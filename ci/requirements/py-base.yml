@@ -3,15 +3,14 @@ channels:
   - conda-forge
 dependencies:
   - autoray>=0.6.6
+  - cotengra
   - coverage
   - cytoolz
-  - diskcache
   - joblib
   - matplotlib
   - networkx
   - numba>=0.56
   - numpy
-  - opt_einsum>=3.2
   - psutil
   - pytest
   - pytest-cov

@@ -14,7 +14,6 @@ import collections
 from numbers import Integral
 
 import numpy as np
-import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import (
     do, conj, astype, infer_backend, get_dtype_name, dag, shape, size
@@ -26,7 +25,7 @@ except ImportError:
 
 from ..core import (qarray, prod, realify_scalar, vdot, make_immutable)
 from ..utils import (check_opt, oset, concat, frequencies, unique, deprecated,
-                     valmap, ensure_dict, LRU, gen_bipartitions, tree_map)
+                     valmap, ensure_dict, gen_bipartitions, tree_map)
 from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
 from . import decomp
 from .array_ops import (iscomplex, norm_fro, ndim, asarray, PArray,
@@ -34,15 +33,18 @@ from .array_ops import (iscomplex, norm_fro, ndim, asarray, PArray,
 from .drawing import draw_tn, visualize_tensor, auto_color_html
 
 from .contraction import (
-    get_contractor,
+    array_contract_expression,
+    array_contract_path,
+    array_contract_pathinfo,
+    array_contract_tree,
+    array_contract,
+    contract_strategy,
     get_contract_backend,
     get_contract_strategy,
-    get_tensor_linop_backend,
-    contract_strategy,
     get_symbol,
-    inds_to_symbols,
+    get_tensor_linop_backend,
     inds_to_eq,
-    array_contract,
+    inds_to_symbols,
 )
 
 _inds_to_eq = deprecated(inds_to_eq, '_inds_to_eq', 'inds_to_eq')
@@ -97,7 +99,51 @@ def _gen_output_inds(all_inds):
             yield ind
 
 
-_VALID_CONTRACT_GET = {None, 'expression', 'path', 'path-info', 'symbol-map'}
+_VALID_CONTRACT_GET = {"expression", "tree", "path", "symbol-map", "path-info"}
+
+
+def _tensor_contract_get_other(
+    arrays,
+    inds,
+    inds_out,
+    shapes,
+    get,
+    **contract_opts
+):
+    check_opt("get", get, _VALID_CONTRACT_GET)
+
+    if get == "expression":
+        # account for possible constant tensors
+        constants = contract_opts.pop("constants", None)
+        if constants is not None:
+            constants = {c: arrays[c] for c in constants}
+        return array_contract_expression(
+            inputs=inds,
+            output=inds_out,
+            shapes=shapes,
+            constants=constants,
+            **contract_opts
+        )
+
+    if get == "tree":
+        return array_contract_tree(
+            inputs=inds, output=inds_out, shapes=shapes, **contract_opts
+        )
+
+    if get == "path":
+        return array_contract_path(
+            inputs=inds, output=inds_out, shapes=shapes, **contract_opts
+        )
+
+    if get == "symbol-map":
+        return inds_to_symbols(inds)
+
+    if get == "path-info":
+        pathinfo = array_contract_pathinfo(
+            inputs=inds, output=inds_out, shapes=shapes, **contract_opts
+        )
+        pathinfo.quimb_symbol_map = inds_to_symbols(inds)
+        return pathinfo
 
 
 def maybe_realify_scalar(data):
@@ -139,32 +185,33 @@ def tensor_contract(
             - ``None``: use the default strategy,
             - str: use the preset strategy with the given name,
             - path_like: use this exact path,
+            - ``cotengra.HyperOptimizer``: find the contraction using this
+              optimizer, supports slicing,
+            - ``cotengra.ContractionTree``: use this exact tree, supports
+              slicing,
             - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
-            - ``cotengra.HyperOptimizer``: find and perform the contraction
-              using ``cotengra``
-            - ``cotengra.ContractionTree``: use this exact tree and perform
-              contraction using ``cotengra``
 
         Contraction with ``cotengra`` might be a bit more efficient but the
         main reason would be to handle sliced contraction automatically, as
         well as the fact that it uses ``autoray`` internally.
-    get : {None, 'expression', 'path', 'path-info', 'symbol-map'}, optional
+    get : str, optional
         What to return. If:
 
             * ``None`` (the default) - return the resulting scalar or Tensor.
-            * ``'expression'`` - return a callbable expression that
-              performs the contraction and operates on the raw arrays.
-            * ``'path'`` - return the ``opt_einsum`` style 'path' as a list of
-              tuples.
-            * ``'path-info'`` - return the full ``opt_einsum`` path object with
-              detailed information such as flop cost. The symbol-map is also
-              added to the ``quimb_symbol_map`` attribute.
-            * ``'symbol-map'`` - return the dict mapping ``opt_einsum`` symbols
-              (single unicode characters) to tensor indices.
+            * ``'expression'`` - return a callbable expression that performs
+              the contraction and operates on the raw arrays.
+            * ``'tree'`` - return the ``cotengra.ContractionTree`` describing
+              the contraction.
+            * ``'path'`` - return the raw 'path' as a list of tuples.
+            * ``'symbol-map'`` - return the dict mapping indices to 'symbols'
+              (single unicode letters) used internally by ``cotengra``
+            * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path
+              object with detailed information such as flop cost. The
+              symbol-map is also added to the ``quimb_symbol_map`` attribute.
 
     backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
-        Which backend to use to perform the contraction. Must be a valid
-        ``opt_einsum`` backend with the relevant library installed.
+        Which backend to use to perform the contraction. Supplied to
+        `cotengra`.
     preserve_tensor : bool, optional
         Whether to return a tensor regardless of whether the output object
         is a scalar (has no indices) or not.
@@ -172,18 +219,12 @@ def tensor_contract(
         Whether to drop all tags from the output tensor. By default the output
         tensor will keep the union of all tags from the input tensors.
     contract_opts
-        Passed to ``opt_einsum.contract_expression`` or
-        ``opt_einsum.contract_path``.
+        Passed to ``cotengra.array_contract``.
 
     Returns
     -------
     scalar or Tensor
     """
-    contract_opts['optimize'] = optimize
-
-    if backend is None:
-        backend = get_contract_backend()
-
     inds, shapes, arrays = zip(*((t.inds, t.shape, t.data) for t in tensors))
 
     if output_inds is None:
@@ -192,34 +233,24 @@ def tensor_contract(
     else:
         inds_out = tuple(output_inds)
 
-    # possibly map indices into the range needed by opt-einsum
-    eq = inds_to_eq(inds, inds_out)
-
     if get is not None:
-        check_opt('get', get, _VALID_CONTRACT_GET)
+        return _tensor_contract_get_other(
+            arrays=arrays,
+            inds=inds,
+            inds_out=inds_out,
+            shapes=shapes,
+            get=get,
+            optimize=optimize,
+            **contract_opts
+        )
 
-        if get == 'symbol-map':
-            return inds_to_symbols(inds)
-
-        if get == 'path':
-            return get_contractor(eq, *shapes, get='path', **contract_opts)
-
-        if get == 'path-info':
-            pathinfo = get_contractor(eq, *shapes, get='info', **contract_opts)
-            pathinfo.quimb_symbol_map = inds_to_symbols(inds)
-            return pathinfo
-
-        if get == 'expression':
-            # account for possible constant tensors
-            cnst = contract_opts.get('constants', ())
-            ops = (
-                t.data if i in cnst else t.shape for i, t in enumerate(tensors)
-            )
-            return get_contractor(eq, *ops, **contract_opts)
-
-    # perform the contraction
-    expression = get_contractor(eq, *shapes, **contract_opts)
-    data_out = expression(*arrays, backend=backend)
+    # perform the contraction!
+    data_out = array_contract(
+        arrays, inds, inds_out,
+        optimize=optimize,
+        backend=backend,
+        **contract_opts
+    )
 
     if not inds_out and not preserve_tensor:
         return maybe_realify_scalar(data_out)
@@ -1293,12 +1324,8 @@ def _tn_fit_als_core(
     solver='solve',
     progbar=False,
 ):
-    # want to cache from sweep to sweep but also not infinitely
-    cachesize = len(var_tags) * (tnAA.num_tensors + tnAB.num_tensors)
-    cache = LRU(maxsize=cachesize)
-
     # shared intermediates + greedy = good reuse of contractions
-    with oe.shared_intermediates(cache), contract_strategy(contract_optimize):
+    with contract_strategy(contract_optimize):
 
         # prepare each of the contractions we are going to repeat
         env_contractions = []
@@ -2160,11 +2187,10 @@ class Tensor:
         if remap:
             raise ValueError(f"Indices {tuple(remap)} not found.")
 
-        old_inds, new_inds = tuple(old_inds), tuple(new_inds)
-
-        eq = inds_to_eq((old_inds,), new_inds)
-        t.modify(apply=lambda x: do('einsum', eq, x, like=x),
-                 inds=new_inds, left_inds=None)
+        expr = array_contract_expression(
+            inputs=[old_inds], output=new_inds, shapes=[t.shape],
+        )
+        t.modify(apply=expr, inds=new_inds, left_inds=None)
 
         if not preserve_tensor and not new_inds:
             data_out = t.data
@@ -2236,9 +2262,10 @@ class Tensor:
         if len(old_inds) == len(new_inds):
             return t
 
-        eq = inds_to_eq((old_inds,), new_inds)
-        t.modify(apply=lambda x: do('einsum', eq, x, like=x),
-                 inds=new_inds, left_inds=None)
+        expr = array_contract_expression(
+            inputs=[old_inds], output=new_inds, shapes=[t.shape],
+        )
+        t.modify(apply=expr, inds=new_inds, left_inds=None)
 
         return t
 
@@ -7810,31 +7837,36 @@ class TensorNetwork(object):
                 - ``None``: use the default strategy,
                 - str: use the preset strategy with the given name,
                 - path_like: use this exact path,
+                - ``cotengra.HyperOptimizer``: find the contraction using this
+                  optimizer, supports slicing,
+                - ``cotengra.ContractionTree``: use this exact tree, supports
+                slicing,
                 - ``opt_einsum.PathOptimizer``: find the path using this
                   optimizer.
-                - ``cotengra.HyperOptimizer``: find and perform the contraction
-                  using ``cotengra``.
-                - ``cotengra.ContractionTree``: use this exact tree and perform
-                  contraction using ``cotengra``.
 
             Contraction with ``cotengra`` might be a bit more efficient but the
             main reason would be to handle sliced contraction automatically.
-        get : {None, 'expression', 'path-info', 'opt_einsum'}, optional
+        get : str, optional
             What to return. If:
 
                 * ``None`` (the default) - return the resulting scalar or
                   Tensor.
-                * ``'expression'`` - return the ``opt_einsum`` expression that
+                * ``'expression'`` - return a callbable expression that
                   performs the contraction and operates on the raw arrays.
-                * ``'symbol-map'`` - return the dict mapping ``opt_einsum``
-                  symbols to tensor indices.
-                * ``'path-info'`` - return the full ``opt_einsum`` path object
-                  with detailed information such as flop cost. The symbol-map
-                  is also added to the ``quimb_symbol_map`` attribute.
+                * ``'tree'`` - return the ``cotengra.ContractionTree``
+                  describing the contraction.
+                * ``'path'`` - return the raw 'path' as a list of tuples.
+                * ``'symbol-map'`` - return the dict mapping indices to
+                  'symbols' (single unicode letters) used internally by
+                  ``cotengra``
+                * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path
+                  object with detailed information such as flop cost. The
+                  symbol-map is also added to the ``quimb_symbol_map``
+                  attribute.
 
         backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
-            Which backend to use to perform the contraction. Must be a valid
-            ``opt_einsum`` backend with the relevant library installed.
+            Which backend to use to perform the contraction. Supplied to
+            `cotengra`.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
@@ -7922,31 +7954,36 @@ class TensorNetwork(object):
                 - ``None``: use the default strategy,
                 - str: use the preset strategy with the given name,
                 - path_like: use this exact path,
+                - ``cotengra.HyperOptimizer``: find the contraction using this
+                  optimizer, supports slicing,
+                - ``cotengra.ContractionTree``: use this exact tree, supports
+                  slicing,
                 - ``opt_einsum.PathOptimizer``: find the path using this
                   optimizer.
-                - ``cotengra.HyperOptimizer``: find and perform the contraction
-                  using ``cotengra``.
-                - ``cotengra.ContractionTree``: use this exact tree and perform
-                  contraction using ``cotengra``.
 
             Contraction with ``cotengra`` might be a bit more efficient but the
             main reason would be to handle sliced contraction automatically.
-        get : {None, 'expression', 'path-info', 'opt_einsum'}, optional
+        get : str, optional
             What to return. If:
 
                 * ``None`` (the default) - return the resulting scalar or
                   Tensor.
-                * ``'expression'`` - return the ``opt_einsum`` expression that
+                * ``'expression'`` - return a callbable expression that
                   performs the contraction and operates on the raw arrays.
-                * ``'symbol-map'`` - return the dict mapping ``opt_einsum``
-                  symbols to tensor indices.
-                * ``'path-info'`` - return the full ``opt_einsum`` path object
-                  with detailed information such as flop cost. The symbol-map
-                  is also added to the ``quimb_symbol_map`` attribute.
+                * ``'tree'`` - return the ``cotengra.ContractionTree``
+                  describing the contraction.
+                * ``'path'`` - return the raw 'path' as a list of tuples.
+                * ``'symbol-map'`` - return the dict mapping indices to
+                  'symbols' (single unicode letters) used internally by
+                  ``cotengra``
+                * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path
+                  object with detailed information such as flop cost. The
+                  symbol-map is also added to the ``quimb_symbol_map``
+                  attribute.
 
         backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
-            Which backend to use to perform the contraction. Must be a valid
-            ``opt_einsum`` backend with the relevant library installed.
+            Which backend to use to perform the contraction. Supplied to
+            `cotengra`.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
@@ -8088,32 +8125,24 @@ class TensorNetwork(object):
         self,
         optimize=None,
         output_inds=None,
+        **kwargs,
     ):
         """Return the :class:`cotengra.ContractionTree` corresponding to
         contracting this entire tensor network with path finder ``optimize``.
         """
-        import cotengra as ctg
+        shapes = []
+        inputs = []
+        for t in self:
+            shapes.append(t.shape)
+            inputs.append(t.inds)
 
-        inputs, output, size_dict = self.get_inputs_output_size_dict(
-            output_inds=output_inds)
-
-        if optimize is None:
-            optimize = get_contract_strategy()
-        if isinstance(optimize, str):
-            optimize = oe.paths.get_path_fn(optimize)
-
-        if hasattr(optimize, 'search'):
-            return optimize.search(inputs, output, size_dict)
-
-        if callable(optimize):
-            path = optimize(inputs, output, size_dict)
-        else:
-            path = optimize
-
-        tree = ctg.ContractionTree.from_path(
-            inputs, output, size_dict, path=path)
-
-        return tree
+        return array_contract_tree(
+            inputs,
+            output=output_inds,
+            shapes=shapes,
+            optimize=optimize,
+            **kwargs,
+        )
 
     def contraction_width(self, optimize=None, **contract_opts):
         """Compute the 'contraction width' of this tensor network. This
@@ -8121,17 +8150,16 @@ class TensorNetwork(object):
         contraction sequence. If every index in the network has dimension 2
         this corresponds to the maximum rank tensor produced.
         """
-        path_info = self.contraction_info(optimize, **contract_opts)
-        return math.log2(path_info.largest_intermediate)
+        tree = self.contraction_tree(optimize, **contract_opts)
+        return tree.contraction_width()
 
     def contraction_cost(self, optimize=None, **contract_opts):
         """Compute the 'contraction cost' of this tensor network. This
         is defined as log10 of the total number of scalar operations during the
-        contraction sequence. Multiply by 2 to estimate FLOPS for real dtype,
-        and by 8 to estimate FLOPS for complex dtype.
+        contraction sequence.
         """
-        path_info = self.contraction_info(optimize, **contract_opts)
-        return path_info.opt_cost / 2
+        tree = self.contraction_tree(optimize, **contract_opts)
+        return tree.contraction_cost()
 
     def __rshift__(self, tags_seq):
         """Overload of '>>' for TensorNetwork.contract_cumulative.
@@ -10420,14 +10448,11 @@ class TNLinearOperator(spla.LinearOperator):
         self.rdims, rd = rdims, prod(rdims)
         self.tags = oset_union(t.tags for t in self._tensors)
 
-        self._kws = {'get': 'expression'}
-
-        # if recent opt_einsum specify constant tensors
-        if hasattr(oe.backends, 'evaluate_constants'):
-            self._kws['constants'] = range(len(self._tensors))
-            self._ins = ()
-        else:
-            self._ins = tuple(t.data for t in self._tensors)
+        self._kws = {
+            "get": "expression",
+            "constants": range(len(self._tensors)),
+        }
+        self._ins = ()
 
         # conjugate inputs/ouputs rather all tensors if necessary
         self.is_conj = is_conj

@@ -7,7 +7,6 @@ import collections
 from numbers import Integral
 
 import numpy as np
-import opt_einsum as oe
 
 from ..core import make_immutable, ikron
 from ..utils import deprecated, unique, concat
@@ -28,6 +27,7 @@ from .tensor_core import (
     TensorNetwork,
 )
 from .array_ops import asarray, sensibly_scale, reshape, do
+from .contraction import array_contract
 from .decomp import eigh
 from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
 from .tensor_1d import MatrixProductState, MatrixProductOperator
@@ -1813,13 +1813,13 @@ def classical_ising_T_matrix(
         classical_ising_sqrtS_matrix(beta=beta, j=j, asymm=a)
         for j, a in zip(js, asymms)
     ] + [classical_ising_H_matrix(beta, h)]
-    lhs = ",".join(f"i{x}" for x in directions)
-    eq = lhs + ",i->" + directions
 
+    inputs = (*(("i", x) for x in directions), ("i",))
+    out = tuple(directions)
     if output:
-        eq += "i"
+        out = out + ("i",)
 
-    return oe.contract(eq, *arrays)
+    return array_contract(arrays, inputs, out)
 
 
 def HTN2D_classical_ising_partition_function(
@@ -3031,6 +3031,7 @@ def MPS_rand_state(
             return array
 
     else:
+
         def fill_fn(shape):
             return sensibly_scale(randn(shape, dtype=dtype))
 
@@ -3237,6 +3238,7 @@ def MPS_zero_state(
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
+
     def fill_fn(shape):
         return np.zeros(shape, dtype=dtype)
 
@@ -3246,7 +3248,7 @@ def MPS_zero_state(
         bond_dim=bond_dim,
         phys_dim=phys_dim,
         cyclic=cyclic,
-        **mps_opts
+        **mps_opts,
     )
 
 

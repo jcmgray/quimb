@@ -15,12 +15,12 @@ from ..utils import int2tup, find_library, raise_cant_find_library_function
 from ..gen.rand import randn, rand_rademacher, rand_phase, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
 
-if find_library("opt_einsum") and find_library("autoray"):
+if find_library("cotengra") and find_library("autoray"):
     from ..tensor.tensor_core import Tensor
     from ..tensor.tensor_1d import MatrixProductOperator
     from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
 else:
-    reqs = "[opt_einsum,autoray]"
+    reqs = "[cotengra,autoray]"
     Tensor = raise_cant_find_library_function(reqs)
     construct_lanczos_tridiag_MPO = raise_cant_find_library_function(reqs)
 

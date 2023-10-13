@@ -45,13 +45,9 @@ from .utils import (
     frequencies,
     int2tup,
     keymap,
-    raise_cant_find_library_function,
 )
 
-try:
-    from opt_einsum import contract
-except ImportError:
-    contract = raise_cant_find_library_function("opt_einsum")
+from .tensor.contraction import array_contract
 
 
 def fidelity(p1, p2, squared=False):
@@ -206,15 +202,22 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
                 for inds in (rho_inds, out):
                     inds.append(xi)
                     inds.append(xj)
-        for inds in (rho_inds, out, Ei_inds, Ej_inds):
-            inds.sort()
-    else:
-        rho_inds = ["ik", "jk"]
-        out = ["inew", "jnew"]
-        Ei_inds = ["K", "inew", "ik"]
-        Ej_inds = ["K", "jnew", "jk"]
 
-    sigma = contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
+        rho_inds = tuple(sorted(rho_inds))
+        out = tuple(sorted(out))
+        Ei_inds = tuple(sorted(Ei_inds))
+        Ej_inds = tuple(sorted(Ej_inds))
+    else:
+        rho_inds = ("ik", "jk")
+        out = ("inew", "jnew")
+        Ei_inds = ("K", "inew", "ik")
+        Ej_inds = ("K", "jnew", "jk")
+
+    sigma = array_contract(
+        (Ek, rho, Ek.conj()),
+        (Ei_inds, rho_inds, Ej_inds),
+        out,
+    )
 
     if dims:
         sigma = sigma.reshape(prod(dims), prod(dims))
@@ -314,7 +317,11 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
     if isvec(p):
         pj = (abs(ev.H @ p) ** 2).flatten()
     else:
-        pj = contract("jk,kl,lj->j", ev.H, p, ev).real
+        pj = array_contract(
+            (ev.H, p, ev),
+            ("jk", "kl", "lj"),
+            ("j",),
+        ).real
 
     # then choose one
     if eigenvalue is None:
@@ -558,8 +565,8 @@ def check_dims_and_indices(dims, *syss):
 
     if not all(0 <= i < nsys for i in all_sys):
         raise ValueError(
-            f"Indices specified in `sysa` and `sysb` must be "
-            "in range({nsys}) for dims {dims}."
+            "Indices specified in `sysa` and `sysb` must be "
+            f"in range({nsys}) for dims {dims}."
         )
 
 
@@ -1252,7 +1259,6 @@ def pauli_correlations(
             )
 
     if sum_abs:
-
         if precomp_func:
             return lambda p: sum((abs(corr(p)) for corr in gen_corr_list()))
 

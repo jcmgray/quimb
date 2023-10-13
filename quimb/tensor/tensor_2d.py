@@ -9,7 +9,6 @@ from itertools import product, cycle, combinations, count, chain
 from collections import defaultdict
 
 from autoray import do, infer_backend, get_dtype_name
-import opt_einsum as oe
 
 from ..gen.operators import swap
 from ..gen.rand import randn, seed_rand
@@ -4278,22 +4277,21 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             ket_local.view_as_(TensorNetwork2DVector, like=self)
             bra_and_env = bra.select_any(sites) | plaquette_envs[p]
 
-            with oe.shared_intermediates():
-                # compute local estimation of norm for this plaquette
-                if normalized:
-                    norm_i0j0 = (ket_local | bra_and_env).contract(
-                        all, optimize=contract_optimize
-                    )
-                else:
-                    norm_i0j0 = None
+            # compute local estimation of norm for this plaquette
+            if normalized:
+                norm_i0j0 = (ket_local | bra_and_env).contract(
+                    all, optimize=contract_optimize
+                )
+            else:
+                norm_i0j0 = None
 
-                # for each local term on plaquette compute expectation
-                for where, G in plaq2coo[p]:
-                    expec_ij = (
-                        ket_local.gate(G, where, contract=False) | bra_and_env
-                    ).contract(all, optimize=contract_optimize)
+            # for each local term on plaquette compute expectation
+            for where, G in plaq2coo[p]:
+                expec_ij = (
+                    ket_local.gate(G, where, contract=False) | bra_and_env
+                ).contract(all, optimize=contract_optimize)
 
-                    expecs[where] = expec_ij, norm_i0j0
+                expecs[where] = expec_ij, norm_i0j0
 
         if return_all:
             return expecs

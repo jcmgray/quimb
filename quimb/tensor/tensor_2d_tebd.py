@@ -5,7 +5,6 @@ from itertools import starmap
 
 import numpy as np
 import scipy.sparse.linalg as spla
-from opt_einsum import shared_intermediates
 from autoray import do, dag, conj, reshape
 
 from ..utils import pairwise, default_to_neutral_style
@@ -696,7 +695,7 @@ def gate_full_update_als(
     x_previous = dict()
     previous_cost = None
 
-    with contract_strategy(optimize), shared_intermediates():
+    with contract_strategy(optimize):
         for i in range(steps):
 
             for site in tags_plq:

@@ -5,7 +5,6 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 from autoray import real
-import opt_einsum as oe
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -16,11 +15,6 @@ found_torch = importlib.util.find_spec('torch') is not None
 found_autograd = importlib.util.find_spec('autograd') is not None
 found_jax = importlib.util.find_spec('jax') is not None
 found_tensorflow = importlib.util.find_spec('tensorflow') is not None
-
-if found_tensorflow:
-    # XXX: tensorflow einsum gradient wrong for complex backends
-    #      https://github.com/tensorflow/tensorflow/issues/37307
-    oe.backends.dispatch._has_einsum['tensorflow'] = False
 
 jax_case = pytest.param(
     'jax', marks=pytest.mark.skipif(
