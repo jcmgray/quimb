@@ -23,7 +23,7 @@ setup(
     packages=find_packages(exclude=["deps", "tests*"]),
     install_requires=[
         "autoray>=0.6.7",
-        "cotengra>=0.5.2",
+        "cotengra>=0.5.3",
         "cytoolz>=0.8.0",
         "numba>=0.39",
         "numpy>=1.17",
@@ -48,8 +48,8 @@ setup(
         ],
         "docs": [
             "astroid<3.0.0",
-            "autoray>=0.6.6",
-            "cotengra>=0.5",
+            "autoray>=0.6.7",
+            "cotengra>=0.5.3",
             "doc2dash>=2.4.1",
             "furo",
             "ipython!=8.7.0",

@@ -4,7 +4,7 @@ channels:
   - conda-forge
 dependencies:
   - autoray>=0.6.7
-  - cotengra
+  - cotengra>=0.5.3
   - coverage
   - cpuonly
   - cytoolz
