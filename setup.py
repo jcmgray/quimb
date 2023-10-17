@@ -22,7 +22,7 @@ setup(
     license="Apache",
     packages=find_packages(exclude=["deps", "tests*"]),
     install_requires=[
-        "autoray>=0.6.6",
+        "autoray>=0.6.7",
         "cotengra>=0.5.2",
         "cytoolz>=0.8.0",
         "numba>=0.39",
