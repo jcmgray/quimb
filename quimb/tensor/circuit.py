@@ -413,8 +413,9 @@ def u3_gate_param_gen(params):
         # get a real backend zero
         zero = theta * 0.0
 
-        c2 = do("complex", do("cos", theta / 2), zero)
-        s2 = do("complex", do("sin", theta / 2), zero)
+        theta_2 = theta / 2
+        c2 = do("complex", do("cos", theta_2), zero)
+        s2 = do("complex", do("sin", theta_2), zero)
         el = do("exp", do("complex", zero, lamda))
         ep = do("exp", do("complex", zero, phi))
         elp = do("exp", do("complex", zero, lamda + phi))
@@ -1138,12 +1139,12 @@ def sample_bitstring_from_prob_ndarray(p):
     return f"{b:0>{p.ndim}b}"
 
 
-def rehearsal_dict(tn, info):
+def rehearsal_dict(tn, tree):
     return {
         "tn": tn,
-        "info": info,
-        "W": math.log2(info.largest_intermediate),
-        "C": math.log10(info.opt_cost / 2),
+        "tree": tree,
+        "W": tree.contraction_width(),
+        "C": math.log10(tree.contraction_cost()),
     }
 
 
@@ -2200,9 +2201,9 @@ class Circuit:
         b : str or sequence of int
             The bitstring to compute the transition amplitude for.
         optimize : str, optional
-            Contraction path optimizer to use for the amplitude, can be
-            a reusable path optimizer as only called once (though path won't be
-            cached for later use in that case).
+            Contraction path optimizer to use for the amplitude, can be a
+            non-reusable path optimizer as only called once (though path won't
+            be cached for later use in that case).
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
@@ -2214,15 +2215,15 @@ class Circuit:
             Actively renormalize tensor norms during simplification.
         backend : str, optional
             Backend to perform the contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         rehearse : bool or "tn", optional
             If ``True``, generate and cache the simplified tensor network and
-            contraction path but don't actually perform the contraction.
-            Returns a dict with keys ``"tn"`` and ``'info'`` with the tensor
+            contraction tree but don't actually perform the contraction.
+            Returns a dict with keys ``"tn"`` and ``'tree'`` with the tensor
             network that will be contracted and the corresponding contraction
-            path if so.
+            tree if so.
         """
         self._maybe_init_storage()
 
@@ -2252,17 +2253,14 @@ class Circuit:
         if rehearse == "tn":
             return psi_b
 
-        # get the contraction path info
-        info = psi_b.contract(
-            all, output_inds=(), optimize=optimize, get="path-info"
-        )
+        tree = psi_b.contraction_tree(output_inds=(), optimize=optimize)
 
         if rehearse:
-            return rehearsal_dict(psi_b, info)
+            return rehearsal_dict(psi_b, tree)
 
-        # perform the full contraction with the path found
+        # perform the full contraction with the tree found
         c_b = psi_b.contract(
-            all, output_inds=(), optimize=info.path, backend=backend
+            all, output_inds=(), optimize=tree, backend=backend
         )
 
         return c_b
@@ -2277,7 +2275,7 @@ class Circuit:
         dtype="complex128",
         rehearse=True,
     ):
-        """Perform just the tensor network simplifications and contraction path
+        """Perform just the tensor network simplifications and contraction tree
         finding associated with computing a single amplitude (caching the
         results) but don't perform the actual contraction.
 
@@ -2287,9 +2285,9 @@ class Circuit:
             The bitstring to rehearse computing the transition amplitude for,
             if ``'random'`` (the default) a random bitstring will be used.
         optimize : str, optional
-            Contraction path optimizer to use for the marginal, can be
-            a reusable path optimizer as only called once (though path won't be
-            cached for later use in that case).
+            Contraction path optimizer to use for the marginal, can be a
+            non-reusable path optimizer as only called once (though path won't
+            be cached for later use in that case).
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
@@ -2301,7 +2299,7 @@ class Circuit:
             Actively renormalize tensor norms during simplification.
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
 
@@ -2358,8 +2356,8 @@ class Circuit:
             The qubit(s) to keep as we trace out the rest.
         optimize : str, optional
             Contraction path optimizer to use for the reduced density matrix,
-            can be a custom path optimizer as only called once (though path
-            won't be cached for later use in that case).
+            can be a non-reusable path optimizer as only called once (though
+            path won't be cached for later use in that case).
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
@@ -2371,15 +2369,15 @@ class Circuit:
             Actively renormalize tensor norms during simplification.
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         rehearse : bool or "tn", optional
             If ``True``, generate and cache the simplified tensor network and
-            contraction path but don't actually perform the contraction.
-            Returns a dict with keys ``"tn"`` and ``'info'`` with the tensor
+            contraction tree but don't actually perform the contraction.
+            Returns a dict with keys ``"tn"`` and ``'tree'`` with the tensor
             network that will be contracted and the corresponding contraction
-            path if so.
+            tree if so.
 
         Returns
         -------
@@ -2403,18 +2401,16 @@ class Circuit:
         if rehearse == "tn":
             return rho
 
-        info = rho.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
-        )
+        tree = rho.contraction_tree(output_inds=output_inds, optimize=optimize)
 
         if rehearse:
-            return rehearsal_dict(rho, info)
+            return rehearsal_dict(rho, tree)
 
-        # perform the full contraction with the path found
+        # perform the full contraction with the tree found
         rho_dense = rho.contract(
             all,
             output_inds=output_inds,
-            optimize=info.path,
+            optimize=tree,
             backend=backend,
         ).data
 
@@ -2457,8 +2453,8 @@ class Circuit:
             Which qubits the operator acts on.
         optimize : str, optional
             Contraction path optimizer to use for the local expectation,
-            can be a custom path optimizer as only called once (though path
-            won't be cached for later use in that case).
+            can be a non-reusable path optimizer as only called once (though
+            path won't be cached for later use in that case).
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
@@ -2470,17 +2466,17 @@ class Circuit:
             Actively renormalize tensor norms during simplification.
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         gate_opts : None or dict_like
             Options to use when applying ``G`` to the wavefunction.
         rehearse : bool or "tn", optional
             If ``True``, generate and cache the simplified tensor network and
-            contraction path but don't actually perform the contraction.
-            Returns a dict with keys ``'tn'`` and ``'info'`` with the tensor
+            contraction tree but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'tree'`` with the tensor
             network that will be contracted and the corresponding contraction
-            path if so.
+            tree if so.
 
         Returns
         -------
@@ -2519,17 +2515,17 @@ class Circuit:
         if rehearse == "tn":
             return rhoG
 
-        info = rhoG.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+        tree = rhoG.contraction_tree(
+            output_inds=output_inds, optimize=optimize
         )
 
         if rehearse:
-            return rehearsal_dict(rhoG, info)
+            return rehearsal_dict(rhoG, tree)
 
         g_ex = rhoG.contract(
             all,
             output_inds=output_inds,
-            optimize=info.path,
+            optimize=tree,
             backend=backend,
         )
 
@@ -2568,12 +2564,12 @@ class Circuit:
         fix : None or dict[int, str], optional
             Measurement results on other qubits to fix.
         optimize : str, optional
-            Contraction path optimizer to use for the marginal, can be
-            a reusable path optimizer as only called once (though path won't be
-            cached for later use in that case).
+            Contraction path optimizer to use for the marginal, can be a
+            non-reusable path optimizer as only called once (though path won't
+            be cached for later use in that case).
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         simplify_sequence : str, optional
@@ -2587,7 +2583,7 @@ class Circuit:
             Actively renormalize tensor norms during simplification.
         rehearse : bool or "tn", optional
             Whether to perform the marginal contraction or just return the
-            associated TN and contraction path information.
+            associated TN and contraction tree.
         """
         self._maybe_init_storage()
 
@@ -2644,23 +2640,23 @@ class Circuit:
         if rehearse == "tn":
             return nm_lc
 
-        # NB. the path isn't *neccesarily* the same each time due to the post
+        # NB. the tree isn't *neccesarily* the same each time due to the post
         #     slicing full simplify, however there is also the lower level
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
-        info = nm_lc.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+        tree = nm_lc.contraction_tree(
+            output_inds=output_inds, optimize=optimize,
         )
 
         if rehearse:
-            return rehearsal_dict(nm_lc, info)
+            return rehearsal_dict(nm_lc, tree)
 
-        # perform the full contraction with the path found
+        # perform the full contraction with the tree found
         p_marginal = abs(
             nm_lc.contract(
                 all,
                 output_inds=output_inds,
-                optimize=info.path,
+                optimize=tree,
                 backend=backend,
             ).data
         )
@@ -2841,14 +2837,11 @@ class Circuit:
             A random seed, passed to ``numpy.random.seed`` if given.
         optimize : str, optional
             Contraction path optimizer to use for the marginals, shouldn't be
-            a reusable path optimizer as called on many different TNs. Passed
-            to :func:`opt_einsum.contract_path`. If you want to use a custom
-            path optimizer register it with a name using
-            ``opt_einsum.paths.register_path_fn`` after which the paths will be
-            cached on name.
+            a non-reusable path optimizer as called on many different TNs.
+            Passed to :func:`cotengra.array_contract_tree`.
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         simplify_sequence : str, optional
@@ -2865,7 +2858,7 @@ class Circuit:
         ------
         bitstrings : sequence of str
         """
-        # init TN norms, contraction paths, and marginals
+        # init TN norms, contraction trees, and marginals
         self._maybe_init_storage()
 
         # which qubits and an ordering e.g. (2, 3, 4, 5), (5, 3, 4, 2)
@@ -2931,7 +2924,7 @@ class Circuit:
         rehearse=True,
         progbar=False,
     ):
-        """Perform the preparations and contraction path findings for
+        """Perform the preparations and contraction tree findings for
         :meth:`~quimb.tensor.circuit.Circuit.sample`, caching various
         intermedidate objects, but don't perform the main contractions.
 
@@ -2952,11 +2945,8 @@ class Circuit:
             be all zeros if not given.
         optimize : str, optional
             Contraction path optimizer to use for the marginals, shouldn't be
-            a reusable path optimizer as called on many different TNs. Passed
-            to :func:`opt_einsum.contract_path`. If you want to use a custom
-            path optimizer register it with a name using
-            ``opt_einsum.paths.register_path_fn`` after which the paths will be
-            cached on name.
+            a non-reusable path optimizer as called on many different TNs.
+            Passed to :func:`cotengra.array_contract_tree`.
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
@@ -2967,18 +2957,17 @@ class Circuit:
         simplify_equalize_norms : bool, optional
             Actively renormalize tensor norms during simplification.
         progbar : bool, optional
-            Whether to show the progress of finding each contraction path.
+            Whether to show the progress of finding each contraction tree.
 
         Returns
         -------
         dict[tuple[int], dict]
-            One contraction path info object per grouped marginal computation.
+            One contraction tree object per grouped marginal computation.
             The keys of the dict are the qubits the marginal is computed for,
             the values are a dict containing a representative simplified tensor
-            network (key: 'tn') and the main contraction path info
-            (key: 'info').
+            network (key: 'tn') and the main contraction tree (key: 'tree').
         """
-        # init TN norms, contraction paths, and marginals
+        # init TN norms, contraction trees, and marginals
         self._maybe_init_storage()
         qubits, order = self._parse_qubits_order(qubits, order)
         groups = self._group_order(order, group_size)
@@ -2987,10 +2976,10 @@ class Circuit:
             result = {q: "0" for q in qubits}
 
         fix = {}
-        tns_and_infos = {}
+        tns_and_trees = {}
 
         for where in _progbar(groups, disable=not progbar):
-            tns_and_infos[where] = self.compute_marginal(
+            tns_and_trees[where] = self.compute_marginal(
                 where=where,
                 fix=fix,
                 optimize=optimize,
@@ -3004,7 +2993,7 @@ class Circuit:
             for q in where:
                 fix[q] = result[q]
 
-        return tns_and_infos
+        return tns_and_trees
 
     sample_tns = functools.partialmethod(sample_rehearse, rehearse="tn")
 
@@ -3058,12 +3047,12 @@ class Circuit:
         seed : None or int, optional
             A random seed, passed to ``numpy.random.seed`` if given.
         optimize : str, optional
-            Contraction path optimizer to use for the marginal, can be
-            a reusable path optimizer as only called once (though path won't be
-            cached for later use in that case).
+            Contraction path optimizer to use for the marginal, can be a
+            non-reusable path optimizer as only called once (though path won't
+            be cached for later use in that case).
         backend : str, optional
             Backend to perform the marginal contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         simplify_sequence : str, optional
@@ -3080,7 +3069,7 @@ class Circuit:
         ------
         str
         """
-        # init TN norms, contraction paths, and marginals
+        # init TN norms, contraction trees, and marginals
         self._maybe_init_storage()
         qubits = tuple(range(self.N))
 
@@ -3146,7 +3135,7 @@ class Circuit:
         rehearse=True,
     ):
         """Rehearse chaotic sampling (perform just the TN simplifications and
-        contraction path finding).
+        contraction tree finding).
 
         Parameters
         ----------
@@ -3158,9 +3147,9 @@ class Circuit:
             Explicitly check the computational cost of this result, assumed to
             be all zeros if not given.
         optimize : str, optional
-            Contraction path optimizer to use for the marginal, can be
-            a reusable path optimizer as only called once (though path won't be
-            cached for later use in that case).
+            Contraction path optimizer to use for the marginal, can be a
+            non-reusable path optimizer as only called once (though path won't
+            be cached for later use in that case).
         simplify_sequence : str, optional
             Which local tensor network simplifications to perform and in which
             order, see
@@ -3179,10 +3168,10 @@ class Circuit:
             The contraction path information for the main computation, the key
             is the qubits that formed the final marginal. The value is itself a
             dict with keys ``'tn'`` - a representative tensor network - and
-            ``'info'`` - the contraction path information.
+            ``'tree'`` - the contraction tree.
         """
 
-        # init TN norms, contraction paths, and marginals
+        # init TN norms, contraction trees, and marginals
         self._maybe_init_storage()
         qubits = tuple(range(self.N))
 
@@ -3236,9 +3225,9 @@ class Circuit:
             Whether to reverse the order of the subsystems, to match the
             convention of qiskit for example.
         optimize : str, optional
-            Contraction path optimizer to use for the contraction, can be
-            a single path optimizer as only called once (though path won't be
-            cached for later use in that case).
+            Contraction path optimizer to use for the contraction, can be a
+            non-reusable path optimizer as only called once (though path won't
+            be cached for later use in that case).
         dtype : dtype or str, optional
             If given, convert the tensors to this dtype prior to contraction.
         simplify_sequence : str, optional
@@ -3252,15 +3241,15 @@ class Circuit:
             Actively renormalize tensor norms during simplification.
         backend : str, optional
             Backend to perform the contraction with, e.g. ``'numpy'``,
-            ``'cupy'`` or ``'jax'``. Passed to ``opt_einsum``.
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
         dtype : str, optional
             Data type to cast the TN to before contraction.
         rehearse : bool, optional
             If ``True``, generate and cache the simplified tensor network and
-            contraction path but don't actually perform the contraction.
-            Returns a dict with keys ``'tn'`` and ``'info'`` with the tensor
+            contraction tree but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'tree'`` with the tensor
             network that will be contracted and the corresponding contraction
-            path if so.
+            tree if so.
 
         Returns
         -------
@@ -3283,19 +3272,18 @@ class Circuit:
         if reverse:
             output_inds = output_inds[::-1]
 
-        # get the contraction path info
-        info = psi.contract(
-            all, output_inds=output_inds, optimize=optimize, get="path-info"
+        tree = psi.contraction_tree(
+            output_inds=output_inds, optimize=optimize
         )
 
         if rehearse:
-            return rehearsal_dict(psi, info)
+            return rehearsal_dict(psi, tree)
 
         # perform the full contraction with the path found
         psi_tensor = psi.contract(
             all,
             output_inds=output_inds,
-            optimize=info.path,
+            optimize=tree,
             backend=backend,
         ).data
 
