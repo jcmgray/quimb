@@ -78,12 +78,12 @@ def heis_pbc():
     H = qtn.MPO_ham_heis(L, cyclic=True).astype(dtype)
 
     def norm_fn(psi):
-        factor = (psi & psi).contract(all, optimize='random-greedy')
+        factor = (psi & psi).contract(all, optimize="auto-hq")
         return psi / factor**0.5
 
     def loss_fn(psi, H):
         k, H, b = qtn.tensor_network_align(psi, H, psi)
-        energy = (k & H & b).contract(all, optimize='random-greedy')
+        energy = (k & H & b).contract(all, optimize="auto-hq")
         return energy
 
     en_ex = qu.groundenergy(qu.ham_heis(L, cyclic=True, sparse=True))
@@ -102,12 +102,12 @@ def ham_mbl_pbc_complex():
     H = qtn.MPO_ham_mbl(L, **ham_opts).astype(dtype)
 
     def norm_fn(psi):
-        factor = (psi.H & psi).contract(all, optimize='random-greedy')
+        factor = (psi.H & psi).contract(all, optimize="auto-hq")
         return psi * factor**-0.5
 
     def loss_fn(psi, H):
         k, H, b = qtn.tensor_network_align(psi, H, psi.H)
-        energy = (k & H & b).contract(all, optimize='random-greedy')
+        energy = (k & H & b).contract(all, optimize="auto-hq")
         return real(energy)
 
     en_ex = qu.groundenergy(qu.ham_mbl(L, sparse=True, **ham_opts))

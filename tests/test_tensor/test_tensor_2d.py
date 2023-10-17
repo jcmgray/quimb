@@ -40,7 +40,7 @@ class TestPEPSConstruct:
                 assert isinstance(psi[f"I{i},{j}"], qtn.Tensor)
 
         if Lx == Ly == 3:
-            psi_dense = psi.to_qarray(optimize="random-greedy")
+            psi_dense = psi.to_qarray(optimize="auto-hq")
             assert psi_dense.shape == (512, 1)
 
         psi.show()
@@ -392,7 +392,7 @@ class Test2DContract:
         )
         ex = qu.expec(A, k)
 
-        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize="random-greedy")
+        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize="auto-hq")
         e = peps.compute_local_expectation(
             terms, mode=mode, normalized=normalized, **opts
         )
@@ -417,7 +417,7 @@ class Test2DContract:
             normalized=normalized,
             cutoff=2e-3,
             max_bond=16,
-            contract_optimize="random-greedy",
+            contract_optimize="auto-hq",
         )
 
         # compute 2x1 and 1x2 plaquettes separately
@@ -488,7 +488,7 @@ class TestPEPO:
                 assert isinstance(X[f"I{i},{j}"], qtn.Tensor)
 
         if Lx == Ly == 3:
-            X_dense = X.to_qarray(optimize="random-greedy")
+            X_dense = X.to_qarray(optimize="auto-hq")
             assert X_dense.shape == (512, 512)
             assert qu.isherm(X_dense)
 
