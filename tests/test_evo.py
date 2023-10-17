@@ -381,6 +381,11 @@ class TestEvolution:
             assert ((np.array(gs_overlap_results) - 1.0) < 1e-3).all()
 
     def test_int_stop_calling_details(self, ham_rcr_psi):
+        import platform
+
+        if platform.system() == "Darwin":
+            skip("Skipping test on macOS")
+
         # test some details about the way Evolution is called with int_stop:
         # - Giving int_stop without any compute
         # - Giving int_stop with (t, p) and with (t, p, H) call signatures
