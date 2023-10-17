@@ -1,4 +1,4 @@
-from pytest import fixture, mark, raises
+from pytest import fixture, mark, raises, skip
 
 from math import pi, gcd, cos
 from functools import reduce
@@ -83,6 +83,7 @@ def srho_dot_ls():
 # --------------------------------------------------------------------------- #
 # Evolution equation tests                                                    #
 # --------------------------------------------------------------------------- #
+
 
 class TestSchrodingerEqKet:
     def test_ket_matrix(self, psi_dot):
@@ -217,10 +218,9 @@ def ham_rcr_psi():
 
 
 class TestEvolution:
-    @mark.parametrize("sparse, presolve",
-                      [(False, False),
-                       (True, False),
-                       (False, True)])
+    @mark.parametrize(
+        "sparse, presolve", [(False, False), (True, False), (False, True)]
+    )
     def test_evo_ham_dense_ket_solve(self, ham_rcr_psi, sparse, presolve):
         ham, trc, p0, tm, pm = ham_rcr_psi
         ham = qu.qu(ham, sparse=sparse)
@@ -229,7 +229,7 @@ class TestEvolution:
             sim = qu.Evolution(p0, (l, v))
             assert isinstance(sim._ham, tuple) and len(sim._ham) == 2
         else:
-            sim = qu.Evolution(p0, ham, method='solve')
+            sim = qu.Evolution(p0, ham, method="solve")
         sim.update_to(tm)
         assert_allclose(sim.pt, pm)
         assert qu.expec(sim.pt, p0) < 1.0
@@ -240,19 +240,19 @@ class TestEvolution:
 
     @mark.parametrize("dop", [False, True])
     @mark.parametrize("sparse", [False, True])
-    @mark.parametrize("method", ["solve", "integrate", 'expm', 'bad'])
+    @mark.parametrize("method", ["solve", "integrate", "expm", "bad"])
     @mark.parametrize("timedep", [False, True])
     @mark.parametrize("linop", [False, True])
     def test_evo_ham(self, ham_rcr_psi, sparse, dop, method, timedep, linop):
         ham, trc, p0, tm, pm = ham_rcr_psi
         if dop:
-            if method == 'expm':
+            if method == "expm":
                 # XXX: not implemented
                 return
             p0 = p0 @ p0.H
             pm = pm @ pm.H
 
-        if method == 'bad':
+        if method == "bad":
             with raises(ValueError):
                 qu.Evolution(p0, ham, method=method)
             return
@@ -268,12 +268,12 @@ class TestEvolution:
             # fake a time dependent ham by making it callable
             ham_object, ham = ham, (lambda t: ham_object)
 
-        if linop and (method in ('expm', 'solve')):
+        if linop and (method in ("expm", "solve")):
             with raises(TypeError):
                 qu.Evolution(p0, ham, method=method)
             return
 
-        if timedep and (method in ('expm', 'solve')):
+        if timedep and (method in ("expm", "solve")):
             with raises(TypeError):
                 qu.Evolution(p0, ham, method=method)
             return
@@ -291,8 +291,9 @@ class TestEvolution:
     @mark.parametrize("linop", [False, True])
     @mark.parametrize("num_callbacks", [0, 1, 2])
     @mark.parametrize("use_int_stop", [False, True])
-    def test_evo_timedep_adiabatic_with_callbacks(self, dop, linop,
-                                                  num_callbacks, use_int_stop):
+    def test_evo_timedep_adiabatic_with_callbacks(
+        self, dop, linop, num_callbacks, use_int_stop
+    ):
         # tests time dependent Evolution via an adiabatic sweep with:
         #   a) no callbacks
         #   b) 1 callback that accesses the time-dependent Hamiltonian
@@ -332,29 +333,41 @@ class TestEvolution:
             p0 = gs1
 
         if use_int_stop:
+
             def check_init_gs_overlap(t, pt):
                 val = qu.fidelity(pt, gs1)
-                return (-1 if val <= 0.75 else 0)
+                return -1 if val <= 0.75 else 0
+
             int_stop = check_init_gs_overlap
         else:
             int_stop = None
 
         if num_callbacks == 0:
-            evo = qu.Evolution(p0, ham, method='integrate', int_stop=int_stop,
-                               progbar=True)
+            evo = qu.Evolution(
+                p0, ham, method="integrate", int_stop=int_stop, progbar=True
+            )
         else:
+
             def gs_overlap(t, pt, H):
-                evals, evecs = eigs_scipy(H(t), k=1, which='SA')
-                return np.abs(qu.dot(pt.T, qu.qu(evecs[:, 0])))**2
+                evals, evecs = eigs_scipy(H(t), k=1, which="SA")
+                return np.abs(qu.dot(pt.T, qu.qu(evecs[:, 0]))) ** 2
 
             if num_callbacks == 1:
                 compute = gs_overlap
             if num_callbacks == 2:
+
                 def norm(t, pt):
                     return qu.dot(pt.T, pt)
-                compute = {'norm': norm, 'gs_overlap': gs_overlap}
-            evo = qu.Evolution(p0, ham, compute=compute, int_stop=int_stop,
-                               method='integrate', progbar=True)
+
+                compute = {"norm": norm, "gs_overlap": gs_overlap}
+            evo = qu.Evolution(
+                p0,
+                ham,
+                compute=compute,
+                int_stop=int_stop,
+                method="integrate",
+                progbar=True,
+            )
         evo.update_to(T)
 
         # final state should now overlap much more with second hamiltonian GS
@@ -373,8 +386,8 @@ class TestEvolution:
             assert ((np.array(gs_overlap_results) - 1.0) < 1e-3).all()
 
         if num_callbacks == 2:
-            norm_results = evo.results['norm']
-            gs_overlap_results = evo.results['gs_overlap']
+            norm_results = evo.results["norm"]
+            gs_overlap_results = evo.results["gs_overlap"]
             # check that we stayed normalized the whole time
             assert ((np.array(norm_results) - 1.0) < 1e-3).all()
             # check that we stayed in the ground state the whole time
@@ -393,31 +406,36 @@ class TestEvolution:
 
         # check that the int_stop argument doesn't get accepted in either form
         with raises(ValueError):
-            qu.Evolution(p0, ham, method='solve', int_stop=(lambda t, p: -1))
+            qu.Evolution(p0, ham, method="solve", int_stop=(lambda t, p: -1))
         with raises(ValueError):
-            qu.Evolution(p0, ham, method='solve',
-                         int_stop=(lambda t, p, H: -1))
+            qu.Evolution(
+                p0, ham, method="solve", int_stop=(lambda t, p, H: -1)
+            )
 
         # check expected behaviour in case where int_stop takes t, p
-        sim = qu.Evolution(p0, ham, method='integrate',
-                           int_stop=(lambda t, p: -1))
+        sim = qu.Evolution(
+            p0, ham, method="integrate", int_stop=(lambda t, p: -1)
+        )
         sim.update_to(trc)
         assert sim.t < trc / 2  # make sure it stopped early
 
-        sim = qu.Evolution(p0, ham, method='integrate',
-                           int_stop=(lambda t, p: 0))
+        sim = qu.Evolution(
+            p0, ham, method="integrate", int_stop=(lambda t, p: 0)
+        )
         sim.update_to(trc)
         assert sim.t == trc  # make sure it didn't stop early
 
-        sim = qu.Evolution(p0, ham, method='integrate',
-                           int_stop=(lambda t, p, H: -1))
+        sim = qu.Evolution(
+            p0, ham, method="integrate", int_stop=(lambda t, p, H: -1)
+        )
 
         # check expected behaviour in case where int_stop takes t, p, H
         sim.update_to(trc)
         assert sim.t < trc / 2  # make sure it stopped early
 
-        sim = qu.Evolution(p0, ham, method='integrate',
-                           int_stop=(lambda t, p, H: 0))
+        sim = qu.Evolution(
+            p0, ham, method="integrate", int_stop=(lambda t, p, H: 0)
+        )
         sim.update_to(trc)
         assert sim.t == trc  # make sure it didn't stop early
 
@@ -428,22 +446,21 @@ class TestEvolution:
             def int_step(t, p, H):
                 raise TypeError("Something else.")
 
-            sim = qu.Evolution(p0, ham, method='integrate',
-                               int_stop=int_step)
+            sim = qu.Evolution(p0, ham, method="integrate", int_stop=int_step)
             sim.update_to(trc)
 
     def test_evo_at_times(self):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
-        sim = qu.Evolution(p0, ham, method='solve')
+        sim = qu.Evolution(p0, ham, method="solve")
         ts = np.linspace(0, 10)
         for t, pt in zip(ts, sim.at_times(ts)):
             x = cos(t)
-            y = qu.expec(pt, qu.ikron(qu.pauli('z'), [2, 2], 0))
+            y = qu.expec(pt, qu.ikron(qu.pauli("z"), [2, 2], 0))
             assert_allclose(x, y, atol=1e-15)
 
-    @mark.parametrize("qtype", ['ket', 'dop'])
-    @mark.parametrize("method", ['solve', 'integrate', 'expm'])
+    @mark.parametrize("qtype", ["ket", "dop"])
+    @mark.parametrize("method", ["solve", "integrate", "expm"])
     def test_evo_compute_callback(self, qtype, method):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.qu(qu.up() & qu.down(), qtype=qtype)
@@ -465,10 +482,9 @@ class TestEvolution:
                 checked = True
         assert checked
 
-    @mark.parametrize("qtype", ['ket', 'dop'])
-    @mark.parametrize("method", ['solve', 'integrate', 'expm'])
+    @mark.parametrize("qtype", ["ket", "dop"])
+    @mark.parametrize("method", ["solve", "integrate", "expm"])
     def test_evo_multi_compute(self, method, qtype):
-
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.qu(qu.up() & qu.down(), qtype=qtype)
 
@@ -482,16 +498,19 @@ class TestEvolution:
         def some_other_quantity_accepting_ham(t, pt, H):
             return qu.logneg(pt)
 
-        compute = {'t': some_quantity, 'logneg': some_other_quantity,
-                   'logneg_ham': some_other_quantity_accepting_ham}
+        compute = {
+            "t": some_quantity,
+            "logneg": some_other_quantity,
+            "logneg_ham": some_other_quantity_accepting_ham,
+        }
 
         evo = qu.Evolution(p0, ham, method=method, compute=compute)
         manual_lns = []
         for pt in evo.at_times(np.linspace(0, 1, 6)):
             manual_lns.append(qu.logneg(pt))
-        ts = evo.results['t']
-        lns = evo.results['logneg']
-        lns_ham = evo.results['logneg_ham']
+        ts = evo.results["t"]
+        lns = evo.results["logneg"]
+        lns_ham = evo.results["logneg_ham"]
         assert len(lns) >= len(manual_lns)
         # check a specific value of logneg at t=0.8 was computed automatically
         checked = False
@@ -504,13 +523,14 @@ class TestEvolution:
         assert checked
 
     @slepc4py_test
-    @mark.parametrize('expm_backend', ['slepc-krylov', 'slepc-expokit'])
+    @mark.parametrize("expm_backend", ["slepc-krylov", "slepc-expokit"])
     def test_expm_slepc(self, expm_backend):
         ham = qu.ham_mbl(7, dh=0.5, sparse=True)
         psi = qu.rand_ket(2**7)
-        evo_exact = qu.Evolution(psi, ham, method='solve')
-        evo_slepc = qu.Evolution(psi, ham, method='expm',
-                                 expm_backend=expm_backend)
+        evo_exact = qu.Evolution(psi, ham, method="solve")
+        evo_slepc = qu.Evolution(
+            psi, ham, method="expm", expm_backend=expm_backend
+        )
         ts = np.linspace(0, 100, 6)
         for p1, p2 in zip(evo_exact.at_times(ts), evo_slepc.at_times(ts)):
             assert abs(qu.expec(p1, p2) - 1) < 1e-9
@@ -518,7 +538,7 @@ class TestEvolution:
     def test_progbar_update_to_integrate(self, capsys):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
-        sim = qu.Evolution(p0, ham, method='integrate', progbar=True)
+        sim = qu.Evolution(p0, ham, method="integrate", progbar=True)
         sim.update_to(100)
         # check something as been printed
         _, err = capsys.readouterr()
@@ -527,7 +547,7 @@ class TestEvolution:
     def test_progbar_at_times_solve(self, capsys):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
-        sim = qu.Evolution(p0, ham, method='solve', progbar=True)
+        sim = qu.Evolution(p0, ham, method="solve", progbar=True)
         for _ in sim.at_times(np.linspace(0, 100, 11)):
             pass
         # check something as been printed
@@ -537,7 +557,7 @@ class TestEvolution:
     def test_progbar_at_times_expm(self, capsys):
         ham = qu.ham_heis(2, cyclic=False)
         p0 = qu.up() & qu.down()
-        sim = qu.Evolution(p0, ham, method='expm', progbar=True)
+        sim = qu.Evolution(p0, ham, method="expm", progbar=True)
         for _ in sim.at_times(np.linspace(0, 100, 11)):
             pass
         # check something as been printed
