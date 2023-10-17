@@ -47,7 +47,7 @@ setup(
             "pytest-cov",
         ],
         "docs": [
-            "astroid!=3.0.0",
+            "astroid<3.0.0",
             "autoray>=0.6.6",
             "cotengra>=0.5",
             "doc2dash>=2.4.1",
