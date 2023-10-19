@@ -17,6 +17,13 @@ def test_contract(damping):
     assert N_ap == pytest.approx(1.0, rel=0.3)
 
 
+def test_tree_exact():
+    psi = qtn.TN_rand_tree(20, 3, 2)
+    norm2 = psi.H @ psi
+    norm2_bp = contract_d2bp(psi)
+    assert norm2_bp == pytest.approx(norm2, rel=1e-6)
+
+
 @pytest.mark.parametrize("damping", [0.0, 0.1, 0.5])
 def test_compress(damping):
     peps = qtn.PEPS.rand(3, 4, 3, seed=42)
@@ -42,7 +49,7 @@ def test_sample():
     nrepeat = 4
     for _ in range(nrepeat):
         _, peps_config, _ = sample_d2bp(peps, seed=42)
-        ptotal += peps_config.contract()**2
+        ptotal += peps_config.contract() ** 2
 
     # check we are doing better than random guessing
     assert ptotal > nrepeat * 2**-peps.nsites
