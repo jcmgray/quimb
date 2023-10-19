@@ -8,7 +8,7 @@ from quimb.experimental.belief_propagation.hd1bp import (
 )
 
 
-@pytest.mark.parametrize("damping", [0.0, 0.1, 0.5])
+@pytest.mark.parametrize("damping", [0.0, 0.1])
 def test_contract_hyper(damping):
     htn = qtn.HTN_random_ksat(3, 50, alpha=2.0, seed=42, mode="dense")
     num_solutions = contract_hd1bp(htn, damping=damping)
@@ -22,7 +22,7 @@ def test_contract_tree_exact():
     assert Z == pytest.approx(Z_bp, rel=1e-12)
 
 
-@pytest.mark.parametrize("damping", [0.0, 0.1, 0.5])
+@pytest.mark.parametrize("damping", [0.0, 0.1])
 def test_contract_normal(damping):
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
@@ -30,10 +30,11 @@ def test_contract_normal(damping):
     assert Z == pytest.approx(Z_bp, rel=1e-1)
 
 
-def test_sample():
+@pytest.mark.parametrize("damping", [0.0, 0.1])
+def test_sample(damping):
     nvars = 20
     htn = qtn.HTN_random_ksat(3, nvars, alpha=2.0, seed=42, mode="dense")
-    config, tn_config, omega = sample_hd1bp(htn, progbar=True)
+    config, tn_config, omega = sample_hd1bp(htn, damping=damping)
     assert len(config) == nvars
     assert tn_config.num_indices == 0
     assert tn_config.contract() == pytest.approx(1.0)

@@ -512,8 +512,7 @@ class HV1BP(BeliefPropagationCommon):
         return None, None, max_dm
 
     def get_messages(self):
-        """Get messages in individual form from the batched stacks.
-        """
+        """Get messages in individual form from the batched stacks."""
         return _extract_messages_from_inputs_batched(
             self.batched_inputs_m,
             self.batched_inputs_t,
@@ -587,6 +586,7 @@ def run_belief_propagation_hv1bp(
     messages=None,
     max_iterations=1000,
     tol=5e-6,
+    damping=0.0,
     smudge_factor=1e-12,
     progbar=False,
 ):
@@ -604,6 +604,8 @@ def run_belief_propagation_hv1bp(
         The maximum number of iterations to run for.
     tol : float, optional
         The convergence tolerance.
+    damping : float, optional
+        The damping factor to use, 0.0 means no damping.
     smudge_factor : float, optional
         A small number to add to the denominator of messages to avoid division
         by zero. Note when this happens the numerator will also be zero.
@@ -617,7 +619,9 @@ def run_belief_propagation_hv1bp(
     converged : bool
         Whether the algorithm converged.
     """
-    bp = HV1BP(tn, messages=messages, smudge_factor=smudge_factor)
+    bp = HV1BP(
+        tn, messages=messages, damping=damping, smudge_factor=smudge_factor
+    )
     bp.run(max_iterations=max_iterations, tol=tol, progbar=progbar)
     return bp.get_messages(), bp.converged
 
@@ -628,6 +632,7 @@ def sample_hv1bp(
     output_inds=None,
     max_iterations=1000,
     tol=1e-2,
+    damping=0.0,
     smudge_factor=1e-12,
     bias=False,
     seed=None,
@@ -713,8 +718,8 @@ def sample_hv1bp(
             messages,
             max_iterations=max_iterations,
             tol=tol,
+            damping=damping,
             smudge_factor=smudge_factor,
-            progbar=True,
         )
 
         marginals = compute_all_index_marginals_from_messages(

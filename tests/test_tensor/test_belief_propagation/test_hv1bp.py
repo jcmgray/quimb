@@ -30,10 +30,11 @@ def test_contract_normal(damping):
     assert Z == pytest.approx(Z_bp, rel=1e-1)
 
 
-def test_sample():
+@pytest.mark.parametrize("damping", [0.0, 0.1])
+def test_sample(damping):
     nvars = 20
     htn = qtn.HTN_random_ksat(3, nvars, alpha=2.0, seed=42, mode="dense")
-    config, tn_config, omega = sample_hv1bp(htn, progbar=True)
+    config, tn_config, omega = sample_hv1bp(htn, damping=damping)
     assert len(config) == nvars
     assert tn_config.num_indices == 0
     assert tn_config.contract() == pytest.approx(1.0)

@@ -88,7 +88,10 @@ def compute_all_tensor_messages_shortcuts(x, ms, ndim):
 
 
 def compute_all_tensor_messages_prod(
-    x, ms, backend=None, smudge_factor=1e-12,
+    x,
+    ms,
+    backend=None,
+    smudge_factor=1e-12,
 ):
     """Given set of messages ``ms`` incident to tensor with data ``x``, compute
     the corresponding next output messages, using the 'prod' implementation.
@@ -236,7 +239,8 @@ def iterate_belief_propagation_basic(
     for tid, t in tn.tensor_map.items():
         inds = t.inds
         ms = compute_all_tensor_messages_tree(
-            t.data, [messages[ix, tid] for ix in inds],
+            t.data,
+            [messages[ix, tid] for ix in inds],
         )
         for ix, m in zip(inds, ms):
             max_dm = _normalize_and_insert((tid, ix), m, max_dm)
@@ -298,15 +302,13 @@ class HD1BP(BeliefPropagationCommon):
         )
 
 
-
-
 def contract_hd1bp(
     tn,
     messages=None,
     max_iterations=1000,
     tol=5e-6,
-    smudge_factor=1e-12,
     damping=0.0,
+    smudge_factor=1e-12,
     strip_exponent=False,
     progbar=False,
 ):
@@ -323,11 +325,11 @@ def contract_hd1bp(
         The maximum number of iterations to perform.
     tol : float, optional
         The convergence tolerance for messages.
+    damping : float, optional
+        The damping factor to use, 0.0 means no damping.
     smudge_factor : float, optional
         A small number to add to the denominator of messages to avoid division
         by zero. Note when this happens the numerator will also be zero.
-    damping : float, optional
-        The damping factor to use, 0.0 means no damping.
     strip_exponent : bool, optional
         Whether to strip the exponent from the final result. If ``True``
         then the returned result is ``(mantissa, exponent)``.
@@ -352,12 +354,12 @@ def contract_hd1bp(
     return bp.contract(strip_exponent=strip_exponent)
 
 
-
 def run_belief_propagation_hd1bp(
     tn,
     messages=None,
     max_iterations=1000,
     tol=5e-6,
+    damping=0.0,
     smudge_factor=1e-12,
     progbar=False,
 ):
@@ -389,7 +391,9 @@ def run_belief_propagation_hd1bp(
     converged : bool
         Whether the algorithm converged.
     """
-    bp = HD1BP(tn, messages=messages, smudge_factor=smudge_factor)
+    bp = HD1BP(
+        tn, messages=messages, damping=damping, smudge_factor=smudge_factor
+    )
     bp.run(max_iterations=max_iterations, tol=tol, progbar=progbar)
     return bp.messages, bp.converged
 
@@ -400,6 +404,7 @@ def sample_hd1bp(
     output_inds=None,
     max_iterations=1000,
     tol=1e-2,
+    damping=0.0,
     smudge_factor=1e-12,
     bias=False,
     seed=None,
@@ -485,6 +490,7 @@ def sample_hd1bp(
             messages,
             max_iterations=max_iterations,
             tol=tol,
+            damping=damping,
             smudge_factor=smudge_factor,
             progbar=True,
         )
