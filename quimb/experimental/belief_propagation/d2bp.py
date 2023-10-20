@@ -12,6 +12,14 @@ class D2BP(BeliefPropagationCommon):
     operators) belief propagation. Allows messages reuse. This version assumes
     no hyper indices (i.e. a standard PEPS like tensor network).
 
+    Potential use cases for D2BP and a PEPS like tensor network are:
+
+        - globally compressing it from bond dimension ``D`` to ``D'``
+        - eagerly applying gates and locally compressing back to ``D``
+        - sampling configurations
+        - estimating the norm of the tensor network
+
+
     Parameters
     ----------
     tn : TensorNetwork
