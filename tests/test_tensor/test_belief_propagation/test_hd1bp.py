@@ -34,7 +34,7 @@ def test_contract_normal(damping):
 def test_sample(damping):
     nvars = 20
     htn = qtn.HTN_random_ksat(3, nvars, alpha=2.0, seed=42, mode="dense")
-    config, tn_config, omega = sample_hd1bp(htn, damping=damping)
+    config, tn_config, omega = sample_hd1bp(htn, damping=damping, seed=42)
     assert len(config) == nvars
     assert tn_config.num_indices == 0
     assert tn_config.contract() == pytest.approx(1.0)
