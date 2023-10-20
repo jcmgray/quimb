@@ -203,6 +203,7 @@ from .geometry import (
     edges_3d_diamond_cubic,
     edges_3d_diamond,
     edges_3d_pyrochlore,
+    edges_tree_rand,
 )
 
 
@@ -238,6 +239,7 @@ __all__ = (
     "edges_3d_diamond_cubic",
     "edges_3d_diamond",
     "edges_3d_pyrochlore",
+    "edges_tree_rand",
     "expec_TN_1D",
     "FullUpdate",
     "gate_TN_1D",

@@ -6,6 +6,11 @@ import autoray as ar
 import quimb.tensor as qtn
 
 
+def prod(xs):
+    """Product of all elements in ``xs``."""
+    return functools.reduce(operator.mul, xs)
+
+
 class RollingDiffMean:
     """Tracker for the absolute rolling mean of diffs between values, to
     assess effective convergence of BP above actual message tolerance.
@@ -59,11 +64,14 @@ class BeliefPropagationCommon:
             rdm = RollingDiffMean()
             self.converged = False
             while not self.converged and it < max_iterations:
-                # can only converge if tol > 0.0
+                # perform a single iteration of BP
+                # we supply tol here for use with local convergence
                 nconv, ncheck, max_mdiff = self.iterate(tol=tol)
+                it += 1
+
+                # check rolling mean convergence
                 rdm.update(max_mdiff)
                 self.converged = (max_mdiff < tol) or (rdm.absmeandiff() < tol)
-                it += 1
 
                 if pbar is not None:
                     pbar.set_description(
@@ -83,11 +91,6 @@ class BeliefPropagationCommon:
                 f"Belief propagation did not converge after {max_iterations} "
                 f"iterations, tol={tol:.2e}, max|dM|={max_mdiff:.2e}."
             )
-
-
-def prod(xs):
-    """Product of all elements in ``xs``."""
-    return functools.reduce(operator.mul, xs)
 
 
 def initialize_hyper_messages(tn, fill_fn=None, smudge_factor=1e-12):

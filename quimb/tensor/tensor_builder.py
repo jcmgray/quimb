@@ -29,7 +29,11 @@ from .tensor_core import (
 from .array_ops import asarray, sensibly_scale, reshape, do
 from .contraction import array_contract
 from .decomp import eigh
-from .tensor_arbgeom import TensorNetworkGen, TensorNetworkGenVector
+from .tensor_arbgeom import (
+    TensorNetworkGen,
+    TensorNetworkGenVector,
+    TensorNetworkGenOperator,
+)
 from .tensor_1d import MatrixProductState, MatrixProductOperator
 from .tensor_2d import gen_2d_bonds, gen_2d_plaquettes, TensorNetwork2D
 from .tensor_3d import gen_3d_bonds, gen_3d_plaquettes, TensorNetwork3D
@@ -64,7 +68,9 @@ def get_rand_fill_fn(
 
 
 @random_seed_fn
-def rand_tensor(shape, inds, tags=None, dtype="float64", left_inds=None):
+def rand_tensor(
+    shape, inds, tags=None, dtype="float64", left_inds=None, **randn_opts
+):
     """Generate a random tensor with specified shape and inds.
 
     Parameters
@@ -87,7 +93,7 @@ def rand_tensor(shape, inds, tags=None, dtype="float64", left_inds=None):
     -------
     Tensor
     """
-    data = randn(shape, dtype=dtype)
+    data = randn(shape, dtype=dtype, **randn_opts)
     return Tensor(data=data, inds=inds, tags=tags, left_inds=left_inds)
 
 
@@ -245,12 +251,16 @@ def TN_from_edges_and_fill_fn(
         at each node.
     site_tag_id : str, optional
         String with formatter to tag sites.
-    site_ind_id : str, optional
-        String with formatter to tag indices (if ``phys_dim`` specified).
+    site_ind_id : str or (str, str), optional
+        String with formatter to tag indices (if ``phys_dim`` specified). If a
+        single str is supplied, the tensor network will have a single index at
+        each site, representing a vector. If a pair of strings is supplied, the
+        tensor network will have two indices at each site, representing an
+        operator with upper and lower indices.
 
     Returns
     -------
-    TensorNetworkGen or TensorNetworkGenVector
+    TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
     terms = collections.defaultdict(list)
     bonds = collections.defaultdict(rand_uuid)
@@ -261,26 +271,51 @@ def TN_from_edges_and_fill_fn(
         terms[node_a].insert(0, bond)
         terms[node_b].insert(0, bond)
 
+    if phys_dim is not None:
+        if isinstance(site_ind_id, str):
+            qtype = "vector"
+        else:
+            qtype = "operator"
+            upper_ind_id, lower_ind_id = site_ind_id
+    else:
+        qtype = "scalar"
+
     ts = []
     sites = []
     for node, inds in sorted(terms.items(), key=lambda x: x[0]):
         sites.append(node)
         shape = [D] * len(inds)
-        if phys_dim is not None:
+
+        # check if not scalar tensor
+        if qtype == "vector":
             inds.append(site_ind_id.format(node))
             shape.append(phys_dim)
+        elif qtype == "operator":
+            inds.append(upper_ind_id.format(node))
+            inds.append(lower_ind_id.format(node))
+            shape.append(phys_dim)
+            shape.append(phys_dim)
+
         data = fill_fn(shape)
         tags = site_tag_id.format(node)
         ts.append(Tensor(data=data, inds=inds, tags=tags))
 
     tn = TensorNetwork(ts)
 
-    if phys_dim is not None:
+    if qtype == "vector":
         tn.view_as_(
             TensorNetworkGenVector,
             sites=sites,
             site_tag_id=site_tag_id,
             site_ind_id=site_ind_id,
+        )
+    elif qtype == "operator":
+        tn.view_as_(
+            TensorNetworkGenOperator,
+            sites=sites,
+            site_tag_id=site_tag_id,
+            upper_ind_id=upper_ind_id,
+            lower_ind_id=lower_ind_id,
         )
     else:
         tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
@@ -319,7 +354,7 @@ def TN_from_edges_empty(
 
     Returns
     -------
-    TensorNetworkGen or TensorNetworkGenVector
+    TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
 
     def fill_fn(shape):
@@ -370,7 +405,7 @@ def TN_from_edges_with_value(
 
     Returns
     -------
-    TensorNetworkGen or TensorNetworkGenVector
+    TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
     element = np.array(value, dtype=dtype)
 
@@ -395,6 +430,7 @@ def TN_from_edges_rand(
     dtype="float64",
     site_tag_id="I{}",
     site_ind_id="k{}",
+    **randn_opts,
 ):
     """Create a random tensor network with geometry defined from a sequence
     of edges defining a graph.
@@ -411,42 +447,33 @@ def TN_from_edges_rand(
         to mimic a wavefunction of ``len(G)`` sites.
     seed : int, optional
         A random seed.
+    dtype : str, optional
+        The data type of the tensors.
     site_tag_id : str, optional
         String with formatter to tag sites.
     site_ind_id : str, optional
         String with formatter to tag indices (if ``phys_dim`` specified).
+    randn_opts
+        Supplied to :func:`~quimb.gen.rand.randn`.
 
     Returns
     -------
-    TensorNetworkGen or TensorNetworkGenVector
+    TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
-    ts = {}
+    if seed is not None:
+        seed_rand(seed)
 
-    sites = tuple(sorted(set(concat(edges))))
+    def fill_fn(shape):
+        return randn(shape, dtype=dtype, **randn_opts)
 
-    for node in sites:
-        t = Tensor(tags=site_tag_id.format(node))
-        if phys_dim is not None:
-            t.new_ind(site_ind_id.format(node), size=phys_dim)
-        ts[node] = t
-
-    for node_a, node_b in gen_unique_edges(edges):
-        new_bond(ts[node_a], ts[node_b], size=D)
-
-    tn = TensorNetwork(ts.values())
-    tn.randomize_(seed=seed, dtype=dtype)
-
-    if phys_dim is not None:
-        tn.view_as_(
-            TensorNetworkGenVector,
-            sites=sites,
-            site_tag_id=site_tag_id,
-            site_ind_id=site_ind_id,
-        )
-    else:
-        tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
-
-    return tn
+    return TN_from_edges_and_fill_fn(
+        fill_fn=fill_fn,
+        edges=edges,
+        D=D,
+        phys_dim=phys_dim,
+        site_tag_id=site_tag_id,
+        site_ind_id=site_ind_id,
+    )
 
 
 TN_rand_from_edges = deprecated(
@@ -487,7 +514,7 @@ def TN_rand_reg(
 
     Returns
     -------
-    TensorNetworkGen or TensorNetworkGenVector
+    TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
     import networkx as nx
 
@@ -532,7 +559,7 @@ def TN_rand_tree(
 
     Returns
     -------
-    TensorNetworkGen or TensorNetworkGenVector
+    TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
     import networkx as nx
 

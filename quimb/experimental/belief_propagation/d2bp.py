@@ -449,11 +449,11 @@ def compress_d2bp(
         Computed automatically if not specified.
     optimize : str or PathOptimizer, optional
         The path optimizer to use when contracting the messages.
+    damping : float, optional
+        The damping parameter to use, defaults to no damping.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
-    damping : float, optional
-        The damping parameter to use, defaults to no damping.
     inplace : bool, optional
         Whether to perform the compression inplace.
     progbar : bool, optional
