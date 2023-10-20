@@ -68,6 +68,7 @@ def test_contract_tree_triple_sandwich_exact(dtype):
     Z_bp = contract_l1bp(tn)
     assert Z_ex == pytest.approx(Z_bp, rel=5e-6)
 
+
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("damping", [0.0, 0.1])
 def test_contract_tree_triple_sandwich_loopy_approx(dtype, damping):
@@ -80,12 +81,31 @@ def test_contract_tree_triple_sandwich_loopy_approx(dtype, damping):
         site_ind_id="k{}",
         dtype=dtype,
         # make the wavefunction postive to make easier
-        dist='uniform',
+        dist="uniform",
     )
-    ket /= (ket.H @ ket)**0.5
+    ket /= (ket.H @ ket) ** 0.5
 
-    G_ket = ket.gate(qu.pauli('Z'), [(1, 1, 'A')], propagate_tags="sites")
+    G_ket = ket.gate(qu.pauli("Z"), [(1, 1, "A")], propagate_tags="sites")
     tn = ket.H | G_ket
     Z_ex = tn.contract()
     Z_bp = contract_l1bp(tn, damping=damping)
     assert Z_bp == pytest.approx(Z_ex, rel=0.5)
+
+
+def test_contract_cluster_approx():
+    tn = qtn.TN2D_classical_ising_partition_function(8, 8, 0.4, h=0.2)
+    f_ex = qu.log(tn.contract())
+    f_bp = qu.log(contract_l1bp(tn))
+    assert f_bp == pytest.approx(f_ex, rel=0.3)
+    cluster_tags = []
+    for i in range(0, 8, 2):
+        for j in range(0, 8, 2):
+            cluster_tag = f"C{i},{j}"
+            tn[i, j].add_tag(cluster_tag)
+            tn[i, j + 1].add_tag(cluster_tag)
+            tn[i + 1, j].add_tag(cluster_tag)
+            tn[i + 1, j + 1].add_tag(cluster_tag)
+            cluster_tags.append(cluster_tag)
+    f_bp2 = qu.log(contract_l1bp(tn, site_tags=cluster_tags))
+    assert f_bp == pytest.approx(f_ex, rel=0.1)
+    assert abs(1 - f_ex / f_bp2) < abs(1 - f_ex / f_bp)
