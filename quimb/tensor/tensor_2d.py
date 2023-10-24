@@ -5032,6 +5032,58 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
+    def from_fill_fn(
+        cls,
+        fill_fn,
+        Lx,
+        Ly,
+        bond_dim,
+        phys_dim=2,
+        shape="urdlbk",
+        **pepo_opts,
+    ):
+        """Create a PEPO and fill the tensor entries with a supplied function
+        matching signature ``fill_fn(shape) -> array``.
+
+        Parameters
+        ----------
+        fill_fn : callable
+            A function that takes a shape tuple and returns a data array.
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        bond_dim : int
+            The bond dimension.
+        physical : int, optional
+            The physical indices dimension.
+        shape : str, optional
+            How to layout the indices of the tensors, the default is
+            ``(up, right, down, left bra, ket) == 'urdlbk'``.
+        pepo_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPO`.
+        """
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+
+        for i, j in product(range(Lx), range(Ly)):
+            shp = []
+            for which in shape:
+                if which == "u" and i < Lx - 1:
+                    shp.append(bond_dim)
+                elif which == "r" and j < Ly - 1:
+                    shp.append(bond_dim)
+                elif which == "d" and i > 0:
+                    shp.append(bond_dim)
+                elif which == "l" and j > 0:
+                    shp.append(bond_dim)
+                elif which in ("b", "k"):
+                    shp.append(phys_dim)
+
+            arrays[i][j] = fill_fn(shp)
+
+        return cls(arrays, shape=shape, **pepo_opts)
+
+    @classmethod
     def rand(
         cls,
         Lx,
@@ -5072,33 +5124,24 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         if seed is not None:
             seed_rand(seed)
 
-        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
-
-        for i, j in product(range(Lx), range(Ly)):
-            shape = []
-            if i != Lx - 1:  # bond up
-                shape.append(bond_dim)
-            if j != Ly - 1:  # bond right
-                shape.append(bond_dim)
-            if i != 0:  # bond down
-                shape.append(bond_dim)
-            if j != 0:  # bond left
-                shape.append(bond_dim)
-            shape.append(phys_dim)
-            shape.append(phys_dim)
-
+        def fill_fn(shape):
             X = ops.sensibly_scale(
                 ops.sensibly_scale(randn(shape, dtype=dtype))
             )
-
             if herm:
                 new_order = list(range(len(shape)))
                 new_order[-2], new_order[-1] = new_order[-1], new_order[-2]
                 X = (do("conj", X) + do("transpose", X, new_order)) / 2
+            return X
 
-            arrays[i][j] = X
-
-        return cls(arrays, **pepo_opts)
+        return cls.from_fill_fn(
+            fill_fn,
+            Lx=Lx,
+            Ly=Ly,
+            bond_dim=bond_dim,
+            phys_dim=phys_dim,
+            **pepo_opts,
+        )
 
     rand_herm = functools.partialmethod(rand, herm=True)
 
