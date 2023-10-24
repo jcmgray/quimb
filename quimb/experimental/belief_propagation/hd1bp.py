@@ -310,6 +310,7 @@ def contract_hd1bp(
     damping=0.0,
     smudge_factor=1e-12,
     strip_exponent=False,
+    info=None,
     progbar=False,
 ):
     """Estimate the contraction of ``tn`` with hyper, vectorized, 1-norm
@@ -333,6 +334,9 @@ def contract_hd1bp(
     strip_exponent : bool, optional
         Whether to strip the exponent from the final result. If ``True``
         then the returned result is ``(mantissa, exponent)``.
+    info : dict, optional
+        If specified, update this dictionary with information about the
+        belief propagation run.
     progbar : bool, optional
         Whether to show a progress bar.
 
@@ -349,6 +353,7 @@ def contract_hd1bp(
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        info=info,
         progbar=progbar,
     )
     return bp.contract(strip_exponent=strip_exponent)
@@ -361,6 +366,7 @@ def run_belief_propagation_hd1bp(
     tol=5e-6,
     damping=0.0,
     smudge_factor=1e-12,
+    info=None,
     progbar=False,
 ):
     """Run belief propagation on a tensor network until it converges. This
@@ -381,6 +387,9 @@ def run_belief_propagation_hd1bp(
     smudge_factor : float, optional
         A small number to add to the denominator of messages to avoid division
         by zero. Note when this happens the numerator will also be zero.
+    info : dict, optional
+        If specified, update this dictionary with information about the
+        belief propagation run.
     progbar : bool, optional
         Whether to show a progress bar.
 
@@ -394,7 +403,7 @@ def run_belief_propagation_hd1bp(
     bp = HD1BP(
         tn, messages=messages, damping=damping, smudge_factor=smudge_factor
     )
-    bp.run(max_iterations=max_iterations, tol=tol, progbar=progbar)
+    bp.run(max_iterations=max_iterations, tol=tol, info=info, progbar=progbar)
     return bp.messages, bp.converged
 
 

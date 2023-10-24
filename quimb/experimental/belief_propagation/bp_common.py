@@ -51,7 +51,7 @@ class BeliefPropagationCommon:
         Whether to show a progress bar.
     """
 
-    def run(self, max_iterations=1000, tol=5e-6, progbar=False):
+    def run(self, max_iterations=1000, tol=5e-6, info=None, progbar=False):
         if progbar:
             import tqdm
 
@@ -91,6 +91,12 @@ class BeliefPropagationCommon:
                 f"Belief propagation did not converge after {max_iterations} "
                 f"iterations, tol={tol:.2e}, max|dM|={max_mdiff:.2e}."
             )
+
+        if info is not None:
+            info["converged"] = self.converged
+            info["iterations"] = it
+            info["max_mdiff"] = max_mdiff
+            info["rolling_abs_mean_diff"] = rdm.absmeandiff()
 
 
 def initialize_hyper_messages(tn, fill_fn=None, smudge_factor=1e-12):

@@ -325,6 +325,7 @@ def contract_l2bp(
     max_iterations=1000,
     tol=5e-6,
     strip_exponent=False,
+    info=None,
     progbar=False,
     **contract_opts,
 ):
@@ -350,6 +351,9 @@ def contract_l2bp(
     strip_exponent : bool, optional
         Whether to strip the exponent from the final result. If ``True``
         then the returned result is ``(mantissa, exponent)``.
+    info : dict, optional
+        If specified, update this dictionary with information about the
+        belief propagation run.
     progbar : bool, optional
         Whether to show a progress bar.
     contract_opts
@@ -366,6 +370,7 @@ def contract_l2bp(
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        info=info,
         progbar=progbar,
     )
     return bp.contract(strip_exponent=strip_exponent)
@@ -384,6 +389,7 @@ def compress_l2bp(
     optimize="auto-hq",
     lazy=False,
     inplace=False,
+    info=None,
     progbar=False,
     **contract_opts,
 ):
@@ -420,6 +426,9 @@ def compress_l2bp(
         compression projectors uncontracted.
     inplace : bool, optional
         Whether to perform the compression inplace.
+    info : dict, optional
+        If specified, update this dictionary with information about the
+        belief propagation run.
     progbar : bool, optional
         Whether to show a progress bar.
     contract_opts
@@ -442,6 +451,7 @@ def compress_l2bp(
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        info=info,
         progbar=progbar,
     )
     return bp.compress(

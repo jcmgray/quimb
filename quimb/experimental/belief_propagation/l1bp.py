@@ -38,6 +38,7 @@ class L1BP(BeliefPropagationCommon):
         site_tags=None,
         damping=0.0,
         local_convergence=True,
+        update="parallel",
         optimize="auto-hq",
         message_init_function=None,
         **contract_opts,
@@ -45,6 +46,7 @@ class L1BP(BeliefPropagationCommon):
         self.backend = next(t.backend for t in tn)
         self.damping = damping
         self.local_convergence = local_convergence
+        self.update = update
         self.optimize = optimize
         self.contract_opts = contract_opts
 
@@ -130,10 +132,12 @@ class L1BP(BeliefPropagationCommon):
             )
 
         ncheck = len(self.touched)
-        new_data = {}
-        while self.touched:
-            i, j = self.touched.pop()
+        nconv = 0
+        max_mdiff = -1.0
+        new_touched = set()
 
+        def _compute_m(key):
+            i, j = key
             bix = self.edges[(i, j) if i < j else (j, i)]
             tn_i_to_j = self.contraction_tns[i, j]
             tm_new = tn_i_to_j.contract(
@@ -141,13 +145,11 @@ class L1BP(BeliefPropagationCommon):
                 optimize=self.optimize,
                 **self.contract_opts,
             )
-            m = self._normalize(tm_new.data)
+            return self._normalize(tm_new.data)
 
-            new_data[i, j] = m
+        def _update_m(key, data):
+            nonlocal nconv, max_mdiff
 
-        nconv = 0
-        max_mdiff = -1.0
-        for key, data in new_data.items():
             tm = self.messages[key]
 
             if self.damping != 0.0:
@@ -157,13 +159,28 @@ class L1BP(BeliefPropagationCommon):
 
             if mdiff > tol:
                 # mark touching messages for update
-                self.touched.update(self.touch_map[key])
+                new_touched.update(self.touch_map[key])
             else:
                 nconv += 1
 
             max_mdiff = max(max_mdiff, mdiff)
             tm.modify(data=data)
 
+        if self.update == "parallel":
+            new_data = {}
+            while self.touched:
+                key = self.touched.pop()
+                new_data[key] = _compute_m(key)
+            for key, data in new_data.items():
+                _update_m(key, data)
+
+        elif self.update == "sequential":
+            while self.touched:
+                key = self.touched.pop()
+                data = _compute_m(key)
+                _update_m(key, data)
+
+        self.touched = new_touched
         return nconv, ncheck, max_mdiff
 
     def contract(self, strip_exponent=False):
@@ -207,8 +224,10 @@ def contract_l1bp(
     site_tags=None,
     damping=0.0,
     local_convergence=True,
+    update="parallel",
     optimize="auto-hq",
     strip_exponent=False,
+    info=None,
     progbar=False,
     **contract_opts,
 ):
@@ -238,6 +257,9 @@ def contract_l1bp(
     strip_exponent : bool, optional
         Whether to strip the exponent from the final result. If ``True``
         then the returned result is ``(mantissa, exponent)``.
+    info : dict, optional
+        If specified, update this dictionary with information about the
+        belief propagation run.
     contract_opts
         Other options supplied to ``cotengra.array_contract``.
     """
@@ -246,12 +268,14 @@ def contract_l1bp(
         site_tags=site_tags,
         damping=damping,
         local_convergence=local_convergence,
+        update=update,
         optimize=optimize,
         **contract_opts,
     )
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        info=info,
         progbar=progbar,
     )
     return bp.contract(

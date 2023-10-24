@@ -11,7 +11,9 @@ from quimb.experimental.belief_propagation.l2bp import (
 def test_contract_tree_exact(dtype):
     psi = qtn.TN_rand_tree(20, 3, 2, dtype=dtype)
     norm2 = psi.H @ psi
-    norm2_bp = contract_l2bp(psi)
+    info = {}
+    norm2_bp = contract_l2bp(psi, info=info, progbar=True)
+    assert info["converged"]
     assert norm2_bp == pytest.approx(norm2, rel=1e-6)
 
 
@@ -19,7 +21,9 @@ def test_contract_tree_exact(dtype):
 def test_contract_loopy_approx(dtype):
     peps = qtn.PEPS.rand(3, 4, 3, dtype=dtype, seed=42)
     norm_ex = peps.H @ peps
-    norm_bp = contract_l2bp(peps, damping=0.1)
+    info = {}
+    norm_bp = contract_l2bp(peps, damping=0.1, info=info, progbar=True)
+    assert info["converged"]
     assert norm_bp == pytest.approx(norm_ex, rel=0.2)
 
 
@@ -30,7 +34,11 @@ def test_compress_loopy(damping, dtype):
     # test that using the BP compression gives better fidelity than purely
     # local, naive compression scheme
     peps_c1 = peps.compress_all(max_bond=2)
-    peps_c2 = compress_l2bp(peps, max_bond=2, damping=damping)
+    info = {}
+    peps_c2 = compress_l2bp(
+        peps, max_bond=2, damping=damping, info=info, progbar=True
+    )
+    assert info["converged"]
     fid1 = peps_c1.H @ peps_c2
     fid2 = peps_c2.H @ peps_c2
     assert abs(fid2) > abs(fid1)
@@ -52,7 +60,9 @@ def test_contract_double_layer_tree_exact(dtype):
     assert tn.num_tensors == 20
 
     norm_ex = tn.H @ tn
-    norm_bp = contract_l2bp(tn)
+    info = {}
+    norm_bp = contract_l2bp(tn, info=info, progbar=True)
+    assert info["converged"]
 
     assert norm_bp == pytest.approx(norm_ex, rel=1e-6)
 
@@ -73,7 +83,11 @@ def test_compress_double_layer_loopy(dtype, damping):
     fid_basic = abs(tn_eager.H @ tn_lazy)
 
     # compress using BP
-    tn_bp = compress_l2bp(tn_lazy, max_bond=3, damping=damping)
+    info = {}
+    tn_bp = compress_l2bp(
+        tn_lazy, max_bond=3, damping=damping, info=info, progbar=True
+    )
+    assert info["converged"]
     assert tn_bp.num_tensors == 12
 
     # assert we did better than basic local compression
