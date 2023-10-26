@@ -94,6 +94,7 @@ class L1BP(BeliefPropagationCommon):
 
                 if message_init_function is None:
                     tm = tn_i.contract(
+                        all,
                         output_inds=bix,
                         optimize=self.optimize,
                         drop_tags=True,
@@ -141,6 +142,7 @@ class L1BP(BeliefPropagationCommon):
             bix = self.edges[(i, j) if i < j else (j, i)]
             tn_i_to_j = self.contraction_tns[i, j]
             tm_new = tn_i_to_j.contract(
+                all,
                 output_inds=bix,
                 optimize=self.optimize,
                 **self.contract_opts,
@@ -196,6 +198,7 @@ class L1BP(BeliefPropagationCommon):
             else:
                 # site exists but has no neighbors
                 tval = tn_ic.contract(
+                    all,
                     output_inds=(),
                     optimize=self.optimize,
                     **self.contract_opts,

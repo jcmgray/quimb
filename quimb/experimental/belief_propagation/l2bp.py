@@ -74,6 +74,7 @@ class L2BP(BeliefPropagationCommon):
                 tn_i = self.local_tns[i]
                 tn_i2 = tn_i & tn_i.conj().reindex_(remapper)
                 tm = tn_i2.contract(
+                    all,
                     output_inds=output_inds,
                     optimize=self.optimize,
                     drop_tags=True,
@@ -136,6 +137,7 @@ class L2BP(BeliefPropagationCommon):
             tn_i_to_j = self.contraction_tns[i, j]
 
             tm_new = tn_i_to_j.contract(
+                all,
                 output_inds=output_inds,
                 drop_tags=True,
                 optimize=self.optimize,
@@ -186,13 +188,14 @@ class L2BP(BeliefPropagationCommon):
                 )
             )
             tvals.append(
-                tni.contract(optimize=self.optimize, **self.contract_opts)
+                tni.contract(all, optimize=self.optimize, **self.contract_opts)
             )
 
         mvals = []
         for i, j in self.edges:
             mvals.append(
                 (self.messages[i, j] & self.messages[j, i]).contract(
+                    all,
                     optimize=self.optimize,
                     **self.contract_opts,
                 )
@@ -253,7 +256,7 @@ class L2BP(BeliefPropagationCommon):
         tn,
         max_bond=None,
         cutoff=5e-6,
-        cutoff_mode='rsum2',
+        cutoff_mode="rsum2",
         renorm=0,
         lazy=False,
     ):

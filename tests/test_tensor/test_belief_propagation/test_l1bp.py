@@ -123,3 +123,17 @@ def test_contract_cluster_approx():
     assert info["converged"]
     assert f_bp == pytest.approx(f_ex, rel=0.1)
     assert abs(1 - f_ex / f_bp2) < abs(1 - f_ex / f_bp)
+
+
+def test_mps():
+    # catch bug to do with structured contract and output inds
+    L = 6
+    psi = qtn.MPS_rand_state(L=L, seed=20, bond_dim=3)
+    psiG = psi.copy()
+    psiG.gate_(qu.pauli("X"), 5, contract=True)
+    expec = psi.H & psiG
+    O = contract_l1bp(
+        expec,
+        site_tags=[f"I{i}" for i in range(L)],
+    )
+    assert O == pytest.approx(expec ^ ..., abs=1e-6)
