@@ -11,6 +11,7 @@ except ImportError:
         # use setuptools_scm to get the current version from src using git
         from setuptools_scm import get_version as _gv
         from pathlib import Path as _Path
+
         __version__ = _gv(_Path(__file__).parent.parent)
     except ImportError:
         # setuptools_scm is not available, use a default version

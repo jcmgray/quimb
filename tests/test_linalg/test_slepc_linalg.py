@@ -3,14 +3,29 @@ import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
 
-from quimb import (qu, rand_uni, ldmul, rand_matrix, rand_herm, rand_pos,
-                   rand_ket, eigh, eye, norm)
+from quimb import (
+    qu,
+    rand_uni,
+    ldmul,
+    rand_matrix,
+    rand_herm,
+    rand_pos,
+    rand_ket,
+    eigh,
+    eye,
+    norm,
+)
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import svds_scipy
+
 if SLEPC4PY_FOUND:
     from quimb.linalg.slepc_linalg import (
-        eigs_slepc, svds_slepc, convert_mat_to_petsc, new_petsc_vec,
-        mfn_multiply_slepc, ssolve_slepc,
+        eigs_slepc,
+        svds_slepc,
+        convert_mat_to_petsc,
+        new_petsc_vec,
+        mfn_multiply_slepc,
+        ssolve_slepc,
     )
 
 
@@ -35,17 +50,18 @@ def bigsparsemat():
 # TESTS                                                                       #
 # --------------------------------------------------------------------------- #
 
+
 @slepc4py_test
 class TestConvertToPETScConversion:
     def test_csr(self):
         a = rand_matrix(2, sparse=True, density=0.5)
         b = convert_mat_to_petsc(a)
-        assert b.getType() == 'seqaij'
+        assert b.getType() == "seqaij"
 
     def test_bsr(self):
-        a = sp.kron(rand_matrix(2), eye(2, sparse=True), format='bsr')
+        a = sp.kron(rand_matrix(2), eye(2, sparse=True), format="bsr")
         b = convert_mat_to_petsc(a)
-        assert b.getType() == 'seqbaij'
+        assert b.getType() == "seqbaij"
         assert b.getBlockSize() == 2
 
     # def test_vec(self):
@@ -56,7 +72,7 @@ class TestConvertToPETScConversion:
     def test_dense(self):
         a = rand_matrix(3)
         b = convert_mat_to_petsc(a)
-        assert b.getType() == 'seqdense'
+        assert b.getType() == "seqdense"
 
     def test_new_petsc_vector(self):
         a = new_petsc_vec(4)
@@ -70,22 +86,25 @@ class TestSlepceigs:
         lk = eigs_slepc(a, k=2, sigma=0.5, return_vecs=False)
         assert_allclose(lk, [-1, 2])
 
-    @mark.parametrize("which, output", [
-        ('lm', 4),
-        ("sa", -3),
-    ])
+    @mark.parametrize(
+        "which, output",
+        [
+            ("lm", 4),
+            ("sa", -3),
+        ],
+    )
     def test_eigs_slepc_groundenergy(self, prematsparse, which, output):
         u, a = prematsparse
         lk = eigs_slepc(a, k=1, which=which, return_vecs=False)
         assert_allclose(lk, output)
 
-    @mark.parametrize("dtype", ['real', 'complex'])
+    @mark.parametrize("dtype", ["real", "complex"])
     def test_eigs_slepc_eigvecs(self, dtype):
         h = rand_herm(32, sparse=True, density=0.5)
-        if dtype == 'real':
+        if dtype == "real":
             h = h.real
         lks, vks = eigs_slepc(h, k=5)
-        lka, vka = eigh(h, k=5, backend='scipy')
+        lka, vka = eigh(h, k=5, backend="scipy")
         assert vks.shape == vka.shape
         assert h.dtype == vks.dtype
 
@@ -100,14 +119,14 @@ class TestSlepcSvds:
         lk = svds_slepc(a, k=1, return_vecs=False)
         assert_allclose(lk, 4)
 
-    @mark.parametrize("SVDType", ['cross', 'lanczos'])
+    @mark.parametrize("SVDType", ["cross", "lanczos"])
     def test_random_compare_scipy(self, bigsparsemat, SVDType):
         a = bigsparsemat
         lk = svds_slepc(a, k=5, return_vecs=False, SVDType=SVDType)
         ls = svds_scipy(a, k=5, return_vecs=False)
         assert_allclose(lk, ls)
 
-    @mark.parametrize("SVDType", ['cross', 'lanczos'])
+    @mark.parametrize("SVDType", ["cross", "lanczos"])
     def test_unitary_vectors(self, bigsparsemat, SVDType):
         a = bigsparsemat
         uk, sk, vk = svds_slepc(a, k=10, return_vecs=True, SVDType=SVDType)
@@ -123,9 +142,7 @@ class TestSlepcSvds:
 
 @slepc4py_test
 class TestSlepcMfnMultiply:
-
     def test_exp_sparse(self):
-
         a = rand_herm(100, sparse=True, density=0.1)
         k = rand_ket(100)
 
@@ -143,7 +160,7 @@ class TestSlepcMfnMultiply:
         a = a + 0.001 * sp.eye(32)
         k = rand_ket(32)
 
-        out = mfn_multiply_slepc(a, k, fntype='sqrt', isherm=True)
+        out = mfn_multiply_slepc(a, k, fntype="sqrt", isherm=True)
 
         al, av = eigh(a.A)
         al[al < 0] = 0.0  # very small neg values spoil sqrt
@@ -154,19 +171,18 @@ class TestSlepcMfnMultiply:
 
 @slepc4py_test
 class TestShellMatrix:
-
     def test_extermal_eigen(self):
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
 
-        el_us, ev_us = sp.linalg.eigsh(alo, k=1, which='LA')
-        el_u, ev_u = eigs_slepc(alo, k=1, which='LA')
+        el_us, ev_us = sp.linalg.eigsh(alo, k=1, which="LA")
+        el_u, ev_u = eigs_slepc(alo, k=1, which="LA")
 
         assert_allclose(el_us, el_u)
         assert_allclose(np.abs(ev_us.conj().T @ ev_u), 1.0)
 
-        el_ls, ev_ls = sp.linalg.eigsh(alo, k=1, which='SA')
-        el_l, ev_l = eigs_slepc(alo, k=1, which='SA')
+        el_ls, ev_ls = sp.linalg.eigsh(alo, k=1, which="SA")
+        el_l, ev_l = eigs_slepc(alo, k=1, which="SA")
 
         assert_allclose(el_ls, el_l)
         assert_allclose(np.abs(ev_ls.conj().T @ ev_l), 1.0)
@@ -174,8 +190,8 @@ class TestShellMatrix:
     def test_internal_interior_default(self):
         a = rand_herm(100, sparse=True)
         alo = sp.linalg.aslinearoperator(a)
-        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0)
-        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+        el, ev = eigs_slepc(alo, k=1, which="TR", sigma=0.0)
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which="LM", sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -185,14 +201,21 @@ class TestShellMatrix:
         alo = sp.linalg.aslinearoperator(a)
 
         st_opts = {
-            'STType': 'sinvert',
-            'KSPType': 'bcgs',  # / 'gmres'
-            'PCType': 'none',
+            "STType": "sinvert",
+            "KSPType": "bcgs",  # / 'gmres'
+            "PCType": "none",
         }
 
-        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0, tol=1e-6,
-                            st_opts=st_opts, EPSType='krylovschur')
-        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+        el, ev = eigs_slepc(
+            alo,
+            k=1,
+            which="TR",
+            sigma=0.0,
+            tol=1e-6,
+            st_opts=st_opts,
+            EPSType="krylovschur",
+        )
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which="LM", sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-5)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -202,14 +225,15 @@ class TestShellMatrix:
         alo = sp.linalg.aslinearoperator(a)
 
         st_opts = {
-            'STType': 'precond',
-            'KSPType': 'preonly',
-            'PCType': 'none',
+            "STType": "precond",
+            "KSPType": "preonly",
+            "PCType": "none",
         }
 
-        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0,
-                            st_opts=st_opts, EPSType='gd')
-        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+        el, ev = eigs_slepc(
+            alo, k=1, which="TR", sigma=0.0, st_opts=st_opts, EPSType="gd"
+        )
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which="LM", sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -219,14 +243,15 @@ class TestShellMatrix:
         alo = sp.linalg.aslinearoperator(a)
 
         st_opts = {
-            'STType': 'precond',
-            'KSPType': 'bcgs',  # / 'gmres'
-            'PCType': 'none',
+            "STType": "precond",
+            "KSPType": "bcgs",  # / 'gmres'
+            "PCType": "none",
         }
 
-        el, ev = eigs_slepc(alo, k=1, which='TR', sigma=0.0,
-                            st_opts=st_opts, EPSType='jd')
-        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which='LM', sigma=0.0)
+        el, ev = eigs_slepc(
+            alo, k=1, which="TR", sigma=0.0, st_opts=st_opts, EPSType="jd"
+        )
+        el_s, ev_s = sp.linalg.eigsh(a.tocsc(), k=1, which="LM", sigma=0.0)
 
         assert_allclose(el_s, el, rtol=1e-6)
         assert_allclose(np.abs(ev_s.conj().T @ ev), 1.0)
@@ -234,14 +259,13 @@ class TestShellMatrix:
 
 @slepc4py_test
 class TestCISS:
-
     def test_1(self):
         a = rand_herm(100, sparse=True)
         el, ev = eigh(a.A)
         which = abs(el) < 0.2
         el, ev = el[which], ev[:, which]
 
-        offset = norm(a, 'fro')
+        offset = norm(a, "fro")
         a = a + offset * sp.eye(a.shape[0])
 
         sl, sv = eigs_slepc(a, k=6, l_win=(-0.2 + offset, 0.2 + offset))
@@ -252,7 +276,6 @@ class TestCISS:
 
 @slepc4py_test
 class TestSSolve:
-
     def test_simple_dense(self):
         a = rand_herm(2**4, sparse=True)
         y = rand_ket(2**4)

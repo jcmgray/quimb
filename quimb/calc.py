@@ -1319,8 +1319,7 @@ def ent_cross_matrix(
                         rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
                         psiap = purify(rhoa)
                         ent = (
-                            ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc))
-                            / sz_blc
+                            ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
                         )
                     else:
                         ent = np.nan
@@ -1331,9 +1330,7 @@ def ent_cross_matrix(
                         [i + b for b in range(sz_blc)]
                         + [j + b for b in range(sz_blc)],
                     )
-                    ent = (
-                        ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
-                    )
+                    ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
                 ents[i // sz_blc, j // sz_blc] = ent
                 ents[j // sz_blc, i // sz_blc] = ent
 

@@ -91,7 +91,8 @@ def mat_s_nnz():
 #                                  TESTS                                      #
 # --------------------------------------------------------------------------- #
 
-class TestMakeImmutable():
+
+class TestMakeImmutable:
     def test_dense(self):
         mat = qu([[1, 2], [3, 4]])
         make_immutable(mat)
@@ -102,7 +103,7 @@ class TestMakeImmutable():
     def test_sparse(self, stype):
         mat = qu([[1, 2], [3, 4]], stype=stype)
         make_immutable(mat)
-        if stype in {'csr', 'csc'}:
+        if stype in {"csr", "csc"}:
             with raises(ValueError):
                 mat[-1, -1] = 1
 
@@ -111,12 +112,14 @@ class TestEnsureQarray:
     def test_ensure_qarray(self):
         def foo(n):
             return np.random.randn(n, n)
+
         a = foo(2)
         assert not isinstance(a, qarray)
 
         @ensure_qarray
         def foo2(n):
             return np.random.randn(n, n)
+
         a = foo2(2)
         assert isinstance(a, qarray)
 
@@ -125,6 +128,7 @@ class TestRealify:
     def test_realify(self):
         def foo(a, b):
             return a + 1j * b
+
         a = foo(1, 1e-15)
         assert a.real == 1
         assert a.imag == 1e-15
@@ -132,6 +136,7 @@ class TestRealify:
         @realify
         def foo2(a, b):
             return a + 1j * b
+
         a = foo2(1, 1e-15)
         assert a.real == 1
         assert a.imag == 0
@@ -140,7 +145,8 @@ class TestRealify:
         @realify
         def foo(a, b):
             return str(a) + str(b)
-        assert foo(1, 2) == '12'
+
+        assert foo(1, 2) == "12"
 
 
 class TestShapes:
@@ -153,55 +159,51 @@ class TestShapes:
 
     def test_ket(self):
         x = np.array([[1], [0]])
-        assert(isket(x))
-        assert(not isbra(x))
-        assert(not isop(x))
+        assert isket(x)
+        assert not isbra(x)
+        assert not isop(x)
         assert isvec(x)
         x = sp.csr_matrix(x)
-        assert(isket(x))
+        assert isket(x)
         assert isvec(x)
-        assert(not isbra(x))
-        assert(not isop(x))
+        assert not isbra(x)
+        assert not isop(x)
 
     def test_bra(self):
         x = np.array([[1, 0]])
-        assert(not isket(x))
-        assert(isbra(x))
-        assert(not isop(x))
+        assert not isket(x)
+        assert isbra(x)
+        assert not isop(x)
         assert isvec(x)
         x = sp.csr_matrix(x)
-        assert(not isket(x))
-        assert(isbra(x))
-        assert(not isop(x))
+        assert not isket(x)
+        assert isbra(x)
+        assert not isop(x)
         assert isvec(x)
 
     def test_op(self):
         x = np.array([[1, 0], [0, 0]])
-        assert(not isket(x))
-        assert(not isbra(x))
-        assert(isop(x))
-        assert (not isvec(x))
+        assert not isket(x)
+        assert not isbra(x)
+        assert isop(x)
+        assert not isvec(x)
         x = sp.csr_matrix(x)
-        assert(not isket(x))
-        assert(not isbra(x))
-        assert(isop(x))
-        assert (not isvec(x))
+        assert not isket(x)
+        assert not isbra(x)
+        assert isop(x)
+        assert not isvec(x)
 
     def test_isherm(self):
-        a = np.array([[1.0, 2.0 + 3.0j],
-                      [2.0 - 3.0j, 1.0]])
-        assert(isherm(a))
-        a = np.array([[1.0, 2.0 - 3.0j],
-                      [2.0 - 3.0j, 1.0]])
-        assert(not isherm(a))
+        a = np.array([[1.0, 2.0 + 3.0j], [2.0 - 3.0j, 1.0]])
+        assert isherm(a)
+        a = np.array([[1.0, 2.0 - 3.0j], [2.0 - 3.0j, 1.0]])
+        assert not isherm(a)
 
     def test_isherm_sparse(self):
-        a = sp.csr_matrix([[1.0, 2.0 + 3.0j],
-                           [2.0 - 3.0j, 1.0]])
-        assert(isherm(a))
-        a = sp.csr_matrix([[1.0, 2.0 - 3.0j],
-                           [2.0 - 3.0j, 1.0]])
-        assert(not isherm(a))
+        a = sp.csr_matrix([[1.0, 2.0 + 3.0j], [2.0 - 3.0j, 1.0]])
+        assert isherm(a)
+        a = sp.csr_matrix([[1.0, 2.0 - 3.0j], [2.0 - 3.0j, 1.0]])
+        assert not isherm(a)
 
 
 class TestMul:
@@ -388,6 +390,7 @@ class TestExplt:
 # Kronecker (tensor) product tests                                            #
 # --------------------------------------------------------------------------- #
 
+
 class TestKron:
     @mark.parametrize("big", [False, True])
     def test_kron_dense(self, mat_d, mat_d2, big):
@@ -400,32 +403,32 @@ class TestKron:
 
     def test_kron_multi_args(self, mat_d, mat_d2, mat_d3):
         assert_allclose(kron(mat_d), mat_d)
-        assert_allclose(kron(mat_d, mat_d2, mat_d3),
-                        np.kron(np.kron(mat_d, mat_d2), mat_d3))
+        assert_allclose(
+            kron(mat_d, mat_d2, mat_d3),
+            np.kron(np.kron(mat_d, mat_d2), mat_d3),
+        )
 
     def test_kron_mixed_types(self, mat_d, mat_s):
-        assert_allclose(kron(mat_d, mat_s).A,
-                        (sp.kron(mat_d, mat_s, 'csr')).A)
-        assert_allclose(kron(mat_s, mat_s).A,
-                        (sp.kron(mat_s, mat_s, 'csr')).A)
+        assert_allclose(kron(mat_d, mat_s).A, (sp.kron(mat_d, mat_s, "csr")).A)
+        assert_allclose(kron(mat_s, mat_s).A, (sp.kron(mat_s, mat_s, "csr")).A)
 
 
 class TestKronSparseFormats:
     def test_sparse_sparse_auto(self, mat_s):
         c = kron_sparse(mat_s, mat_s)
-        assert c.format == 'csr'
+        assert c.format == "csr"
 
     def test_sparse_dense_auto(self, mat_s, mat_d):
         c = kron_sparse(mat_s, mat_d)
-        assert c.format == 'bsr'
+        assert c.format == "bsr"
 
     def test_dense_sparse_auto(self, mat_s, mat_d):
         c = kron_sparse(mat_d, mat_s)
-        assert c.format == 'csr'
+        assert c.format == "csr"
 
     def test_sparse_sparsennz(self, mat_s, mat_s_nnz):
         c = kron_sparse(mat_s, mat_s_nnz)
-        assert c.format == 'csr'
+        assert c.format == "csr"
 
     @mark.parametrize("stype", _SPARSE_FORMATS)
     def test_sparse_sparse_to_sformat(self, mat_s, stype):
@@ -445,14 +448,16 @@ class TestKronSparseFormats:
         assert c.format == (stype if stype is not None else "csr")
 
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_many_args_dense_last_coo_construct(self, mat_s, mat_s2, mat_d,
-                                                stype):
+    def test_many_args_dense_last_coo_construct(
+        self, mat_s, mat_s2, mat_d, stype
+    ):
         c = kron(mat_s, mat_s2, mat_d, stype=stype, coo_build=True)
         assert c.format == (stype if stype is not None else "csr")
 
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
-    def test_many_args_dense_not_last_coo_construct(self, mat_s, mat_s2, mat_d,
-                                                    stype):
+    def test_many_args_dense_not_last_coo_construct(
+        self, mat_s, mat_s2, mat_d, stype
+    ):
         c = kron(mat_s, mat_d, mat_s2, stype=stype, coo_build=True)
         assert c.format == (stype if stype is not None else "csr")
         c = kron(mat_d, mat_s, mat_s2, stype=stype, coo_build=True)

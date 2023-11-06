@@ -11,8 +11,19 @@ import numpy as np
 from scipy.integrate import complex_ode
 from scipy.sparse.linalg import LinearOperator
 
-from .core import (qarray, isop, ldmul, rdmul, explt,
-                   dot, issparse, qu, eye, dag, make_immutable)
+from .core import (
+    dag,
+    dot,
+    explt,
+    eye,
+    isop,
+    issparse,
+    ldmul,
+    make_immutable,
+    qarray,
+    qu,
+    rdmul,
+)
 from .linalg.base_linalg import eigh, norm, expm_multiply, Lazy
 from .linalg.approx_spectral import norm_fro_approx
 from .utils import continuous_progbar, progbar, ensure_dict
@@ -41,6 +52,7 @@ def schrodinger_eq_ket(ham):
     psi_dot(t, y) : callable
         Function to calculate psi_dot(t) at psi(t).
     """
+
     def psi_dot(_, y):
         return -1.0j * dot(ham, y)
 
@@ -61,6 +73,7 @@ def schrodinger_eq_ket_timedep(ham):
     psi_dot(t, y) : callable
         Function to calculate psi_dot(t) at psi(t).
     """
+
     def psi_dot(t, y):
         return -1.0j * dot(ham(t), y)
 
@@ -146,6 +159,7 @@ def schrodinger_eq_dop_vectorized(ham):
 
     def rho_dot(_, y):
         return dot(evo_superop, y)
+
     return rho_dot
 
 
@@ -172,8 +186,9 @@ def lindblad_eq(ham, ls, gamma):
 
     def gen_l_terms(rho):
         for l, ll in zip(ls, lls):
-            yield (dot(l, dot(rho, dag(l))) -
-                   0.5 * (dot(rho, ll) + dot(ll, rho)))
+            yield (
+                dot(l, dot(rho, dag(l))) - 0.5 * (dot(rho, ll) + dot(ll, rho))
+            )
 
     def rho_dot(_, y):
         rho = y.reshape(d, d)
@@ -214,19 +229,21 @@ def lindblad_eq_vectorized(ham, ls, gamma, sparse=False):
         for l in ls:
             lb_sparse = issparse(l) or sparse
             idt = eye(d, sparse=lb_sparse)
-            yield ((l & l.conj()) - 0.5 * ((idt & dot(dag(l), l).T) +
-                                           (dot(dag(l), l) & idt)))
+            yield (
+                (l & l.conj())
+                - 0.5 * ((idt & dot(dag(l), l).T) + (dot(dag(l), l) & idt))
+            )
 
     evo_superop += gamma * sum(gen_lb_terms())
 
     def rho_dot(_, y):
         return dot(evo_superop, y)
+
     return rho_dot
 
 
 def _calc_evo_eq(isdop, issparse, isopen=False, timedep=False):
-    """Choose an appropirate dynamical equation to evolve with.
-    """
+    """Choose an appropirate dynamical equation to evolve with."""
     eq_chooser = {
         (0, 0, 0, 0): schrodinger_eq_ket,
         (0, 1, 0, 0): schrodinger_eq_ket,
@@ -244,7 +261,6 @@ def _calc_evo_eq(isdop, issparse, isopen=False, timedep=False):
 
 
 class Try2Then3Args:
-
     def __init__(self, fn):
         self.fn = fn
         self.num_args = None
@@ -254,7 +270,7 @@ class Try2Then3Args:
             res = self.fn(t, p)
             self.num_args = 2
         except TypeError as e:
-            if 'positional' in e.args[0]:
+            if "positional" in e.args[0]:
                 res = self.fn(t, p, H)
                 self.num_args = 3
             else:
@@ -268,6 +284,7 @@ class Try2Then3Args:
             return self.fn(t, p)
         elif self.num_args == 3:
             return self.fn(t, p, H)
+
 
 # --------------------------------------------------------------------------- #
 # Quantum Evolution Class                                                     #
@@ -347,24 +364,27 @@ class Evolution(object):
         with the ``update_to`` method.
     """
 
-    def __init__(self, p0, ham, t0=0,
-                 compute=None,
-                 int_stop=None,
-                 method='integrate',
-                 int_small_step=False,
-                 expm_backend='AUTO',
-                 expm_opts=None,
-                 progbar=False):
-
+    def __init__(
+        self,
+        p0,
+        ham,
+        t0=0,
+        compute=None,
+        int_stop=None,
+        method="integrate",
+        int_small_step=False,
+        expm_backend="AUTO",
+        expm_opts=None,
+        progbar=False,
+    ):
         self._p0 = qu(p0)
         self._t = self.t0 = t0
         self._isdop = isop(self._p0)  # Density operator evolution?
         self._d = p0.shape[0]  # Hilbert space dimension
         self._progbar = progbar
 
-        self._timedep = (
-            callable(ham) and
-            not isinstance(ham, CALLABLE_TIME_INDEP_CLASSES)
+        self._timedep = callable(ham) and not isinstance(
+            ham, CALLABLE_TIME_INDEP_CLASSES
         )
 
         if self._timedep:
@@ -378,48 +398,58 @@ class Evolution(object):
                     make_immutable(Ht)
                 return Ht
 
-        if (int_stop is not None) and (method != 'integrate'):
-            raise ValueError("You can't provide an integration stopping "
-                             "condition (int_stop) if the method is not "
-                             "'integrate'")
+        if (int_stop is not None) and (method != "integrate"):
+            raise ValueError(
+                "You can't provide an integration stopping "
+                "condition (int_stop) if the method is not "
+                "'integrate'"
+            )
 
         self._setup_callback(compute, int_stop)
         self._method = method
 
-        if method == 'solve' or isinstance(ham, (tuple, list)):
+        if method == "solve" or isinstance(ham, (tuple, list)):
             if isinstance(ham, LinearOperator):
-                raise TypeError("You can't use the 'solve' method "
-                                "with an abstract linear operator "
-                                "Hamiltonian.")
+                raise TypeError(
+                    "You can't use the 'solve' method "
+                    "with an abstract linear operator "
+                    "Hamiltonian."
+                )
             elif self._timedep:
-                raise TypeError("You can't use the 'solve' method "
-                                "with a time-dependent Hamiltonian.")
+                raise TypeError(
+                    "You can't use the 'solve' method "
+                    "with a time-dependent Hamiltonian."
+                )
             self._ham = ham
             self._setup_solved_ham()
 
-        elif method == 'integrate':
+        elif method == "integrate":
             self._start_integrator(ham, int_small_step)
             self._ham = ham
-        elif method == 'expm':
+        elif method == "expm":
             if isinstance(ham, LinearOperator):
-                raise TypeError("You can't use the 'expm' method "
-                                "with an abstract linear operator "
-                                "Hamiltonian.")
+                raise TypeError(
+                    "You can't use the 'expm' method "
+                    "with an abstract linear operator "
+                    "Hamiltonian."
+                )
             elif self._timedep:
-                raise TypeError("You can't use the 'expm' method "
-                                "with a time-dependent Hamiltonian.")
+                raise TypeError(
+                    "You can't use the 'expm' method "
+                    "with a time-dependent Hamiltonian."
+                )
             self._update_method = self._update_to_expm_ket
             self._pt = self._p0
             self.expm_backend = expm_backend
             self.expm_opts = ensure_dict(expm_opts)
             self._ham = ham
         else:
-            raise ValueError(f"Did not understand evolution "
-                             "method: '{method}'.")
+            raise ValueError(
+                f"Did not understand evolution method: '{method}'."
+            )
 
     def _setup_callback(self, fn, int_stop):
-        """Setup callbacks in the correct place to compute into _results
-        """
+        """Setup callbacks in the correct place to compute into _results"""
         # if fn is None there is no callback
         if fn is None:
             step_callback = None
@@ -460,6 +490,7 @@ class Evolution(object):
             # else if there is neither kind of callback but a progbar is
             #   needed, set up a dummy callback so it gets updated
             elif self._progbar:
+
                 def int_step_callback(t, y, H):
                     pass
 
@@ -499,7 +530,7 @@ class Evolution(object):
         # See if already solved from tuple
         try:
             evals, evecs = self._ham
-            self._method = 'solve'
+            self._method = "solve"
         except ValueError:
             evals, evecs = eigh(self._ham.A)
             self._ham = (evals, evecs)
@@ -516,8 +547,7 @@ class Evolution(object):
         self._pt = self._p0
 
     def _start_integrator(self, ham, small_step):
-        """Initialize a stepping integrator.
-        """
+        """Initialize a stepping integrator."""
         if self._timedep:
             H0 = ham(0.0)
         else:
@@ -529,21 +559,23 @@ class Evolution(object):
         self._stepper = complex_ode(evo_eq(ham))
 
         # 5th order stpper or 8th order stepper
-        int_mthd, step_fct = ('dopri5', 150) if small_step else ('dop853', 50)
+        int_mthd, step_fct = ("dopri5", 150) if small_step else ("dop853", 50)
         if isinstance(H0, LinearOperator):
             # approx norm doesn't need to be very accurate
             nrm0 = norm_fro_approx(H0, tol=0.1)
         else:
-            nrm0 = norm(H0, 'f')
+            nrm0 = norm(H0, "f")
         first_step = nrm0 / step_fct
 
         self._stepper.set_integrator(int_mthd, nsteps=0, first_step=first_step)
 
         # Set step_callback to be evaluated with args (t, y) at each step
         if self._int_step_callback is not None:
+
             def solout(t, y):
                 res = self._int_step_callback(t, y, self._ham)
                 return res
+
             self._stepper.set_solout(solout)
 
         self._stepper.set_initial_value(self._p0.A.reshape(-1), self.t0)
@@ -558,8 +590,12 @@ class Evolution(object):
         the operator exponential itself.
         """
         factor = -1j * (t - self.t)
-        self._pt = expm_multiply(factor * self._ham, self._pt,
-                                 backend=self.expm_backend, **self.expm_opts)
+        self._pt = expm_multiply(
+            factor * self._ham,
+            self._pt,
+            backend=self.expm_backend,
+            **self.expm_opts,
+        )
         self._t = t
 
         # compute any callbacks into -> self._results
@@ -594,8 +630,7 @@ class Evolution(object):
             self._step_callback(t, self._pt, self._ham)
 
     def _update_to_integrate(self, t):
-        """Update simulation consisting of unsolved hamiltonian.
-        """
+        """Update simulation consisting of unsolved hamiltonian."""
         self._stepper.integrate(t)
 
     def update_to(self, t):
@@ -606,15 +641,16 @@ class Evolution(object):
         t : float
             Time to update the evolution to.
         """
-        if self._progbar and hasattr(self, '_stepper'):
-
+        if self._progbar and hasattr(self, "_stepper"):
             with continuous_progbar(self.t, t) as pbar:
                 if self._int_step_callback is not None:
+
                     def solout(t, y):
                         int_stop_res = self._int_step_callback(t, y, self._ham)
                         pbar.cupdate(t)
                         return int_stop_res
                 else:
+
                     def solout(t, _):
                         pbar.cupdate(t)
 
@@ -655,15 +691,13 @@ class Evolution(object):
 
     @property
     def t(self):
-        """float : Current time of simulation.
-        """
-        return self._stepper.t if self._method == 'integrate' else self._t
+        """float : Current time of simulation."""
+        return self._stepper.t if self._method == "integrate" else self._t
 
     @property
     def pt(self):
-        """quantum state : State of the system at the current time (t).
-        """
-        if self._method == 'integrate':
+        """quantum state : State of the system at the current time (t)."""
+        if self._method == "integrate":
             return qarray(self._stepper.y.reshape(self._d, -1))
         else:
             return self._pt

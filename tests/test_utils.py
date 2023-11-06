@@ -7,16 +7,16 @@ from quimb.utils import (
 
 
 class TestLibraryFinding:
-
     def test_raise_cant_find_library_function(self):
         fn = raise_cant_find_library_function(
-            "alibthatisdefinitelynotinstalledasfeasdf")
+            "alibthatisdefinitelynotinstalledasfeasdf"
+        )
 
         with pytest.raises(ImportError):
             fn()
 
     def test_deprecated(self):
-        fn = deprecated(lambda: 2, 'old_two', 'new_two')
+        fn = deprecated(lambda: 2, "old_two", "new_two")
 
         with pytest.warns(Warning):
             r = fn()
@@ -25,7 +25,6 @@ class TestLibraryFinding:
 
 
 class TestOset:
-
     def test_basic(self):
         xs = oset([3, 1, 2])
         ys = oset([3, 4, 5])
@@ -45,7 +44,7 @@ class TestOset:
         assert list(xs) == [2, 4, 5]
         assert len(xs) == 3
 
-        assert str(xs) == 'oset([2, 4, 5])'
+        assert str(xs) == "oset([2, 4, 5])"
 
         xs.discard(6)
         xs.discard(5)
@@ -77,10 +76,10 @@ class TestOset:
         d = oset.difference(a, b, c)
         assert len(d) == 10
 
-        a = oset('abcdefg')
-        a.intersection_update(oset('abd'), oset('bdf'))
-        assert list(a) == ['b', 'd']
+        a = oset("abcdefg")
+        a.intersection_update(oset("abd"), oset("bdf"))
+        assert list(a) == ["b", "d"]
 
-        a = oset('abcdefg')
-        a.difference_update(oset('abd'), oset('bdf'))
-        assert list(a) == ['c', 'e', 'g']
+        a = oset("abcdefg")
+        a.difference_update(oset("abd"), oset("bdf"))
+        assert list(a) == ["c", "e", "g"]

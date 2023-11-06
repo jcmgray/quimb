@@ -63,4 +63,3 @@ def test_tn3d_classical_ising_partition_function():
         tn.contract().data,
         htn.contract(output_inds=("s0,2,1", "s1,0,2")).data,
     )
-

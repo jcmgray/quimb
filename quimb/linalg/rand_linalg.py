@@ -15,7 +15,7 @@ def lu_orthog(X):
 
 
 def qr_orthog(X):
-    return sla.qr(X, mode='economic', overwrite_a=True, check_finite=False)[0]
+    return sla.qr(X, mode="economic", overwrite_a=True, check_finite=False)[0]
 
 
 def orthog(X, lu=False):
@@ -25,8 +25,13 @@ def orthog(X, lu=False):
 
 
 def QB_to_svd(Q, B, compute_uv=True):
-    UsV = sla.svd(B, full_matrices=False, compute_uv=compute_uv,
-                  overwrite_a=True, check_finite=False)
+    UsV = sla.svd(
+        B,
+        full_matrices=False,
+        compute_uv=compute_uv,
+        overwrite_a=True,
+        check_finite=False,
+    )
 
     if not compute_uv:
         return UsV
@@ -54,7 +59,7 @@ def possibly_extend_randn(G, k, p, A):
     kG = G.shape[1]
     if kG > k + p:
         # have too many columns
-        G = G[:, :k + p]
+        G = G[:, : k + p]
     elif kG < k + p:
         # have too few columns
         G_extra = randn((A.shape[1], k + p - kG), dtype=A.dtype)
@@ -69,16 +74,15 @@ def isstring(x, s):
 
 
 def rsvd_qb(A, k, q, p, state, AH=None):
-
     if AH is None:
         AH = dag(A)
 
     # generate first block
-    if isstring(state, 'begin-qb'):
+    if isstring(state, "begin-qb"):
         G = randn((A.shape[1], k + p), dtype=A.dtype)
     # block already supplied
     elif len(state) == 1:
-        G, = state
+        (G,) = state
     # mid-way through adaptive algorithm in QB mode
     if len(state) == 3:
         Q, B, G = state
@@ -139,13 +143,13 @@ def rsvd_core(A, k, compute_uv=True, q=2, p=0, state=None, AH=None):
         AH = dag(A)
 
     # generate first block
-    if state is None or isstring(state, 'begin-svd'):
+    if state is None or isstring(state, "begin-svd"):
         G = randn((A.shape[1], k + p), dtype=A.dtype)
     # initial block supplied
-    elif hasattr(state, 'shape'):
+    elif hasattr(state, "shape"):
         G = state
     elif len(state) == 1:
-        G, = state
+        (G,) = state
     # mid-way through adaptive algorithm in SVD mode
     elif len(state) == 4:
         U0, s0, VH0, G = state
@@ -186,7 +190,7 @@ def rsvd_core(A, k, compute_uv=True, q=2, p=0, state=None, AH=None):
 
     U, s, VH = UsVH
 
-    if isstring(state, 'begin-svd') or len(state) == 1:
+    if isstring(state, "begin-svd") or len(state) == 1:
         # first run -> don't need to project or concatenate anything
         return U, s, VH, G
 
@@ -216,10 +220,20 @@ def gen_k_steps(start, incr=1.4):
         step = round(incr * step)
 
 
-def rsvd_iterate(A, eps, compute_uv=True, q=2, p=0, G0=None,
-                 k_max=None, k_start=2, k_incr=1.4, AH=None, use_qb=20):
-    """Handle rank-adaptively calling ``rsvd_core``.
-    """
+def rsvd_iterate(
+    A,
+    eps,
+    compute_uv=True,
+    q=2,
+    p=0,
+    G0=None,
+    k_max=None,
+    k_start=2,
+    k_incr=1.4,
+    AH=None,
+    use_qb=20,
+):
+    """Handle rank-adaptively calling ``rsvd_core``."""
 
     if AH is None:
         AH = dag(A)
@@ -229,17 +243,23 @@ def rsvd_iterate(A, eps, compute_uv=True, q=2, p=0, G0=None,
     rank = next(k_steps)
 
     if use_qb:
-        Q, B, G = rsvd_qb(A, rank, q=q, p=p, AH=AH,
-                          state='begin-qb' if G0 is None else (G0,))
+        Q, B, G = rsvd_qb(
+            A, rank, q=q, p=p, AH=AH, state="begin-qb" if G0 is None else (G0,)
+        )
         U, s, VH = QB_to_svd(Q, B)
         G -= dot(dag(VH), dot(VH, G))
     else:
-        U, s, VH, G = rsvd_core(A, rank, q=q, p=p, AH=AH,
-                                state='begin-svd' if G0 is None else (G0,))
+        U, s, VH, G = rsvd_core(
+            A,
+            rank,
+            q=q,
+            p=p,
+            AH=AH,
+            state="begin-svd" if G0 is None else (G0,),
+        )
 
     # perform randomized SVD in small blocks
     while (s[-1] > eps * s[0]) and (rank < k_max):
-
         # only step k as far as k_max
         new_k = min(next(k_steps), k_max - rank)
         rank += new_k
@@ -250,8 +270,9 @@ def rsvd_iterate(A, eps, compute_uv=True, q=2, p=0, G0=None,
             G -= dot(dag(VH), dot(VH, G))
         else:
             # concatenate new U, s, VH orthogonal to current U, s, VH
-            U, s, VH, G = rsvd_core(A, new_k, q=q, p=p,
-                                    state=(U, s, VH, G), AH=AH)
+            U, s, VH, G = rsvd_core(
+                A, new_k, q=q, p=p, state=(U, s, VH, G), AH=AH
+            )
 
     # make sure singular values always sorted in decreasing order
     if not is_sorted(s):
@@ -274,13 +295,24 @@ def count_svdvals_needed(s, eps):  # pragma: no cover
 
 
 def isdouble(dtype):
-    """Check if ``dtype`` is double precision.
-    """
-    return dtype in ('float64', 'complex128')
+    """Check if ``dtype`` is double precision."""
+    return dtype in ("float64", "complex128")
 
 
-def estimate_rank(A, eps, k_max=None, use_sli=True, k_start=2, k_incr=1.4,
-                  q=0, p=0, get_vectors=False, G0=None, AH=None, use_qb=20):
+def estimate_rank(
+    A,
+    eps,
+    k_max=None,
+    use_sli=True,
+    k_start=2,
+    k_incr=1.4,
+    q=0,
+    p=0,
+    get_vectors=False,
+    G0=None,
+    AH=None,
+    use_qb=20,
+):
     """Estimate the rank of an linear operator. Uses a low quality random
     SVD with a resolution of ~ 10.
 
@@ -319,8 +351,12 @@ def estimate_rank(A, eps, k_max=None, use_sli=True, k_start=2, k_incr=1.4,
     if eps <= 0.0:
         return k_max
 
-    use_sli = (use_sli and (k_max == min(A.shape)) and
-               isdouble(A.dtype) and not get_vectors)
+    use_sli = (
+        use_sli
+        and (k_max == min(A.shape))
+        and isdouble(A.dtype)
+        and not get_vectors
+    )
     if use_sli:
         return sla.interpolative.estimate_rank(A, eps)
 
@@ -331,8 +367,18 @@ def estimate_rank(A, eps, k_max=None, use_sli=True, k_start=2, k_incr=1.4,
     if AH is None:
         AH = dag(A)
 
-    _, s, VH = rsvd_iterate(A, eps, q=q, p=p, G0=G0, AH=AH, use_qb=use_qb,
-                            k_start=k_start, k_max=k_max, k_incr=k_incr)
+    _, s, VH = rsvd_iterate(
+        A,
+        eps,
+        q=q,
+        p=p,
+        G0=G0,
+        AH=AH,
+        use_qb=use_qb,
+        k_start=k_start,
+        k_max=k_max,
+        k_incr=k_incr,
+    )
 
     rank = count_svdvals_needed(s, eps)
 
@@ -349,8 +395,20 @@ def maybe_flip(UsV, flipped):
     return V.T, s, U.T
 
 
-def rsvd(A, eps_or_k, compute_uv=True, mode='adapt+block', use_qb=20,
-         q=2, p=0, k_max=None, k_start=2, k_incr=1.4, G0=None, AH=None):
+def rsvd(
+    A,
+    eps_or_k,
+    compute_uv=True,
+    mode="adapt+block",
+    use_qb=20,
+    q=2,
+    p=0,
+    k_max=None,
+    k_start=2,
+    k_incr=1.4,
+    G0=None,
+    AH=None,
+):
     """Fast, randomized, iterative SVD. Adaptive variant of method due
     originally to Halko. This scales as ``log(k)`` rather than ``k`` so can be
     more efficient.
@@ -416,26 +474,41 @@ def rsvd(A, eps_or_k, compute_uv=True, mode='adapt+block', use_qb=20,
     if AH is None:
         AH = dag(A)
 
-    adaptive_opts = {'k_start': k_start, 'k_max': k_max, 'k_incr': k_incr,
-                     'use_qb': use_qb, 'AH': AH, 'G0': G0}
+    adaptive_opts = {
+        "k_start": k_start,
+        "k_max": k_max,
+        "k_incr": k_incr,
+        "use_qb": use_qb,
+        "AH": AH,
+        "G0": G0,
+    }
 
     # 'adapt' mode -> rank adaptively perform SVD to low accuracy
-    if mode == 'adapt':
-        UsV = rsvd_iterate(A, eps_or_k, q=q, p=p,
-                           compute_uv=compute_uv, **adaptive_opts)
+    if mode == "adapt":
+        UsV = rsvd_iterate(
+            A, eps_or_k, q=q, p=p, compute_uv=compute_uv, **adaptive_opts
+        )
 
     # 'adapt+block' mode -> use first pass to find rank, then use blocking mode
-    elif mode == 'adapt+block':
-
+    elif mode == "adapt+block":
         # estimate both rank and get approximate spanning vectors
         k, VH = estimate_rank(A, eps_or_k, get_vectors=True, **adaptive_opts)
 
         # reuse vectors to effectively boost number of power iterations by one
-        UsV = rsvd_core(A, k, q=max(q - 1, 0), p=p, AH=AH,
-                        state=dag(VH), compute_uv=compute_uv)
+        UsV = rsvd_core(
+            A,
+            k,
+            q=max(q - 1, 0),
+            p=p,
+            AH=AH,
+            state=dag(VH),
+            compute_uv=compute_uv,
+        )
 
     else:
-        raise ValueError("``mode`` must  be one of {'adapt+block', 'adapt'} or"
-                         " ``k`` should be a integer to use 'block' mode.")
+        raise ValueError(
+            "``mode`` must  be one of {'adapt+block', 'adapt'} or"
+            " ``k`` should be a integer to use 'block' mode."
+        )
 
     return maybe_flip(UsV, flipped)

@@ -194,7 +194,6 @@ def _parse_opt_in(tn, tags, shared_tags, to_constant):
 
     # handle shared tags
     for tag in shared_tags:
-
         var_name = _VARIABLE_TAG.format(len(variables))
         test_data = None
 
@@ -246,7 +245,6 @@ def _parse_opt_out(
     variables = []
 
     for t in tn_ag:
-
         if t.tags & constant_tags:
             t.modify(apply=to_constant)
             continue
@@ -711,7 +709,6 @@ class SGD:
         bounds=None,
         **kwargs,
     ):
-
         x = x0
         velocity = self.get_velocity(x)
 
@@ -1322,8 +1319,7 @@ class TNOptimizer:
 
     @property
     def optimizer(self):
-        """The underlying optimizer that works with the vectorized functions.
-        """
+        """The underlying optimizer that works with the vectorized functions."""
         return self._optimizer
 
     @optimizer.setter
@@ -1406,9 +1402,10 @@ class TNOptimizer:
         -------
         tn_opt : TensorNetwork
         """
-        return {"scipy": self.optimize_scipy, "nlopt": self.optimize_nlopt,}[
-            optlib
-        ](n=n, tol=tol, jac=jac, hessp=hessp, **options)
+        return {
+            "scipy": self.optimize_scipy,
+            "nlopt": self.optimize_nlopt,
+        }[optlib](n=n, tol=tol, jac=jac, hessp=hessp, **options)
 
     def optimize_scipy(self, n, tol=None, jac=True, hessp=False, **options):
         """Scipy based optimization, see

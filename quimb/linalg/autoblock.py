@@ -13,8 +13,12 @@ def get_nz(A):  # pragma: no cover
     return np.nonzero(A)
 
 
-@njit(['void(int32, int32, List(Set(int32)))',
-       'void(int64, int64, List(Set(int64)))'])
+@njit(
+    [
+        "void(int32, int32, List(Set(int32)))",
+        "void(int64, int64, List(Set(int64)))",
+    ]
+)
 def _add_to_groups(i, j, groups):  # pragma: no cover
     for group in groups:
         if i in group:
@@ -27,8 +31,12 @@ def _add_to_groups(i, j, groups):  # pragma: no cover
     groups.append({i, j})
 
 
-@njit(['List(List(int32))(int32[:], int32[:], int_)',
-       'List(List(int64))(int64[:], int64[:], int_)'])
+@njit(
+    [
+        "List(List(int32))(int32[:], int32[:], int_)",
+        "List(List(int64))(int64[:], int64[:], int_)",
+    ]
+)
 def compute_blocks(ix, jx, d):  # pragma: no cover
     """Find the charge sectors (blocks in matrix terms) given element
     coordinates ``ix`` and ``jx`` and total size ``d``.

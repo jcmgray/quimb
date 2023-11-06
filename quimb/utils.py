@@ -8,6 +8,7 @@ from importlib.util import find_spec
 
 try:
     import cytoolz
+
     last = cytoolz.last
     concat = cytoolz.concat
     frequencies = cytoolz.frequencies
@@ -25,6 +26,7 @@ try:
     keymap = cytoolz.keymap
 except ImportError:
     import toolz
+
     last = toolz.last
     concat = toolz.concat
     frequencies = toolz.frequencies
@@ -99,7 +101,7 @@ def raise_cant_find_library_function(x, extra_msg=None):
     return function_that_will_raise
 
 
-FOUND_TQDM = find_library('tqdm')
+FOUND_TQDM = find_library("tqdm")
 if FOUND_TQDM:
     from tqdm import tqdm
 
@@ -119,11 +121,11 @@ if FOUND_TQDM:
         """
 
         def __init__(self, *args, total=100, **kwargs):
-            """
-            """
-            kwargs.setdefault('ascii', True)
-            super(continuous_progbar, self).__init__(total=total,
-                                                     unit="%", **kwargs)
+            """ """
+            kwargs.setdefault("ascii", True)
+            super(continuous_progbar, self).__init__(
+                total=total, unit="%", **kwargs
+            )
 
             if len(args) == 2:
                 self.start, self.stop = args
@@ -149,7 +151,7 @@ if FOUND_TQDM:
                 self.step += num_update
 
     def progbar(*args, **kwargs):
-        kwargs.setdefault('ascii', True)
+        kwargs.setdefault("ascii", True)
         return tqdm(*args, **kwargs)
 
 else:  # pragma: no cover
@@ -159,45 +161,46 @@ else:  # pragma: no cover
 
 
 def deprecated(fn, old_name, new_name):
-    """Mark a function as deprecated, and indicate the new name.
-    """
+    """Mark a function as deprecated, and indicate the new name."""
 
     def new_fn(*args, **kwargs):
         import warnings
-        warnings.warn(f"The {old_name} function is deprecated in favor "
-                      f"of {new_name}", Warning)
+
+        warnings.warn(
+            f"The {old_name} function is deprecated in favor "
+            f"of {new_name}",
+            Warning,
+        )
         return fn(*args, **kwargs)
 
     return new_fn
 
 
 def int2tup(x):
-    return (x if isinstance(x, tuple) else
-            (x,) if isinstance(x, int) else
-            tuple(x))
+    return (
+        x if isinstance(x, tuple) else (x,) if isinstance(x, int) else tuple(x)
+    )
 
 
 def ensure_dict(x):
-    """Make sure ``x`` is a ``dict``, creating an empty one if ``x is None``.
-    """
+    """Make sure ``x`` is a ``dict``, creating an empty one if ``x is None``."""
     if x is None:
         return {}
     return dict(x)
 
 
 def pairwise(iterable):
-    """Iterate over each pair of neighbours in ``iterable``.
-    """
+    """Iterate over each pair of neighbours in ``iterable``."""
     a, b = itertools.tee(iterable)
     next(b, None)
     return zip(a, b)
 
 
 def print_multi_line(*lines, max_width=None):
-    """Print multiple lines, with a maximum width.
-    """
+    """Print multiple lines, with a maximum width."""
     if max_width is None:
         import shutil
+
         max_width, _ = shutil.get_terminal_size()
 
     max_line_lenth = max(len(ln) for ln in lines)
@@ -216,18 +219,18 @@ def print_multi_line(*lines, max_width=None):
                 for j, l in enumerate(lines):
                     print(
                         "..." if j == n_lines // 2 else "   ",
-                        l[i * max_width:(i + 1) * max_width],
-                        "..." if j == n_lines // 2 else "   "
+                        l[i * max_width : (i + 1) * max_width],
+                        "..." if j == n_lines // 2 else "   ",
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
             elif i == n_blocks - 1:
                 for ln in lines:
-                    print("   ", ln[i * max_width:(i + 1) * max_width])
+                    print("   ", ln[i * max_width : (i + 1) * max_width])
             else:
                 for j, ln in enumerate(lines):
                     print(
                         "..." if j == n_lines // 2 else "   ",
-                        ln[i * max_width:(i + 1) * max_width],
+                        ln[i * max_width : (i + 1) * max_width],
                         "..." if j == n_lines // 2 else "   ",
                     )
                 print(("{:^" + str(max_width) + "}").format("..."))
@@ -261,13 +264,14 @@ def format_number_with_error(x, err):
     """
     # compute an overall scaling for both values
     x_exponent = max(
-        int(f'{x:e}'.split('e')[1]),
-        int(f'{err:e}'.split('e')[1]) + 1,
+        int(f"{x:e}".split("e")[1]),
+        int(f"{err:e}".split("e")[1]) + 1,
     )
     # for readability try and show values close to 1 with no exponent
     hide_exponent = (
-         # nicer showing 0.xxx(yy) than x.xx(yy)e-1
-        (x_exponent in (0, -1)) or
+        # nicer showing 0.xxx(yy) than x.xx(yy)e-1
+        (x_exponent in (0, -1))
+        or
         # also nicer showing xx.xx(yy) than x.xxx(yy)e+1
         ((x_exponent == +1) and (err < abs(x / 10)))
     )
@@ -280,22 +284,22 @@ def format_number_with_error(x, err):
 
     # work out how many digits to print
     # format the main number and bracketed error
-    mantissa, exponent = f'{err:.1e}'.split('e')
-    mantissa, exponent = mantissa.replace('.', ''), int(exponent)
-    return f'{x:.{abs(exponent) + 1}f}({mantissa}){suffix}'
+    mantissa, exponent = f"{err:.1e}".split("e")
+    mantissa, exponent = mantissa.replace(".", ""), int(exponent)
+    return f"{x:.{abs(exponent) + 1}f}({mantissa}){suffix}"
 
 
 def save_to_disk(obj, fname, **dump_opts):
-    """Save an object to disk using joblib.dump.
-    """
+    """Save an object to disk using joblib.dump."""
     import joblib
+
     return joblib.dump(obj, fname, **dump_opts)
 
 
 def load_from_disk(fname, **load_opts):
-    """Load an object form disk using joblib.load.
-    """
+    """Load an object form disk using joblib.load."""
     import joblib
+
     return joblib.load(fname, **load_opts)
 
 
@@ -312,6 +316,7 @@ class Verbosify:  # pragma: no cover
     def __call__(self, *args, **kwargs):
         if self.mpi:
             from mpi4py import MPI
+
             pre_msg = f"{MPI.COMM_WORLD.Get_rank()}: "
         else:
             pre_msg = ""
@@ -329,7 +334,7 @@ class oset:
     sizes, but makes everything deterministic.
     """
 
-    __slots__ = ('_d',)
+    __slots__ = ("_d",)
 
     def __init__(self, it=()):
         self._d = dict.fromkeys(it)
@@ -342,8 +347,7 @@ class oset:
 
     @classmethod
     def from_dict(cls, d):
-        """Public method makes sure to copy incoming dictionary.
-        """
+        """Public method makes sure to copy incoming dictionary."""
         return oset._from_dict(d.copy())
 
     def copy(self):
@@ -483,11 +487,11 @@ def gen_bipartitions(it):
     """
     n = len(it)
     if n:
-        for i in range(1, 2**(n - 1)):
-            bitstring_repr = f'{i:0>{n}b}'
+        for i in range(1, 2 ** (n - 1)):
+            bitstring_repr = f"{i:0>{n}b}"
             l, r = [], []
             for b, x in zip(bitstring_repr, it):
-                (l if b == '0' else r).append(x)
+                (l if b == "0" else r).append(x)
             yield l, r
 
 
@@ -650,7 +654,6 @@ def tree_apply(f, tree, is_leaf=is_not_container):
 
 
 class Leaf:
-
     __slots__ = ()
 
     def __repr__(self):
@@ -775,38 +778,31 @@ def tree_apply_dict(f, tree, is_leaf):
 tree_register_container(dict, tree_map_dict, tree_iter_dict, tree_apply_dict)
 
 
-
 # a style to use for matplotlib that works with light and dark backgrounds
 NEUTRAL_STYLE = {
-    'axes.edgecolor': (0.5, 0.5, 0.5),
-    'axes.facecolor': (0, 0, 0, 0),
-    'axes.grid': True,
-    'axes.labelcolor': (0.5, 0.5, 0.5),
-    'axes.spines.right': False,
-    'axes.spines.top': False,
-    'figure.facecolor': (0, 0, 0, 0),
-    'grid.alpha': 0.1,
-    'grid.color': (0.5, 0.5, 0.5),
-    'legend.frameon': False,
-    'text.color': (0.5, 0.5, 0.5),
-    'xtick.color': (0.5, 0.5, 0.5),
-    'xtick.minor.visible': True,
-    'ytick.color': (0.5, 0.5, 0.5),
-    'ytick.minor.visible': True,
+    "axes.edgecolor": (0.5, 0.5, 0.5),
+    "axes.facecolor": (0, 0, 0, 0),
+    "axes.grid": True,
+    "axes.labelcolor": (0.5, 0.5, 0.5),
+    "axes.spines.right": False,
+    "axes.spines.top": False,
+    "figure.facecolor": (0, 0, 0, 0),
+    "grid.alpha": 0.1,
+    "grid.color": (0.5, 0.5, 0.5),
+    "legend.frameon": False,
+    "text.color": (0.5, 0.5, 0.5),
+    "xtick.color": (0.5, 0.5, 0.5),
+    "xtick.minor.visible": True,
+    "ytick.color": (0.5, 0.5, 0.5),
+    "ytick.minor.visible": True,
 }
 
 
 def default_to_neutral_style(fn):
-    """Wrap a function or method to use the neutral style by default.
-    """
+    """Wrap a function or method to use the neutral style by default."""
 
     @functools.wraps(fn)
-    def wrapper(
-        *args,
-        style="neutral",
-        show_and_close=True,
-        **kwargs
-    ):
+    def wrapper(*args, style="neutral", show_and_close=True, **kwargs):
         import matplotlib.pyplot as plt
 
         if style == "neutral":

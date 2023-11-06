@@ -19,6 +19,7 @@ if SLEPC4PY_FOUND:
 #                              Fixtures                                       #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.fixture
 def mat_herm_dense():
     np.random.seed(1)
@@ -73,15 +74,16 @@ def ham2():
 #                              Tests                                          #
 # --------------------------------------------------------------------------- #
 
+
 class TestEigh:
     def test_eigsys(self, mat_herm_dense):
         u, a = mat_herm_dense
         evals, v = qu.eigh(a)
-        assert(set(np.rint(evals)) == set((-1, 2, 4, -3)))
+        assert set(np.rint(evals)) == set((-1, 2, 4, -3))
         assert_allclose(evals, [-3, -1, 2, 4])
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, [i]].H @ v[:, [j]]
-            assert_allclose(abs(o), 1.)
+            assert_allclose(abs(o), 1.0)
 
     def test_eigvals(self, mat_herm_dense):
         _, a = mat_herm_dense
@@ -93,7 +95,7 @@ class TestEigh:
         v = qu.eigvecsh(a)
         for i, j in zip([3, 0, 1, 2], range(4)):
             o = u[:, [i]].H @ v[:, [j]]
-            assert_allclose(abs(o), 1.)
+            assert_allclose(abs(o), 1.0)
 
 
 class TestSeigs:
@@ -105,11 +107,11 @@ class TestSeigs:
         assert_allclose(lk, (-3, -1))
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, [i]].H @ vk[:, [j]]
-            assert_allclose(abs(o), 1.)
+            assert_allclose(abs(o), 1.0)
         vk = qu.eigvecsh(a, k=2, backend=backend)
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, [i]].H @ vk[:, [j]]
-            assert_allclose(abs(o), 1.)
+            assert_allclose(abs(o), 1.0)
 
     @pytest.mark.parametrize("backend", eigs_backends)
     def test_eigs_small_dense_novecs(self, mat_herm_dense, backend):
@@ -126,11 +128,11 @@ class TestSeigs:
         assert_allclose(lk, (-3, -1))
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, [i]].H @ vk[:, [j]]
-            assert_allclose(abs(o), 1.)
+            assert_allclose(abs(o), 1.0)
         vk = qu.eigvecsh(a, k=2, backend=backend)
         for i, j in zip([3, 0], [0, 1]):
             o = u[:, [i]].H @ vk[:, [j]]
-            assert_allclose(abs(o), 1.)
+            assert_allclose(abs(o), 1.0)
 
     @pytest.mark.parametrize("backend", eigs_backends)
     def test_eigs_small_sparse_novecs(self, mat_herm_sparse, backend):
@@ -143,7 +145,7 @@ class TestSeigs:
     def test_groundstate(self, mat_herm_dense, backend):
         u, a = mat_herm_dense
         gs = qu.groundstate(a, backend=backend)
-        assert_allclose(abs(u[:, [3]].H @ gs), 1.)
+        assert_allclose(abs(u[:, [3]].H @ gs), 1.0)
 
     @pytest.mark.parametrize("backend", eigs_backends)
     def test_groundenergy(self, mat_herm_dense, backend):
@@ -156,8 +158,12 @@ class TestSeigs:
     def test_cross_equality(self, mat_herm_sparse, k, which):
         _, a = mat_herm_sparse
         sigma = 1 if which in {None, "TR"} else None
-        lks, vks = zip(*(qu.eigh(a, k=k, which=which, sigma=sigma, backend=b)
-                         for b in eigs_backends))
+        lks, vks = zip(
+            *(
+                qu.eigh(a, k=k, which=which, sigma=sigma, backend=b)
+                for b in eigs_backends
+            )
+        )
         lks, vks = tuple(lks), tuple(vks)
         for i in range(len(lks) - 1):
             assert_allclose(lks[i], lks[i + 1])
@@ -167,8 +173,8 @@ class TestSeigs:
 class TestLOBPCG:
     def test_against_arpack(self):
         A = qu.rand_herm(32, dtype=float)
-        lk, vk = qu.eigh(A, k=6, backend='lobpcg')
-        slk, svk = qu.eigh(A, k=6, backend='scipy')
+        lk, vk = qu.eigh(A, k=6, backend="lobpcg")
+        slk, svk = qu.eigh(A, k=6, backend="scipy")
         assert_allclose(lk, slk)
         assert_allclose(np.eye(6), abs(vk.H @ svk), atol=1e-9, rtol=1e-9)
 
@@ -211,15 +217,13 @@ class TestEvalsWindowed:
         u, a = mat_herm_dense
         ev = qu.eigvecsh_window(a, w_0=0.5, k=2, w_sz=0.8)
         assert ev.shape == (4, 2)
-        assert_allclose(abs(u[:, :2].H @ ev[:, ]), [[1, 0], [0, 1]],
-                        atol=1e-14)
+        assert_allclose(abs(u[:, :2].H @ ev[:,]), [[1, 0], [0, 1]], atol=1e-14)
 
     def test_sparse_return_vecs(self, mat_herm_sparse):
         u, a = mat_herm_sparse
         ev = qu.eigvecsh_window(a, w_0=0.5, k=2, w_sz=0.8)
         assert ev.shape == (4, 2)
-        assert_allclose(abs(u[:, :2].H @ ev[:, ]), [[1, 0], [0, 1]],
-                        atol=1e-14)
+        assert_allclose(abs(u[:, :2].H @ ev[:,]), [[1, 0], [0, 1]], atol=1e-14)
 
 
 class TestSVD:
@@ -227,12 +231,14 @@ class TestSVD:
         u, v, a = mat_nherm_dense
         un, sn, vn = qu.svd(a)
         assert_allclose(sn, [4, 3, 2, 1, 0.1], atol=1e-14)
-        for i, j, in zip((0, 1, 2, 3, 4),
-                         (2, 3, 1, 0, 4)):
+        for (
+            i,
+            j,
+        ) in zip((0, 1, 2, 3, 4), (2, 3, 1, 0, 4)):
             o = abs(un[:, [i]].H @ u[:, [j]])
-            assert_allclose(o, 1.)
+            assert_allclose(o, 1.0)
             o = abs(vn[[i], :] @ v[:, [j]])
-            assert_allclose(o, 1.)
+            assert_allclose(o, 1.0)
 
 
 class TestSVDS:
@@ -243,9 +249,9 @@ class TestSVDS:
         assert_allclose(sk, [4, 3, 2])
         for i, j in zip((0, 1, 2), (2, 3, 1)):
             o = abs(uk[:, [i]].H @ u[:, [j]])
-            assert_allclose(o, 1.)
+            assert_allclose(o, 1.0)
             o = abs(vk[[i], :] @ v[:, [j]])
-            assert_allclose(o, 1.)
+            assert_allclose(o, 1.0)
 
     @pytest.mark.parametrize("backend", svds_backends)
     def test_svds_smalldense_nvecs(self, mat_nherm_dense, backend):
@@ -260,9 +266,9 @@ class TestSVDS:
         assert_allclose(sk, [4, 3, 2])
         for i, j in zip((0, 1, 2), (2, 3, 1)):
             o = abs(uk[:, [i]].H @ u[:, [j]])
-            assert_allclose(o, 1.)
+            assert_allclose(o, 1.0)
             o = abs(vk[[i], :] @ v[:, [j]])
-            assert_allclose(o, 1.)
+            assert_allclose(o, 1.0)
 
     @pytest.mark.parametrize("backend", svds_backends)
     def test_svds_sparse_nvecs(self, mat_nherm_sparse, backend):
@@ -274,21 +280,21 @@ class TestSVDS:
 class TestNorms:
     def test_norm_fro_dense(self):
         a = qu.quimbify([[1, 2], [3j, 4j]])
-        assert qu.norm(a, "fro") == (1 + 4 + 9 + 16)**0.5
+        assert qu.norm(a, "fro") == (1 + 4 + 9 + 16) ** 0.5
 
     def test_norm_fro_sparse(self):
         a = qu.sparse([[3, 0], [4j, 0]])
-        assert qu.norm(a, "fro") == (9 + 16)**0.5
+        assert qu.norm(a, "fro") == (9 + 16) ** 0.5
 
     @pytest.mark.parametrize("backend", svds_backends)
     def test_norm_spectral_dense(self, mat_nherm_dense, backend):
         _, _, a = mat_nherm_dense
-        assert_allclose(qu.norm(a, "spectral", backend=backend), 4.)
+        assert_allclose(qu.norm(a, "spectral", backend=backend), 4.0)
 
     @pytest.mark.parametrize("backend", svds_backends)
     def test_norm_spectral_sparse(self, mat_nherm_sparse, backend):
         _, _, a = mat_nherm_sparse
-        assert_allclose(qu.norm(a, "spectral", backend=backend), 4.)
+        assert_allclose(qu.norm(a, "spectral", backend=backend), 4.0)
 
     def test_norm_trace_dense(self):
         a = qu.qarray(np.diag([-3, 1, 7]))
@@ -325,7 +331,6 @@ class TestSqrtm:
 
 
 class TestLazy:
-
     @pytest.mark.parametrize("sparse", [False, True])
     def test_basic(self, sparse):
         ownership = (0, 7)
@@ -335,7 +340,7 @@ class TestLazy:
         h_ex = qu.ham_heis(n=4, sparse=sparse)[slice(*ownership), :]
         assert_allclose(h.A, h_ex.A)
 
-    @pytest.mark.parametrize("backend", ['scipy', 'lobpcg'])
+    @pytest.mark.parametrize("backend", ["scipy", "lobpcg"])
     def test_project_eig(self, backend):
         Hl = qu.Lazy(qu.ham_heis, 4, sparse=True, shape=(16, 16), cyclic=True)
         Pl = qu.Lazy(qu.zspin_projector, 4, shape=(16, 6))

@@ -9,7 +9,6 @@ from .tensor_core import Tensor, TensorNetwork
 
 
 class Placeholder:
-
     __slots__ = ("shape",)
 
     def __init__(self, x):

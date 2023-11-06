@@ -59,8 +59,8 @@ def psi_ab():
 @pytest.fixture
 def psi_ab_mat():
     return np.concatenate(
-        [rand_ket(prod(DIMS[:-1])) for _ in range(6)],
-        axis=1)
+        [rand_ket(prod(DIMS[:-1])) for _ in range(6)], axis=1
+    )
 
 
 @pytest.fixture
@@ -76,12 +76,11 @@ def psi_mb_ab():
 @pytest.fixture
 def psi_mb_ab_mat():
     return np.concatenate(
-        [rand_ket(prod(DIMS_MB[:7])) for _ in range(6)],
-        axis=1)
+        [rand_ket(prod(DIMS_MB[:7])) for _ in range(6)], axis=1
+    )
 
 
 class TestLazyTensorEval:
-
     # ------------------------- Just partial trace -------------------------- #
 
     def test_lazy_ptr_dot_simple_linear_op(self, psi_abc, psi_ab):
@@ -112,8 +111,9 @@ class TestLazyTensorEval:
         psi_out_got = lo @ psi_mb_ab
         assert_allclose(psi_out_expected, psi_out_got)
 
-    def test_lazy_ptr_dot_mat_manybody_linear_op(self, psi_mb_abc,
-                                                 psi_mb_ab_mat):
+    def test_lazy_ptr_dot_mat_manybody_linear_op(
+        self, psi_mb_abc, psi_mb_ab_mat
+    ):
         sysa = [0, 1, 2, 3, 7, 8, 9]
         rho_ab = psi_mb_abc.ptr(DIMS_MB, sysa)
         psi_out_expected = rho_ab @ psi_mb_ab_mat
@@ -155,8 +155,9 @@ class TestLazyTensorEval:
         psi_out_got = lo.dot(psi_mb_ab)
         assert_allclose(psi_out_expected, psi_out_got)
 
-    def test_lazy_ptr_ppt_dot_mat_manybody_linear_op(self, psi_mb_abc,
-                                                     psi_mb_ab_mat):
+    def test_lazy_ptr_ppt_dot_mat_manybody_linear_op(
+        self, psi_mb_abc, psi_mb_ab_mat
+    ):
         sysa = [0, 1, 7, 8]
         sysb = [2, 3, 9]
         rho_ab = psi_mb_abc.ptr(DIMS_MB, sysa + sysb)
@@ -169,6 +170,7 @@ class TestLazyTensorEval:
 
 
 # --------------------- Test lanczos spectral functions --------------------- #
+
 
 def np_sqrt(x):
     out = np.empty_like(x)
@@ -191,7 +193,8 @@ class TestLanczosApprox:
     def test_construct_lanczos_tridiag(self, bsz):
         a = rand_herm(2**5)
         alpha, beta, scaling = last(
-            construct_lanczos_tridiag(a, bsz=bsz, K=20))
+            construct_lanczos_tridiag(a, bsz=bsz, K=20)
+        )
         assert alpha.shape == (20,)
         assert beta.shape == (20,)
 
@@ -223,19 +226,20 @@ class TestLanczosApprox:
             (np.sqrt, rand_pos, 1e-1),
             (np.log1p, rand_pos, 2e-1),
             (np.exp, rand_herm, 1e-1),
-        ]
+        ],
     )
     def test_approx_spectral_function(self, fn_matrix_rtol, bsz, mpi):
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
         pos = fn == np.sqrt
         actual_x = sum(fn(eigvalsh(a)))
-        approx_x = approx_spectral_function(a, fn, mpi=mpi, pos=pos,
-                                            bsz=bsz, verbosity=2)
+        approx_x = approx_spectral_function(
+            a, fn, mpi=mpi, pos=pos, bsz=bsz, verbosity=2
+        )
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
-    @pytest.mark.parametrize("dist", ['gaussian', 'phase', 'rademacher'])
+    @pytest.mark.parametrize("dist", ["gaussian", "phase", "rademacher"])
     @pytest.mark.parametrize(
         "fn_matrix_rtol",
         [
@@ -243,28 +247,34 @@ class TestLanczosApprox:
             (np.sqrt, rand_pos, 2e-1),
             (np.log1p, rand_pos, 3e-1),
             (np.exp, rand_herm, 2e-1),
-        ]
+        ],
     )
     def test_approx_spectral_function_with_v0(self, dist, fn_matrix_rtol, bsz):
         fn, matrix, rtol = fn_matrix_rtol
         a = matrix(2**7)
         actual_x = sum(fn(eigvalsh(a)))
         # check un-normalized state work properly
-        v0 = (neel_state(7) + neel_state(7, down_first=True))
+        v0 = neel_state(7) + neel_state(7, down_first=True)
         v0 = v0.A.reshape(-1)
         pos = fn == np.sqrt
-        v0_opts = {'dist': dist, 'orthog': True}
-        approx_x = approx_spectral_function(a, fn, v0=v0, pos=pos, bsz=bsz,
-                                            K=20, verbosity=2, v0_opts=v0_opts)
+        v0_opts = {"dist": dist, "orthog": True}
+        approx_x = approx_spectral_function(
+            a, fn, v0=v0, pos=pos, bsz=bsz, K=20, verbosity=2, v0_opts=v0_opts
+        )
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
-    @pytest.mark.parametrize("fn_approx_rtol",
-                             [(np_sqrt, tr_sqrt_approx, 0.3),
-                              (np.exp, tr_exp_approx, 0.03),
-                              (np_xlogx, tr_xlogx_approx, 0.3)])
-    def test_approx_spectral_function_ptr_lin_op(self, fn_approx_rtol,
-                                                 psi_abc, psi_ab, bsz):
+    @pytest.mark.parametrize(
+        "fn_approx_rtol",
+        [
+            (np_sqrt, tr_sqrt_approx, 0.3),
+            (np.exp, tr_exp_approx, 0.03),
+            (np_xlogx, tr_xlogx_approx, 0.3),
+        ],
+    )
+    def test_approx_spectral_function_ptr_lin_op(
+        self, fn_approx_rtol, psi_abc, psi_ab, bsz
+    ):
         fn, approx, rtol = fn_approx_rtol
         sysa = [0, 1]
         rho_ab = psi_abc.ptr(DIMS, sysa)
@@ -274,11 +284,13 @@ class TestLanczosApprox:
         assert_allclose(actual_x, approx_x, rtol=rtol)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
-    @pytest.mark.parametrize("fn_approx_rtol",
-                             [(np.exp, tr_exp_approx, 5e-2),
-                              (np.abs, tr_abs_approx, 1e-1)])
-    def test_approx_spectral_function_ptr_ppt_lin_op(self, fn_approx_rtol,
-                                                     psi_abc, psi_ab, bsz):
+    @pytest.mark.parametrize(
+        "fn_approx_rtol",
+        [(np.exp, tr_exp_approx, 5e-2), (np.abs, tr_abs_approx, 1e-1)],
+    )
+    def test_approx_spectral_function_ptr_ppt_lin_op(
+        self, fn_approx_rtol, psi_abc, psi_ab, bsz
+    ):
         fn, approx, rtol = fn_approx_rtol
         rho_ab_ppt = partial_transpose(psi_abc.ptr(DIMS, [0, 1]), DIMS[:-1], 0)
         actual_x = sum(fn(eigvalsh(rho_ab_ppt)))
@@ -297,23 +309,23 @@ class TestLanczosApprox:
 
 # ------------------------ Test specific quantities ------------------------- #
 
-class TestSpecificApproxQuantities:
 
+class TestSpecificApproxQuantities:
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     def test_entropy_approx_simple(self, psi_abc, bsz):
         np.random.seed(42)
         rho_ab = psi_abc.ptr(DIMS, [0, 1])
         actual_e = entropy(rho_ab)
-        approx_e = entropy_subsys_approx(psi_abc, DIMS, [0, 1],
-                                         bsz=bsz, R=20)
+        approx_e = entropy_subsys_approx(psi_abc, DIMS, [0, 1], bsz=bsz, R=20)
         assert_allclose(actual_e, approx_e, rtol=2e-1)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
     def test_entropy_approx_many_body(self, psi_mb_abc, bsz):
         rho_ab = psi_mb_abc.ptr(DIMS_MB, [0, 1, 7, 8, 2, 3, 9])
         actual_e = entropy(rho_ab)
-        approx_e = entropy_subsys_approx(psi_mb_abc, DIMS_MB,
-                                         [0, 1, 7, 8, 2, 3, 9], bsz=bsz)
+        approx_e = entropy_subsys_approx(
+            psi_mb_abc, DIMS_MB, [0, 1, 7, 8, 2, 3, 9], bsz=bsz
+        )
         assert_allclose(actual_e, approx_e, rtol=2e-1)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])
@@ -329,8 +341,9 @@ class TestSpecificApproxQuantities:
         sysb = [2, 3, 9]
         rho_ab = psi_mb_abc.ptr(DIMS_MB, sysa + sysb)
         actual_ln = logneg(rho_ab, [2] * 7, sysa=(0, 1, 4, 5))
-        approx_ln = logneg_subsys_approx(psi_mb_abc, DIMS_MB,
-                                         sysa=sysa, sysb=sysb, bsz=bsz)
+        approx_ln = logneg_subsys_approx(
+            psi_mb_abc, DIMS_MB, sysa=sysa, sysb=sysb, bsz=bsz
+        )
         assert_allclose(actual_ln, approx_ln, rtol=1e-1)
 
     @pytest.mark.parametrize("bsz", [1, 2, 5])

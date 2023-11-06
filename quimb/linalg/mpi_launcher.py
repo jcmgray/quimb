@@ -7,16 +7,19 @@ import functools
 import numpy as np
 
 from .slepc_linalg import (
-    eigs_slepc, svds_slepc, mfn_multiply_slepc, ssolve_slepc,
+    eigs_slepc,
+    svds_slepc,
+    mfn_multiply_slepc,
+    ssolve_slepc,
 )
 from ..core import _NUM_THREAD_WORKERS
 
 # Work out if already running as mpi
 if (
-    ('OMPI_COMM_WORLD_SIZE' in os.environ) or  # OpenMPI
-    ('PMI_SIZE' in os.environ)  # MPICH
+    ("OMPI_COMM_WORLD_SIZE" in os.environ)  # OpenMPI
+    or ("PMI_SIZE" in os.environ)  # MPICH
 ):
-    QUIMB_MPI_LAUNCHED = '_QUIMB_MPI_LAUNCHED' in os.environ
+    QUIMB_MPI_LAUNCHED = "_QUIMB_MPI_LAUNCHED" in os.environ
     ALREADY_RUNNING_AS_MPI = True
     USE_SYNCRO = "QUIMB_SYNCRO_MPI" in os.environ
 else:
@@ -26,29 +29,32 @@ else:
 
 # default to not allowing mpi spawning capabilities
 ALLOW_SPAWN = {
-    'TRUE': True, 'ON': True, 'FALSE': False, 'OFF': False,
-}[os.environ.get('QUIMB_MPI_SPAWN', 'False').upper()]
+    "TRUE": True,
+    "ON": True,
+    "FALSE": False,
+    "OFF": False,
+}[os.environ.get("QUIMB_MPI_SPAWN", "False").upper()]
 
 # Work out the desired total number of workers
 for _NUM_MPI_WORKERS_VAR in (
-    'QUIMB_NUM_MPI_WORKERS',
-    'QUIMB_NUM_PROCS',
-    'OMPI_COMM_WORLD_SIZE',
-    'PMI_SIZE',
-    'OMP_NUM_THREADS'
+    "QUIMB_NUM_MPI_WORKERS",
+    "QUIMB_NUM_PROCS",
+    "OMPI_COMM_WORLD_SIZE",
+    "PMI_SIZE",
+    "OMP_NUM_THREADS",
 ):
     if _NUM_MPI_WORKERS_VAR in os.environ:
         NUM_MPI_WORKERS = int(os.environ[_NUM_MPI_WORKERS_VAR])
         break
 else:
     import psutil
-    _NUM_MPI_WORKERS_VAR = 'psutil'
+
+    _NUM_MPI_WORKERS_VAR = "psutil"
     NUM_MPI_WORKERS = psutil.cpu_count(logical=False)
 
 
 def can_use_mpi_pool():
-    """Function to determine whether we are allowed to call `get_mpi_pool`.
-    """
+    """Function to determine whether we are allowed to call `get_mpi_pool`."""
     return ALLOW_SPAWN or ALREADY_RUNNING_AS_MPI
 
 
@@ -89,7 +95,6 @@ def bcast(result, comm, result_rank):
 
 
 class SyncroFuture:
-
     def __init__(self, result, result_rank, comm):
         self._result = result
         self.result_rank = result_rank
@@ -99,8 +104,9 @@ class SyncroFuture:
         rank = self.comm.Get_rank()
 
         if rank == self.result_rank:
-            should_it = (isinstance(self._result, tuple) and
-                         any(isinstance(x, np.ndarray) for x in self._result))
+            should_it = isinstance(self._result, tuple) and any(
+                isinstance(x, np.ndarray) for x in self._result
+            )
             if should_it:
                 iterate_over = len(self._result)
             else:
@@ -113,8 +119,9 @@ class SyncroFuture:
             if rank != self.result_rank:
                 self._result = (None,) * iterate_over
 
-            result = tuple(bcast(x, self.comm, self.result_rank)
-                           for x in self._result)
+            result = tuple(
+                bcast(x, self.comm, self.result_rank) for x in self._result
+            )
         else:
             result = bcast(self._result, self.comm, self.result_rank)
 
@@ -122,9 +129,11 @@ class SyncroFuture:
 
     @staticmethod
     def cancel():
-        raise ValueError("SyncroFutures cannot be cancelled - they are "
-                         "submitted in a parallel round-robin fasion where "
-                         "each worker immediately computes all its results.")
+        raise ValueError(
+            "SyncroFutures cannot be cancelled - they are "
+            "submitted in a parallel round-robin fasion where "
+            "each worker immediately computes all its results."
+        )
 
 
 class SynchroMPIPool:
@@ -136,6 +145,7 @@ class SynchroMPIPool:
     def __init__(self):
         import itertools
         from mpi4py import MPI
+
         self.comm = MPI.COMM_WORLD
         self.size = self.comm.Get_size()
         self.rank = self.comm.Get_rank()
@@ -165,7 +175,7 @@ class CachedPoolWithShutdown:
     """
 
     def __init__(self, pool_fn):
-        self._settings = '__UNINITIALIZED__'
+        self._settings = "__UNINITIALIZED__"
         self._pool_fn = pool_fn
 
     def __call__(self, num_workers=None, num_threads=1):
@@ -173,11 +183,13 @@ class CachedPoolWithShutdown:
         if num_workers is None:
             num_workers = NUM_MPI_WORKERS
         elif ALREADY_RUNNING_AS_MPI and (num_workers != NUM_MPI_WORKERS):
-            raise ValueError("Can't specify number of processes when running "
-                             "under MPI rather than spawning processes.")
+            raise ValueError(
+                "Can't specify number of processes when running "
+                "under MPI rather than spawning processes."
+            )
 
         # first call
-        if self._settings == '__UNINITIALIZED__':
+        if self._settings == "__UNINITIALIZED__":
             self._pool = self._pool_fn(num_workers, num_threads)
             self._settings = (num_workers, num_threads)
         # new type of pool requested
@@ -195,12 +207,14 @@ def get_mpi_pool(num_workers=None, num_threads=1):
     """
     if (num_workers == 1) and (num_threads == _NUM_THREAD_WORKERS):
         from concurrent.futures import ProcessPoolExecutor
+
         return ProcessPoolExecutor(1)
 
     if not QUIMB_MPI_LAUNCHED:
         raise RuntimeError(
             "For the moment, quimb programs using `get_mpi_pool` need to be "
-            "explicitly launched using `quimb-mpi-python`.")
+            "explicitly launched using `quimb-mpi-python`."
+        )
 
     if USE_SYNCRO:
         return SynchroMPIPool()
@@ -209,13 +223,20 @@ def get_mpi_pool(num_workers=None, num_threads=1):
         raise RuntimeError(
             "`get_mpi_pool()` cannot be explicitly called unless already "
             "running under MPI, or you set the environment variable "
-            "`QUIMB_MPI_SPAWN=True`.")
+            "`QUIMB_MPI_SPAWN=True`."
+        )
 
     from mpi4py.futures import MPIPoolExecutor
-    return MPIPoolExecutor(num_workers, main=False,
-                           env={'OMP_NUM_THREADS': str(num_threads),
-                                'QUIMB_NUM_MPI_WORKERS': str(num_workers),
-                                '_QUIMB_MPI_LAUNCHED': 'SPAWNED'})
+
+    return MPIPoolExecutor(
+        num_workers,
+        main=False,
+        env={
+            "OMP_NUM_THREADS": str(num_threads),
+            "QUIMB_NUM_MPI_WORKERS": str(num_workers),
+            "_QUIMB_MPI_LAUNCHED": "SPAWNED",
+        },
+    )
 
 
 class GetMPIBeforeCall(object):
@@ -229,11 +250,7 @@ class GetMPIBeforeCall(object):
         self.fn = fn
 
     def __call__(
-        self,
-        *args,
-        comm_self=False,
-        wait_for_workers=None,
-        **kwargs
+        self, *args, comm_self=False, wait_for_workers=None, **kwargs
     ):
         """
         Parameters
@@ -257,12 +274,14 @@ class GetMPIBeforeCall(object):
 
         if wait_for_workers is not None:
             from time import time
+
             t0 = time()
             while comm.Get_size() != wait_for_workers:
                 if time() - t0 > 2:
                     raise RuntimeError(
                         f"Timeout while waiting for {wait_for_workers} "
-                        f"workers to join comm {comm}.")
+                        f"workers to join comm {comm}."
+                    )
 
         res = self.fn(*args, comm=comm, **kwargs)
         return res
@@ -287,7 +306,7 @@ class SpawnMPIProcessesFunc(object):
         num_threads=1,
         mpi_pool=None,
         spawn_all=USE_SYNCRO or (not ALREADY_RUNNING_AS_MPI),
-        **kwargs
+        **kwargs,
     ):
         """
         Parameters
@@ -315,13 +334,14 @@ class SpawnMPIProcessesFunc(object):
 
         if (
             # use must explicitly run program as
-            (not can_use_mpi_pool()) or
+            (not can_use_mpi_pool())
+            or
             # no pool or communicator needed
             (num_workers == 1)
         ):
             return self.fn(*args, comm_self=True, **kwargs)
 
-        kwargs['wait_for_workers'] = num_workers
+        kwargs["wait_for_workers"] = num_workers
 
         if mpi_pool is not None:
             pool = mpi_pool
@@ -330,16 +350,21 @@ class SpawnMPIProcessesFunc(object):
 
         # the (non mpi) main process is idle while the workers compute.
         if spawn_all:
-            futures = [pool.submit(self.fn, *args, **kwargs)
-                       for _ in range(num_workers)]
+            futures = [
+                pool.submit(self.fn, *args, **kwargs)
+                for _ in range(num_workers)
+            ]
             results = [f.result() for f in futures]
 
         # the master process is the master mpi process and contributes
         else:
-            futures = [pool.submit(self.fn, *args, **kwargs)
-                       for _ in range(num_workers - 1)]
-            results = ([self.fn(*args, **kwargs)] +
-                       [f.result() for f in futures])
+            futures = [
+                pool.submit(self.fn, *args, **kwargs)
+                for _ in range(num_workers - 1)
+            ]
+            results = [self.fn(*args, **kwargs)] + [
+                f.result() for f in futures
+            ]
 
         # Get master result, (not always first submitted)
         return next(r for r in results if r is not None)
@@ -347,22 +372,26 @@ class SpawnMPIProcessesFunc(object):
 
 # ---------------------------------- SLEPC ---------------------------------- #
 
-eigs_slepc_mpi = functools.wraps(eigs_slepc)(
-    GetMPIBeforeCall(eigs_slepc))
+eigs_slepc_mpi = functools.wraps(eigs_slepc)(GetMPIBeforeCall(eigs_slepc))
 eigs_slepc_spawn = functools.wraps(eigs_slepc)(
-    SpawnMPIProcessesFunc(eigs_slepc_mpi))
+    SpawnMPIProcessesFunc(eigs_slepc_mpi)
+)
 
-svds_slepc_mpi = functools.wraps(svds_slepc)(
-    GetMPIBeforeCall(svds_slepc))
+svds_slepc_mpi = functools.wraps(svds_slepc)(GetMPIBeforeCall(svds_slepc))
 svds_slepc_spawn = functools.wraps(svds_slepc)(
-    SpawnMPIProcessesFunc(svds_slepc_mpi))
+    SpawnMPIProcessesFunc(svds_slepc_mpi)
+)
 
 mfn_multiply_slepc_mpi = functools.wraps(mfn_multiply_slepc)(
-    GetMPIBeforeCall(mfn_multiply_slepc))
+    GetMPIBeforeCall(mfn_multiply_slepc)
+)
 mfn_multiply_slepc_spawn = functools.wraps(mfn_multiply_slepc)(
-    SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi))
+    SpawnMPIProcessesFunc(mfn_multiply_slepc_mpi)
+)
 
 ssolve_slepc_mpi = functools.wraps(ssolve_slepc)(
-    GetMPIBeforeCall(ssolve_slepc))
+    GetMPIBeforeCall(ssolve_slepc)
+)
 ssolve_slepc_spawn = functools.wraps(ssolve_slepc)(
-    SpawnMPIProcessesFunc(ssolve_slepc_mpi))
+    SpawnMPIProcessesFunc(ssolve_slepc_mpi)
+)

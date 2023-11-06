@@ -43,8 +43,9 @@ def eig_numpy(A, sort=True, isherm=True, return_vecs=True, autoblock=False):
         If ``return_vecs=True``, the eigenvectors.
     """
     if autoblock:
-        return eigensystem_autoblocked(A, sort=sort, isherm=isherm,
-                                       return_vecs=return_vecs)
+        return eigensystem_autoblocked(
+            A, sort=sort, isherm=isherm, return_vecs=return_vecs
+        )
 
     evals = _NUMPY_EIG_FUNCS[return_vecs, isherm](A)
 
@@ -119,8 +120,18 @@ _DENSE_EIG_METHODS = {
 }
 
 
-def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
-               sigma=None, isherm=True, P=None, sort=True, **eig_opts):
+def eigs_numpy(
+    A,
+    k,
+    B=None,
+    which=None,
+    return_vecs=True,
+    sigma=None,
+    isherm=True,
+    P=None,
+    sort=True,
+    **eig_opts,
+):
     """Partial eigen-decomposition using numpy's dense linear algebra.
 
     Parameters
@@ -166,14 +177,14 @@ def eigs_numpy(A, k, B=None, which=None, return_vecs=True,
     eig_fn = _DENSE_EIG_METHODS[(isherm, return_vecs, generalized)]
 
     if generalized:
-        eig_opts['b'] = B
+        eig_opts["b"] = B
 
     # these might be given for partial eigsys but not relevant for numpy
-    eig_opts.pop('ncv', None)
-    eig_opts.pop('v0', None)
-    eig_opts.pop('tol', None)
-    eig_opts.pop('maxiter', None)
-    eig_opts.pop('EPSType', None)
+    eig_opts.pop("ncv", None)
+    eig_opts.pop("v0", None)
+    eig_opts.pop("tol", None)
+    eig_opts.pop("maxiter", None)
+    eig_opts.pop("EPSType", None)
 
     if return_vecs:
         # get all eigenpairs

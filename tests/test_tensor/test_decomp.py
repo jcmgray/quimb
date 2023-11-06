@@ -18,9 +18,9 @@ def test_sgn_convention():
     assert abs(sgn(1.0 + 2.0j)) == pytest.approx(1)
 
 
-@pytest.mark.parametrize('dtype', [
-    'float64', 'float32', 'complex128', 'complex64'
-])
+@pytest.mark.parametrize(
+    "dtype", ["float64", "float32", "complex128", "complex64"]
+)
 def test_qr_stabilized_sign_bug(dtype):
     from quimb.tensor.decomp import qr_stabilized
 
@@ -35,8 +35,6 @@ def test_qr_stabilized_sign_bug(dtype):
         X = Q @ R
         Q2, _, R2 = qr_stabilized(X)
 
-        assert (
-            abs(np.linalg.norm((Q2 @ R2) - X))
-            < (1e-12 if dtype in ('float64', 'complex128') else 1e-6)
+        assert abs(np.linalg.norm((Q2 @ R2) - X)) < (
+            1e-12 if dtype in ("float64", "complex128") else 1e-6
         )
-

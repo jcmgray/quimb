@@ -4,14 +4,12 @@ import quimb.tensor as qt
 
 
 class TestMERA:
-
     @pytest.mark.parametrize("dtype", [float, complex])
     def test_construct_random(self, dtype):
-
         mera = qt.MERA.rand(16)
 
         # test outer inds
-        assert set(mera.outer_inds()) == {f'k{i}' for i in range(16)}
+        assert set(mera.outer_inds()) == {f"k{i}" for i in range(16)}
 
         # test normalized
         assert (mera.H & mera) ^ all == pytest.approx(1.0)
@@ -24,7 +22,7 @@ class TestMERA:
         assert md.H @ md == pytest.approx(1.0)
 
     def test_1d_vector_methods(self):
-        X = qu.spin_operator('X', sparse=True)
+        X = qu.spin_operator("X", sparse=True)
 
         mera = qt.MERA.rand(16)
         meraX = mera.gate(X.A, 7)
@@ -43,7 +41,7 @@ class TestMERA:
         # check only need 'lightcone' to compute local
         assert mera.select(7).H @ meraX.select(7) == pytest.approx(x2)
 
-    @pytest.mark.parametrize("method", ['qr', 'exp', 'cayley', 'mgs', 'svd'])
+    @pytest.mark.parametrize("method", ["qr", "exp", "cayley", "mgs", "svd"])
     def test_isometrize(self, method):
         mera = qt.MERA.rand(16, dangle=True)
         assert mera.H @ mera == pytest.approx(2.0)
