@@ -821,7 +821,7 @@ def HTN_CP_operator_from_products(
     tags_all=None,
     bond_ind=None,
 ):
-    """Construct a CP form hyper tensor network of the sum of matrix strings:
+    r"""Construct a CP form hyper tensor network of the sum of matrix strings:
 
     .. math::
 

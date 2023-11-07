@@ -8,7 +8,7 @@ import warnings
 
 import numpy as np
 import scipy.linalg as scla
-from scipy.ndimage.filters import uniform_filter1d
+from scipy.ndimage import uniform_filter1d
 
 from ..core import ptr, prod, vdot, njit, dot, subtract_update_, divide_update_
 from ..utils import int2tup, find_library, raise_cant_find_library_function
