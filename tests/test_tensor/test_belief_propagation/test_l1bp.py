@@ -29,12 +29,15 @@ def test_contract_loopy_approx(dtype, damping):
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("damping", [0.0, 0.1])
-def test_contract_double_loopy_approx(dtype, damping):
+@pytest.mark.parametrize("update", ("parallel", "sequential"))
+def test_contract_double_loopy_approx(dtype, damping, update):
     peps = qtn.PEPS.rand(4, 3, 2, seed=42, dtype=dtype)
     tn = peps.H & peps
     Z_ex = tn.contract()
     info = {}
-    Z_bp1 = contract_l1bp(tn, damping=damping, info=info, progbar=True)
+    Z_bp1 = contract_l1bp(
+        tn, damping=damping, update=update, info=info, progbar=True
+    )
     assert info["converged"]
     assert Z_bp1 == pytest.approx(Z_ex, rel=0.3)
     # compare with 2-norm BP on the peps directly

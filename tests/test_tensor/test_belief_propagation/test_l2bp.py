@@ -69,7 +69,8 @@ def test_contract_double_layer_tree_exact(dtype):
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("damping", [0.0, 0.1])
-def test_compress_double_layer_loopy(dtype, damping):
+@pytest.mark.parametrize("update", ["parallel", "sequential"])
+def test_compress_double_layer_loopy(dtype, damping, update):
     peps = qtn.PEPS.rand(3, 4, bond_dim=3, seed=42, dtype=dtype)
     pepo = qtn.PEPO.rand(3, 4, bond_dim=2, seed=42, dtype=dtype)
 
@@ -85,7 +86,12 @@ def test_compress_double_layer_loopy(dtype, damping):
     # compress using BP
     info = {}
     tn_bp = compress_l2bp(
-        tn_lazy, max_bond=3, damping=damping, info=info, progbar=True
+        tn_lazy,
+        max_bond=3,
+        damping=damping,
+        update=update,
+        info=info,
+        progbar=True,
     )
     assert info["converged"]
     assert tn_bp.num_tensors == 12

@@ -19,12 +19,14 @@ class L2BP(BeliefPropagationCommon):
         site_tags=None,
         damping=0.0,
         local_convergence=True,
+        update="parallel",
         optimize="auto-hq",
         **contract_opts,
     ):
         self.backend = next(t.backend for t in tn)
         self.damping = damping
         self.local_convergence = local_convergence
+        self.update = update
         self.optimize = optimize
         self.contract_opts = contract_opts
 
@@ -126,10 +128,12 @@ class L2BP(BeliefPropagationCommon):
             )
 
         ncheck = len(self.touched)
+        nconv = 0
+        max_mdiff = -1.0
+        new_touched = set()
 
-        new_data = {}
-        while self.touched:
-            i, j = self.touched.pop()
+        def _compute_m(key):
+            i, j = key
             bix = self.edges[(i, j) if i < j else (j, i)]
             cix = tuple(ix + "**" for ix in bix)
             output_inds = cix + bix
@@ -145,12 +149,11 @@ class L2BP(BeliefPropagationCommon):
             )
             tm_new.modify(apply=self._symmetrize)
             tm_new.modify(apply=self._normalize)
-            # defer setting the data to do a parallel update
-            new_data[i, j] = tm_new.data
+            return tm_new.data
 
-        nconv = 0
-        max_mdiff = -1.0
-        for key, data in new_data.items():
+        def _update_m(key, data):
+            nonlocal nconv, max_mdiff
+
             tm = self.messages[key]
 
             if self.damping > 0.0:
@@ -160,12 +163,31 @@ class L2BP(BeliefPropagationCommon):
 
             if mdiff > tol:
                 # mark touching messages for update
-                self.touched.update(self.touch_map[key])
+                new_touched.update(self.touch_map[key])
             else:
                 nconv += 1
 
             max_mdiff = max(max_mdiff, mdiff)
             tm.modify(data=data)
+
+        if self.update == "parallel":
+            new_data = {}
+            # compute all new messages
+            while self.touched:
+                key = self.touched.pop()
+                new_data[key] = _compute_m(key)
+            # insert all new messages
+            for key, data in new_data.items():
+                _update_m(key, data)
+
+        elif self.update == "sequential":
+            # compute each new message and immediately re-insert it
+            while self.touched:
+                key = self.touched.pop()
+                data = _compute_m(key)
+                _update_m(key, data)
+
+        self.touched = new_touched
 
         return nconv, ncheck, max_mdiff
 

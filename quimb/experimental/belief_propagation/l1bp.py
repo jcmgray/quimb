@@ -170,13 +170,16 @@ class L1BP(BeliefPropagationCommon):
 
         if self.update == "parallel":
             new_data = {}
+            # compute all new messages
             while self.touched:
                 key = self.touched.pop()
                 new_data[key] = _compute_m(key)
+            # insert all new messages
             for key, data in new_data.items():
                 _update_m(key, data)
 
         elif self.update == "sequential":
+            # compute each new message and immediately re-insert it
             while self.touched:
                 key = self.touched.pop()
                 data = _compute_m(key)
