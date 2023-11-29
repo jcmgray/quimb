@@ -11,6 +11,9 @@ Release notes for `quimb`.
 - {class}`~quimb.tensor.Circuit` : remove `target_size` in preparation for
   all contraction specifications to be encapsulated at the contract level (e.g.
   with `cotengra`)
+* add [quimb.schematic.Drawing](quimb.schematic.Drawing) from experimental
+  submodule, add example docs at {ref}`schematic`. Add methods `text_between`,
+  `wedge`, `line_offset` and other tweaks for future use by main TN drawing.
 
 **Enhancements:**
 

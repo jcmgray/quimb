@@ -10,14 +10,20 @@ import matplotlib.pyplot as plt
 
 
 class Drawing:
-    """Draw pseudo-3D diagrams using matplotlib. This handles the axonometric
-    projection and the z-ordering of the elements, as well as named preset
-    styles for repeated elements.
+    """Draw 2D or pseudo-3D diagrams using matplotlib. This handles the
+    axonometric projection and the z-ordering of the elements, as well as named
+    preset styles for repeated elements, and the automatic adjustment of the
+    figure limits. It also has basic support for drawing smooth curves and
+    shaded areas around certain elements automatically.
 
     Parameters
     ----------
-    background : color
+    background : color, optional
         The background color of the figure, defaults to transparent.
+    drawcolor : color, optional
+        The default color to draw lines and text in.
+    shapecolor : color, optional
+        The default color to fill shapes with.
     a : float
         The axonometric angle of the x-axis in degrees.
     b : float
@@ -40,6 +46,8 @@ class Drawing:
     def __init__(
         self,
         background=(0, 0, 0, 0),
+        drawcolor=(0.14, 0.15, 0.16, 1.0),
+        shapecolor=(0.45, 0.50, 0.55, 1.0),
         a=50,
         b=12,
         xscale=1,
@@ -60,6 +68,9 @@ class Drawing:
         self.ax.set_axis_off()
         self.ax.set_aspect("equal")
         self.ax.set_clip_on(False)
+
+        self.drawcolor = drawcolor
+        self.shapecolor = shapecolor
 
         self._xmin = None
         self._xmax = None
@@ -128,8 +139,10 @@ class Drawing:
             Specific style options passed to ``matplotlib.axes.Axes.text``.
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("color", self.drawcolor)
         style.setdefault("horizontalalignment", "center")
         style.setdefault("verticalalignment", "center")
+        style.setdefault("clip_on", False)
 
         if len(coo) == 2:
             x, y = coo
@@ -137,6 +150,54 @@ class Drawing:
         else:
             x, y = self._3d_project(*coo)
             style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.02)
+
+        self.ax.text(x, y, text, **style)
+        self._adjust_lims(x, y)
+
+    def text_between(self, cooa, coob, text, preset=None, **kwargs):
+        """Place text between two coordinates.
+
+        Parameters
+        ----------
+        cooa, coob : tuple[int, int] or tuple[int, int, int]
+            The 2D or 3D coordinates of the text endpoints. If 3D, the
+            coordinates will be projected onto the 2D plane, and a z-order
+            will be assigned based on average z-order of the endpoints.
+        text : str
+            The text to place.
+        preset : str, optional
+            A preset style to use for the text.
+        kwargs
+            Specific style options passed to ``matplotlib.axes.Axes.text``.
+        """
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("color", self.drawcolor)
+        style.setdefault("horizontalalignment", "center")
+        style.setdefault("verticalalignment", "center")
+        style.setdefault("clip_on", False)
+
+        if len(cooa) == 2:
+            xa, ya = cooa
+            xb, yb = coob
+            style.setdefault("zorder", +0.02)
+        else:
+            style.setdefault(
+                "zorder",
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]) + 0.02,
+            )
+            xa, ya = self._3d_project(*cooa)
+            xb, yb = self._3d_project(*coob)
+
+        # compute midpoint
+        x = (xa + xb) / 2
+        y = (ya + yb) / 2
+
+        # compute angle
+        if xa <= xb:
+            angle = atan2(yb - ya, xb - xa) * 180 / pi
+        else:
+            angle = atan2(ya - yb, xa - xb) * 180 / pi
+        style.setdefault("rotation", angle)
 
         self.ax.text(x, y, text, **style)
         self._adjust_lims(x, y)
@@ -157,6 +218,7 @@ class Drawing:
             Specific style options passed to ``matplotlib.axes.Axes.text``.
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("color", self.drawcolor)
         style.setdefault("horizontalalignment", "center")
         style.setdefault("verticalalignment", "center")
         style.setdefault("transform", self.ax.transAxes)
@@ -179,11 +241,40 @@ class Drawing:
             Specific style options passed to ``matplotlib.axes.Axes.text``.
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("color", self.drawcolor)
         style.setdefault("horizontalalignment", "center")
         style.setdefault("verticalalignment", "center")
         style.setdefault("transform", self.fig.transFigure)
         self.ax.text(x, y, text, **style)
         self._adjust_lims(x, y)
+
+    def _parse_style_for_marker(self, coo, preset=None, **kwargs):
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        if "color" in style:
+            # assume coloring whole shape
+            style.setdefault("facecolor", style.pop("color"))
+        style.setdefault("facecolor", self.shapecolor)
+        style.setdefault("edgecolor", darken_color(style["facecolor"]))
+        style.setdefault("linewidth", 1)
+        style.setdefault("radius", 0.25)
+
+        if len(coo) == 2:
+            x, y = coo
+            style.setdefault("zorder", +0.01)
+        else:
+            x, y = self._3d_project(*coo)
+            style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.01)
+
+        return x, y, style
+
+    def _adjust_lims_for_marker(self, x, y, r):
+        for x, y in [
+            (x - 1.1 * r, y),
+            (x + 1.1 * r, y),
+            (x, y - 1.1 * r),
+            (x, y + 1.1 * r),
+        ]:
+            self._adjust_lims(x, y)
 
     def circle(self, coo, preset=None, **kwargs):
         """Draw a circle at the specified coordinate.
@@ -198,32 +289,45 @@ class Drawing:
         kwargs
             Specific style options passed to ``matplotlib.patches.Circle``.
         """
-        style = parse_style_preset(self.presets, preset, **kwargs)
-        if "color" in style:
-            style.setdefault("facecolor", style.pop("color"))
-        style.setdefault("facecolor", (0.4, 0.5, 0.6))
-        style.setdefault("edgecolor", darken_color(style["facecolor"], 0.5))
-        style.setdefault("linewidth", 2)
-        style.setdefault("radius", 0.25)
-
-        if len(coo) == 2:
-            x, y = coo
-            style.setdefault("zorder", +0.01)
-        else:
-            x, y = self._3d_project(*coo)
-            style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.01)
-
+        x, y, style = self._parse_style_for_marker(
+            coo, preset=preset, **kwargs
+        )
         circle = mpl.patches.Circle((x, y), **style)
         self.ax.add_artist(circle)
+        self._adjust_lims_for_marker(x, y, style["radius"])
 
-        r = style["radius"]
-        for x, y in [
-            (x - 1.1 * r, y),
-            (x + 1.1 * r, y),
-            (x, y - 1.1 * r),
-            (x, y + 1.1 * r),
-        ]:
-            self._adjust_lims(x, y)
+    def wedge(self, coo, theta1, theta2, preset=None, **kwargs):
+        """Draw a wedge at the specified coordinate.
+
+        Parameters
+        ----------
+        coo : tuple[int, int] or tuple[int, int, int]
+            The 2D or 3D coordinate of the wedge. If 3D, the coordinate will
+            be projected onto the 2D plane, and a z-order will be assigned.
+        theta1 : float
+            The angle in degrees of the first edge of the wedge.
+        theta2 : float
+            The angle in degrees of the second edge of the wedge.
+        preset : str, optional
+            A preset style to use for the wedge.
+        kwargs
+            Specific style options passed to ``matplotlib.patches.Wedge``.
+        """
+        x, y, style = self._parse_style_for_marker(
+            coo, preset=preset, **kwargs
+        )
+
+        # wedge uses r, not radius
+        style["r"] = style.pop("radius")
+        # and is not filled by default
+        style.setdefault("fill", True)
+
+        wedge = mpl.patches.Wedge(
+            (x, y), theta1=theta1, theta2=theta2, **style
+        )
+
+        self.ax.add_artist(wedge)
+        self._adjust_lims_for_marker(x, y, style["r"])
 
     def dot(self, coo, preset=None, **kwargs):
         """Draw a small circle with no border. Alias for circle with defaults
@@ -243,6 +347,78 @@ class Drawing:
         style.setdefault("radius", 0.1)
         style.setdefault("linewidth", 0.0)
         self.circle(coo, **style)
+
+    def regular_polygon(self, coo, preset=None, **kwargs):
+        """Draw a regular polygon at the specified coordinate.
+
+        Parameters
+        ----------
+        coo : tuple[int, int] or tuple[int, int, int]
+            The 2D or 3D coordinate of the polygon. If 3D, the coordinate will
+            be projected onto the 2D plane, and a z-order will be assigned.
+        n : int
+            The number of sides of the polygon.
+        orientation : float, optional
+            The orientation of the polygon in radians. Default is 0.0.
+        preset : str, optional
+            A preset style to use for the polygon.
+        kwargs
+            Specific style options passed to ``matplotlib.patches.Polygon``.
+        """
+        x, y, style = self._parse_style_for_marker(
+            coo, preset=preset, **kwargs
+        )
+
+        n = style.pop("n", 3)
+        orientation = style.pop("orientation", 0.0)
+
+        rpoly = mpl.patches.RegularPolygon(
+            (x, y), numVertices=n, orientation=orientation, **style
+        )
+        self.ax.add_artist(rpoly)
+        self._adjust_lims_for_marker(x, y, style["radius"])
+
+    def marker(self, coo, preset=None, **kwargs):
+        """Draw a 'marker' at the specified coordinate. This is a shorthand for
+        creating polygons with shape specified by a single character.
+
+        Parameters
+        ----------
+        coo : tuple[int, int] or tuple[int, int, int]
+            The 2D or 3D coordinate of the marker. If 3D, the coordinate will
+            be projected onto the 2D plane, and a z-order will be assigned.
+        marker : str, optional
+            The marker shape to draw. One of ``"o.v^<>sDphH8"``.
+        preset : str, optional
+            A preset style to use for the marker.
+        kwargs
+            Specific style options.
+        """
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        marker = style.pop("marker", "s")
+        if marker in ("o", "."):
+            return self.circle(coo, preset=preset, **style)
+
+        if isinstance(marker, int):
+            n = marker
+            orientation = 0.0
+        else:
+            n, orientation = {
+                "v": (3, pi / 3),
+                "^": (3, 0),
+                "<": (3, pi / 2),
+                ">": (3, -pi / 2),
+                "s": (4, pi / 4),
+                "D": (4, 0),
+                "p": (5, 0),
+                "h": (6, 0),
+                "H": (6, pi / 2),
+                "8": (8, 0),
+            }[marker]
+
+        self.regular_polygon(
+            coo, preset=preset, n=n, orientation=orientation, **style
+        )
 
     def cube(self, coo, preset=None, **kwargs):
         """Draw a cube at the specified coordinate, which must be 3D.
@@ -288,9 +464,11 @@ class Drawing:
         stretch : float
             Stretch the line by this factor. 1.0 is no stretch, 0.5 is half
             length, 2.0 is double length. Default is 1.0.
-        arrowhead : bool
+        arrowhead : bool or dict, optional
             Draw an arrowhead at the end of the line. Default is False. If a
             dict, it is passed as keyword arguments to the arrowhead method.
+        text_between : str, optional
+            Add text along the line.
         preset : str, optional
             A preset style to use for the line.
         kwargs
@@ -301,10 +479,14 @@ class Drawing:
         Drawing.arrowhead
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
-        style.setdefault("color", (0.25, 0.25, 0.25))
+        style.setdefault("color", self.drawcolor)
         style.setdefault("solid_capstyle", "round")
         style.setdefault("stretch", 1.0)
         style.setdefault("arrowhead", None)
+        style.setdefault("text", None)
+        stretch = style.pop("stretch")
+        arrowhead = style.pop("arrowhead")
+        text = style.pop("text")
 
         if len(cooa) == 2:
             xs, ys = zip(*(cooa, coob))
@@ -316,26 +498,115 @@ class Drawing:
             )
             xs, ys = zip(*[self._3d_project(*coo) for coo in [cooa, coob]])
 
-        stretch = style.pop("stretch")
         if stretch != 1.0:
             # shorten around center
             center = mean(xs), mean(ys)
             xs = [center[0] + stretch * (x - center[0]) for x in xs]
             ys = [center[1] + stretch * (y - center[1]) for y in ys]
 
-        arrowhead = style.pop("arrowhead")
         if arrowhead is not None:
             if arrowhead is True:
                 arrowhead = {}
             else:
                 arrowhead = dict(arrowhead)
-            self.arrowhead(cooa, coob, preset=preset, **style, **arrowhead)
+            self.arrowhead(cooa, coob, preset=preset, **(style | arrowhead))
 
         line = mpl.lines.Line2D(xs, ys, **style)
         self.ax.add_artist(line)
 
+        if text:
+            if isinstance(text, str):
+                text = {"text": text}
+            else:
+                text = dict(text)
+
+            # don't want to pass full style dict to text_between
+            text.setdefault("zorder", style["zorder"])
+            self.text_between(cooa, coob, **text)
+
         for x, y in zip(xs, ys):
             self._adjust_lims(x, y)
+
+    def line_offset(
+        self, cooa, coob, offset, midlength=0.5, preset=None, **kwargs
+    ):
+        """Draw a line between two coordinates, but curving out by a given
+        offset perpendicular to the line.
+
+        Parameters
+        ----------
+        cooa, coob : tuple[int, int] or tuple[int, int, int]
+            The 2D or 3D coordinates of the line endpoints. If 3D, the
+            coordinates will be projected onto the 2D plane, and a z-order
+            will be assigned based on average z-order of the endpoints.
+        offset : float
+            The offset of the curve from the line, as a fraction of the total
+            line length. This is always processed in the 2D projected plane.
+        midlength : float
+            The length of the middle straight section, as a fraction of the
+            total line length. Default is 0.5.
+        arrowhead : bool or dict, optional
+            Draw an arrowhead at the end of the line. Default is False. If a
+            dict, it is passed as keyword arguments to the arrowhead method.
+        text_between : str, optional
+            Add text along the line.
+        preset : str, optional
+            A preset style to use for the line.
+        kwargs
+            Specific style options passed to ``curve``.
+        """
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("arrowhead", None)
+        style.setdefault("text", None)
+        arrowhead = style.pop("arrowhead")
+        text = style.pop("text")
+
+        if len(cooa) == 2:
+            xs, ys = zip(*(cooa, coob))
+            style.setdefault("zorder", +0.0)
+        else:
+            style.setdefault(
+                "zorder",
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]),
+            )
+            xs, ys = zip(*[self._3d_project(*coo) for coo in [cooa, coob]])
+
+        cooa = xs[0], ys[0]
+        coob = xs[1], ys[1]
+        forward, inverse = get_rotator_and_inverse(cooa, coob)
+        R = forward(*coob)[0]
+        endlength = (1 - midlength) / 2
+        cooml = inverse(endlength * R, offset * R)
+        coomm = inverse(R / 2, offset * R)
+        coomr = inverse((1 - endlength) * R, offset * R)
+        curve_pts = [cooa, cooml, coomm, coomr, coob]
+
+        if arrowhead is not None:
+            if arrowhead is True:
+                arrowhead = {}
+            else:
+                arrowhead = dict(arrowhead)
+
+            # want to correct center for midlength
+            center = arrowhead.pop("center", 0.5)
+            arrowhead["center"] = min(
+                max(0.0, 0.5 + (center - 0.5) / midlength), 1.0
+            )
+            self.arrowhead(cooml, coomr, preset=preset, **(style | arrowhead))
+
+        self.curve(curve_pts, preset=preset, **style)
+
+        if text:
+            if isinstance(text, str):
+                text = {"text": text}
+            else:
+                text = dict(text)
+            # don't want to pass full style dict to text_between
+            text.setdefault("zorder", style["zorder"])
+            self.text_between(cooml, coomr, **text)
+
+        for coo in curve_pts:
+            self._adjust_lims(*coo)
 
     def arrowhead(self, cooa, coob, preset=None, **kwargs):
         """Draw just a arrowhead on the line between ``cooa`` and ``coob``.
@@ -346,8 +617,10 @@ class Drawing:
             The coordinates of the start and end of the line. If 3D, the
             coordinates will be projected onto the 2D plane, and a z-order
             will be assigned based on average z-order of the endpoints.
-        reverse : bool, optional
-            Reverse the direction by switching ``cooa`` and ``coob``.
+        reverse : bool or "both", optional
+            Reverse the direction by switching ``cooa`` and ``coob``. If
+            ``"both"``, draw an arrowhead in both directions. Default is
+            False.
         center : float, optional
             The position of the arrowhead along the line, where 0 is the start
             and 1 is the end. Default is 0.5.
@@ -362,13 +635,15 @@ class Drawing:
             Specific style options passed to ``matplotlib.lines.Line2D``.
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
-        style.setdefault("color", (0.25, 0.25, 0.25))
+        style.setdefault("color", self.drawcolor)
         style.setdefault("center", 0.5)
         style.setdefault("width", 0.05)
         style.setdefault("length", 0.1)
         style.setdefault("reverse", False)
 
         reverse = style.pop("reverse")
+        if reverse == "both":
+            self.arrowhead(cooa, coob, preset=preset, **style)
         if reverse:
             cooa, coob = coob, cooa
 
@@ -425,7 +700,7 @@ class Drawing:
         if "color" in style:
             # presume that edge color is being specified
             style.setdefault("edgecolor", style.pop("color"))
-        style.setdefault("edgecolor", (0.25, 0.25, 0.25))
+        style.setdefault("edgecolor", self.drawcolor)
         style.setdefault("fill", False)
         style.setdefault("capstyle", "round")
         style.setdefault("smoothing", 1 / 2)
@@ -494,9 +769,9 @@ class Drawing:
         style = parse_style_preset(self.presets, preset, **kwargs)
         if "color" in style:
             style.setdefault("facecolor", style.pop("color"))
-        style.setdefault("facecolor", (0.4, 0.5, 0.6))
-        style.setdefault("edgecolor", darken_color(style["facecolor"], 0.5))
-        style.setdefault("linewidth", 2)
+        style.setdefault("facecolor", self.shapecolor)
+        style.setdefault("edgecolor", darken_color(style["facecolor"]))
+        style.setdefault("linewidth", 1)
         style.setdefault("joinstyle", "round")
 
         if len(coos[0]) != 2:
@@ -793,7 +1068,7 @@ def axonometric_project(
     x, y : float
         The 2D coordinates of the projected point.
     """
-    i *= (xscale * 0.8)
+    i *= xscale * 0.8
     j *= yscale
     k *= zscale
     return (
@@ -844,7 +1119,7 @@ def get_wong_color(
     return r, g, b
 
 
-def darken_color(color, factor=0.5):
+def darken_color(color, factor=2/3):
     """Take ``color`` and darken it by ``factor``."""
     rgba = mpl.colors.to_rgba(color)
     return tuple(factor * c for c in rgba[:3]) + rgba[3:]
@@ -899,8 +1174,9 @@ def get_rotator_and_inverse(pa, pb):
     def forward(x, y):
         """Rotate and translate a point."""
         x, y = x - dx, y - dy
-        x, y = x * cos(-theta) - y * sin(-theta), x * sin(-theta) + y * cos(
-            -theta
+        x, y = (
+            x * cos(-theta) - y * sin(-theta),
+            x * sin(-theta) + y * cos(-theta),
         )
         return x, y
 
