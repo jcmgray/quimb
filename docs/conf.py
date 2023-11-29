@@ -57,8 +57,8 @@ myst_enable_extensions = [
 autoapi_dirs = ['../quimb']
 
 extlinks = {
-    'issue': ('https://github.com/jcmgray/quimb/issues/%s', 'GH'),
-    'pull': ('https://github.com/jcmgray/quimb/pull/%s', 'PR'),
+    'issue': ('https://github.com/jcmgray/quimb/issues/%s', 'GH %s'),
+    'pull': ('https://github.com/jcmgray/quimb/pull/%s', 'PR %s'),
 }
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
