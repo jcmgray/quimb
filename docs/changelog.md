@@ -11,12 +11,18 @@ Release notes for `quimb`.
 - {class}`~quimb.tensor.Circuit` : remove `target_size` in preparation for
   all contraction specifications to be encapsulated at the contract level (e.g.
   with `cotengra`)
-* add [quimb.schematic.Drawing](quimb.schematic.Drawing) from experimental
-  submodule, add example docs at {ref}`schematic`. Add methods `text_between`,
-  `wedge`, `line_offset` and other tweaks for future use by main TN drawing.
 
 **Enhancements:**
 
+- [TensorNetwork.draw](quimb.tensor.TensorNetwork.draw): use `quimb.schematic`
+  for main `backend="matplotlib"` drawing. Enabling:
+    1. multi tag coloring for single tensors
+    2. arrows and labels on multi-edges
+    3. better sizing of tensors using absolute units
+    4. neater single tensor drawing, in 2D and 3D
+* add [quimb.schematic.Drawing](quimb.schematic.Drawing) from experimental
+  submodule, add example docs at {ref}`schematic`. Add methods `text_between`,
+  `wedge`, `line_offset` and other tweaks for future use by main TN drawing.
 - [`Circuit`](quimb.tensor.Circuit) : allow any gate to be controlled by any
   number of qubits.
 - add [`is_cyclic_x`](quimb.tensor.TensorNetwork2D.is_cyclic_x),
