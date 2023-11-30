@@ -664,7 +664,7 @@ def _draw_matplotlib(
     if title is not None:
         ax.set_title(str(title))
 
-    for (i, j), edge_data in edges.items():
+    for _, edge_data in edges.items():
         cooa, coob = edge_data["coos"]
         edge_colors = edge_data["color"]
         edge_sizes = edge_data["edge_size"]
@@ -717,7 +717,7 @@ def _draw_matplotlib(
                 d.line(**line_opts)
 
     # draw the tensors
-    for node, node_data in nodes.items():
+    for _, node_data in nodes.items():
         patch_opts = dict(
             coo=node_data["coo"],
             radius=node_data["size"],
@@ -968,7 +968,7 @@ def _draw_matplotlib3d(G, **kwargs):
         linewidth=node_source["outline_size"],
     )
 
-    for node, node_data in G.nodes(data=True):
+    for _, node_data in G.nodes(data=True):
         label = node_data["label"]
         if label:
             ax.text(
