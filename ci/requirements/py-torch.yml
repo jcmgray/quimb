@@ -4,7 +4,7 @@ channels:
   - conda-forge
 dependencies:
   - autoray>=0.6.7
-  - cotengra>=0.5.3
+  # - cotengra>=0.5.3
   - coverage
   - cpuonly
   - cytoolz
@@ -19,3 +19,5 @@ dependencies:
   - pytorch
   - scipy
   - tqdm
+  - pip:
+    - git+https://github.com/username/repo.git@branch_name
