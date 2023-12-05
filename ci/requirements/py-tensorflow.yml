@@ -19,4 +19,4 @@ dependencies:
   - pip
   - pip:
     - tensorflow
-    - git+https://github.com/username/repo.git@branch_name
+    - git+https://github.com/jcmgray/repo.git@althash
