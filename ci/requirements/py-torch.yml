@@ -20,4 +20,4 @@ dependencies:
   - scipy
   - tqdm
   - pip:
-    - git+https://github.com/jcmgray/repo.git@althash
+    - git+https://github.com/jcmgray/cotengra.git@althash
