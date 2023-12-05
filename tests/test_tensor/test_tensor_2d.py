@@ -273,7 +273,7 @@ class Test2DContract:
             bond_dim=2,
         )
         norm = psi.make_norm()
-        xe = norm.contract(all, optimize="auto-hq")
+        xe = norm.contract(all, optimize="auto-hq", cache_expression=False)
         xt = norm.contract_hotrg(max_bond=5)
         assert xt == pytest.approx(xe, rel=1e-4)
 
