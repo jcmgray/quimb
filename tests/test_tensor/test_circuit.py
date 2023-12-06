@@ -162,6 +162,74 @@ class TestCircuit:
         qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
+    def test_openqasm2_custom_gates(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, θ) q
+        {
+            u2(θ / 2, param1) q;
+            u2(param1, θ / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "H",
+            "CX",
+            "U3",
+            "U2",
+            "U2",
+            "H",
+            "CX",
+            "U3",
+        ]
+
+    def test_openqasm2_custom_nested_gates(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate cphase(θ) a, b
+        {
+            U3(0, 0, θ / 2) a;
+            CX a, b;
+            U3(0, 0, -θ / 2) b;
+            CX a, b;
+            U3(0, 0, θ / 2) b;
+        }
+
+        gate doublecphase(θ) a, b, c {
+            cphase(θ) a, b;
+            cphase(θ) b, c;
+        }
+
+        doublecphase(0.1) q[0], q[1], q[2];
+        doublecphase(0.2) q[2], q[0], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "U3",
+            "CX",
+            "U3",
+            "CX",
+            "U3",
+        ] * 4
+
     @pytest.mark.parametrize(
         "Circ", [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
     )

@@ -128,36 +128,56 @@ def parse_qsim_url(url, **kwargs):
     return parse_qsim_str(request.urlopen(url).read().decode(), **kwargs)
 
 
-def parse_openqasm2_str(contents):
-    """Parse the string contents of an OpenQASM 2.0 file. This parser only
-    supports basic gate definitions, and is not guaranteed to check the full
-    openqasm grammar.
-    """
-    # define regular expressions for parsing
-    rgxs = {
+def to_clean_list(s, delimiter):
+    """Split, strip and filter a string by a given character into a list."""
+    if s is None:
+        return []
+    return list(filter(None, (w.strip() for w in s.split(delimiter))))
+
+
+def multi_replace(s, replacements):
+    """Replace multiple substrings in a string."""
+    for w, r in replacements.items():
+        s = s.replace(w, r)
+    return s
+
+
+@functools.lru_cache(None)
+def get_openqasm2_regexes():
+    return {
         "header": re.compile(r"(OPENQASM\s+2.0;)|(include\s+\"qelib1.inc\";)"),
         "comment": re.compile(r"^//"),
         "comment_start": re.compile(r"/\*"),
         "comment_end": re.compile(r"\*/"),
         "qreg": re.compile(r"qreg\s+(\w+)\s*\[(\d+)\];"),
-        "gate": re.compile(
-            r"(\w+)\s*(\(.*\))?\s*(\w+\[\d+\]\s*(,\s*\w+\[\d+\])*);"
-        ),
-        "error": re.compile(r"^(gate|if)"),
+        "gate": re.compile(r"(\w+)\s*(\((.+)\))?\s*(.*);"),
+        "error": re.compile(r"^(if|for)"),
         "ignore": re.compile(r"^(creg|measure|barrier)"),
+        "gate_def": re.compile(r"^gate"),
+        "gate_sig": re.compile(r"^gate\s+(\w+)\s*(\((.+)\))?\s*(.*)"),
     }
+
+
+def parse_openqasm2_str(contents):
+    """Parse the string contents of an OpenQASM 2.0 file. This parser does not
+    support classical control flow is not guaranteed to check the full openqasm
+    grammar.
+    """
+    # define regular expressions for parsing
+    rgxs = get_openqasm2_regexes()
 
     # initialise number of qubits to zero and an empty list for gates
     sitemap = {}
     gates = []
+    custom_gates = {}
     # only want to warn once about each ignored instruction
     warned = {}
 
     # Process each line
     in_comment = False
-    for line in contents.split("\n"):
-        line = line.strip()
-
+    lines = contents.split("\n")
+    while lines:
+        line = lines.pop(0).strip()
         if not line:
             # blank line
             continue
@@ -200,19 +220,81 @@ def parse_openqasm2_str(contents):
                 f"Custom gate definitions are not supported: {line}"
             )
 
+        if rgxs["gate_def"].match(line):
+            # custom gate definition:
+            # first gather all lines involved in the gate definition
+            gate_lines = [line]
+            while True:
+                if "}" in line:
+                    # finished -> break
+                    break
+                else:
+                    # not finished -> need next line
+                    line = lines.pop(0)
+                    gate_lines.append(line)
+
+            # then combine this full gate definition, without newlines
+            gate_body = "".join(gate_lines)
+            # separate the signature and body
+            gate_sig, gate_body = re.match("(.*)\s*{(.*)}", gate_body).groups()
+
+            # parse the signature
+            match = rgxs["gate_sig"].match(gate_sig)
+            label = match[1]
+            sig_params = to_clean_list(match[3], ",")
+            sig_qubits = to_clean_list(match[4], ",")
+
+            # break body only back into individual lines, include semicolons
+            gate_body = to_clean_list(gate_body, ";")
+            # insert formatters, (using simple `replace` on the whole line will
+            # scramble the label if parameters or qubits are letters etc)
+            for i, gate_line in enumerate(gate_body):
+                gm = rgxs["gate"].match(gate_line + ";")
+                glabel = gm[1]
+                gqubits = multi_replace(
+                    gm[4], {q: f"{{{q}}}" for q in sig_qubits}
+                )
+                if gm[3]:
+                    # sub gate line is parametrized gate
+                    gparams = multi_replace(
+                        gm[3], {p: f"{{{p}}}" for p in sig_params}
+                    )
+                    gate_body[i] = f"{glabel}({gparams}) {gqubits};"
+                else:
+                    # sub gate line is standard gate
+                    gate_body[i] = f"{glabel} {gqubits};"
+
+            custom_gates[label] = sig_params, sig_qubits, gate_body
+            continue
+
         match = rgxs["gate"].search(line)
         if match:
             # apply a gate
             label, params, qubits = (
                 match.group(1),
-                match.group(2),
                 match.group(3),
+                match.group(4),
             )
 
+            if label in custom_gates:
+                # custom gate -> resolve parameters and qubits and prepend
+                # the constituent gate lines to the main list
+                sig_params, sig_qubits, gate_body = custom_gates[label]
+                replacer = {
+                    **dict(zip(sig_params, to_clean_list(params, ","))),
+                    **dict(zip(sig_qubits, to_clean_list(qubits, ","))),
+                }
+
+                # recurse by prepending the translated gate body
+                for gl in reversed(gate_body):
+                    lines.insert(0, gl.format(**replacer))
+
+                continue
+
+            # standard gate -> add to list directly
             if params:
                 params = tuple(
-                    eval(param, {"pi": math.pi})
-                    for param in params.strip("()").split(",")
+                    eval(param, {"pi": math.pi}) for param in params.split(",")
                 )
             else:
                 params = ()
@@ -878,7 +960,6 @@ register_special_gate("SWAP", apply_swap, 2, array=qu.swap(2))
 register_special_gate("IDEN", lambda *_, **__: None, 1, array=qu.identity(2))
 
 
-
 def build_controlled_gate_htn(
     ncontrol,
     gate,
@@ -1446,9 +1527,7 @@ class Circuit:
         opts = {**self.gate_opts, **gate_opts}
 
         if gate.controls:
-            apply_controlled_gate(
-                self._psi, gate, tags=tags, **opts
-            )
+            apply_controlled_gate(self._psi, gate, tags=tags, **opts)
         elif gate.special:
             # these are specified as a general function
             SPECIAL_GATES[gate.label](
@@ -2645,7 +2724,8 @@ class Circuit:
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
         tree = nm_lc.contraction_tree(
-            output_inds=output_inds, optimize=optimize,
+            output_inds=output_inds,
+            optimize=optimize,
         )
 
         if rehearse:
@@ -3272,9 +3352,7 @@ class Circuit:
         if reverse:
             output_inds = output_inds[::-1]
 
-        tree = psi.contraction_tree(
-            output_inds=output_inds, optimize=optimize
-        )
+        tree = psi.contraction_tree(output_inds=output_inds, optimize=optimize)
 
         if rehearse:
             return rehearsal_dict(psi, tree)
