@@ -2,15 +2,16 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-6-1)=
-
-## v1.6.1 (unreleased)
+(whats-new-1-7-0)=
+## v1.7.0 (unreleased)
 
 **Breaking Changes**
 
 - {class}`~quimb.tensor.Circuit` : remove `target_size` in preparation for
   all contraction specifications to be encapsulated at the contract level (e.g.
   with `cotengra`)
+- some TN drawing options (mainly arrow options) have changed due to the
+  backend change detailed below.
 
 **Enhancements:**
 
@@ -25,6 +26,8 @@ Release notes for `quimb`.
   `wedge`, `line_offset` and other tweaks for future use by main TN drawing.
 - [`Circuit`](quimb.tensor.Circuit) : allow any gate to be controlled by any
   number of qubits.
+- [`Circuit`](quimb.tensor.Circuit) : support for parsing `openqasm2`
+  specifications now with custom and nested gate definitions etc.
 - add [`is_cyclic_x`](quimb.tensor.TensorNetwork2D.is_cyclic_x),
   [`is_cyclic_y`](quimb.tensor.TensorNetwork2D.is_cyclic_y) and
   [`is_cyclic_z`](quimb.tensor.TensorNetwork3D.is_cyclic_z) to
@@ -37,7 +40,6 @@ Release notes for `quimb`.
   for constructing MPS from a function that fills the tensors.
 
 (whats-new-1-6-0)=
-
 ## v1.6.0 (2023-09-10)
 
 **Breaking Changes**
@@ -62,7 +64,6 @@ Release notes for `quimb`.
 - fix gauge size check for some backends
 
 (whats-new-1-5-1)=
-
 ## v1.5.1 (2023-07-28)
 
 **Enhancements:**
@@ -83,7 +84,6 @@ Release notes for `quimb`.
 - fix bug where calling `tn.norm()` would mangle indices.
 
 (whats-new-1-5-0)=
-
 ## v1.5.0 (2023-05-03)
 
 **Enhancements**
@@ -148,7 +148,6 @@ Release notes for `quimb`.
   triangular R factors.
 
 (whats-new-1-4-2)=
-
 ## v1.4.2 (28th November 2022)
 
 **Enhancements**
@@ -157,7 +156,6 @@ Release notes for `quimb`.
   [setuptools_scm](https://pypi.org/project/setuptools-scm/) for versioning
 
 (whats-new-1-4-1)=
-
 ## v1.4.1 (28th November 2022)
 
 **Enhancements**
@@ -191,7 +189,6 @@ Release notes for `quimb`.
 > - allow unpickling of `PTensor` objects ({issue}`128`, {pull}`131`)
 
 (whats-new-1-4-0)=
-
 ## v1.4.0 (14th June 2022)
 
 **Enhancements**
@@ -211,7 +208,6 @@ Release notes for `quimb`.
 - Various graph generators and TN builders
 
 (whats-new-1-3-0)=
-
 ## v1.3.0 (18th Feb 2020)
 
 **Enhancements**
@@ -248,7 +244,6 @@ Release notes for `quimb`.
 - Make cache import and initilization of `petsc4py` and `slepc4py` more robust.
 
 (whats-new-1-2-0)=
-
 ## v1.2.0 (6th June 2019)
 
 **Enhancements**

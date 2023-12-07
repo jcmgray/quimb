@@ -1,4 +1,9 @@
 """Tools for quantum circuit simulation using tensor networks.
+
+TODO:
+- [ ] gate-by-gate sampling
+- [ ] sub-MPO apply for MPS simulation
+- [ ] multi qubit gates via MPO for MPS simulation
 """
 
 import functools
@@ -217,7 +222,7 @@ def parse_openqasm2_str(contents):
         if rgxs["error"].match(line):
             # raise hard error for custom tate defns etc
             raise NotImplementedError(
-                f"Custom gate definitions are not supported: {line}"
+                f"The following instruction is not supported: {line}"
             )
 
         if rgxs["gate_def"].match(line):
