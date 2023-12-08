@@ -3,7 +3,7 @@ channels:
   - defaults
 dependencies:
   - autoray>=0.6.7
-  # - cotengra>=0.5.3
+  - cotengra>=0.5.6
   - coverage
   - cytoolz
   - joblib
@@ -22,5 +22,3 @@ dependencies:
   - slepc=*=*complex*
   - slepc4py
   - tqdm
-  - pip:
-    - git+https://github.com/jcmgray/cotengra.git@althash

@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - autoray>=0.6.7
-  # - cotengra>=0.5.3
+  - cotengra>=0.5.6
   - coverage
   - cytoolz
   - joblib
@@ -19,4 +19,3 @@ dependencies:
   - pip
   - pip:
     - tensorflow
-    - git+https://github.com/jcmgray/cotengra.git@althash

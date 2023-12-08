@@ -23,7 +23,7 @@ setup(
     packages=find_packages(exclude=["deps", "tests*"]),
     install_requires=[
         "autoray>=0.6.7",
-        "cotengra>=0.5.3",
+        "cotengra>=0.5.6",
         "cytoolz>=0.8.0",
         "numba>=0.39",
         "numpy>=1.17",
