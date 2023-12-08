@@ -3533,19 +3533,19 @@ def tensor_network_gate_inds(
           GGGGG
           │╱  │╱
         ──●───●──
-          ╱   ╱
+         ╱   ╱
 
     ``contract=True``::
 
           │╱  │╱
         ──GGGGG──
-          ╱   ╱
+         ╱   ╱
 
     ``contract='split'``::
 
           │╱  │╱          │╱  │╱
         ──GGGGG──  ==>  ──G┄┄┄G──
-          ╱   ╱           ╱   ╱
+         ╱   ╱           ╱   ╱
           <SVD>
 
     ``contract='reduce-split'``::
@@ -3554,7 +3554,7 @@ def tensor_network_gate_inds(
           GGGGG             GGG               │ │
           │╱  │╱   ==>     ╱│ │  ╱   ==>     ╱│ │  ╱          │╱  │╱
         ──●───●──       ──>─●─●─<──       ──>─GGG─<──  ==>  ──G┄┄┄G──
-          ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
+         ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
         <QR> <LQ>                            <SVD>
 
     For one site gates when one of these 'split' methods is supplied
@@ -3566,7 +3566,7 @@ def tensor_network_gate_inds(
           G~~~G
           │╱  │╱
         ──●───●──
-          ╱   ╱
+         ╱   ╱
 
     ``contract='swap-split-gate'``::
 
@@ -3576,7 +3576,7 @@ def tensor_network_gate_inds(
           G~~~G
           │╱  │╱
         ──●───●──
-          ╱   ╱
+         ╱   ╱
 
     ``contract='auto-split-gate'`` chooses between the above two and ``False``,
     depending on whether either results in a lower rank.

@@ -8,6 +8,7 @@
 [![Documentation Status](https://readthedocs.org/projects/quimb/badge/?version=latest)](http://quimb.readthedocs.io/en/latest/?badge=latest)
 [![JOSS Paper](http://joss.theoj.org/papers/10.21105/joss.00819/status.svg)](https://doi.org/10.21105/joss.00819)
 [![PyPI](https://img.shields.io/pypi/v/quimb?color=teal)](https://pypi.org/project/quimb/)
+[![Anaconda-Server Badge](https://anaconda.org/conda-forge/quimb/badges/version.svg)](https://anaconda.org/conda-forge/quimb)
 
 [`quimb`](https://github.com/jcmgray/quimb) is an easy but fast python library for *'quantum information many-body'* calculations, focusing primarily on **tensor networks**. The code is hosted on [github](https://github.com/jcmgray/quimb), and docs are hosted on [readthedocs](http://quimb.readthedocs.io/en/latest/). Functionality is split in two:
 
