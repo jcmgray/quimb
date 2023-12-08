@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 (whats-new-1-7-0)=
-## v1.7.0 (unreleased)
+## v1.7.0 (12-08-2023)
 
 **Breaking Changes**
 
@@ -24,6 +24,7 @@ Release notes for `quimb`.
 * add [quimb.schematic.Drawing](quimb.schematic.Drawing) from experimental
   submodule, add example docs at {ref}`schematic`. Add methods `text_between`,
   `wedge`, `line_offset` and other tweaks for future use by main TN drawing.
+- upgrade all contraction to use `cotengra` as the backend
 - [`Circuit`](quimb.tensor.Circuit) : allow any gate to be controlled by any
   number of qubits.
 - [`Circuit`](quimb.tensor.Circuit) : support for parsing `openqasm2`
@@ -38,6 +39,18 @@ Release notes for `quimb`.
   without casting as a [TensorNetwork1D](quimb.tensor.TensorNetwork1D).
 - add [MatrixProductState.from_fill_fn](quimb.tensor.tensor_1d.MatrixProductState.from_fill_fn)
   for constructing MPS from a function that fills the tensors.
+- add [Tensor.idxmin](quimb.tensor.Tensor.idxmin) and
+  [Tensor.idxmax](quimb.tensor.Tensor.idxmax) for finding the index of the
+  minimum/maximum element.
+- 2D and 3D classical partition function TN builders: allow output indices.
+- [`quimb.experimental.belief_propagation`]([`quimb.experimental.belief_propagation`]):
+  add various 1-norm/2-norm dense/lazy BP algorithms.
+
+**Bug fixes:**
+
+- fixed bug where an output index could be removed by squeezing when
+  performing tensor network simplifications.
+
 
 (whats-new-1-6-0)=
 ## v1.6.0 (2023-09-10)

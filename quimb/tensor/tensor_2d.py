@@ -4483,7 +4483,8 @@ class TensorNetwork2DFlat(TensorNetwork2D):
         return b_ix
 
     def bond_size(self, coo1, coo2):
-        """Return the size of the bond between sites at ``coo1`` and ``coo2``.
+        """Return the (combined) size of the bond(s) between sites at ``coo1``
+        and ``coo2``.
         """
         b_ix = self.bond(coo1, coo2)
         return self[coo1].ind_size(b_ix)
@@ -5055,7 +5056,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             The number of columns.
         bond_dim : int
             The bond dimension.
-        physical : int, optional
+        phys_dim : int, optional
             The physical indices dimension.
         shape : str, optional
             How to layout the indices of the tensors, the default is

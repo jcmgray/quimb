@@ -241,7 +241,9 @@ def parse_openqasm2_str(contents):
             # then combine this full gate definition, without newlines
             gate_body = "".join(gate_lines)
             # separate the signature and body
-            gate_sig, gate_body = re.match("(.*)\s*{(.*)}", gate_body).groups()
+            gate_sig, gate_body = re.match(
+                r"(.*)\s*{(.*)}", gate_body
+            ).groups()
 
             # parse the signature
             match = rgxs["gate_sig"].match(gate_sig)
