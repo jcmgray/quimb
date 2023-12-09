@@ -15,7 +15,7 @@ setup(
     name="quimb",
     description="Quantum information and many-body library.",
     long_description=readme(),
-    long_description_content_type="text/x-rst",
+    long_description_content_type="text/markdown",
     url="http://quimb.readthedocs.io",
     author="Johnnie Gray",
     author_email="johnniemcgray@gmail.com",
