@@ -1,23 +1,53 @@
 # Installation
 
-{mod}`quimb` itself is a pure python package and can now be found on PyPI:
+`quimb` is available on both [pypi](https://pypi.org/project/quimb/) and
+[conda-forge](https://anaconda.org/conda-forge/quimb). While `quimb` is
+pure python and has no direct dependencies itself, the recommended distribution
+would be [mambaforge](https://github.com/conda-forge/miniforge#mambaforge)
+for installing the various backend array libraries and their dependencies.
 
+**Installing with `pip`:**
 ```bash
 pip install quimb
 ```
 
-However it is recommended to first install the main dependencies using e.g. `conda`, as below.
-The code is hosted on [github](https://github.com/jcmgray/quimb) and if the dependencies are satisfied, a development version can be installed with pip directly from there:
-
+**Installing with `conda`:**
 ```bash
-pip install --no-deps -U git+https://github.com/jcmgray/quimb.git@main
+conda install -c conda-forge quimb
+```
+
+**Installing with `mambaforge`:**
+```bash
+mamba install quimb
+```
+```{hint}
+Mamba is a faster version of `conda`, and the -forge distritbution comes
+pre-configured with only the `conda-forge` channel, which further simplifies
+and speeds up installing dependencies.
+```
+
+**Installing the latest version directly from github:**
+
+If you want to checkout the latest version of features and fixes, you can
+install directly from the github repository:
+```bash
+pip install -U git+https://github.com/jcmgray/quimb.git
+```
+
+**Installing a local, editable development version:**
+
+If you want to make changes to the source code and test them out, you can
+install a local editable version of the package:
+```bash
+git clone https://github.com/jcmgray/quimb.git
+pip install --no-deps -U -e quimb/
 ```
 
 ## Required Dependencies
 
 The core packages `quimb` requires are:
 
-- python 3.6+
+- python 3.8+
 - [numpy](http://www.numpy.org/)
 - [scipy](https://www.scipy.org/)
 - [numba](http://numba.pydata.org/)
@@ -29,8 +59,8 @@ For ease and performance (i.e. mkl compiled libraries), [conda](https://conda.io
 
 In addition, the tensor network library, {mod}`quimb.tensor`, requires:
 
-- [cotengra](https://github.com/jcmgray/cotengra)
-- [autoray](https://github.com/jcmgray/autoray)
+- [cotengra](https://cotengra.readthedocs.io)
+- [autoray](https://autoray.readthedocs.io)
 
 `cotengra` efficiently optimizes and performs tensor contraction expressions. It can be installed with `pip` or from [conda-forge](https://conda-forge.org) and is a required dependency since various bits of the core `quimb` module now make use tensor-network functionality behind the scenes.
 `autoray` allows backend agnostic numeric code for various tensor network operations so that many libraries other than `numpy` can be used. It can be installed via `pip` from [pypi](https://pypi.org/project/autoray/) or via `conda` [from conda-forge](https://anaconda.org/conda-forge/autoray).
@@ -52,10 +82,14 @@ Finally, fast and optionally distributed partial eigen-solving, SVD, exponentiat
 - [petsc4py](https://bitbucket.org/petsc/petsc4py)
 - [petsc](http://www.mcs.anl.gov/petsc/)
 - [mpi4py](http://mpi4py.readthedocs.io/en/latest/) (v2.1.0+)
-- An MPI implementation ([OpenMPI](https://www.open-mpi.org/) recommended, the 1.10.x series seems most robust for spawning processes)
+- An MPI implementation ([OpenMPI](https://www.open-mpi.org/) recommended, the 1.10.x series seems most robust for spawning processes).
 
-For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options.
-Pip can handle this compilation and installation, for example the following script installs everything necessary on Ubuntu:
+To install these from conda-forge, with complex dtype specified for example, use:
+```bash
+mamba install -c conda-forge mpi4py petsc=*=*complex* petsc4py slepc=*=*complex* slepc4py
+```
+
+For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Pip can handle this compilation and installation, for example the following script installs everything necessary on Ubuntu:
 
 ```bash
 #!/bin/bash
