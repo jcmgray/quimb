@@ -168,7 +168,7 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         if norm(SEk - eye(Ek.shape[-1]), "fro") > 1e-12:
             raise ValueError("Did not find ``sum(E_k.H @ Ek) == 1``.")
 
-    if int(dims is None) + int(where is None) == 1:
+    if (dims is None) and (where is None):
         raise ValueError("If `dims` is specified so should `where`.")
 
     if isinstance(where, numbers.Integral):
@@ -184,34 +184,20 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         kdims = tuple(dims[i] for i in where)
         Ek = Ek.reshape((-1,) + kdims + kdims)
 
-        rho_inds, out, Ei_inds, Ej_inds = [], [], ["K"], ["K"]
-        for i in range(N):
-            if i in where:
-                xi, xj = f"i{i}k", f"j{i}k"
-                for inds in (rho_inds, Ei_inds):
-                    inds.append(xi)
-                for inds in (rho_inds, Ej_inds):
-                    inds.append(xj)
-                xi, xj = f"i{i}new", f"j{i}new"
-                for inds in (out, Ei_inds):
-                    inds.append(xi)
-                for inds in (out, Ej_inds):
-                    inds.append(xj)
-            else:
-                xi, xj = f"i{i}", f"j{i}"
-                for inds in (rho_inds, out):
-                    inds.append(xi)
-                    inds.append(xj)
-
-        rho_inds = tuple(sorted(rho_inds))
-        out = tuple(sorted(out))
-        Ei_inds = tuple(sorted(Ei_inds))
-        Ej_inds = tuple(sorted(Ej_inds))
+        rho_inds = (
+            *(f"i*{q}" if q in where else f"i{q}" for q in range(N)),
+            *(f"j*{q}" if q in where else f"j{q}" for q in range(N)),
+        )
+        Ei_inds = ("K", *(f"i{q}" for q in where), *(f"i*{q}" for q in where))
+        Ej_inds = ("K", *(f"j{q}" for q in where), *(f"j*{q}" for q in where))
+        out = (*(f"i{q}" for q in range(N)), *(f"j{q}" for q in range(N)))
     else:
-        rho_inds = ("ik", "jk")
-        out = ("inew", "jnew")
-        Ei_inds = ("K", "inew", "ik")
-        Ej_inds = ("K", "jnew", "jk")
+        Ei_inds = ("K", "i", "i*")
+        rho_inds = ("i*", "j*")
+        Ej_inds = ("K", "j", "j*")
+        out = ("i", "j")
+
+    print(Ei_inds, rho_inds, Ej_inds, out)
 
     sigma = array_contract(
         (Ek, rho, Ek.conj()),

@@ -148,11 +148,20 @@ class TestKrausOp:
             else:
                 assert p[0] == p[1] == 'I'
         K = qu.rand_iso(3 * 4, 4).reshape(3, 4, 4)
-        KIIXK = qu.kraus_op(IIX, K, dims=dims, where=[0, 2])
+        KIIXK = qu.kraus_op(IIX, K, dims=dims, where=[0, 2], check=True)
         dcmp = qu.pauli_decomp(KIIXK, mode='c')
         for p, x in dcmp.items():
              if abs(x) > 1e-12:
-                assert (p == 'III') or p[0] != 'I'
+                assert (p == 'III') or p[1] == 'I'
+
+    @pytest.mark.parametrize("subsystem", [(0, 1), (1, 2), (2, 0)])
+    def test_multisubsytem_kraus_identity(self, subsystem):
+        n = 3
+        qu.seed_rand(7)
+        rho = qu.rand_rho(2**n)
+        Ek = np.array([qu.eye(2**len(subsystem))])
+        sigma = qu.kraus_op(rho, Ek, dims=[2] * n, where=[0, 1], check=True)
+        assert qu.fidelity(rho, sigma) == pytest.approx(1.0)
 
 
 class TestProjector:
