@@ -168,7 +168,7 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         if norm(SEk - eye(Ek.shape[-1]), "fro") > 1e-12:
             raise ValueError("Did not find ``sum(E_k.H @ Ek) == 1``.")
 
-    if (dims is None) and (where is None):
+    if int(dims is None) + int(where is None) == 1:
         raise ValueError("If `dims` is specified so should `where`.")
 
     if isinstance(where, numbers.Integral):
