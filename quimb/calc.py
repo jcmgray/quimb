@@ -197,8 +197,6 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         Ej_inds = ("K", "j", "j*")
         out = ("i", "j")
 
-    print(Ei_inds, rho_inds, Ej_inds, out)
-
     sigma = array_contract(
         (Ek, rho, Ek.conj()),
         (Ei_inds, rho_inds, Ej_inds),
