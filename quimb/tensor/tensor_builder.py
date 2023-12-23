@@ -2758,6 +2758,10 @@ def cnf_file_parse(fname):
     with open(fname, "r") as f:
         for line in f:
             args = line.split()
+            
+            # ignore empty lines, other comments and info line
+            if (not args) or (args == ["0"]) or (args[0][0] in "c%"):
+                continue
 
             # global info, just record
             if args[0] == "p":
@@ -2788,10 +2792,6 @@ def cnf_file_parse(fname):
                     continue
 
                 weights[int(sgn_var)] = float(w)
-                continue
-
-            # ignore empty lines, other comments and info line
-            if (not args) or (args == ["0"]) or (args[0][0] in "c%"):
                 continue
 
             # clause tensor, drop last '0' (endline marker) and empty strings
