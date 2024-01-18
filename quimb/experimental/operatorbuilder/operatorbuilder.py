@@ -1008,7 +1008,8 @@ def comb(n, k):
 
 @njit
 def get_all_equal_weight_bits(n, k, dtype=np.int64):
-    """Get an array of all 'bits' (integers), with n bits, and k of them set."""
+    """Get an array of all 'bits' (integers), with n bits, and k of them set.
+    """
     if k == 0:
         return np.array([0], dtype=dtype)
 
