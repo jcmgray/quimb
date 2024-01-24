@@ -1716,12 +1716,38 @@ def choose_squarest_grid(x):
 
 def visualize_tensors(
     tn,
+    mode="network",
     r=None,
     r_scale=1.0,
     figsize=None,
-    mode="network",
     **visualize_opts,
 ):
+    """Visualize all the entries of every tensor in this network.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to visualize.
+    mode : {'network', 'grid', 'row', 'col'}, optional
+        How to arrange each tensor's visualization.
+
+        - ``'network'``: arrange each tensor's visualization according to the
+            automatic layout given by ``draw``.
+        - ``'grid'``: arrange each tensor's visualization in a grid.
+        - ``'row'``: arrange each tensor's visualization horizontally.
+        - ``'col'``: arrange each tensor's visualization vertically.
+
+    r : float, optional
+        The absolute radius of each tensor's visualization, when
+        ``mode='network'``.
+    r_scale : float, optional
+        A relative scaling factor for the radius of each tensor's
+        visualization, when ``mode='network'``.
+    figsize : tuple, optional
+        The size of the figure to create, if ``ax`` is not provided.
+    visualize_opts
+        Supplied to ``visualize_tensor``.
+    """
     from matplotlib import pyplot as plt
 
     if figsize is None:
