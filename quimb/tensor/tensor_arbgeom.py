@@ -10,13 +10,13 @@ from autoray import do, dag, size
 from ..utils import check_opt, deprecated, ensure_dict
 from ..utils import progbar as Progbar
 from .tensor_core import (
-    get_symbol,
     group_inds,
     oset,
     rand_uuid,
     tags_to_oset,
     TensorNetwork,
 )
+from .contraction import get_symbol
 from . import decomp
 
 

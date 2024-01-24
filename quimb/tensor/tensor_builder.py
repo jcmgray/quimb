@@ -490,6 +490,7 @@ def TN_rand_reg(
     dtype="float64",
     site_tag_id="I{}",
     site_ind_id="k{}",
+    **randn_opts,
 ):
     """Create a random regular tensor network.
 
@@ -527,6 +528,7 @@ def TN_rand_reg(
         dtype=dtype,
         site_tag_id=site_tag_id,
         site_ind_id=site_ind_id,
+        **randn_opts,
     )
 
 
@@ -538,6 +540,7 @@ def TN_rand_tree(
     dtype="float64",
     site_tag_id="I{}",
     site_ind_id="k{}",
+    **randn_opts,
 ):
     """Create a random tree tensor network.
 
@@ -572,6 +575,7 @@ def TN_rand_tree(
         dtype=dtype,
         site_tag_id=site_tag_id,
         site_ind_id=site_ind_id,
+        **randn_opts,
     )
 
 
@@ -2758,7 +2762,7 @@ def cnf_file_parse(fname):
     with open(fname, "r") as f:
         for line in f:
             args = line.split()
-            
+
             # ignore empty lines, other comments and info line
             if (not args) or (args == ["0"]) or (args[0][0] in "c%"):
                 continue

@@ -1898,9 +1898,16 @@ class Tensor:
         # TODO: make this more efficient with inplace |= ?
         self.modify(tags=itertools.chain(self.tags, tags))
 
-    def expand_ind(self, ind, size):
+    def expand_ind(
+        self,
+        ind,
+        size,
+        mode=None,
+        rand_strength=None,
+        rand_dist="normal",
+    ):
         """Inplace increase the size of the dimension of ``ind``, the new array
-        entries will be filled with zeros.
+        entries will be filled with zeros by default.
 
         Parameters
         ----------
@@ -1908,18 +1915,84 @@ class Tensor:
             Name of the index to expand.
         size : int, optional
             Size of the expanded index.
+        mode : {None, 'zeros', 'repeat', 'random'}, optional
+            How to fill any new array entries. If ``'zeros'`` then fill with
+            zeros, if ``'repeat'`` then repeatedly tile the existing entries.
+            If ``'random'`` then fill with random entries drawn from
+            ``rand_dist``, multiplied by ``rand_strength``. If ``None`` then
+            select from zeros or random depening on non-zero ``rand_strength``.
+        rand_strength : float, optional
+            If ``mode='random'``, a multiplicative scale for the random
+            entries, defaulting to 1.0. If ``mode is None`` then supplying a
+            non-zero value here triggers ``mode='random'``.
+        rand_dist : {'normal', 'uniform', 'exp'}, optional
+            If ``mode='random'``, the distribution to draw the random entries
+            from.
         """
         if ind not in self.inds:
             raise ValueError(f"Tensor has no index '{ind}'.")
 
         size_current = self.ind_size(ind)
-        pads = [
-            (0, size - size_current) if i == ind else (0, 0)
-            for i in self.inds
-        ]
-        self.modify(data=do('pad', self.data, pads, mode='constant'))
+        if size_current >= size:
+            # nothing to do
+            return
 
-    def new_ind(self, name, size=1, axis=0):
+        # auto select mode
+        if mode is None:
+            if (rand_strength is not None) and (rand_strength != 0.0):
+                mode = "random"
+            else:
+                mode = "zeros"
+
+        if mode == "zeros":
+            pads = [
+                (0, size - size_current) if i == ind else (0, 0)
+                for i in self.inds
+            ]
+            new_data = do("pad", self.data, pads, mode="constant")
+
+        elif mode == "repeat":
+            num_repeats = size // size_current
+            if size % size_current != 0:
+                raise ValueError(
+                    f"Cannot expand index '{ind}' to size {size} by repeating "
+                    f"the existing entries as this is not an integer multiple "
+                    f"of the current size {size_current}."
+                )
+            axis = self.inds.index(ind)
+            new_data = do("concatenate", (self.data,) * num_repeats, axis=axis)
+
+        elif mode == "random":
+
+            if rand_strength is None:
+                # assume if "random" mode selected then want non-zero strength
+                rand_strength = 1.0
+
+            axis = self.inds.index(ind)
+            rand_shape = list(self.shape)
+            rand_shape[axis] = size - size_current
+            rand_data = randn(
+                shape=tuple(rand_shape),
+                dtype=self.dtype,
+                dist=rand_dist,
+                scale=rand_strength,
+            )
+            new_data = do("concatenate", (self.data, rand_data), axis=axis)
+
+        else:
+            raise ValueError(f"Invalid mode '{mode}'.")
+
+        self.modify(data=new_data)
+
+    def new_ind(
+        self,
+        name,
+        size=1,
+        axis=0,
+        mode=None,
+        rand_strength=None,
+        rand_dist="normal",
+    ):
         """Inplace add a new index - a named dimension. If ``size`` is
         specified to be greater than one then the new array entries will be
         filled with zeros.
@@ -1932,6 +2005,23 @@ class Tensor:
             Size of the new index.
         axis : int, optional
             Position of the new index.
+        mode : {None, 'zeros', 'repeat', 'random'}, optional
+            How to fill any new array entries. If ``'zeros'`` then fill with
+            zeros, if ``'repeat'`` then repeatedly tile the existing entries.
+            If ``'random'`` then fill with random entries drawn from
+            ``rand_dist``, multiplied by ``rand_strength``. If ``None`` then
+            select from zeros or random depening on non-zero ``rand_strength``.
+        rand_strength : float, optional
+            If ``mode='random'``, a multiplicative scale for the random
+            entries, defaulting to 1.0. If ``mode is None`` then supplying a
+            non-zero value here triggers ``mode='random'``.
+        rand_dist : {'normal', 'uniform', 'exp'}, optional
+            If ``mode='random'``, the distribution to draw the random entries
+            from.
+
+        See Also
+        --------
+        Tensor.expand_ind, new_bond
         """
         new_inds = list(self.inds)
 
@@ -1939,13 +2029,20 @@ class Tensor:
         if axis < 0:
             axis = len(new_inds) + axis + 1
 
+        # initially create size-1 index / dimension
         new_inds.insert(axis, name)
-
         new_data = do("expand_dims", self.data, axis=axis)
-
         self.modify(data=new_data, inds=new_inds)
+
         if size > 1:
-            self.expand_ind(name, size, mode=mode)
+            # tile or pad it to the desired size
+            self.expand_ind(
+                ind=name,
+                size=size,
+                mode=mode,
+                rand_strength=rand_strength,
+                rand_dist=rand_dist,
+            )
 
     new_bond = new_bond
 
@@ -2048,9 +2145,8 @@ class Tensor:
         return bonds_size(self, other)
 
     def inner_inds(self):
-        """ """
-        ind_freqs = frequencies(self.inds)
-        return tuple(i for i in self.inds if ind_freqs[i] == 2)
+        """Get all indices that appear on two or more tensors."""
+        return tuple(self._inner_inds)
 
     def transpose(self, *output_inds, inplace=False):
         """Transpose this tensor - permuting the order of both the data *and*
@@ -9089,7 +9185,9 @@ class TensorNetwork(object):
     def expand_bond_dimension(
         self,
         new_bond_dim,
-        rand_strength=0.0,
+        mode=None,
+        rand_strength=None,
+        rand_dist="normal",
         inds_to_expand=None,
         inplace=False,
     ):
@@ -9120,30 +9218,38 @@ class TensorNetwork(object):
 
         if inds_to_expand is None:
             # find all 'bonds' - indices connecting two or more tensors
-            inds_to_expand = set()
-            for ind, tids in tn.ind_map.items():
-                if len(tids) >= 2:
-                    inds_to_expand.add(ind)
+            inds_to_expand = self._inner_inds
         else:
             inds_to_expand = tags_to_oset(inds_to_expand)
 
         for t in tn._inds_get(*inds_to_expand):
-            # perform the array expansions
-            pads = [
-                (0, 0)
-                if ind not in inds_to_expand
-                else (0, max(new_bond_dim - d, 0))
-                for d, ind in zip(t.shape, t.inds)
-            ]
-
-            if rand_strength > 0:
-                edata = do(
-                    "pad",
-                    t.data,
-                    pads,
-                    mode=rand_padder,
-                    rand_strength=rand_strength,
+            for ind in t.inds:
+                if ind in inds_to_expand:
+                    t.expand_ind(
+                        ind,
+                        new_bond_dim,
+                        mode=mode,
+                        rand_strength=rand_strength,
+                        rand_dist=rand_dist,
                 )
+                )
+                )
+            else:
+                edata = do("pad", t.data, pads, mode="constant")
+
+            t.modify(data=edata)
+                    )
+            else:
+                edata = do("pad", t.data, pads, mode="constant")
+
+            t.modify(data=edata)
+                    )
+                )
+            else:
+                edata = do("pad", t.data, pads, mode="constant")
+
+            t.modify(data=edata)
+                    )
             else:
                 edata = do("pad", t.data, pads, mode="constant")
 

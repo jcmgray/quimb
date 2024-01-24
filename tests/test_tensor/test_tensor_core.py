@@ -706,6 +706,33 @@ class TestTensorFunctions:
         assert t.idxmin("abs") == {"a": 0, "b": 2, "c": 3}
         assert t.idxmax(lambda x: 1 / x) == {"a": 1, "b": 0, "c": 0}
 
+    def test_expand_ind(self):
+        t = Tensor(np.ones((2, 3, 4)), inds=["a", "b", "c"])
+        assert t.data.sum() == pytest.approx(24)
+
+        # test zeros mode
+        t0 = t.copy()
+        t0.expand_ind("a", size=6, mode="zeros")
+        assert t0.data.sum() == pytest.approx(24)
+
+        # test tiling mode
+        tt = t.copy()
+        tt.expand_ind("a", size=6, mode="repeat")
+        assert tt.data.sum() == pytest.approx(72)
+
+        # test random mode
+        tr = t.copy()
+        tr.expand_ind("a", size=6, mode="random", rand_dist="uniform")
+        assert 24 <= tr.data.sum() <= 72
+
+        tr = t.copy()
+        tr.expand_ind("a", size=6, rand_strength=1.0, rand_dist="uniform")
+        assert 24 <= tr.data.sum() <= 72
+
+        tr = t.copy()
+        tr.expand_ind("a", size=6, rand_strength=-1.0, rand_dist="uniform")
+        assert -48 <= tr.data.sum() <= 24
+
 
 class TestTensorNetwork:
     def test_combining_tensors(self):
@@ -1285,6 +1312,22 @@ class TestTensorNetwork:
         tn = k1 | k2
         s1, s2 = tn.subgraphs()
         assert {s1.num_tensors, s2.num_tensors} == {6, 8}
+
+    def test_expand_bond_dimension_zeros(self):
+        k = MPS_rand_state(10, 7)
+        k0 = k.copy()
+        k0.expand_bond_dimension(13)
+        assert k0.max_bond() == 13
+        assert k0.ind_size("k0") == 2
+        assert k0.distance(k) == pytest.approx(0.0)
+
+    def test_expand_bond_dimension_random(self):
+        tn = qtn.TN_rand_reg(6, 3, 2, dist="uniform")
+        Z = tn ^ ...
+        # expand w/ positive random entries -> contraction value must increase
+        tn.expand_bond_dimension_(3, rand_strength=0.1, rand_dist="uniform")
+        Ze = tn ^ ...
+        assert Ze > Z
 
     def test_compress_multibond(self):
         A = rand_tensor((7, 2, 2), "abc", tags="A")
