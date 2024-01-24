@@ -2,6 +2,17 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-7-1)=
+## v1.7.1 (unreleased)
+
+**Bug fixes:**
+
+- fix bug in [`kruas_op`](quimb.kraus_op) when operator spanned multiple
+  subsystems ({issue}`214`)
+- fix bug in [`qr_stabilized`](quimb.decomp.qr_stabilized) when the diagonal of
+  `R` has significant imaginary parts.
+
+
 (whats-new-1-7-0)=
 ## v1.7.0 (12-08-2023)
 

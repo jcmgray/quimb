@@ -616,7 +616,7 @@ def qr_stabilized(x, backend=None):
         # stabilize the diagonal of R
         rd = do("diag", R)
         s = sgn(rd)
-        Q = rdmul(Q, s)
+        Q = rdmul(Q, do("conj", s))
         R = ldmul(s, R)
         return Q, None, R
 
@@ -629,7 +629,7 @@ def qr_stabilized_numba(x):
         rii = R[i, i]
         si = sgn_numba(rii)
         if si != 1.0:
-            Q[:, i] *= si
+            Q[:, i] *= np.conj(si)
             R[i, i:] *= si
     return Q, None, R
 
