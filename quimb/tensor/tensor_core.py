@@ -9231,29 +9231,7 @@ class TensorNetwork(object):
                         mode=mode,
                         rand_strength=rand_strength,
                         rand_dist=rand_dist,
-                )
-                )
-                )
-            else:
-                edata = do("pad", t.data, pads, mode="constant")
-
-            t.modify(data=edata)
                     )
-            else:
-                edata = do("pad", t.data, pads, mode="constant")
-
-            t.modify(data=edata)
-                    )
-                )
-            else:
-                edata = do("pad", t.data, pads, mode="constant")
-
-            t.modify(data=edata)
-                    )
-            else:
-                edata = do("pad", t.data, pads, mode="constant")
-
-            t.modify(data=edata)
 
         return tn
 
