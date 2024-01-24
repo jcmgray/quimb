@@ -520,8 +520,10 @@ class TestQuantumDiscord:
         qd = qu.quantum_discord(p, [2, 2, 2], 0, 2)
         assert 0 <= qd and qd <= 1
 
-    def test_qu_discord_diagonal(self):
-        p = np.random.rand(4)
+    @pytest.mark.parametrize("seed", range(10))
+    def test_qu_discord_diagonal(self, seed):
+        rng = np.random.RandomState(seed)
+        p = rng.random(size=4)
         p /= np.sum(p)
         rho = np.diag(p)
         assert qu.quantum_discord(rho) < 1e-10

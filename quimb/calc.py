@@ -956,6 +956,7 @@ def quantum_discord(
     sysb=1,
     method="COBYLA",
     tol=1e-12,
+    maxiter=2**14,
 ):
     """Quantum Discord for two qubit density operator.
 
@@ -996,6 +997,9 @@ def quantum_discord(
         method=method,
         bounds=((0, pi), (0, 2 * pi)),
         tol=tol,
+        options=dict(
+            maxiter=maxiter,
+        ),
     )
     if opt.success:
         return opt.fun
