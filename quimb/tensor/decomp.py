@@ -487,14 +487,46 @@ def svdvals_eig(x):  # pragma: no cover
     return s2[::-1] ** 0.5
 
 
+@compose
+def eigh_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    backend=None,
+):
+    with backend_like(backend):
+        s, U = do("linalg.eigh", x)
+
+        # make sure largest singular value first
+        k = do("argsort", -do("abs", s))
+        s, U = s[k], U[:, k]
+
+        # absorb phase into V
+        V = ldmul(sgn(s), dag(U))
+        s = do("abs", s)
+        return _trim_and_renorm_svd_result(
+            U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
+        )
+
+
+@eigh_truncated.register("numpy")
 @njit  # pragma: no cover
-def eigh(x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
+def eigh_truncated_numba(
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
     ``x`` is hermitian.
     """
     s, U = np.linalg.eigh(x)
-    s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
 
+    # make sure largest singular value first
+    k = np.argsort(-np.abs(s))
+    s, U = s[k], U[:, k]
+
+    # absorb phase into V
     V = ldmul_numba(sgn_numba(s), dag_numba(U))
     s = np.abs(s)
     return _trim_and_renorm_svd_result_numba(
@@ -597,7 +629,7 @@ def eigsh(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     if k == "full":
         if not isinstance(x, np.ndarray):
             x = x.to_dense()
-        return eigh(x, cutoff, cutoff_mode, max_bond, absorb)
+        return eigh_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
 
     s, U = base_linalg.eigh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first

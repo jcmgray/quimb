@@ -28,7 +28,7 @@ from .tensor_core import (
 )
 from .array_ops import asarray, sensibly_scale, reshape, do
 from .contraction import array_contract
-from .decomp import eigh
+from .decomp import eigh_truncated
 from .tensor_arbgeom import (
     TensorNetworkGen,
     TensorNetworkGenVector,
@@ -1785,7 +1785,7 @@ def classical_ising_sqrtS_matrix(beta, j=1.0, asymm=None):
     network.
     """
     if (j < 0.0) and (asymm is not None):
-        Slr = eigh(classical_ising_S_matrix(beta=beta, j=j))
+        Slr = eigh_truncated(classical_ising_S_matrix(beta=beta, j=j))
         S_1_2 = {
             "l": Slr[0],
             "lT": Slr[0].T,
