@@ -11,9 +11,22 @@ import numpy as np
 import numpy.random
 import scipy.sparse as sp
 
-from ..core import (qarray, dag, dot, rdmul, complex_array, get_thread_pool,
-                    _NUM_THREAD_WORKERS, qu, ptr, kron, nmlz, prod,
-                    vectorize, pvectorize)
+from ..core import (
+    _NUM_THREAD_WORKERS,
+    complex_array,
+    dag,
+    dot,
+    get_thread_pool,
+    kron,
+    nmlz,
+    prod,
+    ptr,
+    pvectorize,
+    qarray,
+    qu,
+    rdmul,
+    vectorize,
+)
 
 
 class _RGenHandler:
@@ -91,8 +104,10 @@ class _RGenHandler:
         num_gens = len(self.rgs)
 
         if num_gens < num_threads:
-            self.rgs.extend(self.gen_fn(next(self.seeds))
-                            for _ in range(num_gens, num_threads))
+            self.rgs.extend(
+                self.gen_fn(next(self.seeds))
+                for _ in range(num_gens, num_threads)
+            )
 
         return self.rgs[:num_threads]
 
@@ -126,8 +141,15 @@ def _get_rgens(num_threads):
     return _RG_HANDLER.get_rgens(num_threads)
 
 
-def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
-          num_threads=None, seed=None, dist='normal'):
+def randn(
+    shape=(),
+    dtype=float,
+    scale=1.0,
+    loc=0.0,
+    num_threads=None,
+    seed=None,
+    dist="normal",
+):
     """Fast multithreaded generation of random normally distributed data.
 
     Parameters
@@ -166,9 +188,9 @@ def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
     rgs = _get_rgens(num_threads)
 
     gen_method = {
-        'uniform': 'random',
-        'normal': 'standard_normal',
-        'exp': 'standard_exponential',
+        "uniform": "random",
+        "normal": "standard_normal",
+        "exp": "standard_exponential",
     }.get(dist, dist)
 
     # sequential generation
@@ -225,7 +247,7 @@ def randn(shape=(), dtype=float, scale=1.0, loc=0.0,
 
 @wraps(randn)
 def rand(*args, **kwargs):
-    kwargs.setdefault('dist', 'uniform')
+    kwargs.setdefault("dist", "uniform")
     return randn(*args, **kwargs)
 
 
@@ -256,8 +278,7 @@ choice = random_seed_fn(_choice)
 
 @random_seed_fn
 def rand_rademacher(shape, scale=1, loc=0.0, dtype=float):
-    """
-    """
+    """ """
     if np.issubdtype(dtype, np.floating):
         entries = loc + np.array([1.0, -1.0]) * scale
         need2convert = dtype not in (float, np.float_)
@@ -267,8 +288,9 @@ def rand_rademacher(shape, scale=1, loc=0.0, dtype=float):
         need2convert = dtype not in (complex, np.complex_)
 
     else:
-        raise TypeError(f"dtype {dtype} not understood - should be float or "
-                        "complex.")
+        raise TypeError(
+            f"dtype {dtype} not understood - should be float or " "complex."
+        )
 
     x = _choice(entries, shape)
     if need2convert:
@@ -281,7 +303,7 @@ def _phase_to_complex_base(x):
     return 1j * math.sin(x) + math.cos(x)
 
 
-_phase_sigs = ['complex64(float32)', 'complex128(float64)']
+_phase_sigs = ["complex64(float32)", "complex128(float64)"]
 _phase_to_complex_seq = vectorize(_phase_sigs)(_phase_to_complex_base)
 """Turn array of phases into unit circle complex numbers - sequential.
 """
@@ -299,8 +321,7 @@ def phase_to_complex(x):
 
 @random_seed_fn
 def rand_phase(shape, scale=1, dtype=complex):
-    """Generate random complex numbers distributed on the unit sphere.
-    """
+    """Generate random complex numbers distributed on the unit sphere."""
     if not np.issubdtype(dtype, np.complexfloating):
         raise ValueError(f"dtype must be complex, got '{dtype}'.")
 
@@ -309,7 +330,7 @@ def rand_phase(shape, scale=1, dtype=complex):
     else:
         sub_dtype = np.float64
 
-    phi = randn(shape, dtype=sub_dtype, scale=2 * math.pi, dist='uniform')
+    phi = randn(shape, dtype=sub_dtype, scale=2 * math.pi, dist="uniform")
     z = phase_to_complex(phi)
     if scale != 1:
         z *= scale
@@ -317,8 +338,15 @@ def rand_phase(shape, scale=1, dtype=complex):
     return z
 
 
-def rand_matrix(d, scaled=True, sparse=False, stype='csr',
-                density=None, dtype=complex, seed=None):
+def rand_matrix(
+    d,
+    scaled=True,
+    sparse=False,
+    stype="csr",
+    density=None,
+    dtype=complex,
+    seed=None,
+):
     """Generate a random matrix of order `d` with normally distributed
     entries. If `scaled` is `True`, then in the limit of large `d` the
     eigenvalues will be distributed on the unit complex disk.
@@ -350,8 +378,9 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
     elif np.issubdtype(dtype, np.complexfloating):
         iscomplex = True
     else:
-        raise TypeError(f"dtype {dtype} not understood - should be "
-                        "float or complex.")
+        raise TypeError(
+            f"dtype {dtype} not understood - should be " "float or complex."
+        )
 
     # handle seed manually since standard python random.seed might be called
     if seed is not None:
@@ -360,7 +389,13 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
     if sparse:
         # Aim for 10 non-zero values per row, but betwen 1 and d/2
         density = min(10, d / 2) / d if density is None else density
-        density = min(max(d**-2, density, ), 1.0)
+        density = min(
+            max(
+                d**-2,
+                density,
+            ),
+            1.0,
+        )
         nnz = round(density * d * d)
 
         if density > 0.1:
@@ -381,7 +416,7 @@ def rand_matrix(d, scaled=True, sparse=False, stype='csr',
         mat = qarray(randn((d, d), dtype=dtype))
 
     if scaled:
-        mat /= ((2 if iscomplex else 1) * d * density)**0.5
+        mat /= ((2 if iscomplex else 1) * d * density) ** 0.5
 
     return mat
 
@@ -401,13 +436,14 @@ def rand_herm(d, sparse=False, density=None, dtype=complex):
         density = min(max(density, d**-2), 1 - d**-2)
         density /= 2  # to account of herm construction
 
-    herm = rand_matrix(d, scaled=True, sparse=sparse,
-                       density=density, dtype=dtype)
+    herm = rand_matrix(
+        d, scaled=True, sparse=sparse, density=density, dtype=dtype
+    )
 
     if sparse:
-        herm.data /= (2**1.5)
+        herm.data /= 2**1.5
     else:
-        herm /= (2**1.5)
+        herm /= 2**1.5
 
     herm += dag(herm)
 
@@ -427,10 +463,11 @@ def rand_pos(d, sparse=False, density=None, dtype=complex):
     if sparse:
         density = 10 / d if density is None else density
         density = min(max(density, d**-2), 1 - d**-2)
-        density = 0.5 * (density / d)**0.5  # to account for pos construction
+        density = 0.5 * (density / d) ** 0.5  # to account for pos construction
 
-    pos = rand_matrix(d, scaled=True, sparse=sparse,
-                      density=density, dtype=dtype)
+    pos = rand_matrix(
+        d, scaled=True, sparse=sparse, density=density, dtype=dtype
+    )
 
     return dot(pos, dag(pos))
 
@@ -463,9 +500,8 @@ def rand_uni(d, dtype=complex):
 
 
 @random_seed_fn
-def rand_ket(d, sparse=False, stype='csr', density=0.01, dtype=complex):
-    """Generates a ket of length `d` with normally distributed entries.
-    """
+def rand_ket(d, sparse=False, stype="csr", density=0.01, dtype=complex):
+    """Generates a ket of length `d` with normally distributed entries."""
     if sparse:
         ket = sp.random(d, 1, format=stype, density=density)
         ket.data = randn((ket.nnz,), dtype=dtype)
@@ -496,7 +532,7 @@ def gen_rand_haar_states(d, reps, dtype=complex):
 
 
 @random_seed_fn
-def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand', dtype=complex):
+def rand_mix(d, tr_d_min=None, tr_d_max=None, mode="rand", dtype=complex):
     """Constructs a random mixed state by tracing out a random ket
     where the composite system varies in size between 2 and d. This produces
     a spread of states including more purity but has no real meaning.
@@ -507,9 +543,9 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand', dtype=complex):
         tr_d_max = d
 
     m = _randint(tr_d_min, tr_d_max)
-    if mode == 'rand':
+    if mode == "rand":
         psi = rand_ket(d * m, dtype=dtype)
-    elif mode == 'haar':
+    elif mode == "haar":
         psi = rand_haar_state(d * m, dtype=dtype)
 
     return ptr(psi, [d, m], 0)
@@ -517,23 +553,30 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode='rand', dtype=complex):
 
 @random_seed_fn
 def rand_product_state(n, qtype=None, dtype=complex):
-    """Generates a ket of `n` many random pure qubits.
-    """
+    """Generates a ket of `n` many random pure qubits."""
+
     def gen_rand_pure_qubits(n):
         for _ in range(n):
-            u, = rand(1)
-            v, = rand(1)
+            (u,) = rand(1)
+            (v,) = rand(1)
             phi = 2 * np.pi * u
             theta = np.arccos(2 * v - 1)
-            yield qu([[np.cos(theta / 2.0)],
-                      [np.sin(theta / 2.0) * np.exp(1.0j * phi)]],
-                     qtype=qtype, dtype=dtype)
+            yield qu(
+                [
+                    [np.cos(theta / 2.0)],
+                    [np.sin(theta / 2.0) * np.exp(1.0j * phi)],
+                ],
+                qtype=qtype,
+                dtype=dtype,
+            )
+
     return kron(*gen_rand_pure_qubits(n))
 
 
 @random_seed_fn
-def rand_matrix_product_state(n, bond_dim, phys_dim=2, dtype=complex,
-                              cyclic=False, trans_invar=False):
+def rand_matrix_product_state(
+    n, bond_dim, phys_dim=2, dtype=complex, cyclic=False, trans_invar=False
+):
     """Generate a random matrix product state (in dense form, see
     :func:`~quimb.tensor.MPS_rand_state` for tensor network form).
 
@@ -560,8 +603,14 @@ def rand_matrix_product_state(n, bond_dim, phys_dim=2, dtype=complex,
     """
     from quimb.tensor import MPS_rand_state
 
-    mps = MPS_rand_state(n, bond_dim, phys_dim=phys_dim, dtype=dtype,
-                         cyclic=cyclic, trans_invar=trans_invar)
+    mps = MPS_rand_state(
+        n,
+        bond_dim,
+        phys_dim=phys_dim,
+        dtype=dtype,
+        cyclic=cyclic,
+        trans_invar=trans_invar,
+    )
     return mps.to_dense()
 
 
@@ -602,8 +651,7 @@ def rand_seperable(dims, num_mix=10, dtype=complex):
 
 @random_seed_fn
 def rand_iso(n, m, dtype=complex):
-    """Generate a random isometry of shape ``(n, m)``.
-    """
+    """Generate a random isometry of shape ``(n, m)``."""
     data = randn((n, m), dtype=dtype)
 
     q, _ = np.linalg.qr(data if n >= m else data.T)
