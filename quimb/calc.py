@@ -949,7 +949,14 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 
 @zeroify
-def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
+def quantum_discord(
+    p,
+    dims=(2, 2),
+    sysa=0,
+    sysb=1,
+    method="COBYLA",
+    tol=1e-12,
+):
     """Quantum Discord for two qubit density operator.
 
     If ``len(dims) > 2``, then the non-target dimensions will be traced out
@@ -984,7 +991,11 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
         return iab - owci((prja, prjb))
 
     opt = minimize(
-        trial_qd, (pi / 2, pi), method="SLSQP", bounds=((0, pi), (0, 2 * pi))
+        trial_qd,
+        (pi / 2, pi),
+        method=method,
+        bounds=((0, pi), (0, 2 * pi)),
+        tol=tol,
     )
     if opt.success:
         return opt.fun
