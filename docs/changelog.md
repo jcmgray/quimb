@@ -5,12 +5,18 @@ Release notes for `quimb`.
 (whats-new-1-7-1)=
 ## v1.7.1 (unreleased)
 
+** Enhancements:**
+
+- add [TensorNetwork.visualize_tensors](quimb.tensor.TensorNetwork.visualize_tensors)
+  for visualizing the actual data entries of an entire tensor network.
+
 **Bug fixes:**
 
 - fix bug in [`kruas_op`](quimb.kraus_op) when operator spanned multiple
   subsystems ({issue}`214`)
 - fix bug in [`qr_stabilized`](quimb.decomp.qr_stabilized) when the diagonal of
   `R` has significant imaginary parts.
+- fix bug in quantum discord computation when the state was diagonal ({issue}`217`)
 
 
 (whats-new-1-7-0)=
