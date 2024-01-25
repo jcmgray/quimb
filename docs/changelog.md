@@ -7,8 +7,18 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add [TensorNetwork.visualize_tensors](quimb.tensor.drawing.visualize_tensors)
+- add [`TensorNetwork.visualize_tensors`](quimb.tensor.drawing.visualize_tensors)
   for visualizing the actual data entries of an entire tensor network.
+- add [`ham.build_mpo_propagator_trotterized`](quimb.tensor.tensor_1d_tebd.LocalHam1D.build_mpo_propagator_trotterized)
+  for building a trotterized propagator from a local 1D hamiltonian. This
+  also includes updates for creating 'empty' tensor networks using
+  [`TensorNetwork.new`](quimb.tensor.tensor_core.TensorNetwork.new), and
+  building up gates from empty tensor networks using
+  [`TensorNetwork.gate_inds_with_tn`](quimb.tensor.tensor_core.TensorNetwork.gate_inds_with_tn).
+- add more options to [`Tensor.expand_ind`](quimb.tensor.tensor_core.Tensor.expand_ind)
+  and [`Tensor.new_ind`](quimb.tensor.tensor_core.Tensor.new_ind): repeat
+  tiling mode and random padding mode.
+- tensor decomposition: make ``eigh_truncated`` backend agnostic.
 
 **Bug fixes:**
 
@@ -20,7 +30,7 @@ Release notes for `quimb`.
 
 
 (whats-new-1-7-0)=
-## v1.7.0 (12-08-2023)
+## v1.7.0 (2023-12-08)
 
 **Breaking Changes**
 
@@ -178,7 +188,7 @@ Release notes for `quimb`.
   triangular R factors.
 
 (whats-new-1-4-2)=
-## v1.4.2 (28th November 2022)
+## v1.4.2 (2022-11-28)
 
 **Enhancements**
 
@@ -186,7 +196,7 @@ Release notes for `quimb`.
   [setuptools_scm](https://pypi.org/project/setuptools-scm/) for versioning
 
 (whats-new-1-4-1)=
-## v1.4.1 (28th November 2022)
+## v1.4.1 (2022-11-28)
 
 **Enhancements**
 
@@ -219,7 +229,7 @@ Release notes for `quimb`.
 > - allow unpickling of `PTensor` objects ({issue}`128`, {pull}`131`)
 
 (whats-new-1-4-0)=
-## v1.4.0 (14th June 2022)
+## v1.4.0 (2022-06-14)
 
 **Enhancements**
 
@@ -238,7 +248,7 @@ Release notes for `quimb`.
 - Various graph generators and TN builders
 
 (whats-new-1-3-0)=
-## v1.3.0 (18th Feb 2020)
+## v1.3.0 (2020-02-18)
 
 **Enhancements**
 
@@ -274,7 +284,7 @@ Release notes for `quimb`.
 - Make cache import and initilization of `petsc4py` and `slepc4py` more robust.
 
 (whats-new-1-2-0)=
-## v1.2.0 (6th June 2019)
+## v1.2.0 (2019-06-06)
 
 **Enhancements**
 

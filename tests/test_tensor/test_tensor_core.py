@@ -1668,6 +1668,92 @@ class TestTensorNetwork:
         tn = MPS_rand_state(5, 3)
         assert tn._get_string_between_tids(0, 4) == (0, 1, 2, 3, 4)
 
+    @pytest.mark.parametrize(
+        "contract",
+        (
+            False,
+            True,
+            "split",
+            "reduce-split",
+            "split-gate",
+            "swap-split-gate",
+        ),
+    )
+    def test_gate_inds(self, contract):
+        tn = qtn.TN_from_edges_rand(
+            [("A", "B"), ("B", "C"), ("C", "A")],
+            D=3,
+            phys_dim=2,
+        )
+        oix = tn._outer_inds.copy()
+        p = tn.to_dense()
+        G = qu.rand_matrix(4)
+        tn.gate_inds_(
+            G, inds=(tn.site_ind("A"), tn.site_ind("C")), contract=contract
+        )
+        if contract is True:
+            assert tn.num_tensors == 2
+        elif contract is False:
+            assert tn.num_tensors == 4
+        elif contract in ("split", "reduce-split"):
+            assert tn.num_tensors == 3
+        elif contract in ("split-gate", "swap-split-gate"):
+            assert tn.num_tensors == 5
+            assert tn.max_bond() == 4
+
+        assert tn._outer_inds == oix
+
+        pG = tn.to_dense()
+        GIG = qu.pkron(G, [2, 2, 2], [0, 2])
+        pGx = GIG @ p
+        assert_allclose(pG, pGx)
+
+    def test_gate_inds_with_tn(self):
+        k = qtn.MPS_rand_state(6, 3)
+        A = qtn.MPO_rand(3, 2)
+        k.gate_inds_with_tn_(
+            ["k1", "k2", "k4"],
+            A,
+            ["b0", "b1", "b2"],
+            ["k0", "k1", "k2"],
+        )
+        assert k._outer_inds == oset(f"k{i}" for i in range(6))
+        assert k.num_tensors == 6 + 3
+
+    def test_gate_inds_with_tn_missing_inds(self):
+        tn = TensorNetwork()
+        tn.gate_inds_with_tn_(
+            ["k0", "k1"],
+            (
+                rand_tensor([2, 2, 3], ["k0", "b0", "X"])
+                | rand_tensor(
+                    [2, 2, 3],
+                    ["k1", "b1", "X"],
+                )
+            ),
+            ["b0", "b1"],
+            ["k0", "k1"],
+        )
+        assert tn._outer_inds == oset(["k0", "k1", "b0", "b1"])
+        assert tn.num_tensors == 2
+        assert tn.num_indices == 5
+        assert tn.max_bond() == 3
+        tn.gate_inds_with_tn_(
+            ["k1", "k2"],
+            (
+                rand_tensor([2, 2, 3], ["k1", "b1", "X"])
+                | rand_tensor(
+                    [2, 2, 3],
+                    ["k2", "b2", "X"],
+                )
+            ),
+            ["b1", "b2"],
+            ["k1", "k2"],
+        )
+        assert tn._outer_inds == oset(["k0", "k1", "k2", "b0", "b1", "b2"])
+        assert tn.num_tensors == 4
+        assert tn.num_indices == 9
+
 
 class TestTensorNetworkSimplifications:
     def test_rank_simplify(self):

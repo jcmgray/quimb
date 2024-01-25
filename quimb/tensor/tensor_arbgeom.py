@@ -132,6 +132,14 @@ def tensor_network_apply_op_vec(
     A, x = tn_op.copy(), tn_vec.copy()
 
     # align the indices
+    #
+    #     |       <- upper_ind_id to be site_ind_id (outerid)
+    #    -A- ...
+    #     |       <- lower_ind_id to be innerid
+    #     :
+    #     |       <- site_ind_id to be innerid
+    #    -x- ...
+    #
     coordinate_formatter = get_coordinate_formatter(A._NDIMS)
     A.lower_ind_id = f"__tmp{coordinate_formatter}__"
     A.upper_ind_id = x.site_ind_id

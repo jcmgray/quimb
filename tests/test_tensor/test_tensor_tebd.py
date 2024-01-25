@@ -216,6 +216,18 @@ class TestTEBD:
         ef_mpo = qtn.expec_TN_1D(tebd.pt.H, H_mpo, tebd.pt)
         assert ef_mpo == pytest.approx(e0, 1e-5)
 
+    def test_build_mpo_propagator_trotterized(self):
+        n = 5
+        ham = qtn.ham_1d_mbl(n, dh=1.7, cyclic=False, seed=42)
+        mpo = ham.build_mpo_propagator_trotterized(-0.01j)
+        assert mpo.num_tensors == 5
+        href = qu.ham_mbl(n, dh=1.7, cyclic=False, seed=42)
+        pref = qu.expm(-0.01j * href)
+        pden = mpo.to_dense()
+        dr = np.linalg.norm(pden - pref)
+        di = np.linalg.norm(pden - qu.identity(2**n))
+        assert dr < 1e-3 < di
+
 
 def test_OTOC_local():
     L = 10

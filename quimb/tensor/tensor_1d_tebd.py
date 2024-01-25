@@ -1,7 +1,9 @@
 """Tools for performing TEBD like algorithms in 1D.
 """
+import itertools
 
 import numpy as np
+from autoray import do
 
 from ..utils import ensure_dict, continuous_progbar, deprecated
 from ..utils import progbar as Progbar
@@ -98,6 +100,117 @@ class LocalHam1D(LocalHamGen):
             norm_fro(h)
             for h in self.terms.values()
         ) / len(self.terms)
+
+    def build_mpo_propagator_trotterized(
+        self,
+        x,
+        site_tag_id="I{}",
+        tags=None,
+        upper_ind_id="k{}",
+        lower_ind_id="b{}",
+        shape="lrud",
+        contract_sites=True,
+        **split_opts,
+    ):
+        """Build an MPO representation of ``expm(H * x)``, i.e. the imaginary
+        or real time propagator of this local 1D hamiltonian, using a first
+        order trotterized decomposition.
+
+        Parameters
+        ----------
+        x : float
+            The time to evolve for. Note this does **not** include the
+            imaginary prefactor of the Schrodinger equation, so real ``x``
+            corresponds to imaginary time evolution, and vice versa.
+        site_tag_id : str
+            A string specifiying how to tag the tensors at each site. Should
+            contain a ``'{}'`` placeholder. It is used to generate the actual tags
+            like: ``map(site_tag_id.format, range(len(arrays)))``.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
+        upper_ind_id : str
+            A string specifiying how to label the upper physical site indices.
+            Should contain a ``'{}'`` placeholder. It is used to generate the
+            actual indices like:
+            ``map(upper_ind_id.format, range(len(arrays)))``.
+        lower_ind_id : str
+            A string specifiying how to label the lower physical site indices.
+            Should contain a ``'{}'`` placeholder. It is used to generate the
+            actual indices like:
+            ``map(lower_ind_id.format, range(len(arrays)))``.
+        shape : str, optional
+            String specifying layout of the tensors. E.g. 'lrud' (the default)
+            indicates the shape corresponds left-bond, right-bond, 'up'
+            physical index, 'down' physical index.
+            End tensors have either 'l' or 'r' dropped from the string if not
+            periodic.
+        contract_sites : bool, optional
+            Whether to contract all the decomposed factors at each site to
+            yield a single tensor per site, by default True.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        from .tensor_core import Tensor
+        from .tensor_1d import MatrixProductOperator
+
+        mpo = MatrixProductOperator.new(
+            L=self.L,
+            site_tag_id=site_tag_id,
+            upper_ind_id=upper_ind_id,
+            lower_ind_id=lower_ind_id,
+            cyclic=self.cyclic,
+        )
+        imax = self.L - (not self.cyclic)
+
+        # process even bonds then odd bonds
+        layered_sites = itertools.chain(range(0, imax, 2), range(1, imax, 2))
+
+        # process even bonds
+        for i in layered_sites:
+            j = (i + 1) % self.L
+
+            # get a tensor of the local exponentiated term
+            U = self.get_gate_expm((i, j), x)
+            U = do("reshape", U, (2, 2, 2, 2))
+
+            ki = upper_ind_id.format(i)
+            kj = upper_ind_id.format(j)
+            bi = lower_ind_id.format(i)
+            bj = lower_ind_id.format(j)
+
+            # split spatially
+            tnU = Tensor(
+                data=U,
+                inds=(ki, kj, bi, bj),
+            ).split(
+                left_inds=(ki, bi),
+                ltags=site_tag_id.format(i),
+                rtags=site_tag_id.format(j),
+                **split_opts,
+            )
+            # add tensors to mpo
+            mpo.gate_inds_with_tn_(
+                inds=(ki, kj),
+                gate=tnU,
+                gate_inds_inner=(bi, bj),
+                gate_inds_outer=(ki, kj),
+            )
+
+        if contract_sites:
+            # combine site groups into single tensors
+            for st in mpo.site_tags:
+                mpo ^= st
+
+        if tags is not None:
+            # global tags
+            mpo.add_tag(tags)
+
+        if shape is not None:
+            # enforce a canonical ordering of indices within each tensor
+            mpo.permute_arrays(shape)
+
+        return mpo
+
 
     def __repr__(self):
         return f"<LocalHam1D(L={self.L}, cyclic={self.cyclic})>"

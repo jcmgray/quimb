@@ -2447,20 +2447,6 @@ class Tensor:
 
         return tensor_split(self, **split_opts)[which]
 
-        X = self.to_dense(left_inds, right_inds)
-
-        if side == "right":
-            # contract the left indices
-            XX = dag(X) @ X
-        else: # "left"
-            # contract the right indices
-            XX = X @ dag(X)
-
-        return decomp.squared_op_to_reduced_factor(
-            XX, *shape(X), right=(side == "right")
-        )
-
-
     @functools.wraps(tensor_network_distance)
     def distance(self, other, **contract_opts):
         return tensor_network_distance(self, other, **contract_opts)
@@ -3924,6 +3910,47 @@ class TensorNetwork(object):
         """
         return self.combine(other, virtual=True, check_collisions=True)
 
+    def _update_properties(self, cls, like=None, current=None, **kwargs):
+        for prop in cls._EXTRA_PROPS:
+            # equate real and private property name
+            prop_name = prop.lstrip("_")
+
+            # get value from kwargs
+            if prop_name in kwargs:
+                setattr(self, prop, kwargs.pop(prop_name))
+
+            # get value from another manually specified TN
+            elif (like is not None) and hasattr(like, prop_name):
+                setattr(self, prop, getattr(like, prop_name))
+
+            # get value directly from TN
+            elif (current is not None) and hasattr(current, prop_name):
+                setattr(self, prop, getattr(current, prop_name))
+
+            else:
+                raise ValueError(
+                    f"You need to specify '{prop_name}' for the tensor network"
+                    f" class {cls}, and ensure that it correctly corresponds "
+                    f"to the structure of the tensor network supplied, since "
+                    f"it cannot be found as an attribute on the TN: {current}."
+                )
+
+        if kwargs:
+            raise ValueError(
+                f"Options {kwargs} are invalid for the class {cls}."
+            )
+
+    @classmethod
+    def new(cls, like=None, **kwargs):
+        """Create a new tensor network, without any tensors, of type ``cls``,
+        with all the requisite properties specified by ``kwargs`` or inherited
+        from ``like``.
+        """
+        tn = cls.__new__(cls)
+        TensorNetwork.__init__(tn)
+        tn._update_properties(cls, like=like, current=None, **kwargs)
+        return tn
+
     @classmethod
     def from_TN(cls, tn, like=None, inplace=False, **kwargs):
         """Construct a specific tensor network subclass (i.e. one with some
@@ -3945,34 +3972,7 @@ class TensorNetwork(object):
             Extra properties of the TN subclass that should be specified.
         """
         new_tn = tn if inplace else tn.copy()
-
-        for prop in cls._EXTRA_PROPS:
-            # equate real and private property name
-            prop_name = prop.lstrip('_')
-
-            # get value from kwargs
-            if prop_name in kwargs:
-                setattr(new_tn, prop, kwargs.pop(prop_name))
-
-            # get value from another manually specified TN
-            elif (like is not None) and hasattr(like, prop_name):
-                setattr(new_tn, prop, getattr(like, prop_name))
-
-            # get value directly from TN
-            elif hasattr(tn, prop_name):
-                setattr(new_tn, prop, getattr(tn, prop_name))
-
-            else:
-                raise ValueError(
-                    f"You need to specify '{prop_name}' for the tensor network"
-                    f" class {cls}, and ensure that it correctly corresponds "
-                    f"to the structure of the tensor network supplied, since "
-                    f"it cannot be found as an attribute on the TN: {tn}.")
-
-        if kwargs:
-            raise ValueError(
-                f"Options {kwargs} are invalid for the class {cls}.")
-
+        new_tn._update_properties(cls, like=like, current=tn, **kwargs)
         new_tn.__class__ = cls
         return new_tn
 
@@ -5512,22 +5512,44 @@ class TensorNetwork(object):
              :
              :         gate_inds_inner
              :         :
-             :         :  inds              inds
-             :  ┌────┐ :  : ┌────┬───       : ┌───────┬───
-             ───┤    ├──  ──┤    │          ──┤       │
-                │    │      │    ├───         │       ├───
-             ───┤gate├──  ──┤self│     -->  ──┤  new  │
-                │    │      │    ├───         │       ├───
-             ───┤    ├──  ──┤    │          ──┤       │
-                └────┘      └────┴───         └───────┴───
+             :         :   inds               inds
+             :  ┌────┐ :   : ┌────┬───        : ┌───────┬───
+             ───┤    ├──  a──┤    │          a──┤       │
+                │    │       │    ├───          │       ├───
+             ───┤gate├──  b──┤self│     -->  b──┤  new  │
+                │    │       │    ├───          │       ├───
+             ───┤    ├──  c──┤    │          c──┤       │
+                └────┘       └────┴───          └───────┴───
 
         Where there can be arbitrary structure of tensors within both ``self``
         and ``gate``.
 
+        The case where some of target ``inds`` are not present is handled as
+        so (here 'c' is missing so 'x' and 'y' are kept)::
+
+            gate_inds_outer
+             :
+             :         gate_inds_inner
+             :         :
+             :         :   inds               inds
+             :  ┌────┐ :   : ┌────┬───        : ┌───────┬───
+             ───┤    ├──  a──┤    │          a──┤       │
+                │    │       │    ├───          │       ├───
+             ───┤gate├──  b──┤self│     -->  b──┤  new  │
+                │    │       │    ├───          │       ├───
+            x───┤    ├──y    └────┘          x──┤    ┌──┘
+                └────┘                          └────┴───y
+
+        Which enables convinient construction of various tensor networks, for
+        example propagators, from scratch.
+
         Parameters
         ----------
         inds : str or sequence of str
-            The current indices to gate.
+            The current indices to gate. If an index is not present on the
+            target tensor network, it is ignored and instead the resulting
+            tensor network will have both the corresponding inner and outer
+            index of the gate tensor network.
         gate : Tensor or TensorNetwork
             The tensor network to gate with.
         gate_inds_inner : sequence of str
@@ -5540,9 +5562,11 @@ class TensorNetwork(object):
         Returns
         -------
         tn_gated : TensorNetwork
-        """
-        tn_gated = self if inplace else self.copy()
 
+        See Also
+        --------
+        TensorNetwork.gate_inds
+        """
         if isinstance(inds, str):
             inds = (inds,)
         if isinstance(gate_inds_inner, str):
@@ -5550,21 +5574,31 @@ class TensorNetwork(object):
         if isinstance(gate_inds_outer, str):
             gate_inds_outer = (gate_inds_outer,)
 
-        if (
-            (len(inds) != len(gate_inds_inner)) or
-            (len(inds) != len(gate_inds_outer))
+        if (len(inds) != len(gate_inds_inner)) or (
+            len(inds) != len(gate_inds_outer)
         ):
-            raise ValueError("``inds``, ``gate_inds_inner``, and "
-                             "``gate_inds_outer`` must be the same length.")
+            raise ValueError(
+                "``inds``, ``gate_inds_inner``, and "
+                "``gate_inds_outer`` must be the same length."
+            )
 
-        bonds = [rand_uuid() for _ in range(len(inds))]
-        tn_gated.reindex_(dict(zip(inds, bonds)))
-        tn_gated |= gate.reindex({
-            **dict(zip(gate_inds_inner, bonds)),
-            **dict(zip(gate_inds_outer, inds)),
-        })
+        # the new tensor network
+        tn_target = self if inplace else self.copy()
 
-        return tn_gated
+        tixmap = {}
+        gixmap = {}
+        for tix, iix, oix in zip(inds, gate_inds_inner, gate_inds_outer):
+            if tix in tn_target.ind_map:
+                tixmap[tix] = gixmap[iix] = rand_uuid()
+                gixmap[oix] = tix
+            # we allow the case where the index is not present in the TN, as
+            # this enables building a TN operator from scratch with gates
+
+        # rewire and combine
+        tn_target.reindex_(tixmap)
+        tn_target |= gate.reindex(gixmap)
+
+        return tn_target
 
     gate_inds_with_tn_ = functools.partialmethod(
         gate_inds_with_tn, inplace=True
@@ -6322,7 +6356,18 @@ class TensorNetwork(object):
                 tb.modify(tags=tb.tags | tags)
 
     def _get_neighbor_tids(self, tids, exclude_inds=()):
-        """Get the tids of tensors connected to the tensor at ``tid``.
+        """Get the tids of tensors connected to the tensor(s) at ``tids``.
+
+        Parameters
+        ----------
+        tids : int or sequence of int
+            The tensor identifier(s) to get the neighbors of.
+        exclude_inds : sequence of str, optional
+            Exclude these indices from being considered as connections.
+
+        Returns
+        -------
+        oset[int]
         """
         tids = tags_to_oset(tids)
 
