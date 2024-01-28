@@ -19,6 +19,9 @@ Release notes for `quimb`.
   and [`Tensor.new_ind`](quimb.tensor.tensor_core.Tensor.new_ind): repeat
   tiling mode and random padding mode.
 - tensor decomposition: make ``eigh_truncated`` backend agnostic.
+- [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add
+  `reduced="left"` and `reduced="right"` modes for when the pair of tensors is
+  already in a canonical form.
 
 **Bug fixes:**
 
