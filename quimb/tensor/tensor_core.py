@@ -669,7 +669,7 @@ def tensor_compress_bond(
     **compress_opts,
 ):
     r"""Inplace compress between the two single tensors. It follows the
-    following steps to minimize the size of SVD performed::
+    following steps (by default) to minimize the size of SVD performed::
 
         a)│   │        b)│        │        c)│       │
         ━━●━━━●━━  ->  ━━>━━○━━○━━<━━  ->  ━━>━━━M━━━<━━
@@ -693,8 +693,12 @@ def tensor_compress_bond(
         The maxmimum bond dimension.
     cutoff : float, optional
         The singular value cutoff to use.
-    reduced : bool, optional
-        Whether to perform the QR reduction as above or not.
+    reduced : {True, False, "left", "right"}, optional
+        Whether to perform the QR reduction as above or not. If False, contract
+        both tensors together and perform a single SVD. If 'left' or 'right'
+        then just perform the svd on the left or right tensor respectively.
+        This can still be optimal if the other tensor is already isometric,
+        i.e. the pair are right or left canonical respectively.
     absorb : {'both', 'left', 'right', None}, optional
         Where to absorb the singular values after decomposition.
     info : None or dict, optional
@@ -735,20 +739,60 @@ def tensor_compress_bond(
         T1C = T1_L.contract(M_L, output_inds=T1.inds)
         T2C = M_R.contract(T2_R, output_inds=T2.inds)
 
-    elif reduced == 'lazy':
-        compress_opts.setdefault('method', 'isvd')
+    elif reduced == "right":
+        # if left canonical, just do svd on right tensor
+        M, *s, T2C = T2.split(
+            left_inds=bix,
+            right_inds=rix,
+            get="tensors",
+            absorb=absorb,
+            **compress_opts,
+        )
+        T1C = T1 @ M
+        T1C.transpose_like_(T1)
+        T2C.transpose_like_(T2)
+
+        if absorb == "right":
+            # can't mark left tensor as isometric if absorbed into right tensor
+            absorb = "both"
+
+    elif reduced == "left":
+        # if right canonical, just do svd on left tensor
+        T1C, *s, M = T1.split(
+            left_inds=lix,
+            right_inds=bix,
+            get="tensors",
+            absorb=absorb,
+            **compress_opts,
+        )
+        T2C = M @ T2
+        T1C.transpose_like_(T1)
+        T2C.transpose_like_(T2)
+
+        if absorb == "left":
+            # can't mark right tensor as isometric if absorbed into left tensor
+            absorb = "both"
+
+    elif reduced == "lazy":
+        compress_opts.setdefault("method", "isvd")
         T12 = TNLinearOperator((T1, T2), lix, rix)
         T1C, *s, T2C = T12.split(get="tensors", absorb=absorb, **compress_opts)
         T1C.transpose_like_(T1)
         T2C.transpose_like_(T2)
 
-    else:
+    elif reduced is False:
         T12 = T1 @ T2
         T1C, *s, T2C = T12.split(
             left_inds=lix, get="tensors", absorb=absorb, **compress_opts
         )
         T1C.transpose_like_(T1)
         T2C.transpose_like_(T2)
+
+    else:
+        raise ValueError(
+            f"Unrecognized value for `reduced` argument: {reduced}."
+            "Valid options are {True, False, 'left', 'right', 'lazy'}."
+        )
 
     # update with the new compressed data
     T1.modify(data=T1C.data)

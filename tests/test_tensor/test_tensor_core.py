@@ -1343,6 +1343,89 @@ class TestTensorNetwork:
         x1 = (A & B).trace("a", "d")
         assert x1 == pytest.approx(x0)
 
+    @pytest.mark.parametrize("absorb", ["both", "left", "right"])
+    def test_tensor_compress_bond_reduced_modes(self, absorb):
+        kws = dict(max_bond=4, absorb=absorb)
+
+        A = rand_tensor((3, 4, 5), "abc", tags="A")
+        B = rand_tensor((5, 6), "cd", tags="B")
+        AB = A @ B
+
+        # naive contract and compress should be optimal
+        A1, B1 = A.copy(), B.copy()
+        qtn.tensor_compress_bond(A1, B1, reduced=False, **kws)
+        assert A1.shape == (3, 4, 4)
+        assert B1.shape == (4, 6)
+        if absorb == "right":
+            # assert A is isometric
+            assert A1.norm()**2 == pytest.approx(4)
+        if absorb == "left":
+            # assert B is isometric
+            assert B1.norm()**2 == pytest.approx(4)
+        # compute the optimal fidelity
+        d1 = (A1 @ B1).distance(AB)
+        assert 0 < d1
+
+        A2, B2 = A.copy(), B.copy()
+        qtn.tensor_compress_bond(A2, B2, reduced=True, **kws)
+        assert A2.shape == (3, 4, 4)
+        assert B2.shape == (4, 6)
+        if absorb == "right":
+            assert A2.norm()**2 == pytest.approx(4)
+        if absorb == "left":
+            assert B2.norm()**2 == pytest.approx(4)
+        d2 = (A2 @ B2).distance(AB)
+        # reduced mode should also be optimal
+        assert d2 == pytest.approx(d1)
+
+        Ar, Br = A.copy(), B.copy()
+        qtn.tensor_compress_bond(Ar, Br, reduced="right", **kws)
+        assert Ar.shape == (3, 4, 4)
+        assert Br.shape == (4, 6)
+        if absorb == "right":
+            # A won't be canonical
+            assert Ar.left_inds is None
+            assert Ar.norm()**2 != pytest.approx(4)
+        if absorb == "left":
+            assert Br.norm()**2 == pytest.approx(4)
+        dr = (Ar @ Br).distance(AB)
+        # right reduced mode should not be optimal
+        assert dr > d1
+        # unless we canonicalize first
+        Ar, Br = A.copy(), B.copy()
+        qtn.tensor_canonize_bond(Ar, Br, absorb="right")
+        qtn.tensor_compress_bond(Ar, Br, reduced="right", **kws)
+        if absorb == "right":
+            assert Ar.norm()**2 == pytest.approx(4)
+        if absorb == "left":
+            assert Br.norm()**2 == pytest.approx(4)
+        dr = (Ar @ Br).distance(AB)
+        assert dr == pytest.approx(d1)
+
+        Al, Bl = A.copy(), B.copy()
+        qtn.tensor_compress_bond(Al, Bl, reduced="left", **kws)
+        assert Al.shape == (3, 4, 4)
+        assert Bl.shape == (4, 6)
+        if absorb == "right":
+            assert Al.norm()**2 == pytest.approx(4)
+        if absorb == "left":
+            # B won't be canonical
+            assert Bl.left_inds is None
+            assert Bl.norm()**2 != pytest.approx(4)
+        dl = (Al @ Bl).distance(AB)
+        # left reduced mode should not be optimal
+        assert dl > d1
+        # unless we canonicalize first
+        Al, Bl = A.copy(), B.copy()
+        qtn.tensor_canonize_bond(Al, Bl, absorb="left")
+        qtn.tensor_compress_bond(Al, Bl, reduced="left", **kws)
+        if absorb == "right":
+            assert Al.norm()**2 == pytest.approx(4)
+        if absorb == "left":
+            assert Bl.norm()**2 == pytest.approx(4)
+        dl = (Al @ Bl).distance(AB)
+        assert dl == pytest.approx(d1)
+
     def test_canonize_multibond(self):
         A = rand_tensor((3, 4, 5), "abc", tags="A")
         assert A.H @ A != pytest.approx(3)
