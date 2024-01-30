@@ -22,6 +22,9 @@ Release notes for `quimb`.
 - [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add
   `reduced="left"` and `reduced="right"` modes for when the pair of tensors is
   already in a canonical form.
+- add [`qtn.TN2D_embedded_classical_ising_partition_function`](quimb.tensor.tensor_builder.TN2D_embedded_classical_ising_partition_function) for constructing 2D
+  (triangular) tensor networks representing all-to-all classical ising
+  partition functions.
 
 **Bug fixes:**
 

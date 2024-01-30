@@ -7,6 +7,7 @@ import collections
 from numbers import Integral
 
 import numpy as np
+import autoray as ar
 
 from ..core import make_immutable, ikron
 from ..utils import deprecated, unique, concat
@@ -18,6 +19,7 @@ from ..gen.operators import (
 )
 from ..gen.rand import seed_rand, randn, choice, random_seed_fn, rand_phase
 from .tensor_core import (
+    COPY_tensor,
     new_bond,
     rand_uuid,
     tags_to_oset,
@@ -1878,8 +1880,10 @@ def HTN2D_classical_ising_partition_function(
         The inverse temperature.
     h : float, optional
         The magnetic field strength.
-    j : float, optional
-        The interaction strength, positive being *ferromagnetic*.
+    j : float, dict, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a dict
+        should contain entries for each edge, keyed by the edge. If a callable
+        should have the signature ``j(node_a, node_b)`` and return a float.
     cyclic : bool or (bool, bool), optional
         Whether to use periodic boundary conditions. X and Y can be specified
         separately using a tuple.
@@ -1902,6 +1906,10 @@ def HTN2D_classical_ising_partition_function(
 
     if callable(j):
         j_factory = j
+    elif isinstance(j, dict):
+
+        def j_factory(node_a, node_b):
+            return j[node_a, node_b]
     else:
 
         def j_factory(node_a, node_b):
@@ -1932,6 +1940,28 @@ def HTN2D_classical_ising_partition_function(
     return TensorNetwork(ts)
 
 
+def parse_j_coupling_to_function(j):
+    """Parse the ``j`` argument to a function that can be called to get the
+    coupling strength between two nodes. The input can be a constant, dict or
+    function.
+    """
+    if callable(j):
+        return j
+
+    elif isinstance(j, dict):
+
+        def j_factory(node_a, node_b):
+            return j[node_a, node_b]
+
+        return j_factory
+    else:
+
+        def j_factory(node_a, node_b):
+            return j
+
+        return j_factory
+
+
 def HTN3D_classical_ising_partition_function(
     Lx,
     Ly,
@@ -1958,8 +1988,10 @@ def HTN3D_classical_ising_partition_function(
         Length of side z.
     beta : float
         The inverse temperature.
-    j : float, optional
-        The interaction strength, positive being *ferromagnetic*.
+    j : float, dict, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a dict
+        should contain entries for each edge, keyed by the edge. If a callable
+        should have the signature ``j(node_a, node_b)`` and return a float.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool, bool), optional
@@ -1982,12 +2014,7 @@ def HTN3D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
-    if callable(j):
-        j_factory = j
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
+    j_factory = parse_j_coupling_to_function(j)
 
     ts = []
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
@@ -2046,10 +2073,10 @@ def TN2D_classical_ising_partition_function(
         Length of side y.
     beta : float
         The inverse temperature.
-    j : float, optional
-        The interaction strength, positive being *ferromagnetic*. If a callable
-        it should have the signature ``j(node_a, node_b)`` and return a float
-        for the coupling strength betwen ``node_a`` and ``node_b``.
+    j : float, dict, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a dict
+        should contain entries for each edge, keyed by the edge. If a callable
+        should have the signature ``j(node_a, node_b)`` and return a float.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool), optional
@@ -2081,12 +2108,7 @@ def TN2D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
-    if callable(j):
-        j_factory = j
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
+    j_factory = parse_j_coupling_to_function(j)
 
     if outputs:
         if isinstance(outputs[0], int):
@@ -2181,10 +2203,10 @@ def TN3D_classical_ising_partition_function(
         Length of side z.
     beta : float
         The inverse temperature.
-    j : float or callable, optional
-        The interaction strength, positive being *ferromagnetic*. If a callable
-        it should have the signature ``j(node_a, node_b)`` and return a float
-        for the coupling strength betwen ``node_a`` and ``node_b``.
+    j : float, dict, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a dict
+        should contain entries for each edge, keyed by the edge. If a callable
+        should have the signature ``j(node_a, node_b)`` and return a float.
     h : float, optional
         The magnetic field strength.
     cyclic : bool or (bool, bool, bool), optional
@@ -2218,12 +2240,7 @@ def TN3D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
-    if callable(j):
-        j_factory = j
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
+    j_factory = parse_j_coupling_to_function(j)
 
     if outputs:
         if isinstance(outputs[0], int):
@@ -2329,10 +2346,10 @@ def HTN_classical_partition_function_from_edges(
         ``(u, v)`` and ``(v, u)`` and only one edge will be added.
     beta : float, optional
         The inverse temperature.
-    j : float, or callable, optional
-        The interaction strength, positive being *ferromagnetic*. If a
-        callable should have the signature ``j(node_a, node_b)`` and return
-        a float.
+    j : float, dict, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a dict
+        should contain entries for each edge, keyed by the edge. If a callable
+        should have the signature ``j(node_a, node_b)`` and return a float.
     h : float, or callable, optional
         The magnetic field strength. If a callable should have the
         signature ``h(node)`` and return a float.
@@ -2350,12 +2367,7 @@ def HTN_classical_partition_function_from_edges(
     -------
     TensorNetwork
     """
-    if callable(j):
-        j_factory = j
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
+    j_factory = parse_j_coupling_to_function(j)
 
     ts = []
     for node_a, node_b in gen_unique_edges(edges):
@@ -2405,10 +2417,10 @@ def TN_classical_partition_function_from_edges(
         ``(u, v)`` and ``(v, u)`` and only one edge will be added.
     beta : float, optional
         The inverse temperature.
-    j : float, or callable, optional
-        The interaction strength, positive being *ferromagnetic*. If a
-        callable should have the signature ``j(node_a, node_b)`` and return
-        a float.
+    j : float, dict, or callable, optional
+        The interaction strength, positive being *ferromagnetic*. If a dict
+        should contain entries for each edge, keyed by the edge. If a callable
+        should have the signature ``j(node_a, node_b)`` and return a float.
     h : float, or callable, optional
         The magnetic field strength. If a callable should have the
         signature ``h(node)`` and return a float.
@@ -2423,12 +2435,7 @@ def TN_classical_partition_function_from_edges(
     -------
     TensorNetwork
     """
-    if callable(j):
-        j_factory = j
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
+    j_factory = parse_j_coupling_to_function(j)
 
     to_contract = collections.defaultdict(list)
     ts = []
@@ -2474,6 +2481,304 @@ def TN_classical_partition_function_from_edges(
         tn.contract_ind(ind, output_inds=output_inds)
 
     tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
+    return tn
+
+
+def make_couplings_matrix_symmetric(J, UPLO="auto"):
+    """Take a coupling matrix or dict of pairwise strengths in either upper or
+    lower triangular form and return a symmetric matrix.
+
+    Parameters
+    ----------
+    J : array_like or dict[(int, int), float]
+        The couplings, as a square matrix or explicit dict. If a matrix, the
+        upper or lower triangle (corresponding to ``UPLO``) should the pairwise
+        interaction strengths. If a dict, then each non-zero interaction can be
+        specified explicitly.
+    UPLO : {"auto", "L", "U"}, optional
+        Whether to read the couplings in from ``J`` in lower ('L': ``i >= j``)
+        or upper ('U': ``i <= j``) form. If ``J`` is a dict then this only
+        matters if both are present and in that case acts as a preference.
+        If ``"auto"`` then either the lower or upper, or symmetric distances
+        can be supplied, but an error is raised if both are.
+
+    Returns
+    -------
+    J : array_like
+        The couplings as a symmetric matrix.
+    """
+    if isinstance(J, dict):
+        N = max(ij for coo in J for ij in coo) + 1
+        X = np.zeros((N, N))
+        haslower = hasupper = False
+        for (i, j), xij in J.items():
+            X[i, j] = xij
+
+    else:
+        #  assumed array supplied
+        N = ar.shape(J)[0]
+        X = J.copy()
+
+    if UPLO == "auto":
+        symm = np.allclose(X, X.T)
+        hasupper = np.any(X[np.triu_indices(N)])
+        haslower = np.any(X[np.tril_indices(N)])
+
+        if symm:
+            UPLO = "L"
+        else:
+            if hasupper and haslower:
+                raise ValueError(
+                    "Both upper (i < j) and lower (i > j) distances supplied "
+                    "but they are not symmetric. Supply one, or set UPLO='L' "
+                    "or 'U' to specify which to prefer."
+                )
+            UPLO = "U" if hasupper else "L"
+
+    # erase other triangle
+    if UPLO == "L":
+        X[np.triu_indices(N)] = 0.0
+    else:
+        X[np.tril_indices(N)] = 0.0
+
+    # make symmetric
+    X += X.T
+
+    return X
+
+
+def TN2D_embedded_classical_ising_partition_function(
+    Jij,
+    beta,
+    outputs=(),
+    ordering=None,
+    sites_location="side",
+    UPLO="auto",
+    contract_sites=True,
+    site_tag_id="I{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    ind_id="s{}",
+):
+    """Construct a (triangular) '2D' tensor network representation of the
+    classical ising model partition function with all-to-all interactions, by
+    embedding it in a 2D lattice. For `N` spins this will have `N(N-1)/2`
+    tensors, present at sites `(i, j)` where `i > j`. If `outputs` is supplied,
+    then dangling indices will be added for each output, to give a 'standard'
+    TN representation of the unnormalized marginal distribution over those
+    outputs. Since each spin is effectively "delocalized" into a COPY-tensor
+    MPS spanning the lattice, there is a choice of where to put the outputs,
+    specified by `sites_location`.
+
+    ``sites_location="side"``::
+
+        ...   .  .  .  ╭──
+                       │
+        j=2   .  .  ╭──O──...
+                    │  │
+        j=1   .  ╭──O──O──...
+                 │  │  │
+        j=0   ╭──O──O──O──...
+              │  │  │  │
+              s0 s1 s2 s3  <- site indices
+
+            i=0, 1, 2, 3, ...
+
+    ``sites_location="diag"``::
+
+        ...   .  .  s3 ╭──
+                      ╲│
+        j=2   .  s2 ╭──O──...
+                   ╲│  │
+        j=1   s1 ╭──O──O──...
+                ╲│  │  │
+        j=0  s0──O──O──O──...
+
+            i=0, 1, 2, 3, ...
+
+    Parameters
+    ----------
+    Jij : array_like or dict[(int, int), float]
+        The couplings, as a square matrix or explicit dict. If a matrix, the
+        upper or lower triangle (corresponding to ``UPLO``) should the pairwise
+        interaction strengths. If a dict, then each non-zero interaction can be
+        specified explicitly.
+    beta : float
+        The inverse temperature.
+    outputs : sequence of int, optional
+        Which sites to generate output indices (i.e. dangling legs) for.
+        The index is named according to ``ind_id``. The location of the output
+        depends on ``sites_location``.
+    ordering : sequence of int, optional
+        If supplied, the ordering of the embedded spins into the lattice.
+    sites_location : {"side", "diag"}, optional
+        Whether to place the output indices on the side or diagonally. If
+        ``"side"`` then the output indices will be placed along the 'y-min'
+        border, i.e. ``[(j, 0) for j in range(1, N)]``, with two on the first
+        tensor. If ``"diag"`` then the output indices will be placed along the
+        central diagonal fold of the lattice, i.e.
+        ``[(j + 1, j) for j in range(1, N)]``, with two on the first tensor.
+    UPLO : {"auto", "L", "U"}, optional
+        Whether to read the couplings in from ``J`` in lower ('L': ``i >= j``)
+        or upper ('U': ``i <= j``) form. If ``J`` is a dict then this only
+        matters if both are present and in that case acts as a preference.
+        If ``"auto"`` then either the lower or upper, or symmetric distances
+        can be supplied, but an error is raised if both are.
+    contract_sites : bool, optional
+        Whether to contract the sites of the TN, which after initial
+        construction will have one horizontol spin-rail, one vertical spin-rail
+        and one interaction tensor per site.
+    site_tag_id : str, optional
+        String formatter specifying how to label each site.
+    x_tag_id : str, optional
+        String formatter specifying how to label each x-plane.
+    y_tag_id : str, optional
+        String formatter specifying how to label each y-plane.
+    ind_id : str, optional
+        How to label the indices i.e. ``ind_id.format(i)``, each of
+        which corresponds to a single classical spin in ``outputs``.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    Jij = make_couplings_matrix_symmetric(Jij, UPLO=UPLO)
+    N = Jij.shape[0]
+
+    if isinstance(outputs, int):
+        outputs = (outputs,)
+    outputs = set(outputs)
+
+    tn = TensorNetwork2D.new(
+        Lx=N,
+        Ly=N,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+    )
+
+    bonds = collections.defaultdict(rand_uuid)
+    triangle_sites = [(i, j) for i in range(N) for j in range(i)]
+
+    for i, j in triangle_sites:
+        ix_hvar = ix_vvar = ix_left = ix_right = ix_down = ix_up = None
+
+        if ordering is None:
+            oi, oj = i, j
+        else:
+            oi, oj = ordering[i], ordering[j]
+
+        if sites_location == "side":
+            # ...   .  .  .  ╭──
+            #                │
+            # j=2   .  .  ╭──O──...
+            #             │  │
+            # j=1   .  ╭──O──O──...
+            #          │  │  │
+            # j=0   ╭──O──O──O──...
+            #       │  │  │  │
+            #       s0 s1 s2 s3  <- site indices
+            #
+            #     i=0, 1, 2, 3, ...
+            if j + 1 == i:
+                # add diagonal bond
+                if j == 0:
+                    # lower left, left index is 0th site index
+                    ix_hvar = ind_id.format(oj)
+                else:
+                    # left index connects diagonally to up index
+                    ix_left = bonds[(i - 1, j - 1), (i - 1, j)]
+            else:
+                # bulk left bond
+                ix_left = bonds[(i - 1, j), (i, j)]
+
+            if i + 1 < N:
+                # bulk right bond
+                ix_right = bonds[(i, j), (i + 1, j)]
+
+            if j == 0:
+                # bottom edge - down bond is site index
+                ix_vvar = ind_id.format(oi)
+            else:
+                ix_down = bonds[(i, j - 1), (i, j)]
+
+            if j + 2 < N:
+                # bulk up bond
+                ix_up = bonds[(i, j), (i, j + 1)]
+
+        else:  # sites_location == "diag"
+            # ...   .  .  s3 ╭──
+            #               ╲│
+            # j=2   .  s2 ╭──O──...
+            #            ╲│  │
+            # j=1   s1 ╭──O──O──...
+            #         ╲│  │  │
+            # j=0  s0──O──O──O──...
+            #
+            #     i=0, 1, 2, 3, ...
+            if j + 1 == i:
+                # add diagonal bond
+                ix_vvar = ind_id.format(oi)
+                if j == 0:
+                    # lower left, left index is 0th site index
+                    ix_hvar = ind_id.format(oj)
+                else:
+                    ix_left = bonds[(i - 1, j - 1), (i - 1, j)]
+            else:
+                # bulk left bond
+                ix_left = bonds[(i - 1, j), (i, j)]
+
+            if i + 1 < N:
+                # bulk right bond
+                ix_right = bonds[(i, j), (i + 1, j)]
+
+            if j > 0:
+                # bulk down bond
+                ix_down = bonds[(i, j - 1), (i, j)]
+
+            if j + 2 < N:
+                # bulk up bond
+                ix_up = bonds[(i, j), (i, j + 1)]
+
+        # only place output indices for specific outputs
+        if oi not in outputs:
+            ix_vvar = None
+        if oj not in outputs:
+            ix_hvar = None
+
+        # add cross rails
+        x_inds = tuple(filter(None, (ix_hvar, ix_left, ix_right, f"k{i},{j}")))
+        y_inds = tuple(filter(None, (ix_vvar, ix_down, ix_up, f"b{i},{j}")))
+
+        these_tags = (
+            x_tag_id.format(i),
+            y_tag_id.format(j),
+            site_tag_id.format(i, j),
+        )
+
+        # connect horizontal and vertical rails to interaction indices
+        tn |= COPY_tensor(2, inds=x_inds, tags=these_tags)
+        tn |= COPY_tensor(2, inds=y_inds, tags=these_tags)
+
+        try:
+            this_j = Jij[i, j]
+        except KeyError:
+            this_j = Jij[j, i]
+
+        # add the interaction tensor
+        tn |= Tensor(
+            data=classical_ising_S_matrix(beta, this_j),
+            inds=[f"k{i},{j}", f"b{i},{j}"],
+            tags=these_tags,
+        )
+
+    if contract_sites:
+        for i, j in triangle_sites:
+            try:
+                tn ^= (i, j)
+            except KeyError:
+                pass
+
     return tn
 
 
