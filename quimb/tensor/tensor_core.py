@@ -7974,6 +7974,31 @@ class TensorNetwork(object):
         (tid2,) = self._get_tids_from_tags(right_tags)
         self._cut_between_tids(tid1, tid2, left_ind, right_ind)
 
+    def cut_bond(self, bond, new_left_ind=None, new_right_ind=None):
+        """Cut the bond index specified by ``bond`` between the tensors it
+        connects. Use ``cut_between`` for control over which tensor gets which
+        new index ``new_left_ind``  or ``new_right_ind``. The index must
+        connect exactly two tensors.
+
+        Parameters
+        ----------
+        bond : str
+            The index to cut.
+        new_left_ind : str, optional
+            The new index to give to the left tensor (lowest ``tid`` value).
+        new_right_ind : str, optional
+            The new index to give to the right tensor (highest ``tid`` value).
+        """
+        tid1, tid2 = sorted(self.ind_map[bond])
+        tl, tr = self._tids_get(tid1, tid2)
+        if new_left_ind is None:
+            new_left_ind = rand_uuid()
+        if new_right_ind is None:
+            new_right_ind = rand_uuid()
+        tl.reindex_({bond: new_left_ind})
+        tr.reindex_({bond: new_right_ind})
+        return new_left_ind, new_right_ind
+
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor
         network, thereby removing them.

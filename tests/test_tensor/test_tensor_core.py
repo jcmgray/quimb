@@ -1595,6 +1595,14 @@ class TestTensorNetwork:
         tn.fuse_multibonds(inplace=True)
         assert len(tn.inner_inds()) == 3
 
+    def test_cut_bond(self):
+        ta = qtn.rand_tensor((2, 2, 2), inds="abc", tags="A")
+        tb = qtn.rand_tensor((2, 2, 2), inds="cde", tags="B")
+        tn = ta | tb
+        tn.cut_bond('c', new_left_ind='l', new_right_ind='r')
+        assert ta.inds == ('a', 'b', 'l')
+        assert tb.inds == ('r', 'd', 'e')
+
     def test_draw(self):
         import matplotlib
         from matplotlib import pyplot as plt

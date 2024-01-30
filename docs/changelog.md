@@ -2,6 +2,16 @@
 
 Release notes for `quimb`.
 
+
+(whats-new-1-7-2)=
+## v1.7.2 (unreleased)
+
+**Enhancements:**
+
+- add [`TensorNetwork.cut_bond`](quimb.tensor.tensor_core.TensorNetwork.cut_bond)
+  for cutting a bond index
+
+
 (whats-new-1-7-1)=
 ## v1.7.1 (2024-01-30)
 
