@@ -1,4 +1,4 @@
-<img src="https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/logo-banner.png?raw=true" alt="quimb" width="800px">
+![quimb logo](https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/logo-banner.png?raw=true)
 
 [![Tests](https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg)](https://github.com/jcmgray/quimb/actions/workflows/tests.yml)
 [![Code Coverage](https://codecov.io/gh/jcmgray/quimb/branch/main/graph/badge.svg)](https://codecov.io/gh/jcmgray/quimb)
@@ -19,7 +19,7 @@ The `quimb.tensor` module contains tools for working with **tensors and tensor n
 - use various backend array libraries such as [jax](https://jax.readthedocs.io) and [torch](https://pytorch.org/) via [autoray](https://github.com/jcmgray/autoray/)
 - run specific MPS, PEPS, MERA and quantum circuit algorithms, such as DMRG & TEBD
 
-<img src="https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-tensor.svg?raw=true" width="300px">
+![tensor pic](https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-tensor.svg?raw=true)
 
 ---
 
@@ -31,7 +31,7 @@ The core `quimb` module contains tools for reference **'exact'** quantum calcula
 - take advantage of [numba](https://numba.pydata.org) accelerations
 - stochastically estimate $\mathrm{Tr}f(X)$ quantities
 
-<img src="https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-herm-matrix.svg?raw=true" width="300px">
+![matrix pic](https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-herm-matrix.svg?raw=true)
 
 ---
 
