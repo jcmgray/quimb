@@ -1027,15 +1027,19 @@ class TestTensorNetwork:
         assert_allclose(Ur @ Ur.T, np.eye(4), atol=1e-10)
 
     @pytest.mark.parametrize("method", ("auto", "dense", "overlap"))
-    def test_tensor_network_distance(self, method):
+    @pytest.mark.parametrize("normalized", (True, False))
+    def test_tensor_network_distance(self, method, normalized):
         n = 6
         A = qtn.TN_rand_reg(n=n, reg=3, D=2, phys_dim=2, dtype=complex)
         Ad = A.to_dense([f"k{i}" for i in range(n)])
         B = qtn.TN_rand_reg(n=6, reg=3, D=2, phys_dim=2, dtype=complex)
         Bd = B.to_dense([f"k{i}" for i in range(n)])
         d1 = np.linalg.norm(Ad - Bd)
-        d2 = A.distance(B, method=method)
-        assert d1 == pytest.approx(d2)
+        d2 = A.distance(B, method=method, normalized=normalized)
+        if normalized:
+            assert 0 <= d2 <= 2
+        else:
+            assert d1 == pytest.approx(d2)
 
     @pytest.mark.parametrize(
         "method,opts",
@@ -1057,9 +1061,9 @@ class TestTensorNetwork:
     def test_fit_mps(self, method, opts):
         k1 = qtn.MPS_rand_state(5, 3, seed=666)
         k2 = qtn.MPS_rand_state(5, 3, seed=667)
-        assert k1.distance(k2) > 1e-3
+        assert k1.distance_normalized(k2) > 1e-3
         k1.fit_(k2, method=method, progbar=True, **dict(opts))
-        assert k1.distance(k2) < 1e-3
+        assert k1.distance_normalized(k2) < 1e-3
 
     @pytest.mark.parametrize(
         "method,opts",

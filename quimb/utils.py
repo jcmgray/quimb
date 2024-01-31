@@ -163,12 +163,12 @@ else:  # pragma: no cover
 def deprecated(fn, old_name, new_name):
     """Mark a function as deprecated, and indicate the new name."""
 
+    @functools.wraps(fn)
     def new_fn(*args, **kwargs):
         import warnings
 
         warnings.warn(
-            f"The {old_name} function is deprecated in favor "
-            f"of {new_name}",
+            f"The {old_name} function is deprecated in favor of {new_name}",
             Warning,
         )
         return fn(*args, **kwargs)

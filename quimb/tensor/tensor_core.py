@@ -1251,6 +1251,7 @@ def tensor_network_distance(
     xAB=None,
     xBB=None,
     method="auto",
+    normalized=False,
     **contract_opts,
 ):
     r"""Compute the Frobenius norm distance between two tensor networks:
@@ -1284,6 +1285,10 @@ def tensor_network_distance(
         directly formed and the norm computed, which can be quicker when the
         exterior dimensions are small. If ``'auto'``, the dense method will
         be used if the total operator (outer) size is ``<= 2**16``.
+    normalized : bool, optional
+        If ``True``, then normalize the distance by the norm of the two
+        operators, i.e. ``2 * D(A, B) / (|A| + |B|)``. The resulting distance
+        lies between 0 and 2 and is more useful for assessing convergence.
     contract_opts
         Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
 
@@ -1310,11 +1315,10 @@ def tensor_network_distance(
         else:
             method = "overlap"
 
-    # directly form vectorizations of both
+    # directly from vectorizations of both
     if method == "dense":
-        A = tnA.to_dense(oix)
-        B = tnB.to_dense(oix)
-        return do("linalg.norm", A - B)
+        tnA = tnA.contract(..., output_inds=oix, preserve_tensor=True)
+        tnB = tnB.contract(..., output_inds=oix, preserve_tensor=True)
 
     # overlap method
     if xAA is None:
@@ -1324,7 +1328,12 @@ def tensor_network_distance(
     if xBB is None:
         xBB = (tnB | tnB.H).contract(..., **contract_opts)
 
-    return do("abs", xAA - 2 * do("real", xAB) + xBB) ** 0.5
+    dAB = do("abs", xAA - 2 * do("real", xAB) + xBB) ** 0.5
+
+    if normalized:
+        dAB *= 2 / (do("abs", xAA)**0.5 + do("abs", xBB)**0.5)
+
+    return dAB
 
 
 def tensor_network_fit_autodiff(
@@ -2494,6 +2503,8 @@ class Tensor:
     @functools.wraps(tensor_network_distance)
     def distance(self, other, **contract_opts):
         return tensor_network_distance(self, other, **contract_opts)
+
+    distance_normalized = functools.partialmethod(distance, normalized=True)
 
     def gate(
         self,
@@ -8836,6 +8847,8 @@ class TensorNetwork(object):
     @functools.wraps(tensor_network_distance)
     def distance(self, *args, **kwargs):
         return tensor_network_distance(self, *args, **kwargs)
+
+    distance_normalized = functools.partialmethod(distance, normalized=True)
 
     def fit(
         self,

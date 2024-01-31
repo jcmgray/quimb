@@ -8,8 +8,8 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add [`TensorNetwork.cut_bond`](quimb.tensor.tensor_core.TensorNetwork.cut_bond)
-  for cutting a bond index
+- add `normalized=True` option to [`tensor_network_distance`](quimb.tensor.tensor_core.tensor_network_distance) for computing the normalized distance between tensor networks: $2 |A - B| / (|A| + |B|)$, which is useful for convergence checks. [`Tensor.distance_normalized`](quimb.tensor.tensor_core.Tensor.distance_normalized) and [`TensorNetwork.distance_normalized`](quimb.tensor.tensor_core.TensorNetwork.distance_normalized) added as aliases.
+- add [`TensorNetwork.cut_bond`](quimb.tensor.tensor_core.TensorNetwork.cut_bond) for cutting a bond index
 
 
 (whats-new-1-7-1)=
