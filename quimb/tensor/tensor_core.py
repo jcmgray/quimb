@@ -1264,7 +1264,10 @@ def tensor_network_distance(
             = ( \langle A | A \rangle - 2 \mathrm{Re} \langle A | B \rangle|
             + \langle B | B \rangle ) ^{1/2}
 
-    which should have a matching external indices.
+    which should have matching outer indices. Note the default approach to
+    computing the norm is precision limited to about ``eps**0.5`` where ``eps``
+    is the precision of the data type, e.g. ``1e-8`` for float64. This is due
+    to the subtraction in the above expression.
 
     Parameters
     ----------

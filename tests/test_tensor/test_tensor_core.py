@@ -1320,10 +1320,10 @@ class TestTensorNetwork:
     def test_expand_bond_dimension_zeros(self):
         k = MPS_rand_state(10, 7)
         k0 = k.copy()
-        k0.expand_bond_dimension(13)
+        k0.expand_bond_dimension_(13)
         assert k0.max_bond() == 13
         assert k0.ind_size("k0") == 2
-        assert k0.distance(k) == pytest.approx(0.0)
+        assert k0.distance(k) == pytest.approx(0.0, abs=1e-7)
 
     def test_expand_bond_dimension_random(self):
         tn = qtn.TN_rand_reg(6, 3, 2, dist="uniform")
