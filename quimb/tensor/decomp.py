@@ -3,10 +3,12 @@
 
 import functools
 import operator
+import warnings
 
 import numpy as np
-import scipy.sparse.linalg as spla
+import scipy.linalg as scla
 import scipy.linalg.interpolative as sli
+import scipy.sparse.linalg as spla
 from autoray import (
     astype,
     backend_like,
@@ -313,7 +315,6 @@ def _trim_and_renorm_svd_result_numba(
     return U, None, VH
 
 
-@svd_truncated.register("numpy")
 @njit  # pragma: no cover
 def svd_truncated_numba(
     x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
@@ -323,6 +324,25 @@ def svd_truncated_numba(
     return _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
+
+
+@svd_truncated.register("numpy")
+def svd_truncated_numpy(
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+):
+    """Numpy version of ``svd_truncated``, trying the accelerated version
+    first, then falling back to the more stable scipy version.
+    """
+    try:
+        return svd_truncated_numba(
+            x, cutoff, cutoff_mode, max_bond, absorb, renorm
+        )
+    except np.linalg.LinAlgError as e:  # pragma: no cover
+        warnings.warn(f"Got: {e}, falling back to scipy gesvd driver.")
+        U, s, VH = scla.svd(x, full_matrices=False, lapack_driver="gesvd")
+        return _trim_and_renorm_svd_result_numba(
+            U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+        )
 
 
 @svd_truncated.register("autoray.lazy")

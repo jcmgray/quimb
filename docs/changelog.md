@@ -10,6 +10,11 @@ Release notes for `quimb`.
 - [qu.randn](quimb.randn): support `dist="rademacher"`.
 - support `dist` and other `randn` options in various TN builders.
 
+**Bug fixes:**
+
+- restore fallback (to `scipy.linalg.svd` with driver='gesvd') behavior for
+  truncated SVD with numpy backend.
+
 
 (whats-new-1-7-2)=
 ## v1.7.2 (2024-01-30)
