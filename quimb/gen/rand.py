@@ -159,14 +159,12 @@ def randn(
     dtype : {'complex128', 'float64', 'complex64' 'float32'}, optional
         The data-type of the output array.
     scale : float, optional
-        The width of the distribution (standard deviation if
-        ``dist='normal'``).
+        A multiplicative scale for the random numbers.
     loc : float, optional
-        The location of the distribution (lower limit if
-        ``dist='uniform'``).
+        An additive location for the random numbers.
     num_threads : int, optional
         How many threads to use. If ``None``, decide automatically.
-    dist : {'normal', 'uniform', 'exp'}, optional
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
         Type of random number to generate.
     """
     if seed is not None:
@@ -177,6 +175,10 @@ def randn(
         shape = (shape,)
     else:
         d = prod(shape)
+
+    if dist == "rademacher":
+        # not parallelized for now
+        return rand_rademacher(shape, scale=scale, loc=loc, dtype=dtype)
 
     if num_threads is None:
         # only multi-thread for big ``d``
@@ -289,7 +291,7 @@ def rand_rademacher(shape, scale=1, loc=0.0, dtype=float):
 
     else:
         raise TypeError(
-            f"dtype {dtype} not understood - should be float or " "complex."
+            f"dtype {dtype} not understood - should be float or complex."
         )
 
     x = _choice(entries, shape)

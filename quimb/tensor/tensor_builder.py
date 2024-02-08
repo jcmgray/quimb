@@ -71,7 +71,15 @@ def get_rand_fill_fn(
 
 @random_seed_fn
 def rand_tensor(
-    shape, inds, tags=None, dtype="float64", left_inds=None, **randn_opts
+    shape,
+    inds,
+    tags=None,
+    dtype="float64",
+    dist="normal",
+    scale=1.0,
+    loc=0.0,
+    left_inds=None,
+    **randn_opts,
 ):
     """Generate a random tensor with specified shape and inds.
 
@@ -85,6 +93,12 @@ def rand_tensor(
         Labels to tag this tensor with.
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    scale : float, optional
+        A multiplier for the random numbers.
+    loc : float, optional
+        An offset for the random numbers.
     left_inds : sequence of str, optional
         Which, if any, indices to group as 'left' indices of an effective
         matrix. This can be useful, for example, when automatically applying
@@ -95,7 +109,9 @@ def rand_tensor(
     -------
     Tensor
     """
-    data = randn(shape, dtype=dtype, **randn_opts)
+    data = randn(
+        shape, dtype=dtype, dist=dist, scale=scale, loc=loc, **randn_opts
+    )
     return Tensor(data=data, inds=inds, tags=tags, left_inds=left_inds)
 
 
@@ -1210,8 +1226,8 @@ def TN2D_rand(
         String specifier for naming convention of row tags.
     y_tag_id : str, optional
         String specifier for naming convention of column tags.
-    dist : str, optional
-        The distribution to sample from.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
     loc : float, optional
         The 'location' of the distribution, its meaning depends on ``dist``.
     scale : float, optional
@@ -3327,6 +3343,7 @@ def MPS_rand_state(
     normalize=True,
     cyclic=False,
     dtype="float64",
+    dist="normal",
     trans_invar=False,
     **mps_opts,
 ):
@@ -3360,7 +3377,11 @@ def MPS_rand_state(
                 "boundary conditions."
             )
         array = sensibly_scale(
-            randn(shape=(bond_dim, bond_dim, phys_dim), dtype=dtype)
+            randn(
+                shape=(bond_dim, bond_dim, phys_dim),
+                dtype=dtype,
+                dist=dist,
+            )
         )
 
         def fill_fn(shape):
@@ -3369,7 +3390,7 @@ def MPS_rand_state(
     else:
 
         def fill_fn(shape):
-            return sensibly_scale(randn(shape, dtype=dtype))
+            return sensibly_scale(randn(shape, dtype=dtype, dist=dist))
 
     mps = MatrixProductState.from_fill_fn(
         fill_fn,
@@ -3749,6 +3770,7 @@ def MPO_rand(
     cyclic=False,
     herm=False,
     dtype="float64",
+    dist="normal",
     **mpo_opts,
 ):
     """Generate a random matrix product state.
@@ -3768,6 +3790,8 @@ def MPO_rand(
         open boundary conditions.
     dtype : {float, complex} or numpy dtype, optional
         Data type of the tensor network.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
     herm : bool, optional
         Whether to make the matrix hermitian (or symmetric if real) or not.
     mpo_opts
@@ -3782,7 +3806,7 @@ def MPO_rand(
     ]
 
     def gen_data(shape):
-        data = randn(shape, dtype=dtype)
+        data = randn(shape, dtype=dtype, dist=dist)
         if not herm:
             return data
 

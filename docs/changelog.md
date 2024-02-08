@@ -2,6 +2,14 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-7-3)=
+## v1.7.3 (unreleased)
+
+**Enhancements:**
+
+- [qu.randn](quimb.randn): support `dist="rademacher"`.
+- support `dist` and other `randn` options in various TN builders.
+
 
 (whats-new-1-7-2)=
 ## v1.7.2 (2024-01-30)
