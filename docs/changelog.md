@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 (whats-new-1-7-3)=
-## v1.7.3 (unreleased)
+## v1.7.3 (2024-02-08)
 
 **Enhancements:**
 
@@ -12,8 +12,7 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
-- restore fallback (to `scipy.linalg.svd` with driver='gesvd') behavior for
-  truncated SVD with numpy backend.
+- restore fallback (to `scipy.linalg.svd` with driver='gesvd') behavior for truncated SVD with numpy backend.
 
 
 (whats-new-1-7-2)=
