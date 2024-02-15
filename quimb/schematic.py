@@ -165,6 +165,9 @@ class Drawing:
             will be assigned based on average z-order of the endpoints.
         text : str
             The text to place.
+        center : float, optional
+            The position of the text along the line, where 0.0 is the start and
+            1.0 is the end. Default is 0.5.
         preset : str, optional
             A preset style to use for the text.
         kwargs
@@ -175,6 +178,7 @@ class Drawing:
         style.setdefault("horizontalalignment", "center")
         style.setdefault("verticalalignment", "center")
         style.setdefault("clip_on", False)
+        center = style.pop("center", 0.5)
 
         if len(cooa) == 2:
             xa, ya = cooa
@@ -189,8 +193,8 @@ class Drawing:
             xb, yb = self._3d_project(*coob)
 
         # compute midpoint
-        x = (xa + xb) / 2
-        y = (ya + yb) / 2
+        x = (xa * (1 - center) + xb * center)
+        y = (ya * (1 - center) + yb * center)
 
         # compute angle
         if xa <= xb:
@@ -528,7 +532,14 @@ class Drawing:
             self._adjust_lims(x, y)
 
     def line_offset(
-        self, cooa, coob, offset, midlength=0.5, preset=None, **kwargs
+        self,
+        cooa,
+        coob,
+        offset,
+        midlength=0.5,
+        relative=True,
+        preset=None,
+        **kwargs,
     ):
         """Draw a line between two coordinates, but curving out by a given
         offset perpendicular to the line.
@@ -550,6 +561,9 @@ class Drawing:
             dict, it is passed as keyword arguments to the arrowhead method.
         text_between : str, optional
             Add text along the line.
+        relative : bool, optional
+            If ``True`` (the default), then ``offset`` is taken as a fraction
+            of the line length, else in absolute units.
         preset : str, optional
             A preset style to use for the line.
         kwargs
@@ -575,10 +589,14 @@ class Drawing:
         coob = xs[1], ys[1]
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         R = forward(*coob)[0]
+
+        if relative:
+            offset *= R
+
         endlength = (1 - midlength) / 2
-        cooml = inverse(endlength * R, offset * R)
-        coomm = inverse(R / 2, offset * R)
-        coomr = inverse((1 - endlength) * R, offset * R)
+        cooml = inverse(endlength * R, offset)
+        coomm = inverse(R / 2, offset)
+        coomr = inverse((1 - endlength) * R, offset)
         curve_pts = [cooa, cooml, coomm, coomr, coob]
 
         if arrowhead is not None:
@@ -1119,7 +1137,7 @@ def get_wong_color(
     return r, g, b
 
 
-def darken_color(color, factor=2/3):
+def darken_color(color, factor=2 / 3):
     """Take ``color`` and darken it by ``factor``."""
     rgba = mpl.colors.to_rgba(color)
     return tuple(factor * c for c in rgba[:3]) + rgba[3:]
