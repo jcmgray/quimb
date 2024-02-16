@@ -1190,8 +1190,8 @@ def mod_sat(c, mod=None, alpha=None):
     if mod is None:
         return r, g, b, alpha
 
-    h, s, v = mpl.rgb_to_hsv((r, g, b))
-    return (*mpl.hsv_to_rgb((h, mod * s, v)), alpha)
+    h, s, v = mpl.colors.rgb_to_hsv((r, g, b))
+    return (*mpl.colors.hsv_to_rgb((h, mod * s, v)), alpha)
 
 
 def auto_colors(nc, alpha=None, default_sequence=False):
