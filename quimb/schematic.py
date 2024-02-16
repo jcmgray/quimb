@@ -3,7 +3,7 @@
 
 import functools
 import warnings
-from math import cos, sin, pi, atan2
+from math import atan2, cos, pi, sin
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -193,8 +193,8 @@ class Drawing:
             xb, yb = self._3d_project(*coob)
 
         # compute midpoint
-        x = (xa * (1 - center) + xb * center)
-        y = (ya * (1 - center) + yb * center)
+        x = xa * (1 - center) + xb * center
+        y = ya * (1 - center) + yb * center
 
         # compute angle
         if xa <= xb:
@@ -1108,6 +1108,19 @@ def coo_to_zorder(i, j, k, xscale=1, yscale=1, zscale=1):
     )
 
 
+# colorblind palettes by Okabe & Ito (https://jfly.uni-koeln.de/color/)
+
+_COLORS_DEFAULT = {
+    "blue": "#56B4E9",  # light blue
+    "orange": "#E69F00",  # orange
+    "green": "#009E73",  # green
+    "red": "#D55E00",  # red
+    "yellow": "#F0E442",  # yellow
+    "pink": "#CC79A7",  # pink
+    "bluedark": "#0072B2",  # dark blue
+}
+
+
 def get_wong_color(
     which,
     alpha=None,
@@ -1115,17 +1128,34 @@ def get_wong_color(
     sat_factor=1.0,
     val_factor=1.0,
 ):
+    """Get a color by name, optionally modifying its alpha, hue, saturation
+    or value.
+
+    These colorblind friendly colors were ppularized in an article by Wong
+    (https://www.nature.com/articles/nmeth.1618) but originally come from
+    Okabe & Ito (https://jfly.uni-koeln.de/color/).
+
+    Parameters
+    ----------
+    which : {'blue', 'orange', 'green', 'red', 'yellow', 'pink', 'bluedark'}
+        The name of the color to get.
+    alpha : float, optional
+        The alpha channel value to set for the color. Default is 1.0.
+    hue_factor : float, optional
+        The amount to shift the hue of the color. Default is 0.0.
+    sat_factor : float, optional
+        The amount to scale the saturation of the color. Default is 1.0.
+    val_factor : float, optional
+        The amount to scale the value of the color. Default is 1.0.
+
+    Returns
+    -------
+    color : tuple[float, float, float, float]
+        The RGBA color as a tuple of floats.
+    """
     import matplotlib as mpl
 
-    h = {
-        "blue": "#56B4E9",  # light blue
-        "orange": "#E69F00",  # orange
-        "green": "#009E73",  # green
-        "red": "#D55E00",  # red
-        "yellow": "#F0E442",  # yellow
-        "pink": "#CC79A7",
-        "bluedark": "#0072B2",  # dark blue
-    }[which]
+    h = _COLORS_DEFAULT[which]
     rgb = mpl.colors.to_rgb(h)
     h, s, v = mpl.colors.rgb_to_hsv(rgb)
     h = (h + hue_factor) % 1.0
@@ -1137,10 +1167,112 @@ def get_wong_color(
     return r, g, b
 
 
+_COLORS_SORTED = [
+    _COLORS_DEFAULT["bluedark"],
+    _COLORS_DEFAULT["blue"],
+    _COLORS_DEFAULT["green"],
+    _COLORS_DEFAULT["yellow"],
+    _COLORS_DEFAULT["orange"],
+    _COLORS_DEFAULT["red"],
+    _COLORS_DEFAULT["pink"],
+]
+
+
+def mod_sat(c, mod=None, alpha=None):
+    """Modify the luminosity of color ``c``, optionally set the ``alpha``
+    channel, and return the final color as a RGBA tuple."""
+    import matplotlib as mpl
+
+    r, g, b, a = mpl.colors.to_rgba(c)
+    if alpha is None:
+        alpha = a
+
+    if mod is None:
+        return r, g, b, alpha
+
+    h, s, v = mpl.rgb_to_hsv((r, g, b))
+    return (*mpl.hsv_to_rgb((h, mod * s, v)), alpha)
+
+
+def auto_colors(nc, alpha=None, default_sequence=False):
+    """Generate a nice sequence of ``nc`` colors. By default this uses an
+    interpolation between the colorblind friendly colors of Okabe & Ito in hue
+    sorted order, with luminosity moderated by a sine function to increase
+    local distinguishability.
+
+    Parameters
+    ----------
+    nc : int
+        The number of colors to generate.
+    alpha : float, optional
+        The alpha channel value to set for all colors. Default is 1.0.
+    default_sequence : bool, optional
+        If ``True``, take from the default sequence of 7 colors, un-sorted and
+        un-modulated.
+
+    Returns
+    -------
+    colors : list[tuple[float, float, float, float]]
+    """
+    import math
+
+    import numpy as np
+    from matplotlib.colors import LinearSegmentedColormap
+
+    if default_sequence:
+        if nc > 7:
+            raise ValueError(
+                "Can only generate 7 colors with default sequence"
+            )
+        return [
+            mod_sat(c, alpha=alpha)
+            for c in tuple(_COLORS_DEFAULT.values())[:nc]
+        ]
+
+    cmap = LinearSegmentedColormap.from_list("colorblind", _COLORS_SORTED)
+
+    xs = list(map(cmap, np.linspace(0, 1.0, nc)))
+
+    # modulate color saturation with sine to generate local distinguishability
+    # ... but only turn on gradually for increasing number of nodes
+    sat_mod_period = min(4, nc / 7)
+    sat_mod_factor = max(0.0, 2 / 3 * math.tanh((nc - 7) / 4))
+
+    if alpha is None:
+        alpha = 1.0
+
+    return [
+        mod_sat(
+            c,
+            1 - sat_mod_factor * math.sin(math.pi * i / sat_mod_period) ** 2,
+            alpha,
+        )
+        for i, c in enumerate(xs)
+    ]
+
+
 def darken_color(color, factor=2 / 3):
     """Take ``color`` and darken it by ``factor``."""
     rgba = mpl.colors.to_rgba(color)
     return tuple(factor * c for c in rgba[:3]) + rgba[3:]
+
+
+def average_color(colors):
+    """Take a sequence of colors and return the RMS average in RGB space."""
+    from matplotlib.colors import to_rgba
+
+    # first map to rgba
+    colors = [to_rgba(c) for c in colors]
+
+    r, g, b, a = zip(*colors)
+
+    # then RMS average each channel
+    rm = (sum(ri**2 for ri in r) / len(r)) ** 0.5
+    gm = (sum(gi**2 for gi in g) / len(g)) ** 0.5
+    bm = (sum(bi**2 for bi in b) / len(b)) ** 0.5
+    am = sum(a) / len(a)
+
+    return (rm, gm, bm, am)
 
 
 def jitter_color(color, factor=0.05):
@@ -1156,6 +1288,88 @@ def jitter_color(color, factor=0.05):
     )
     rgb = mpl.colors.hsv_to_rgb(hsv)
     return tuple(rgb) + rgba[3:]
+
+
+
+COLORING_SEED = 8  # 8, 10
+
+
+def set_coloring_seed(seed):
+    """Set the seed for the random color generator.
+
+    Parameters
+    ----------
+    seed : int
+        The seed to use.
+    """
+    global COLORING_SEED
+    COLORING_SEED = seed
+
+
+def hash_to_nvalues(s, nval, seed=None):
+    """Hash the string ``s`` to ``nval`` different floats in the range [0, 1]."""
+    import hashlib
+
+    if seed is None:
+        seed = COLORING_SEED
+
+    m = hashlib.sha256()
+    m.update(f"{seed}".encode())
+    m.update(s.encode())
+    hsh = m.hexdigest()
+
+    b = len(hsh) // nval
+    if b == 0:
+        raise ValueError(
+            f"Can't extract {nval} values from hash of length {len(hsh)}"
+        )
+    return tuple(
+        int(hsh[i * b : (i + 1) * b], 16) / 16**b for i in range(nval)
+    )
+
+
+def hash_to_color(
+    s,
+    hmin=0.0,
+    hmax=1.0,
+    smin=0.3,
+    smax=0.8,
+    vmin=0.8,
+    vmax=0.9,
+):
+    """Generate a random color for a string  ``s``.
+
+    Parameters
+    ----------
+    s : str
+        The string to generate a color for.
+    hmin : float, optional
+        The minimum hue value.
+    hmax : float, optional
+        The maximum hue value.
+    smin : float, optional
+        The minimum saturation value.
+    smax : float, optional
+        The maximum saturation value.
+    vmin : float, optional
+        The minimum value value.
+    vmax : float, optional
+        The maximum value value.
+
+    Returns
+    -------
+    color : tuple
+        A tuple of floats in the range [0, 1] representing the RGB color.
+    """
+    from matplotlib.colors import to_hex, hsv_to_rgb
+
+    h, s, v = hash_to_nvalues(s, 3)
+    h = hmin + h * (hmax - hmin)
+    s = smin + s * (smax - smin)
+    v = vmin + v * (vmax - vmin)
+
+    rgb = hsv_to_rgb((h, s, v))
+    return to_hex(rgb)
 
 
 def mean(xs):

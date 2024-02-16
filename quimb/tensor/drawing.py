@@ -8,7 +8,7 @@ import warnings
 import numpy as np
 
 from ..utils import valmap, check_opt, autocorrect_kwargs
-
+from ..schematic import average_color, darken_color, auto_colors, hash_to_color
 
 HAS_FA2 = importlib.util.find_spec("fa2") is not None
 
@@ -1451,62 +1451,6 @@ def get_positions(
 
 # ----------------------------- color functions ----------------------------- #
 
-# colorblind palettes by Bang Wong (https://www.nature.com/articles/nmeth.1618)
-
-_COLORS_DEFAULT = (
-    "#56B4E9",  # light blue
-    "#E69F00",  # orange
-    "#009E73",  # green
-    "#D55E00",  # red
-    "#F0E442",  # yellow
-    "#CC79A7",  # purple
-    "#0072B2",  # dark blue
-)
-
-_COLORS_SORTED = (
-    "#0072B2",  # dark blue
-    "#56B4E9",  # light blue
-    "#009E73",  # green
-    "#F0E442",  # yellow
-    "#E69F00",  # orange
-    "#D55E00",  # red
-    "#CC79A7",  # purple
-)
-
-
-def mod_sat(c, mod, alpha):
-    """Modify the luminosity of rgb color ``c``."""
-    from matplotlib.colors import hsv_to_rgb, rgb_to_hsv
-
-    h, s, v = rgb_to_hsv(c[:3])
-    return (*hsv_to_rgb((h, mod * s, v)), alpha)
-
-
-def auto_colors(nc, alpha=None):
-    import math
-    from matplotlib.colors import LinearSegmentedColormap
-
-    cmap = LinearSegmentedColormap.from_list("wong", _COLORS_SORTED)
-
-    xs = list(map(cmap, np.linspace(0, 1.0, nc)))
-
-    # modulate color saturation with sine to generate local distinguishability
-    # ... but only turn on gradually for increasing number of nodes
-    sat_mod_period = min(4, nc / 7)
-    sat_mod_factor = max(0.0, 2 / 3 * math.tanh((nc - 7) / 4))
-
-    if alpha is None:
-        alpha = 1.0
-
-    return [
-        mod_sat(
-            c,
-            1 - sat_mod_factor * math.sin(math.pi * i / sat_mod_period) ** 2,
-            alpha,
-        )
-        for i, c in enumerate(xs)
-    ]
-
 
 def get_colors(color, custom_colors=None, alpha=None):
     """Generate a sequence of rgbs for tag(s) ``color``."""
@@ -1524,7 +1468,7 @@ def get_colors(color, custom_colors=None, alpha=None):
 
     nc = len(color)
     if nc <= 7:
-        rgbs = [to_rgba(c, alpha=alpha) for c in _COLORS_DEFAULT]
+        rgbs = auto_colors(nc, alpha=alpha, default_sequence=True)
         return dict(zip(color, rgbs))
 
     rgbs = auto_colors(nc, alpha)
@@ -1539,109 +1483,6 @@ def to_rgba_str(color, alpha=None):
     g = int(rgba[1] * 255) if isinstance(rgba[1], float) else rgba[1]
     b = int(rgba[2] * 255) if isinstance(rgba[2], float) else rgba[2]
     return f"rgba({r}, {g}, {b}, {rgba[3]})"
-
-
-def average_color(colors):
-    from matplotlib.colors import to_rgba
-
-    # first map to rgba
-    colors = [to_rgba(c) for c in colors]
-
-    r, g, b, a = zip(*colors)
-
-    # then RMS average each channel
-    rm = (sum(ri**2 for ri in r) / len(r)) ** 0.5
-    gm = (sum(gi**2 for gi in g) / len(g)) ** 0.5
-    bm = (sum(bi**2 for bi in b) / len(b)) ** 0.5
-    am = sum(a) / len(a)
-
-    return (rm, gm, bm, am)
-
-
-def darken_color(rgba, darkness=0.8):
-    """Return a darker color."""
-    return tuple(x if i == 3 else (darkness) * x for i, x in enumerate(rgba))
-
-
-COLORING_SEED = 8  # 8, 10
-
-
-def set_coloring_seed(seed):
-    """Set the seed for the random color generator.
-
-    Parameters
-    ----------
-    seed : int
-        The seed to use.
-    """
-    global COLORING_SEED
-    COLORING_SEED = seed
-
-
-def hash_to_nvalues(s, nval, seed=None):
-    """Hash the string ``s`` to ``nval`` different floats in the range [0, 1]."""
-    import hashlib
-
-    if seed is None:
-        seed = COLORING_SEED
-
-    m = hashlib.sha256()
-    m.update(f"{seed}".encode())
-    m.update(s.encode())
-    hsh = m.hexdigest()
-
-    b = len(hsh) // nval
-    if b == 0:
-        raise ValueError(
-            f"Can't extract {nval} values from hash of length {len(hsh)}"
-        )
-    return tuple(
-        int(hsh[i * b : (i + 1) * b], 16) / 16**b for i in range(nval)
-    )
-
-
-def hash_to_color(
-    s,
-    hmin=0.0,
-    hmax=1.0,
-    smin=0.3,
-    smax=0.8,
-    vmin=0.8,
-    vmax=0.9,
-):
-    """Generate a random color for a string  ``s``.
-
-    Parameters
-    ----------
-    s : str
-        The string to generate a color for.
-    hmin : float, optional
-        The minimum hue value.
-    hmax : float, optional
-        The maximum hue value.
-    smin : float, optional
-        The minimum saturation value.
-    smax : float, optional
-        The maximum saturation value.
-    vmin : float, optional
-        The minimum value value.
-    vmax : float, optional
-        The maximum value value.
-
-    Returns
-    -------
-    color : tuple
-        A tuple of floats in the range [0, 1] representing the RGB color.
-    """
-    from matplotlib.colors import to_hex, hsv_to_rgb
-
-    h, s, v = hash_to_nvalues(s, 3)
-    h = hmin + h * (hmax - hmin)
-    s = smin + s * (smax - smin)
-    v = vmin + v * (vmax - vmin)
-
-    rgb = hsv_to_rgb((h, s, v))
-    return to_hex(rgb)
 
 
 def auto_color_html(s):
