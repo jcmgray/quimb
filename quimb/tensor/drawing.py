@@ -7,8 +7,9 @@ import warnings
 
 import numpy as np
 
-from ..utils import valmap, check_opt, autocorrect_kwargs
-from ..schematic import average_color, darken_color, auto_colors, hash_to_color
+from ..utils import autocorrect_kwargs, check_opt, valmap
+
+# from ..schematic import average_color, darken_color, auto_colors, hash_to_color
 
 HAS_FA2 = importlib.util.find_spec("fa2") is not None
 
@@ -206,10 +207,13 @@ def draw_tn(
     ax : matplotlib.Axis, optional
         Draw the graph on this axis rather than creating a new figure.
     """
-    import networkx as nx
-    import matplotlib as mpl
-    from matplotlib.colors import to_rgb, to_rgba
     import math
+
+    import matplotlib as mpl
+    import networkx as nx
+    from matplotlib.colors import to_rgb, to_rgba
+
+    from ..schematic import darken_color, hash_to_color
 
     check_opt(
         "multi_tag_style",
@@ -650,7 +654,8 @@ def _draw_matplotlib(
     ax=None,
 ):
     import matplotlib.pyplot as plt
-    from quimb.schematic import Drawing
+
+    from quimb.schematic import Drawing, average_color
 
     d = Drawing(figsize=figsize, ax=ax)
     if ax is None:
@@ -828,6 +833,8 @@ def _draw_matplotlib(
 
 
 def _linearize_graph_data(G, multi_tag_style="auto"):
+    from ..schematic import average_color
+
     edge_source = collections.defaultdict(list)
     for _, _, edge_data in G.edges(data=True):
         cooa, coob = edge_data["coos"]
@@ -1456,6 +1463,8 @@ def get_colors(color, custom_colors=None, alpha=None):
     """Generate a sequence of rgbs for tag(s) ``color``."""
     from matplotlib.colors import to_rgba
 
+    from ..schematic import auto_colors
+
     if color is None:
         return dict()
 
@@ -1487,6 +1496,8 @@ def to_rgba_str(color, alpha=None):
 
 def auto_color_html(s):
     """Automatically hash and color a string for HTML display."""
+    from ..schematic import hash_to_color
+
     if not isinstance(s, str):
         s = str(s)
     return f'<b style="color: {hash_to_color(s)};">{s}</b>'
