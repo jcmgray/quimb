@@ -453,6 +453,31 @@ class Test2DContract:
         assert not tn.is_cyclic_y()
         assert tn.num_indices == 2 * 3 * 4 - 7
 
+    @pytest.mark.parametrize("cyclicx", [False, True])
+    @pytest.mark.parametrize("cyclicy", [False, True])
+    @pytest.mark.parametrize("mode", ["mps", "hotrg", "ctmrg"])
+    def test_cyclic_contract(self, cyclicx, cyclicy, mode):
+        Lx = 5
+        Ly = 6
+        D = 2
+        chi = 3
+        tn = qtn.TN2D_rand(
+            Lx,
+            Ly,
+            D,
+            cyclic=(cyclicx, cyclicy),
+            seed=42,
+            dist="uniform",
+        )
+        Zex = tn.contract(...)
+        if mode == "hotrg":
+            Z = tn.contract_hotrg(chi)
+        elif mode == "ctmrg":
+            Z = tn.contract_ctmrg(chi)
+        else:
+            Z = tn.contract_boundary(chi, mode=mode)
+        assert abs(1 - Z / Zex) < 1e-3
+
 
 class TestPEPO:
     @pytest.mark.parametrize("Lx", [3, 4, 5])

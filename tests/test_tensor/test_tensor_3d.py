@@ -96,3 +96,25 @@ class Test3DManualContract:
         Z = tn.item() * 10**tn.exponent
         f = -qu.log(Z) / (L**3 * beta)
         assert f == pytest.approx(fex, rel=1e-2)
+
+    @pytest.mark.parametrize("cyclicx", [False, True])
+    @pytest.mark.parametrize("cyclicy", [False, True])
+    @pytest.mark.parametrize("cyclicz", [False, True])
+    @pytest.mark.parametrize("mode", ["hotrg", "ctmrg"])
+    def test_contract_cyclic(self, cyclicx, cyclicy, cyclicz, mode):
+        Lx, Ly, Lz = 3, 4, 5
+        chi = 3
+        tn = qtn.TN3D_from_fill_fn(
+            lambda shape: ar.lazy.Variable(shape=shape, backend="numpy"),
+            Lx,
+            Ly,
+            Lz,
+            D=2,
+            cyclic=(cyclicx, cyclicy, cyclicz),
+        )
+        if mode == "hotrg":
+            lZ = tn.contract_hotrg(max_bond=chi, cutoff=0.0)
+        elif mode == "ctmrg":
+            lZ = tn.contract_ctmrg(max_bond=chi, cutoff=0.0)
+
+        assert lZ.history_max_size() < 2**13

@@ -1,5 +1,4 @@
-"""Classes and algorithms related to 3D tensor networks.
-"""
+"""Classes and algorithms related to 3D tensor networks."""
 
 import functools
 import itertools
@@ -278,6 +277,60 @@ class Rotator3D:
             # -> sweeps are decreasing
             self.sweep = range(self.imax, self.imin - 1, -1)
             self.istep = -1
+
+    @property
+    def sweep_other(self):
+        return itertools.product(
+            range(self.jmin, self.jmax + 1),
+            range(self.kmin, self.kmax + 1),
+        )
+
+    @functools.cached_property
+    def cyclic_x(self):
+        return self.is_cyclic_x(
+            (self.jmin + self.jmax) // 2,
+            (self.kmin + self.kmax) // 2,
+            self.imin,
+            self.imax,
+        )
+
+    @functools.cached_property
+    def cyclic_y(self):
+        return self.is_cyclic_y(
+            (self.kmin + self.kmax) // 2,
+            (self.imin + self.imax) // 2,
+            self.jmin,
+            self.jmax,
+        )
+
+    @functools.cached_property
+    def cyclic_z(self):
+        return self.is_cyclic_z(
+            (self.imin + self.imax) // 2,
+            (self.jmin + self.jmax) // 2,
+            self.kmin,
+            self.kmax,
+        )
+
+    def get_jnext(self, j):
+        if j == self.jmax:
+            if self.cyclic_y:
+                # wrap around
+                return self.jmin
+            # no more steps
+            return None
+        # normal step
+        return j + 1
+
+    def get_knext(self, k):
+        if k == self.kmax:
+            if self.cyclic_z:
+                # wrap around
+                return self.kmin
+            # no more steps
+            return None
+        # normal step
+        return k + 1
 
 
 # reference for viewing a cube from each direction
@@ -609,58 +662,83 @@ class TensorNetwork3D(TensorNetworkGen):
         """Check if the x dimension is cyclic (periodic), specifically whether
         a bond exists between ``(imin, j, k)`` and ``(imax, j, k)``, with
         default values of ``imin = 0`` and ``imax = Lx - 1``, and ``j`` and
-        ``k`` the center of the lattice.
+        ``k`` the center of the lattice. If ``imin`` and ``imax`` are adjacent
+        then this is considered False, since there is no 'extra' connectivity.
         """
-        if j is None:
-            j = self.Ly // 2
-        if k is None:
-            k = self.Lz // 2
         if imin is None:
             imin = 0
         if imax is None:
             imax = self.Lx - 1
-        return bool(bonds(
-            self[self.site_tag(imin, j, k)],
-            self[self.site_tag(imax, j, k)],
-        ))
 
-    def is_cyclic_y(self, i=None, k=None, jmin=None, jmax=None):
+        if abs(imax - imin) <= 1:
+            # first and last sites already connected -> a bit undefined
+            return False
+
+        if j is None:
+            j = self.Ly // 2
+        if k is None:
+            k = self.Lz // 2
+
+        return bool(
+            bonds(
+                self[self.site_tag(imin, j, k)],
+                self[self.site_tag(imax, j, k)],
+            )
+        )
+
+    def is_cyclic_y(self, k=None, i=None, jmin=None, jmax=None):
         """Check if the y dimension is cyclic (periodic), specifically whether
         a bond exists between ``(i, jmin, k)`` and ``(i, jmax, k)``, with
         default values of ``jmin = 0`` and ``jmax = Ly - 1``, and ``i`` and
-        ``k`` the center of the lattice.
+        ``k`` the center of the lattice. If ``jmin`` and ``jmax`` are adjacent
+        then this is considered False, since there is no 'extra' connectivity.
         """
-        if i is None:
-            i = self.Lx // 2
-        if k is None:
-            k = self.Lz // 2
         if jmin is None:
             jmin = 0
         if jmax is None:
             jmax = self.Ly - 1
-        return bool(bonds(
-            self[self.site_tag(i, jmin, k)],
-            self[self.site_tag(i, jmax, k)],
-        ))
+
+        if abs(jmax - jmin) <= 1:
+            # first and last sites already connected -> a bit undefined
+            return False
+
+        if i is None:
+            i = self.Lx // 2
+        if k is None:
+            k = self.Lz // 2
+        return bool(
+            bonds(
+                self[self.site_tag(i, jmin, k)],
+                self[self.site_tag(i, jmax, k)],
+            )
+        )
 
     def is_cyclic_z(self, i=None, j=None, kmin=None, kmax=None):
         """Check if the z dimension is cyclic (periodic), specifically whether
         a bond exists between ``(i, j, kmin)`` and ``(i, j, kmax)``, with
         default values of ``kmin = 0`` and ``kmax = Lz - 1``, and ``i`` and
-        ``j`` the center of the lattice.
+        ``j`` the center of the lattice. If ``kmin`` and ``kmax`` are adjacent
+        then this is considered False, since there is no 'extra' connectivity.
         """
-        if i is None:
-            i = self.Lx // 2
-        if j is None:
-            j = self.Ly // 2
         if kmin is None:
             kmin = 0
         if kmax is None:
             kmax = self.Lz - 1
-        return bool(bonds(
-            self[self.site_tag(i, j, kmin)],
-            self[self.site_tag(i, j, kmax)],
-        ))
+
+        if abs(kmax - kmin) <= 1:
+            # first and last sites already connected -> a bit undefined
+            return False
+
+        if i is None:
+            i = self.Lx // 2
+        if j is None:
+            j = self.Ly // 2
+        return bool(
+            bonds(
+                self[self.site_tag(i, j, kmin)],
+                self[self.site_tag(i, j, kmax)],
+            )
+        )
 
     def __getitem__(self, key):
         """Key based tensor selection, checking for integer based shortcut."""
@@ -1018,29 +1096,27 @@ class TensorNetwork3D(TensorNetworkGen):
             canonize_opts.setdefault("max_iterations", 2)
             self.select(r.x_tag(r.sweep[0])).gauge_all_(**canonize_opts)
 
-        sweep_other = tuple(
-            itertools.product(
-                range(r.jmin, r.jmax + 1), range(r.kmin, r.kmax + 1)
-            )
-        )
-
-        for i0, i1 in pairwise(r.sweep):
+        for i, inext in pairwise(r.sweep):
             # we compute the projectors from an untouched copy
             tn_calc = self.copy()
 
-            for j, k in sweep_other:
-                tag_ijk = r.site_tag(i0, j, k)
-                tag_ip1jk = r.site_tag(i1, j, k)
+            for j, k in r.sweep_other:
+                # get next neighboring sites, wrapping around if necessary
+                jnext = r.get_jnext(j)
+                knext = r.get_knext(k)
+
+                tag_ijk = r.site_tag(i, j, k)
+                tag_ip1jk = r.site_tag(inext, j, k)
                 rtags = (tag_ijk, tag_ip1jk)
 
                 poss_ltags = []
-                if j != r.jmin:
+                if jnext is not None:
                     poss_ltags.append(
-                        (r.site_tag(i0, j - 1, k), r.site_tag(i1, j - 1, k))
+                        (r.site_tag(i, jnext, k), r.site_tag(inext, jnext, k))
                     )
-                if k != r.kmin:
+                if knext is not None:
                     poss_ltags.append(
-                        (r.site_tag(i0, j, k - 1), r.site_tag(i1, j, k - 1))
+                        (r.site_tag(i, j, knext), r.site_tag(inext, j, knext))
                     )
 
                 for ltags in poss_ltags:
@@ -1057,12 +1133,15 @@ class TensorNetwork3D(TensorNetworkGen):
 
             if not lazy:
                 # contract each pair of boundary tensors with their projectors
-                for j, k in sweep_other:
+                for j, k in r.sweep_other:
                     self.contract_tags_(
-                        (r.site_tag(i0, j, k), r.site_tag(i1, j, k)),
+                        (r.site_tag(i, j, k), r.site_tag(inext, j, k)),
                         optimize=optimize,
                     )
 
+            if equalize_norms:
+                for t in self.select_tensors(r.x_tag(inext)):
+                    self.strip_exponent(t, equalize_norms)
             if equalize_norms:
                 for t in self.select_tensors(r.x_tag(i1)):
                     self.strip_exponent(t, equalize_norms)
@@ -1101,7 +1180,9 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_opts["compress_opts"] = compress_opts
 
         if mode == "projector":
-            return tn._contract_boundary_projector(**contract_boundary_opts)
+            return tn._contract_boundary_projector(
+                canonize_opts=canonize_opts, **contract_boundary_opts
+            )
 
         # mode == 'peps' options
         return tn._contract_boundary_core(
@@ -1199,7 +1280,22 @@ class TensorNetwork3D(TensorNetworkGen):
             }
 
         if sequence is None:
-            sequence = ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")
+            sequence = []
+            if tn.is_cyclic_x():
+                sequence.append("xmin")
+            else:
+                sequence.extend(["xmin", "xmax"])
+
+            if tn.is_cyclic_y():
+                sequence.append("ymin")
+            else:
+                sequence.extend(["ymin", "ymax"])
+
+            if tn.is_cyclic_z():
+                sequence.append("zmin")
+            else:
+                sequence.extend(["zmin", "zmax"])
+
         else:
             sequence = parse_boundary_sequence(sequence)
 
@@ -1362,6 +1458,66 @@ class TensorNetwork3D(TensorNetworkGen):
     contract_boundary_ = functools.partialmethod(
         contract_boundary, inplace=True
     )
+
+    def contract_ctmrg(
+        self,
+        max_bond=None,
+        *,
+        cutoff=1e-10,
+        canonize=False,
+        canonize_opts=None,
+        lazy=False,
+        mode="projector",
+        compress_opts=None,
+        sequence=("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"),
+        xmin=None,
+        xmax=None,
+        ymin=None,
+        ymax=None,
+        zmin=None,
+        zmax=None,
+        max_separation=1,
+        max_unfinished=1,
+        around=None,
+        equalize_norms=False,
+        final_contract=True,
+        final_contract_opts=None,
+        progbar=False,
+        inplace=False,
+        **contract_boundary_opts,
+    ):
+        contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["cutoff"] = cutoff
+        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["compress_opts"] = compress_opts
+        contract_boundary_opts["lazy"] = lazy
+
+        if lazy:
+            # we are implicitly asking for the tensor network
+            final_contract = False
+
+        return self._contract_interleaved_boundary_sequence(
+            contract_boundary_opts=contract_boundary_opts,
+            canonize=canonize,
+            canonize_opts=canonize_opts,
+            sequence=sequence,
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            zmin=zmin,
+            zmax=zmax,
+            max_separation=max_separation,
+            max_unfinished=max_unfinished,
+            around=around,
+            equalize_norms=equalize_norms,
+            final_contract=final_contract,
+            final_contract_opts=final_contract_opts,
+            progbar=progbar,
+            inplace=inplace,
+        )
+
+    contract_ctmrg_ = functools.partialmethod(contract_ctmrg, inplace=True)
 
     def _compute_plane_envs(
         self,
@@ -1550,46 +1706,47 @@ class TensorNetwork3D(TensorNetworkGen):
         tn = self if inplace else self.copy()
         tn_calc = tn.copy()
 
-        r = Rotator3D(tn, None, None, None, direction + "min")
+        r = Rotator3D(tn, None, None, None, f"{direction}min")
 
         retag_map = {}
 
         for i in range(r.imin, r.imax + 1, 2):
+            # since we are partitioning into pairs in the `x` direction, we
+            # don't have to worry about PBC here - the boundary is never coarse
+            # grained over
             next_i_in_lattice = i + 1 <= r.imax
-            for j in range(r.jmin, r.jmax + 1):
-                for k in range(r.kmin, r.kmax + 1):
-                    tag_ijk = r.site_tag(i, j, k)
-                    tag_ip1jk = r.site_tag(i + 1, j, k)
-                    new_tag = r.site_tag(i // 2, j, k)
-                    retag_map[tag_ijk] = new_tag
-                    if next_i_in_lattice:
-                        retag_map[tag_ip1jk] = new_tag
 
-                    # insert the 'y'-orientated projectors
-                    if (j > 0) and next_i_in_lattice:
-                        ltags = (
-                            r.site_tag(i, j - 1, k),
-                            r.site_tag(i + 1, j - 1, k),
-                        )
-                        rtags = (tag_ijk, tag_ip1jk)
-                        tn_calc.insert_compressor_between_regions(
-                            ltags,
-                            rtags,
-                            new_ltags=ltags,
-                            new_rtags=rtags,
-                            insert_into=tn,
-                            max_bond=max_bond,
-                            cutoff=cutoff,
-                            **compress_opts,
-                        )
+            for j, k in r.sweep_other:
+                # however when computing neighboring sites in the orthogonal
+                # direction, we do need to consider PBC
+                jnext = r.get_jnext(j)
+                knext = r.get_knext(k)
 
-                    # insert the 'z'-orientated projectors
-                    if (k > 0) and next_i_in_lattice:
-                        ltags = (
-                            r.site_tag(i, j, k - 1),
-                            r.site_tag(i + 1, j, k - 1),
+                tag_ijk = r.site_tag(i, j, k)
+                tag_ip1jk = r.site_tag(i + 1, j, k)
+                new_tag = r.site_tag(i // 2, j, k)
+                retag_map[tag_ijk] = new_tag
+
+                if next_i_in_lattice:
+                    retag_map[tag_ip1jk] = new_tag
+
+                    rtags = (tag_ijk, tag_ip1jk)
+                    poss_ltags = []
+                    if jnext is not None:
+                        poss_ltags.append(
+                            (
+                                r.site_tag(i, jnext, k),
+                                r.site_tag(i + 1, jnext, k),
+                            )
                         )
-                        rtags = (tag_ijk, tag_ip1jk)
+                    if knext is not None:
+                        poss_ltags.append(
+                            (
+                                r.site_tag(i, j, knext),
+                                r.site_tag(i + 1, j, knext),
+                            )
+                        )
+                    for ltags in poss_ltags:
                         tn_calc.insert_compressor_between_regions(
                             ltags,
                             rtags,
