@@ -9,6 +9,12 @@ Release notes for `quimb`.
 
 - [qu.randn](quimb.randn): support `dist="rademacher"`.
 - support `dist` and other `randn` options in various TN builders.
+- support PBC in
+  [`tn2d.contract_hotrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg),
+  [`tn2d.contract_ctmrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg),
+  [`tn3d.contract_hotrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_hotrg) and
+  the new function
+  [`tn3d.contract_ctmrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_ctmrg).
 
 **Bug fixes:**
 
