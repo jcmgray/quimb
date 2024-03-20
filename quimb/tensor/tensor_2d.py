@@ -5246,7 +5246,16 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         """In-place PEPO addition."""
         return self.add_PEPO(other, inplace=True)
 
-    _apply_peps = tensor_network_apply_op_vec
+    def _apply_peps(
+        self, other, compress=False, contract=True, **compress_opts
+    ):
+        return tensor_network_apply_op_vec(
+            A=self,
+            x=other,
+            compress=compress,
+            contract=contract,
+            **compress_opts,
+        )
 
     def apply(self, other, compress=False, **compress_opts):
         """Act with this PEPO on ``other``, returning a new TN like ``other``

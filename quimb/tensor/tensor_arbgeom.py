@@ -1,5 +1,4 @@
-"""Classes and algorithms related to arbitrary geometry tensor networks.
-"""
+"""Classes and algorithms related to arbitrary geometry tensor networks."""
 
 import functools
 import contextlib
@@ -100,65 +99,209 @@ def tensor_network_align(*tns, ind_ids=None, trace=False, inplace=False):
 
 
 def tensor_network_apply_op_vec(
-    tn_op, tn_vec, contract=True, compress=False, **compress_opts
+    A,
+    x,
+    which_A="lower",
+    contract=False,
+    fuse_multibonds=True,
+    compress=False,
+    inplace=False,
+    inplace_A=False,
+    **compress_opts,
 ):
     """Apply a general a general tensor network representing an operator (has
     ``upper_ind_id`` and ``lower_ind_id``) to a tensor network representing a
     vector (has ``site_ind_id``), by contracting each pair of tensors at each
     site then compressing the resulting tensor network. How the compression
     takes place is determined by the type of tensor network passed in. The
-    returned tensor network has the same site indices as ``tn_vec``, and it is
-    the ``lower_ind_id`` of ``tn_op`` that is contracted.
+    returned tensor network has the same site indices as ``x``, and it is
+    the ``lower_ind_id`` of ``A`` that is contracted.
+
+    This is like performing ``A.to_dense() @ x.to_dense()``, or the transpose
+    thereof, depending on the value of ``which_A``.
 
     Parameters
     ----------
-    tn_op : TensorNetwork
+    A : TensorNetworkGenOperator
         The tensor network representing the operator.
-    tn_vec : TensorNetwork
+    x : TensorNetworkGenVector
         The tensor network representing the vector.
+    which_A : {"lower", "upper"}, optional
+        Whether to contract the lower or upper indices of ``A`` with the site
+        indices of ``x``.
     contract : bool
         Whether to contract the tensors at each site after applying the
         operator, yielding a single tensor at each site.
+    fuse_multibonds : bool
+        If ``contract=True``, whether to fuse any multibonds after contracting
+        the tensors at each site.
     compress : bool
-        Whether to compress the resulting tensor network, if ``contract`` is
-        ``True``.
+        Whether to compress the resulting tensor network.
+    inplace : bool
+        Whether to modify ``x``, the input vector tensor network inplace.
+    inplace_A : bool
+        Whether to modify ``A``, the operator tensor network inplace.
     compress_opts
-        Options to pass to ``tn_vec.compress``.
+        Options to pass to ``tn.compress``, where ``tn`` is the resulting
+        tensor network, if ``compress=True``.
 
     Returns
     -------
-    tn_op_vec : TensorNetwork
+    TensorNetworkGenVector
+        The same type as ``x``.
     """
-    A, x = tn_op.copy(), tn_vec.copy()
+    x = x if inplace else x.copy()
+    A = A if inplace_A else A.copy()
 
-    # align the indices
-    #
-    #     |       <- upper_ind_id to be site_ind_id (outerid)
-    #    -A- ...
-    #     |       <- lower_ind_id to be innerid
-    #     :
-    #     |       <- site_ind_id to be innerid
-    #    -x- ...
-    #
     coordinate_formatter = get_coordinate_formatter(A._NDIMS)
-    A.lower_ind_id = f"__tmp{coordinate_formatter}__"
-    A.upper_ind_id = x.site_ind_id
-    x.reindex_sites_(f"__tmp{coordinate_formatter}__")
+    inner_ind_id = rand_uuid() + f"{coordinate_formatter}"
 
-    # form total network and contract each site
+    if which_A == "lower":
+        # align the indices
+        #
+        #     |       <- upper_ind_id to be site_ind_id (outerid)
+        #    -A- ...
+        #     |       <- lower_ind_id to be innerid
+        #     :
+        #     |       <- site_ind_id to be innerid
+        #    -x- ...
+        #
+        A.lower_ind_id = inner_ind_id
+        A.upper_ind_id = x.site_ind_id
+    elif which_A == "upper":
+        # transposed application
+        A.upper_ind_id = inner_ind_id
+        A.lower_ind_id = x.site_ind_id
+    else:
+        raise ValueError(
+            f"Invalid `which_A`: {which_A}, should be 'lower' or 'upper'."
+        )
+
+    x.reindex_sites_(inner_ind_id)
+
+    # combine the tensor networks
     x |= A
 
     if contract:
+        # optionally contract all tensor at each site
         for site in x.gen_sites_present():
             x ^= site
 
-        x.fuse_multibonds_()
+        if fuse_multibonds:
+            x.fuse_multibonds_()
 
-        # optionally compress
-        if compress:
-            x.compress(**compress_opts)
+    # optionally compress
+    if compress:
+        x.compress(**compress_opts)
 
     return x
+
+
+def tensor_network_apply_op_op(
+    A,
+    B,
+    which_A="lower",
+    which_B="upper",
+    contract=False,
+    fuse_multibonds=True,
+    compress=False,
+    inplace=False,
+    inplace_A=False,
+    **compress_opts,
+):
+    """Apply the operator (has upper and lower site inds) represented by tensor
+    network ``A`` to the operator represented by tensor network ``B``. The
+    resulting tensor network has the same upper and lower indices as ``B``.
+    Optionally contract the tensors at each site, fuse any multibonds, and
+    compress the resulting tensor network.
+
+    This is like performing ``A.to_dense() @ B.to_dense()``, or various
+    combinations of tranposes thereof, depending on the values of ``which_A``
+    and ``which_B``.
+
+    Parameters
+    ----------
+    A : TensorNetworkGenOperator
+        The tensor network representing the operator to apply.
+    B : TensorNetworkGenOperator
+        The tensor network representing the target operator.
+    which_A : {"lower", "upper"}, optional
+        Whether to contract the lower or upper indices of ``A``.
+    which_B : {"lower", "upper"}, optional
+        Whether to contract the lower or upper indices of ``B``.
+    contract : bool
+        Whether to contract the tensors at each site after applying the
+        operator, yielding a single tensor at each site.
+    fuse_multibonds : bool
+        If ``contract=True``, whether to fuse any multibonds after contracting
+        the tensors at each site.
+    compress : bool
+        Whether to compress the resulting tensor network.
+    inplace : bool
+        Whether to modify ``B``, the target tensor network inplace.
+    inplace_A : bool
+        Whether to modify ``A``, the applied operator tensor network inplace.
+    compress_opts
+        Options to pass to ``tn.compress``, where ``tn`` is the resulting
+        tensor network, if ``compress=True``.
+
+    Returns
+    -------
+    TensorNetworkGenOperator
+        The same type as ``B``.
+    """
+    B = B if inplace else B.copy()
+    A = A if inplace_A else A.copy()
+
+    coordinate_formatter = get_coordinate_formatter(A._NDIMS)
+    inner_ind_id = rand_uuid() + f"{coordinate_formatter}"
+
+    if (which_A, which_B) == ("lower", "upper"):
+        # align the indices (by default lower of A joined with upper of B
+        # which corresponds to matrix multiplication):
+        #
+        #     |       <- A upper_ind_id to be upper_ind_id
+        #    -A- ...
+        #     |       <- A lower_ind_id to be innerid
+        #     :
+        #     |       <- B upper_ind_id to be innerid
+        #    -B- ...
+        #     |       <- B lower_ind_id to be lower_ind_id
+        #
+        A.lower_ind_id = inner_ind_id
+        A.upper_ind_id = B.upper_ind_id
+        B.reindex_upper_sites_(inner_ind_id)
+    elif (which_A, which_B) == ("lower", "lower"):
+        # rest are just permutations of above ...
+        A.lower_ind_id = inner_ind_id
+        A.upper_ind_id = B.lower_ind_id
+        B.reindex_lower_sites_(inner_ind_id)
+    elif (which_A, which_B) == ("upper", "upper"):
+        A.upper_ind_id = inner_ind_id
+        A.lower_ind_id = B.upper_ind_id
+        B.reindex_upper_sites_(inner_ind_id)
+    elif (which_A, which_B) == ("upper", "lower"):
+        A.upper_ind_id = inner_ind_id
+        A.lower_ind_id = B.lower_ind_id
+        B.reindex_lower_sites_(inner_ind_id)
+    else:
+        raise ValueError("Invalid `which_A` and `which_B` combination.")
+
+    # combine the tensor networks
+    B |= A
+
+    if contract:
+        # optionally contract all tensor at each site
+        for site in B.gen_sites_present():
+            B ^= site
+
+        if fuse_multibonds:
+            B.fuse_multibonds_()
+
+    if compress:
+        B.compress(**compress_opts)
+
+    return B
 
 
 class TensorNetworkGen(TensorNetwork):

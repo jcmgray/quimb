@@ -1,5 +1,5 @@
-"""Build specific tensor networks, including states and operators.
-"""
+"""Build specific tensor networks, including states and operators."""
+
 import math
 import functools
 import itertools

@@ -2924,7 +2924,16 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
 
     add_MPO_ = functools.partialmethod(add_MPO, inplace=True)
 
-    _apply_mps = tensor_network_apply_op_vec
+    def _apply_mps(
+        self, other, compress=False, contract=True, **compress_opts
+    ):
+        return tensor_network_apply_op_vec(
+            A=self,
+            x=other,
+            compress=compress,
+            contract=contract,
+            **compress_opts,
+        )
 
     def _apply_mpo(self, other, compress=False, **compress_opts):
         A, B = self.copy(), other.copy()
