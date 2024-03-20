@@ -3330,6 +3330,72 @@ def HTN_random_ksat(
     )
 
 
+def TN1D_matching(tn, max_bond, site_tags=None, dtype=None, **randn_opts):
+    """Create a 1D tensor network with the same outer indices as ``tn`` but
+    with a single tensor per site with bond dimension ``max_bond`` between
+    joining each site. Generally to be used as an initial guess for fitting.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to match, it can have arbitrary local structure and
+        output indices, as long as ``site_tags`` effectively partitions it.
+    max_bond : int
+        The bond dimension to use between each site.
+    site_tags : sequence of str, optional
+        The tags to use to select the tensors from ``tn``. If not given, uses
+        ``tn.site_tags``. The tensor network built will have one tensor per
+        site, in the order given by ``site_tags``.
+    dtype : dtype, optional
+        The data type to use for the new tensors, if not given uses the same as
+        the original tensors.
+    randn_opts
+        Supplied to :func:`~quimb.gen.rand.randn`.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    if site_tags is None:
+        site_tags = tn.site_tags
+
+    if dtype is None:
+        dtype = tn.dtype
+
+    tn_fit = TensorNetwork()
+
+    all_outer_ix = set(tn.outer_inds())
+    bonds = collections.defaultdict(rand_uuid)
+
+    for i, site in enumerate(site_tags):
+        # get local network at site
+        tni = tn.select(site)
+        # get all local indices which as also outer indices
+        loix = tuple(ix for ix in tni.ind_map if ix in all_outer_ix)
+        # also inherit all local tags
+        ltags = tni.tags
+
+        shape = []
+        inds = []
+        # add bond dimensions
+        if i > 0:
+            shape.append(max_bond)
+            inds.append(bonds[i - 1, i])
+        if i < len(site_tags) - 1:
+            shape.append(max_bond)
+            inds.append(bonds[i, i + 1])
+        # add physical/outer dimensions
+        shape.extend(map(tn.ind_size, loix))
+        inds.extend(loix)
+
+        tn_fit |= rand_tensor(
+            shape=shape, inds=inds, tags=ltags, dtype=dtype, **randn_opts
+        )
+
+    # finally cast the new network as the same type as the original
+    return tn_fit.view_like_(tn)
+
+
 # --------------------------------------------------------------------------- #
 #                                    MPSs                                     #
 # --------------------------------------------------------------------------- #

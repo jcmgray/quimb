@@ -4252,6 +4252,17 @@ class TensorNetwork(object):
 
         return t
 
+    def remove_all_tensors(self):
+        """Remove all tensors from this network."""
+        for t in self.tensor_map.values():
+            t.remove_owner(self)
+        self.tensor_map.clear()
+        self.tag_map.clear()
+        self.ind_map.clear()
+        self._inner_inds.clear()
+        self._outer_inds.clear()
+        self._tid_counter = 0
+
     _pop_tensor = deprecated(
         pop_tensor,
         "_pop_tensor",
@@ -8299,8 +8310,8 @@ class TensorNetwork(object):
         --------
         contract, contract_cumulative
         """
-        untagged_tn, tagged_ts = self.partition_tensors(
-            tags, inplace=inplace, which=which
+        tn, tagged_ts = self.partition_tensors(
+            tags, which=which, inplace=inplace,
         )
 
         if not tagged_ts:
@@ -8311,10 +8322,10 @@ class TensorNetwork(object):
 
         # whether we should let tensor_contract return a raw scalar
         preserve_tensor = (
-            preserve_tensor or inplace or (untagged_tn.num_tensors >= 1)
+            preserve_tensor or inplace or (tn.num_tensors >= 1)
         )
 
-        contracted = tensor_contract(
+        t = tensor_contract(
             *tagged_ts,
             output_inds=output_inds,
             optimize=optimize,
@@ -8324,13 +8335,13 @@ class TensorNetwork(object):
             **contract_opts,
         )
 
-        if (untagged_tn.num_tensors == 0) and (not inplace):
+        if (tn.num_tensors == 0) and (not inplace):
             # contracted all down to single tensor or scalar -> return it
             # (apart from if inplace -> we want to keep the tensor network)
-            return contracted
+            return t
 
-        untagged_tn.add_tensor(contracted, virtual=True)
-        return untagged_tn
+        tn.add_tensor(t, virtual=True)
+        return tn
 
     contract_tags_ = functools.partialmethod(contract_tags, inplace=True)
 
