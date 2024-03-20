@@ -100,3 +100,19 @@ def test_tensor_network_apply_op_op(which_A, which_B, contract, inplace):
         assert AB.lower_ind_id == B.lower_ind_id
 
     assert_allclose(AB.to_dense(), C)
+
+
+def test_gate_with_op():
+    A = qtn.MPO_rand(5, 3, dtype=complex)
+    x = qtn.MPS_rand_state(5, 3, dtype=complex)
+    y = A.to_dense() @ x.to_dense()
+    x.gate_with_op_lazy_(A)
+    assert_allclose(x.to_dense(), y)
+
+
+def test_gate_sandwich_with_op():
+    B = qtn.MPO_rand(5, 3, dtype=complex)
+    A = qtn.MPO_rand(5, 3, dtype=complex)
+    y = A.to_dense() @ B.to_dense() @ A.to_dense().conj().T
+    B.gate_sandwich_with_op_lazy_(A)
+    assert_allclose(B.to_dense(), y)

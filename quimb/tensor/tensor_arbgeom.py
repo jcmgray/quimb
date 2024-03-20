@@ -721,6 +721,53 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
+    def gate_with_op_lazy(self, A, transpose=False, inplace=False):
+        r"""Act lazily with the operator tensor network ``A``, which should
+        have matching structure, on this vector/state tensor network, like
+        ``A @ x``. The returned tensor network will have the same structure as
+        this one, but with the operator gated in lazily, i.e. uncontracted.
+
+        .. math::
+
+            | x \rangle \rightarrow A | x \rangle
+
+        or (if ``transpose=True``):
+
+        .. math::
+
+            | x \rangle \rightarrow A^T | x \rangle
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        transpose : bool, optional
+            Whether to contract the lower or upper indices of ``A`` with the
+            site indices of ``x``. If ``False`` (the default), the lower
+            indices of ``A`` will be contracted with the site indices of ``x``,
+            if ``True`` the upper indices of ``A`` will be contracted with
+            the site indices of ``x``, which is like applying ``A.T @ x``.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+            network.
+
+        Returns
+        -------
+        TensorNetworkGenVector
+        """
+        return tensor_network_apply_op_vec(
+            A=A,
+            x=self,
+            which_A="upper" if transpose else "lower",
+            contract=False,
+            inplace=inplace,
+        )
+
+    gate_with_op_lazy_ = functools.partialmethod(
+        gate_with_op_lazy, inplace=True
+    )
+
     def gate(
         self,
         G,
@@ -1570,7 +1617,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
 class TensorNetworkGenOperator(TensorNetworkGen):
     """A tensor network which notionally has a single tensor and two outer
     indices per 'site', though these could be labelled arbitrarily and could
-    also be linked in an arbitrary geometry by bonds.
+    also be linked in an arbitrary geometry by bonds. By convention, if
+    converted to a dense matrix, the 'upper' indices would be on the left and
+    the 'lower' indices on the right.
     """
 
     _EXTRA_PROPS = (
@@ -1744,6 +1793,146 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         if which == "lower":
             return self[site].ind_size(self.lower_ind(site))
 
+    def gate_upper_with_op_lazy(
+        self,
+        A,
+        transpose=False,
+        inplace=False,
+    ):
+        r"""Act lazily with the operator tensor network ``A``, which should
+        have matching structure, on this operator tensor network (``B``), like
+        ``A @ B``. The returned tensor network will have the same structure as
+        this one, but with the operator gated in lazily, i.e. uncontracted.
+
+        .. math::
+
+            B \rightarrow A B
+
+        or (if ``transpose=True``):
+
+        .. math::
+
+            B \rightarrow A^T B
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        transpose : bool, optional
+            Whether to contract the lower or upper indices of ``A`` with the
+            upper indices of ``B``. If ``False`` (the default), the lower
+            indices of ``A`` will be contracted with the upper indices of
+            ``B``, if ``True`` the upper indices of ``A`` will be
+            contracted with the upper indices of ``B``, which is like applying
+            the transpose first.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+            network.
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        return tensor_network_apply_op_op(
+            A=A,
+            B=self,
+            which_A="upper" if transpose else "lower",
+            which_B="upper",
+            contract=False,
+            inplace=inplace,
+        )
+
+    gate_upper_with_op_lazy_ = functools.partialmethod(
+        gate_upper_with_op_lazy, inplace=True
+    )
+
+    def gate_lower_with_op_lazy(
+        self,
+        A,
+        transpose=False,
+        inplace=False,
+    ):
+        r"""Act lazily 'from the right' with the operator tensor network ``A``,
+        which should have matching structure, on this operator tensor network
+        (``B``), like ``B @ A``. The returned tensor network will have the same
+        structure as this one, but with the operator gated in lazily, i.e.
+        uncontracted.
+
+        .. math::
+
+            B \rightarrow B A
+
+        or (if ``transpose=True``):
+
+        .. math::
+
+            B \rightarrow B A^T
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        transpose : bool, optional
+            Whether to contract the upper or lower indices of ``A`` with the
+            lower indices of this TN. If ``False`` (the default), the upper
+            indices of ``A`` will be contracted with the lower indices of
+            ``B``, if ``True`` the lower indices of ``A`` will be contracted
+            with the lower indices of this TN, which is like applying the
+            transpose first.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+            network.
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        return tensor_network_apply_op_op(
+            B=self,
+            A=A,
+            which_A="lower" if transpose else "upper",
+            which_B="lower",
+            contract=False,
+            inplace=inplace,
+        )
+
+    gate_lower_with_op_lazy_ = functools.partialmethod(
+        gate_lower_with_op_lazy, inplace=True
+    )
+
+    def gate_sandwich_with_op_lazy(
+        self,
+        A,
+        inplace=False,
+    ):
+        r"""Act lazily with the operator tensor network ``A``, which should
+        have matching structure, on this operator tensor network (``B``), like
+        :math:`B \rightarrow A B A^\dagger`. The returned tensor network will
+        have the same structure as this one, but with the operator gated in
+        lazily, i.e. uncontracted.
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        B  = self if inplace else self.copy()
+        B.gate_upper_with_op_lazy_(A)
+        B.gate_lower_with_op_lazy_(A.conj(), transpose=True)
+        return B
+
+    gate_sandwich_with_op_lazy_ = functools.partialmethod(
+        gate_sandwich_with_op_lazy, inplace=True
+    )
 
 def _compute_expecs_maybe_in_parallel(
     fn,

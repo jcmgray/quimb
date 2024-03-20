@@ -2,13 +2,12 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-7-3)=
-## v1.7.3 (2024-02-08)
+
+(whats-new-1-7-4)=
+## v1.7.4 (unreleased)
 
 **Enhancements:**
 
-- [qu.randn](quimb.randn): support `dist="rademacher"`.
-- support `dist` and other `randn` options in various TN builders.
 - support PBC in
   [`tn2d.contract_hotrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg),
   [`tn2d.contract_ctmrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg),
@@ -17,8 +16,25 @@ Release notes for `quimb`.
   [`tn3d.contract_ctmrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_ctmrg).
 - add [`tensor_network_apply_op_op`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_op)
   for applying 'operator' TNs to 'operator' TNs.
-- tweak [`tensor_network_apply_op_vec`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_state)
+- tweak [`tensor_network_apply_op_vec`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_vec)
   for applying 'operator' TNs to 'vector' or 'state' TNs.
+- add [`tnvec.gate_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_with_op_lazy)
+  method for applying 'operator' TNs to 'vector' or 'state' TNs like $x \rightarrow A x$.
+- add [`tnop.gate_upper_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_upper_with_op_lazy)
+  method for applying 'operator' TNs to the upper indices of 'operator' TNs like $B \rightarrow A B$.
+- add [`tnop.gate_lower_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_lower_with_op_lazy)
+  method for applying 'operator' TNs to the lower indices of 'operator' TNs like $B \rightarrow B A$.
+- add [`tnop.gate_sandwich_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_sandwich_with_op_lazy)
+  method for applying 'operator' TNs to the upper and lower indices of 'operator' TNs like $B \rightarrow A B A^\dagger$.
+
+
+(whats-new-1-7-3)=
+## v1.7.3 (2024-02-08)
+
+**Enhancements:**
+
+- [qu.randn](quimb.randn): support `dist="rademacher"`.
+- support `dist` and other `randn` options in various TN builders.
 
 **Bug fixes:**
 
