@@ -17,7 +17,7 @@ Release notes for `quimb`.
   [`tn3d.contract_ctmrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_ctmrg).
 - add [`tensor_network_apply_op_op`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_op)
   for applying 'operator' TNs to 'operator' TNs.
-- tweak [`tensor_network_apply_op_vec](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_state)
+- tweak [`tensor_network_apply_op_vec`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_state)
   for applying 'operator' TNs to 'vector' or 'state' TNs.
 
 **Bug fixes:**
