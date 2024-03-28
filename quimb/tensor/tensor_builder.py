@@ -1,55 +1,69 @@
 """Build specific tensor networks, including states and operators."""
 
-import math
+import collections
 import functools
 import itertools
-import collections
+import math
 from numbers import Integral
 
-import numpy as np
 import autoray as ar
+import numpy as np
 
-from ..core import make_immutable, ikron
-from ..utils import deprecated, unique, concat
+from ..core import ikron, make_immutable
 from ..gen.operators import (
     _gen_mbl_random_factors,
     eye,
     ham_heis,
     spin_operator,
 )
-from ..gen.rand import seed_rand, randn, choice, random_seed_fn, rand_phase
+from ..gen.rand import choice, rand_phase, randn, random_seed_fn, seed_rand
+from ..utils import concat, deprecated, unique
+from .array_ops import asarray, do, reshape, sensibly_scale
+from .contraction import array_contract
+from .decomp import eigh_truncated
+from .tensor_1d import MatrixProductOperator, MatrixProductState
+from .tensor_1d_tebd import LocalHam1D
+from .tensor_2d import TensorNetwork2D, gen_2d_bonds, gen_2d_plaquettes
+from .tensor_2d_tebd import LocalHam2D
+from .tensor_3d import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
+from .tensor_3d_tebd import LocalHam3D
+from .tensor_arbgeom import (
+    TensorNetworkGen,
+    TensorNetworkGenOperator,
+    TensorNetworkGenVector,
+)
 from .tensor_core import (
     COPY_tensor,
+    Tensor,
+    TensorNetwork,
     new_bond,
     rand_uuid,
     tags_to_oset,
     tensor_direct_product,
     tensor_network_sum,
-    Tensor,
-    TensorNetwork,
 )
-from .array_ops import asarray, sensibly_scale, reshape, do
-from .contraction import array_contract
-from .decomp import eigh_truncated
-from .tensor_arbgeom import (
-    TensorNetworkGen,
-    TensorNetworkGenVector,
-    TensorNetworkGenOperator,
-)
-from .tensor_1d import MatrixProductState, MatrixProductOperator
-from .tensor_2d import gen_2d_bonds, gen_2d_plaquettes, TensorNetwork2D
-from .tensor_3d import gen_3d_bonds, gen_3d_plaquettes, TensorNetwork3D
-from .tensor_1d_tebd import LocalHam1D
-from .tensor_2d_tebd import LocalHam2D
-from .tensor_3d_tebd import LocalHam3D
 
 
 @functools.lru_cache(maxsize=64)
 def delta_array(shape, dtype="float64"):
+    """Get the delta symbol AKA COPY-tensor as an ndarray.
+
+    Parameters
+    ----------
+    shape : tuple[int]
+        The shape of the array, not all dimensions have to match.
+    dtype : str, optional
+        The data type of the array.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
     x = np.zeros(shape, dtype=dtype)
     idx = np.indices(x.shape)
     # 1 where all indices are equal
     x[(idx[0] == idx).all(axis=0)] = 1
+    make_immutable(x)
     return x
 
 
@@ -60,10 +74,30 @@ def get_rand_fill_fn(
     seed=None,
     dtype="float64",
 ):
+    """Get a callable with the given random distribution and parameters, that
+    has signature ``fill_fn(shape) -> array``.
+
+    Parameters
+    ----------
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    seed : int, optional
+        A random seed.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The underlying data type.
+
+    Returns
+    -------
+    callable
+    """
     if seed is not None:
         seed_rand(seed)
 
-    def fill_fn(shape):
+    def fill_fn(shape=()):
         return randn(shape, dtype=dtype, dist=dist, loc=loc, scale=scale)
 
     return fill_fn
@@ -96,9 +130,9 @@ def rand_tensor(
     dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
         Type of random number to generate, defaults to 'normal'.
     scale : float, optional
-        A multiplier for the random numbers.
+        A multiplicative factor to scale the random numbers by.
     loc : float, optional
-        An offset for the random numbers.
+        An additive offset to add to the random numbers.
     left_inds : sequence of str, optional
         Which, if any, indices to group as 'left' indices of an effective
         matrix. This can be useful, for example, when automatically applying
@@ -137,6 +171,93 @@ def rand_phased(shape, inds, tags=None, dtype=complex):
     Tensor
     """
     data = rand_phase(shape, dtype=dtype)
+    return Tensor(data=data, inds=inds, tags=tags)
+
+
+def rand_symmetric_array(
+    d,
+    ndim,
+    dist="normal",
+    loc=0.0,
+    scale=1.0,
+    seed=None,
+    dtype="float64",
+    fill_fn=None,
+):
+    """Get a random symmetric array, i.e. one that is invariant under
+    permutation of its indices. It has `(ndim + d - 1) choose (d - 1)` unique
+    elements.
+
+    Parameters
+    ----------
+    d : int
+        The size of each dimension.
+    ndim : int
+        The number of dimensions.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    seed : int, optional
+        A random seed.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The underlying data type.
+    fill_fn : callable, optional
+        A function that takes a shape (here always `()`) and returns an array,
+        rather that using the random number generator.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
+    if fill_fn is None:
+        fill_fn = get_rand_fill_fn(
+            dist=dist, loc=loc, scale=scale, seed=seed, dtype=dtype
+        )
+
+    value_store = collections.defaultdict(fill_fn)
+    x = np.empty((d,) * ndim, dtype=np.float64)
+    for coo in itertools.product(range(d), repeat=ndim):
+        key = [0] * d
+        for i in coo:
+            key[i] += 1
+        key = tuple(key)
+        x[coo] = value_store[key]
+    return x
+
+
+def rand_tensor_symmetric(
+    d, inds, tags=None, dist="normal", loc=0.0, scale=1.0, seed=None
+):
+    """Generate a random symmetric tensor with specified local dimension and
+    inds.
+
+    Parameters
+    ----------
+    d : int
+        Size of each dimension.
+    inds : sequence of str
+        Names of each dimension.
+    tags : sequence of str
+        Labels to tag this tensor with.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    seed : int, optional
+        A random seed.
+
+    Returns
+    -------
+    Tensor
+    """
+    data = rand_symmetric_array(
+        d, len(inds), dist=dist, loc=loc, scale=scale, seed=seed
+    )
     return Tensor(data=data, inds=inds, tags=tags)
 
 
@@ -972,6 +1093,7 @@ def convert_to_2d(
     functions that only require a list of edges etc.
     """
     import itertools
+
     from quimb.tensor.tensor_2d import TensorNetwork2D
 
     tn2d = tn if inplace else tn.copy()
@@ -1229,9 +1351,9 @@ def TN2D_rand(
     dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
         Type of random number to generate, defaults to 'normal'.
     loc : float, optional
-        The 'location' of the distribution, its meaning depends on ``dist``.
+        An additive offset to add to the random numbers.
     scale : float, optional
-        The 'scale' of the distribution, its meaning depends on ``dist``.
+        A multiplicative factor to scale the random numbers by.
     seed : int, optional
         A random seed.
     dtype : dtype, optional
@@ -1242,6 +1364,76 @@ def TN2D_rand(
     TensorNetwork2D
     """
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
+
+    return TN2D_from_fill_fn(
+        fill_fn,
+        Lx=Lx,
+        Ly=Ly,
+        D=D,
+        cyclic=cyclic,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+    )
+
+
+def TN2D_rand_symmetric(
+    Lx,
+    Ly,
+    D,
+    cyclic=False,
+    site_tag_id="I{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    dist="normal",
+    loc=0,
+    scale=1,
+    seed=None,
+    dtype="float64",
+):
+    """Create a random 2D lattice tensor network where every tensor is
+    symmetric up to index permutations.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    D : int
+        The bond dimension connecting sites.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    seed : int, optional
+        A random seed.
+    dtype : dtype, optional
+        Data type of the random arrays.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
+    entry_fill_fn = get_rand_fill_fn(
+        dist=dist, loc=loc, scale=scale, seed=seed, dtype=dtype
+    )
+
+    def fill_fn(shape):
+        (d,) = set(shape)
+        ndim = len(shape)
+        return rand_symmetric_array(d, ndim, fill_fn=entry_fill_fn)
 
     return TN2D_from_fill_fn(
         fill_fn,
@@ -1353,8 +1545,6 @@ def TN2D_rand_hidden_loop(
     y_tag_id="Y{}",
     **kwargs,
 ):
-    """
-    """
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     edges = tuple(gen_2d_bonds(Lx, Ly, cyclic=cyclic)) * line_density
@@ -1395,6 +1585,7 @@ def convert_to_3d(
     functions that only require a list of edges etc.
     """
     import itertools
+
     from quimb.tensor.tensor_3d import TensorNetwork3D
 
     tn3d = tn if inplace else tn.copy()

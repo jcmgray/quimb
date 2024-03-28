@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath("./_pygments"))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'quimb'
-copyright = '2015-2023, Johnnie Gray'
+copyright = '2015-2024, Johnnie Gray'
 author = 'Johnnie Gray'
 
 # The full version, including alpha/beta/rc tags

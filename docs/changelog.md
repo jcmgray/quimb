@@ -8,6 +8,18 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- add `quimb.tensor.tensor_1d_compress` with functions for compressing generic
+  1D tensor networks (with arbitrary local structure) using various methods.
+  The methods are:
+
+  - The **'direct'** method: [`tensor_network_1d_compress_direct`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_direct)
+  - The **'dm'** (density matrix) method: [`tensor_network_1d_compress_dm`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_dm)
+  - The **'zipup'** method: [`tensor_network_1d_compress_zipup`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup)
+  - The **'zipup-first'** method: [`tensor_network_1d_compress_zipup_first`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_first)
+  - The 1 and 2 site **'fit'** or sweeping method: [`tensor_network_1d_compress_fit`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit)
+  - ... and some more niche methods for debugging and testing.
+
+  And can be accessed via the unified function [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress).
 - support PBC in
   [`tn2d.contract_hotrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg),
   [`tn2d.contract_ctmrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg),
@@ -34,18 +46,11 @@ Release notes for `quimb`.
   method for applying 'operator' TNs to the lower indices of 'operator' TNs like $B \rightarrow B A$.
 - add [`tnop.gate_sandwich_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_sandwich_with_op_lazy)
   method for applying 'operator' TNs to the upper and lower indices of 'operator' TNs like $B \rightarrow A B A^\dagger$.
-- add `quimb.tensor.tensor_1d_compress` with functions for compressing generic
-  1D tensor networks (with arbitrary local structure) using various methods.
-  The methods are:
+- add [`rand_symmetric_array`](quimb.tensor.tensor_builder.rand_symmetric_array),
+  [`rand_tensor_symmetric`](quimb.tensor.tensor_builder.rand_tensor_symmetric)
+  [`TN2D_rand_symmetric`](quimb.tensor.tensor_builder.TN2D_rand_symmetric)
+  for generating random symmetric arrays, tensors and 2D tensor networks.
 
-  - The **'direct'** method: [`tensor_network_1d_compress_direct`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_direct)
-  - The **'dm'** (density matrix) method: [`tensor_network_1d_compress_dm`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_dm)
-  - The **'zipup'** method: [`tensor_network_1d_compress_zipup`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup)
-  - The **'zipup-first'** method: [`tensor_network_1d_compress_zipup_first`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_first)
-  - The 1 and 2 site **'fit'** or sweeping method: [`tensor_network_1d_compress_fit`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit)
-  - ... and some more niche methods for debugging and testing.
-
-  And can be accessed via the unified function [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress).
 
 
 (whats-new-1-7-3)=
