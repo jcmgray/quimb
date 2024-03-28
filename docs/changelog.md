@@ -14,6 +14,14 @@ Release notes for `quimb`.
   [`tn3d.contract_hotrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_hotrg) and
   the new function
   [`tn3d.contract_ctmrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_ctmrg).
+- support PBC in
+  [`gen_2d_bonds`](quimb.tensor.tensor_2d.gen_2d_bonds) and
+  [`gen_3d_bonds`](quimb.tensor.tensor_3d.gen_3d_bonds), with ``cyclic`` kwarg.
+- support PBC in
+  [`TN2D_rand_hidden_loop`](quimb.tensor.tensor_builder.TN2D_rand_hidden_loop)
+  and
+  [`TN3D_rand_hidden_loop`](quimb.tensor.tensor_builder.TN3D_rand_hidden_loop),
+  with ``cyclic`` kwarg.
 - add [`tensor_network_apply_op_op`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_op)
   for applying 'operator' TNs to 'operator' TNs.
 - tweak [`tensor_network_apply_op_vec`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_vec)
@@ -26,6 +34,18 @@ Release notes for `quimb`.
   method for applying 'operator' TNs to the lower indices of 'operator' TNs like $B \rightarrow B A$.
 - add [`tnop.gate_sandwich_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_sandwich_with_op_lazy)
   method for applying 'operator' TNs to the upper and lower indices of 'operator' TNs like $B \rightarrow A B A^\dagger$.
+- add `quimb.tensor.tensor_1d_compress` with functions for compressing generic
+  1D tensor networks (with arbitrary local structure) using various methods.
+  The methods are:
+
+  - The **'direct'** method: [`tensor_network_1d_compress_direct`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_direct)
+  - The **'dm'** (density matrix) method: [`tensor_network_1d_compress_dm`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_dm)
+  - The **'zipup'** method: [`tensor_network_1d_compress_zipup`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup)
+  - The **'zipup-first'** method: [`tensor_network_1d_compress_zipup_first`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_first)
+  - The 1 and 2 site **'fit'** or sweeping method: [`tensor_network_1d_compress_fit`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit)
+  - ... and some more niche methods for debugging and testing.
+
+  And can be accessed via the unified function [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress).
 
 
 (whats-new-1-7-3)=

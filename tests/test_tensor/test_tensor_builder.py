@@ -5,14 +5,15 @@ import quimb as qu
 import quimb.tensor as qtn
 
 
-def test_tn2d_classical_ising_partition_function():
+@pytest.mark.parametrize("cyclic", [False, True, (False, True), (True, False)])
+def test_tn2d_classical_ising_partition_function(cyclic):
     Lx = 4
     Ly = 5
     coupling = {
         (cooa, coob): float(qu.randn())
-        for cooa, coob in qtn.gen_2d_bonds(Lx, Ly)
+        for cooa, coob in qtn.gen_2d_bonds(Lx, Ly, cyclic=cyclic)
     }
-    h = float(qu.randn())
+    h = qu.randn()
     tn = qtn.TN2D_classical_ising_partition_function(
         Lx,
         Ly,
@@ -20,6 +21,7 @@ def test_tn2d_classical_ising_partition_function():
         j=lambda cooa, coob: coupling[(cooa, coob)],
         h=h,
         outputs=[(1, 2), (3, 4)],
+        cyclic=cyclic,
     )
     assert tn.outer_inds() == ("s1,2", "s3,4")
     htn = qtn.HTN2D_classical_ising_partition_function(
@@ -28,20 +30,29 @@ def test_tn2d_classical_ising_partition_function():
         beta=0.44,
         j=lambda cooa, coob: coupling[(cooa, coob)],
         h=h,
+        cyclic=cyclic,
     )
+    assert htn.num_indices == Lx * Ly
+
+    if not isinstance(cyclic, tuple):
+        cyclic = (cyclic, cyclic)
+
+    assert (tn.is_cyclic_x(), tn.is_cyclic_y()) == cyclic
+
     assert_allclose(
         tn.contract().data,
         htn.contract(output_inds=("s1,2", "s3,4")).data,
     )
 
 
-def test_tn3d_classical_ising_partition_function():
+@pytest.mark.parametrize("cyclic", [False, (0, 1, 1), (0, 0, 1)])
+def test_tn3d_classical_ising_partition_function(cyclic):
     Lx, Ly, Lz = 2, 3, 3
     coupling = {
         (cooa, coob): float(qu.randn())
-        for cooa, coob in qtn.gen_3d_bonds(Lx, Ly, Lz)
+        for cooa, coob in qtn.gen_3d_bonds(Lx, Ly, Lz, cyclic=cyclic)
     }
-    h = float(qu.randn())
+    h = qu.randn()
     tn = qtn.TN3D_classical_ising_partition_function(
         Lx,
         Ly,
@@ -50,6 +61,7 @@ def test_tn3d_classical_ising_partition_function():
         j=lambda cooa, coob: coupling[(cooa, coob)],
         h=h,
         outputs=[(1, 0, 2), (0, 2, 1)],
+        cyclic=cyclic,
     )
     assert tn.outer_inds() == ("s0,2,1", "s1,0,2")
     htn = qtn.HTN3D_classical_ising_partition_function(
@@ -59,7 +71,15 @@ def test_tn3d_classical_ising_partition_function():
         beta=0.44,
         j=lambda cooa, coob: coupling[(cooa, coob)],
         h=h,
+        cyclic=cyclic,
     )
+    assert htn.num_indices == Lx * Ly * Lz
+
+    if not isinstance(cyclic, tuple):
+        cyclic = (cyclic, cyclic, cyclic)
+
+    assert (tn.is_cyclic_x(), tn.is_cyclic_y(), tn.is_cyclic_z()) == cyclic
+
     assert_allclose(
         tn.contract().data,
         htn.contract(output_inds=("s0,2,1", "s1,0,2")).data,
@@ -90,14 +110,14 @@ def test_all_to_all_classical_partition_functions(sites_location, outputs):
 
     sites = tuple(tn.gen_sites_present())
     assert len(sites) == N * (N - 1) // 2
-    for (i, j) in sites:
+    for i, j in sites:
         assert i > j
 
     if isinstance(outputs, tuple):
         assert set(tn.outer_inds()) == {f"s{i}" for i in outputs}
     else:
         assert tn.outer_inds() == (f"s{outputs}",)
-        t, = tn._inds_get(f"s{outputs}")
+        (t,) = tn._inds_get(f"s{outputs}")
         if sites_location == "side":
             assert "I2,0" in t.tags
         else:

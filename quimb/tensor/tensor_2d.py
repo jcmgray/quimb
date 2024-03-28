@@ -51,7 +51,7 @@ def nearest_neighbors(coo):
     return ((i - 1, j), (i, j - 1), (i, j + 1), (i + 1, j))
 
 
-def gen_2d_bonds(Lx, Ly, steppers=None, coo_filter=None):
+def gen_2d_bonds(Lx, Ly, steppers=None, coo_filter=None, cyclic=False):
     """Convenience function for tiling pairs of bond coordinates on a 2D
     lattice given a function like ``lambda i, j: (i + 1, j + 1)``.
 
@@ -105,11 +105,27 @@ def gen_2d_bonds(Lx, Ly, steppers=None, coo_filter=None):
     if callable(steppers):
         steppers = (steppers,)
 
+    try:
+        cyclic_x, cyclic_y = cyclic
+    except (TypeError, ValueError):
+        cyclic_x = cyclic_y = cyclic
+
+    def _maybe_wrap_coo(w, Lw, cyclic):
+        if 0 <= w < Lw:
+            return w
+        if cyclic:
+            return w % Lw
+        return None
+
     for i, j in product(range(Lx), range(Ly)):
         if (coo_filter is None) or coo_filter(i, j):
             for stepper in steppers:
                 i2, j2 = stepper(i, j)
-                if (0 <= i2 < Lx) and (0 <= j2 < Ly):
+
+                i2 = _maybe_wrap_coo(i2, Lx, cyclic_x)
+                j2 = _maybe_wrap_coo(j2, Ly, cyclic_y)
+
+                if (i2 is not None) and (j2 is not None):
                     yield (i, j), (i2, j2)
 
 
@@ -512,6 +528,7 @@ class TensorNetwork2D(TensorNetworkGen):
             self.Lx,
             self.Ly,
             steppers=[lambda i, j: (i, j + 1), lambda i, j: (i + 1, j)],
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_horizontal_bond_coos(self):
@@ -522,6 +539,7 @@ class TensorNetwork2D(TensorNetworkGen):
             steppers=[
                 lambda i, j: (i, j + 1),
             ],
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_horizontal_even_bond_coos(self):
@@ -535,6 +553,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i, j + 1),
             ],
             coo_filter=lambda i, j: j % 2 == 0,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_horizontal_odd_bond_coos(self):
@@ -548,6 +567,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i, j + 1),
             ],
             coo_filter=lambda i, j: j % 2 == 1,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_vertical_bond_coos(self):
@@ -558,6 +578,7 @@ class TensorNetwork2D(TensorNetworkGen):
             steppers=[
                 lambda i, j: (i + 1, j),
             ],
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_vertical_even_bond_coos(self):
@@ -571,6 +592,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j),
             ],
             coo_filter=lambda i, j: i % 2 == 0,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_vertical_odd_bond_coos(self):
@@ -584,6 +606,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j),
             ],
             coo_filter=lambda i, j: i % 2 == 1,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_left_bond_coos(self):
@@ -594,6 +617,7 @@ class TensorNetwork2D(TensorNetworkGen):
             steppers=[
                 lambda i, j: (i + 1, j - 1),
             ],
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_left_even_bond_coos(self):
@@ -607,6 +631,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j - 1),
             ],
             coo_filter=lambda i, j: j % 2 == 0,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_left_odd_bond_coos(self):
@@ -620,6 +645,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j - 1),
             ],
             coo_filter=lambda i, j: j % 2 == 1,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_right_bond_coos(self):
@@ -630,6 +656,7 @@ class TensorNetwork2D(TensorNetworkGen):
             steppers=[
                 lambda i, j: (i + 1, j + 1),
             ],
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_right_even_bond_coos(self):
@@ -643,6 +670,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j + 1),
             ],
             coo_filter=lambda i, j: i % 2 == 0,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_right_odd_bond_coos(self):
@@ -656,6 +684,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j + 1),
             ],
             coo_filter=lambda i, j: i % 2 == 1,
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def gen_diagonal_bond_coos(self):
@@ -667,6 +696,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 lambda i, j: (i + 1, j - 1),
                 lambda i, j: (i + 1, j + 1),
             ],
+            cyclic=(self.is_cyclic_x(), self.is_cyclic_y()),
         )
 
     def valid_coo(self, coo, xrange=None, yrange=None):

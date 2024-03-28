@@ -1338,6 +1338,8 @@ def TN2D_corner_double_line(
 def TN2D_rand_hidden_loop(
     Lx,
     Ly,
+    *,
+    cyclic=False,
     line_dim=2,
     line_density=2,
     seed=None,
@@ -1351,9 +1353,11 @@ def TN2D_rand_hidden_loop(
     y_tag_id="Y{}",
     **kwargs,
 ):
+    """
+    """
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
-    edges = tuple(gen_2d_bonds(Lx, Ly)) * line_density
+    edges = tuple(gen_2d_bonds(Lx, Ly, cyclic=cyclic)) * line_density
 
     kwargs.setdefault("join", True)
     kwargs.setdefault("random_rewire", True)
@@ -1736,6 +1740,8 @@ def TN3D_rand_hidden_loop(
     Lx,
     Ly,
     Lz,
+    *,
+    cyclic=False,
     line_dim=2,
     line_density=2,
     seed=None,
@@ -1752,7 +1758,7 @@ def TN3D_rand_hidden_loop(
 ):
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
-    edges = tuple(gen_3d_bonds(Lx, Ly, Lz)) * line_density
+    edges = tuple(gen_3d_bonds(Lx, Ly, Lz, cyclic=cyclic)) * line_density
 
     kwargs.setdefault("join", True)
     kwargs.setdefault("random_rewire", True)
@@ -1861,7 +1867,7 @@ def classical_ising_T_matrix(
     arrays = [
         classical_ising_sqrtS_matrix(beta=beta, j=j, asymm=a)
         for j, a in zip(js, asymms)
-    ] + [classical_ising_H_matrix(beta, h)]
+    ] + [classical_ising_H_matrix(beta, float(h))]
 
     inputs = (*(("i", x) for x in directions), ("i",))
     out = tuple(directions)
@@ -1950,7 +1956,7 @@ def HTN2D_classical_ising_partition_function(
             ts.append(Tensor(data, inds=inds))
 
         if h != 0.0:
-            data = classical_ising_H_matrix(beta=beta, h=h)
+            data = classical_ising_H_matrix(beta=beta, h=float(h))
             ts.append(Tensor(data, inds=(ind_id.format(ni, nj),)))
 
     return TensorNetwork(ts)
@@ -2059,7 +2065,7 @@ def HTN3D_classical_ising_partition_function(
             ts.append(Tensor(data, inds=inds))
 
         if h != 0.0:
-            data = classical_ising_H_matrix(beta=beta, h=h)
+            data = classical_ising_H_matrix(beta=beta, h=float(h))
             ts.append(Tensor(data, inds=(ind_id.format(ni, nj, nk),)))
 
     return TensorNetwork(ts)
@@ -2166,7 +2172,7 @@ def TN2D_classical_ising_partition_function(
                     beta=beta,
                     directions=directions,
                     j=js,
-                    h=h,
+                    h=float(h),
                     asymm=asymms,
                     output=site_is_output,
                 ),
@@ -2312,7 +2318,7 @@ def TN3D_classical_ising_partition_function(
                     beta=beta,
                     directions=directions,
                     j=js,
-                    h=h,
+                    h=float(h),
                     asymm=asymms,
                     output=site_is_output,
                 ),
@@ -2405,7 +2411,7 @@ def HTN_classical_partition_function_from_edges(
                 return h
 
         for node in unique(concat(edges)):
-            data = classical_ising_H_matrix(beta, h=h_factory(node))
+            data = classical_ising_H_matrix(beta, h=float(h_factory(node)))
             inds = [site_ind_id.format(node)]
             tags = [site_tag_id.format(node)]
             ts.append(Tensor(data=data, inds=inds, tags=tags))
@@ -2485,7 +2491,7 @@ def TN_classical_partition_function_from_edges(
                 return h
 
         for node in sites:
-            data = classical_ising_H_matrix(beta, h=h_factory(node))
+            data = classical_ising_H_matrix(beta, h=float(h_factory(node)))
             inds = [f"s{node}"]
             tags = [site_tag_id.format(node)]
             ts.append(Tensor(data=data, inds=inds, tags=tags))

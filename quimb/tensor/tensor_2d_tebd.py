@@ -59,12 +59,12 @@ class LocalHam2D(LocalHamGen):
 
     """
 
-    def __init__(self, Lx, Ly, H2, H1=None):
+    def __init__(self, Lx, Ly, H2, H1=None, cyclic=False):
         self.Lx = int(Lx)
         self.Ly = int(Ly)
 
         # parse two site terms
-        if hasattr(H2, 'shape'):
+        if hasattr(H2, "shape"):
             # use as default nearest neighbour term
             H2 = {None: H2}
         else:
@@ -76,7 +76,7 @@ class LocalHam2D(LocalHamGen):
             for coo_a, coo_b in gen_2d_bonds(Lx, Ly, steppers=[
                 lambda i, j: (i, j + 1),
                 lambda i, j: (i + 1, j),
-            ]):
+            ], cyclic=cyclic):
                 if (coo_a, coo_b) not in H2 and (coo_b, coo_a) not in H2:
                     H2[coo_a, coo_b] = default_H2
 

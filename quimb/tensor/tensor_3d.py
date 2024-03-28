@@ -27,7 +27,7 @@ from .tensor_arbgeom import (
 )
 
 
-def gen_3d_bonds(Lx, Ly, Lz, steppers=None, coo_filter=None):
+def gen_3d_bonds(Lx, Ly, Lz, steppers=None, coo_filter=None, cyclic=False):
     """Convenience function for tiling pairs of bond coordinates on a 3D
     lattice given a function like ``lambda i, j, k: (i + 1, j + 1, k + 1)``.
 
@@ -85,11 +85,28 @@ def gen_3d_bonds(Lx, Ly, Lz, steppers=None, coo_filter=None):
     if callable(steppers):
         steppers = (steppers,)
 
+    try:
+        cyclic_x, cyclic_y, cyclic_z = cyclic
+    except (TypeError, ValueError):
+        cyclic_x = cyclic_y = cyclic_z = cyclic
+
+    def _maybe_wrap_coo(w, Lw, cyclic):
+        if 0 <= w < Lw:
+            return w
+        if cyclic:
+            return w % Lw
+        return None
+
     for i, j, k in product(range(Lx), range(Ly), range(Lz)):
         if (coo_filter is None) or coo_filter(i, j, k):
             for stepper in steppers:
                 i2, j2, k2 = stepper(i, j, k)
-                if (0 <= i2 < Lx) and (0 <= j2 < Ly) and (0 <= k2 < Lz):
+
+                i2 = _maybe_wrap_coo(i2, Lx, cyclic_x)
+                j2 = _maybe_wrap_coo(j2, Ly, cyclic_y)
+                k2 = _maybe_wrap_coo(k2, Lz, cyclic_z)
+
+                if all(x is not None for x in (i2, j2, k2)):
                     yield (i, j, k), (i2, j2, k2)
 
 
@@ -604,6 +621,11 @@ class TensorNetwork3D(TensorNetworkGen):
                 lambda i, j, k: (i, j + 1, k),
                 lambda i, j, k: (i, j, k + 1),
             ],
+            cyclic=(
+                self.is_cyclic_x(),
+                self.is_cyclic_y(),
+                self.is_cyclic_z(),
+            ),
         )
 
     def valid_coo(self, coo, xrange=None, yrange=None, zrange=None):
