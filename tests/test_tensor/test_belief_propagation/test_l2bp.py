@@ -80,7 +80,7 @@ def test_compress_double_layer_loopy(dtype, damping, update):
     # compress using basic local compression
     tn_eager = qtn.tensor_network_apply_op_vec(pepo, peps, contract=True)
     assert tn_eager.num_tensors == 12
-    tn_eager.compress_all_(max_bond=3)
+    tn_eager.compress_all_(max_bond=3, canonize=False)
     fid_basic = abs(tn_eager.H @ tn_lazy)
 
     # compress using BP

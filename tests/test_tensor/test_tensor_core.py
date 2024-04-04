@@ -525,22 +525,30 @@ class TestTensorFunctions:
         assert fn2 == pytest.approx(385.0)
         assert trc == pytest.approx(55.0)
 
-        tn2 = t.split("a", method="svd", cutoff=0.1, cutoff_mode="rsum2")
+        tn2 = t.split(
+            "a", method="svd", cutoff=0.1, renorm=True, cutoff_mode="rsum2"
+        )
         a_fn2 = tn2.H @ tn2
         assert qtn.bonds_size(*tn2) == 6
         assert a_fn2 == pytest.approx(fn2)
 
-        tn2 = t.split("a", method="svd", cutoff=40, cutoff_mode="sum2")
+        tn2 = t.split(
+            "a", method="svd", cutoff=40, renorm=True, cutoff_mode="sum2"
+        )
         a_fn2 = tn2.H @ tn2
         assert qtn.bonds_size(*tn2) == 6
         assert a_fn2 == pytest.approx(fn2)
 
-        tn1 = t.split("a", method="svd", cutoff=0.2, cutoff_mode="rsum1")
+        tn1 = t.split(
+            "a", method="svd", cutoff=0.2, renorm=True, cutoff_mode="rsum1"
+        )
         a_trc = tn1.trace("a", "b").real
         assert qtn.bonds_size(*tn1) == 6
         assert a_trc == pytest.approx(trc)
 
-        tn1 = t.split("a", method="svd", cutoff=11, cutoff_mode="sum1")
+        tn1 = t.split(
+            "a", method="svd", cutoff=11, renorm=True, cutoff_mode="sum1"
+        )
         a_trc = tn1.trace("a", "b").real
         assert qtn.bonds_size(*tn1) == 6
         assert a_trc == pytest.approx(trc)
@@ -1450,7 +1458,7 @@ class TestTensorNetwork:
         B.expand_ind("d", 10)
         tn = A | B
         assert A.shared_bond_size(B) == 10
-        tn.compress_between("T1", "T2", method=method)
+        tn.compress_between("T1", "T2", method=method, mode="basic")
         assert A.shared_bond_size(B) == 5
 
     @pytest.mark.parametrize("method", ["svd", "eig", "isvd", "svds", "rsvd"])
@@ -1458,7 +1466,7 @@ class TestTensorNetwork:
         k = MPS_rand_state(10, 7)
         k += k
         k /= 2
-        k.compress_all_(max_bond=7, method=method)
+        k.compress_all_(max_bond=7, method=method, mode="basic")
         assert k.max_bond() == 7
         assert_allclose(k.H @ k, 1.0)
 

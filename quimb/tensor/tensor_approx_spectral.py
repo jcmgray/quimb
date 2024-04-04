@@ -36,7 +36,7 @@ def construct_lanczos_tridiag_MPO(A, K, v0=None, initial_bond_dim=None,
     bsz = A.phys_dim()**A.L
     beta[1] = bsz  # == sqrt(prod(A.shape))
 
-    compress_kws = {'max_bond': max_bond, 'method': 'svd'}
+    compress_kws = {'max_bond': max_bond, 'method': 'svd', "renorm": True}
 
     for j in range(1, K + 1):
 

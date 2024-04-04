@@ -298,9 +298,9 @@ class TestMatrixProductState:
     def test_compress_trim_max_bond(self, method):
         p0 = MPS_rand_state(20, 20)
         p = p0.copy()
-        p.compress(method=method)
+        p.compress(method=method, renorm=True)
         assert max(p["I4"].shape) == 20
-        p.compress(max_bond=13, method=method)
+        p.compress(max_bond=13, method=method, renorm=True)
         assert max(p["I4"].shape) == 13
         assert_allclose(p.H @ p, p0.H @ p0)
 
