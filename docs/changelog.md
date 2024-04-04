@@ -77,6 +77,9 @@ Release notes for `quimb`.
   [`TN2D_rand_symmetric`](quimb.tensor.tensor_builder.TN2D_rand_symmetric)
   for generating random symmetric arrays, tensors and 2D tensor networks.
 
+**Bug fixes:**
+
+- fix scipy sparse monkey patch for scipy>=1.13 ({issue}`222`)
 
 
 (whats-new-1-7-3)=

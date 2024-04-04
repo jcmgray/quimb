@@ -2183,12 +2183,25 @@ def sp_mulvec_wrap(fn):
     return qarrayed_fn
 
 
-sp.csr_matrix._mul_vector = csr_mulvec_wrap(sp.csr_matrix._mul_vector)
-sp.csc_matrix._mul_vector = sp_mulvec_wrap(sp.csc_matrix._mul_vector)
-sp.coo_matrix._mul_vector = sp_mulvec_wrap(sp.coo_matrix._mul_vector)
-sp.bsr_matrix._mul_vector = sp_mulvec_wrap(sp.bsr_matrix._mul_vector)
+try:
+    # scipy>=1.13
+    sp.csr_matrix._matmul_vector = csr_mulvec_wrap(sp.csr_matrix._matmul_vector)
+    sp.csc_matrix._matmul_vector = sp_mulvec_wrap(sp.csc_matrix._matmul_vector)
+    sp.coo_matrix._matmul_vector = sp_mulvec_wrap(sp.coo_matrix._matmul_vector)
+    sp.bsr_matrix._matmul_vector = sp_mulvec_wrap(sp.bsr_matrix._matmul_vector)
 
-sp.csr_matrix._mul_multivector = sp_mulvec_wrap(sp.csr_matrix._mul_multivector)
-sp.csc_matrix._mul_multivector = sp_mulvec_wrap(sp.csc_matrix._mul_multivector)
-sp.coo_matrix._mul_multivector = sp_mulvec_wrap(sp.coo_matrix._mul_multivector)
-sp.bsr_matrix._mul_multivector = sp_mulvec_wrap(sp.bsr_matrix._mul_multivector)
+    sp.csr_matrix._matmul_multivector = sp_mulvec_wrap(sp.csr_matrix._matmul_multivector)
+    sp.csc_matrix._matmul_multivector = sp_mulvec_wrap(sp.csc_matrix._matmul_multivector)
+    sp.coo_matrix._matmul_multivector = sp_mulvec_wrap(sp.coo_matrix._matmul_multivector)
+    sp.bsr_matrix._matmul_multivector = sp_mulvec_wrap(sp.bsr_matrix._matmul_multivector)
+except AttributeError:
+    # scipy <=1.12"
+    sp.csr_matrix._mul_vector = csr_mulvec_wrap(sp.csr_matrix._mul_vector)
+    sp.csc_matrix._mul_vector = sp_mulvec_wrap(sp.csc_matrix._mul_vector)
+    sp.coo_matrix._mul_vector = sp_mulvec_wrap(sp.coo_matrix._mul_vector)
+    sp.bsr_matrix._mul_vector = sp_mulvec_wrap(sp.bsr_matrix._mul_vector)
+
+    sp.csr_matrix._mul_multivector = sp_mulvec_wrap(sp.csr_matrix._mul_multivector)
+    sp.csc_matrix._mul_multivector = sp_mulvec_wrap(sp.csc_matrix._mul_multivector)
+    sp.coo_matrix._mul_multivector = sp_mulvec_wrap(sp.coo_matrix._mul_multivector)
+    sp.bsr_matrix._mul_multivector = sp_mulvec_wrap(sp.bsr_matrix._mul_multivector)
