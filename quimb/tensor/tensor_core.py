@@ -389,7 +389,7 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     opts["cutoff_mode"] = _CUTOFF_MODES[cutoff_mode]
 
     # renorm doubles up as the power used to renormalize
-    if (method in _FULL_SPLIT_METHODS) and (renorm is None):
+    if (method in _FULL_SPLIT_METHODS) and (renorm is True):
         opts["renorm"] = _RENORM_LOOKUP.get(cutoff_mode, 0)
     else:
         opts["renorm"] = 0 if renorm is None else renorm
@@ -656,6 +656,44 @@ def tensor_canonize_bond(
 
     if gauges is not None:
         tn.gauge_simple_remove(outer=outer)
+
+
+def choose_local_compress_gauge_settings(
+    canonize=True,
+    tree_gauge_distance=None,
+    canonize_distance=None,
+    canonize_after_distance=None,
+    mode="auto",
+):
+    """Choose default gauge settings for arbitrary geometry local compression.
+    """
+    if tree_gauge_distance is None:
+        if canonize:
+            # default to r=3 gauge
+            tree_gauge_distance = 3
+        else:
+            tree_gauge_distance = 0
+
+    if mode == "auto":
+        if tree_gauge_distance == 0:
+            # equivalent to basic mode anyway
+            mode = "basic"
+        else:
+            mode = "virtual-tree"
+
+    if canonize_distance is None:
+        # default to the tree gauge distance
+        canonize_distance = tree_gauge_distance
+
+    if canonize_after_distance is None:
+        if mode == "virtual-tree":
+            # can avoid resetting the tree gauge
+            canonize_after_distance = 0
+        elif mode == "basic":
+            # do an eager tree guage and reset
+            canonize_after_distance = tree_gauge_distance
+
+    return canonize_distance, canonize_after_distance, mode
 
 
 def tensor_compress_bond(
@@ -6033,22 +6071,16 @@ class TensorNetwork(object):
                 **canonize_opts,
             )
 
-        if mode == 'basic':
-            tensor_compress_bond(
-                ta, tb, **compress_opts
-            )
-        elif mode == 'virtual-tree':
+        if mode == "basic":
+            tensor_compress_bond(ta, tb, **compress_opts)
+        elif mode == "virtual-tree":
             self._compress_between_virtual_tree_tids(
                 tid1, tid2, **compress_opts
             )
-        elif mode == 'full-bond':
-            self._compress_between_full_bond_tids(
-                tid1, tid2, **compress_opts
-            )
-        elif mode == 'local-fit':
-            self._compress_between_local_fit(
-                tid1, tid2, **compress_opts
-            )
+        elif mode == "full-bond":
+            self._compress_between_full_bond_tids(tid1, tid2, **compress_opts)
+        elif mode == "local-fit":
+            self._compress_between_local_fit(tid1, tid2, **compress_opts)
         else:
             # assume callable
             mode(self, tid1, tid2, **compress_opts)
@@ -6141,18 +6173,83 @@ class TensorNetwork(object):
             **compress_opts,
         )
 
-    def compress_all(self, inplace=False, **compress_opts):
-        """Inplace compress all bonds in this network."""
-        tn = self if inplace else self.copy()
-        tn.fuse_multibonds_()
+    def compress_all(
+        self,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=True,
+        tree_gauge_distance=None,
+        canonize_distance=None,
+        canonize_after_distance=None,
+        mode="auto",
+        inplace=False,
+        **compress_opts
+    ):
+        """Compress all bonds one by one in this network.
 
+        Parameters
+        ----------
+        max_bond : int or None, optional
+            The maxmimum bond dimension to compress to.
+        cutoff : float, optional
+            The singular value cutoff to use.
+        tree_gauge_distance : int, optional
+            How far to include local tree gauge information when compressing.
+            If the local geometry is a tree, then each compression will be
+            locally optimal up to this distance.
+        canonize_distance : int, optional
+            How far to locally canonize around the target tensors first, this
+            is set automatically by ``tree_gauge_distance`` if not specified.
+        canonize_after_distance : int, optional
+            How far to locally canonize around the target tensors after, this
+            is set automatically by ``tree_gauge_distance``, depending on
+            ``mode`` if not specified.
+        mode : {'auto', 'basic', 'virtual-tree'}, optional
+            The mode to use for compressing the bonds. If 'auto', will use
+            'basic' if ``tree_gauge_distance == 0`` else 'virtual-tree'.
+        inplace : bool, optional
+            Whether to perform the compression inplace.
+        compress_opts
+            Supplied to
+            :func:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        compress_between, canonize_all
+        """
+        tn = self if inplace else self.copy()
+
+        canonize_distance, canonize_after_distance, mode = (
+            choose_local_compress_gauge_settings(
+                canonize,
+                tree_gauge_distance,
+                canonize_distance,
+                canonize_after_distance,
+                mode,
+            )
+        )
+
+        tn.fuse_multibonds_()
         for ix in tuple(tn.ind_map):
             try:
                 tid1, tid2 = tn.ind_map[ix]
             except (ValueError, KeyError):
                 # not a bond, or index already compressed away
                 continue
-            tn._compress_between_tids(tid1, tid2, **compress_opts)
+            tn._compress_between_tids(
+                tid1,
+                tid2,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                mode=mode,
+                canonize_distance=canonize_distance,
+                canonize_after_distance=canonize_after_distance,
+                **compress_opts
+            )
 
         return tn
 

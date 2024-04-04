@@ -3605,8 +3605,10 @@ def MPS_rand_state(
     phys_dim=2,
     normalize=True,
     cyclic=False,
-    dtype="float64",
     dist="normal",
+    loc=0.0,
+    scale=1.0,
+    dtype="float64",
     trans_invar=False,
     **mps_opts,
 ):
@@ -3625,6 +3627,12 @@ def MPS_rand_state(
     cyclic : bool, optional
         Generate a MPS with periodic boundary conditions or not, default is
         open boundary conditions.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
     dtype : {float, complex} or numpy dtype, optional
         Data type of the tensor network.
     trans_invar : bool (optional)
@@ -3633,6 +3641,8 @@ def MPS_rand_state(
     mps_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
     """
+    randn_opts = {"dist": dist, "loc": loc, "scale": scale, "dtype": dtype}
+
     if trans_invar:
         if not cyclic:
             raise ValueError(
@@ -3640,11 +3650,7 @@ def MPS_rand_state(
                 "boundary conditions."
             )
         array = sensibly_scale(
-            randn(
-                shape=(bond_dim, bond_dim, phys_dim),
-                dtype=dtype,
-                dist=dist,
-            )
+            randn(shape=(bond_dim, bond_dim, phys_dim), **randn_opts)
         )
 
         def fill_fn(shape):
@@ -3653,7 +3659,7 @@ def MPS_rand_state(
     else:
 
         def fill_fn(shape):
-            return sensibly_scale(randn(shape, dtype=dtype, dist=dist))
+            return sensibly_scale(randn(shape, **randn_opts))
 
     mps = MatrixProductState.from_fill_fn(
         fill_fn,
@@ -4034,6 +4040,8 @@ def MPO_rand(
     herm=False,
     dtype="float64",
     dist="normal",
+    loc=0.0,
+    scale=1.0,
     **mpo_opts,
 ):
     """Generate a random matrix product state.
@@ -4055,6 +4063,10 @@ def MPO_rand(
         Data type of the tensor network.
     dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
         Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
     herm : bool, optional
         Whether to make the matrix hermitian (or symmetric if real) or not.
     mpo_opts
@@ -4069,7 +4081,7 @@ def MPO_rand(
     ]
 
     def gen_data(shape):
-        data = randn(shape, dtype=dtype, dist=dist)
+        data = randn(shape, dtype=dtype, dist=dist, loc=loc, scale=scale)
         if not herm:
             return data
 

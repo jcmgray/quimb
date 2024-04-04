@@ -6,9 +6,16 @@ Release notes for `quimb`.
 (whats-new-1-7-4)=
 ## v1.7.4 (unreleased)
 
+**Breaking Changes**
+
+- all singular value renormalization is turned off by default
+- [`TensorNetwork.compress_all`](quimb.tensor.TensorNetwork.compress_all)
+  now defaults to using some local gauging
+
+
 **Enhancements:**
 
-- add `quimb.tensor.tensor_1d_compress` with functions for compressing generic
+- add `quimb.tensor.tensor_1d_compress.py` with functions for compressing generic
   1D tensor networks (with arbitrary local structure) using various methods.
   The methods are:
 
@@ -20,6 +27,24 @@ Release notes for `quimb`.
   - ... and some more niche methods for debugging and testing.
 
   And can be accessed via the unified function [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress).
+  Boundary contraction in 2D can now utilize any of these methods.
+- add `quimb.tensor.tensor_arbgeom_compress.py` with functions for compressing
+  arbitrary geometry tensor networks using various methods. The methods are:
+
+  - The **'local-early'** method:
+    [`tensor_network_ag_compress_local_early`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_local_early)
+  - The **'local-late'** method:
+    [`tensor_network_ag_compress_local_late`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_local_late)
+  - The **'projector'** method:
+    [`tensor_network_ag_compress_projector`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_projector)
+  - The **'superorthogonal'** method:
+    [`tensor_network_ag_compress_superorthogonal`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_superorthogonal)
+  - The **'l2bp'** method:
+    [`tensor_network_ag_compress_l2bp`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_l2bp)
+
+  And can be accessed via the unified function
+  [`tensor_network_ag_compress`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress).
+  1D compression can also fall back to these methods.
 - support PBC in
   [`tn2d.contract_hotrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg),
   [`tn2d.contract_ctmrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg),
@@ -34,6 +59,7 @@ Release notes for `quimb`.
   and
   [`TN3D_rand_hidden_loop`](quimb.tensor.tensor_builder.TN3D_rand_hidden_loop),
   with ``cyclic`` kwarg.
+- support PBC in the various base PEPS and PEPO construction methods.
 - add [`tensor_network_apply_op_op`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_op)
   for applying 'operator' TNs to 'operator' TNs.
 - tweak [`tensor_network_apply_op_vec`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_vec)

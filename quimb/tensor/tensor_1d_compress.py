@@ -11,11 +11,13 @@ network can locally have arbitrary structure and outer indices.
 - [x] the autofit method (via non-1d specific ALS or autodiff)
 
 """
+
 import collections
 import itertools
 import warnings
 
 from .tensor_arbgeom import tensor_network_apply_op_vec
+from .tensor_arbgeom_compress import tensor_network_ag_compress
 from .tensor_builder import TN1D_matching
 from .tensor_core import (
     TensorNetwork,
@@ -1371,19 +1373,46 @@ def tensor_network_1d_compress(
     """
     compress_opts = compress_opts or {}
 
-    return _TN1D_COMPRESS_METHODS[method](
-        tn,
-        max_bond=max_bond,
-        cutoff=cutoff,
-        site_tags=site_tags,
-        canonize=canonize,
-        permute_arrays=permute_arrays,
-        optimize=optimize,
-        sweep_reverse=sweep_reverse,
-        inplace=inplace,
-        **compress_opts,
-        **kwargs,
-    )
+    try:
+        return _TN1D_COMPRESS_METHODS[method](
+            tn,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            site_tags=site_tags,
+            canonize=canonize,
+            permute_arrays=permute_arrays,
+            optimize=optimize,
+            sweep_reverse=sweep_reverse,
+            inplace=inplace,
+            **compress_opts,
+            **kwargs,
+        )
+    except KeyError:
+        # try arbitrary geometry methods
+
+        if sweep_reverse:
+            warnings.warn(
+                "sweep_reverse has no effect for "
+                "arbitrary geometry (AG) methods."
+            )
+
+        tnc = tensor_network_ag_compress(
+            tn,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            method=method,
+            site_tags=site_tags,
+            canonize=canonize,
+            optimize=optimize,
+            inplace=inplace,
+            **compress_opts,
+            **kwargs,
+        )
+
+        if permute_arrays:
+            possibly_permute_(tnc, permute_arrays)
+
+        return tnc
 
 
 # --------------- MPO-MPS gating using 1D compression methods --------------- #
