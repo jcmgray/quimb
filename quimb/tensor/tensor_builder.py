@@ -28,6 +28,7 @@ from .tensor_2d_tebd import LocalHam2D
 from .tensor_3d import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
 from .tensor_3d_tebd import LocalHam3D
 from .tensor_arbgeom import (
+    create_lazy_edge_map,
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
@@ -3527,10 +3528,12 @@ def HTN_random_ksat(
     )
 
 
-def TN1D_matching(tn, max_bond, site_tags=None, dtype=None, **randn_opts):
-    """Create a 1D tensor network with the same outer indices as ``tn`` but
+def TN_matching(
+    tn, max_bond, site_tags=None, fill_fn=None, dtype=None, **randn_opts
+):
+    """Create a tensor network with the same outer indices as ``tn`` but
     with a single tensor per site with bond dimension ``max_bond`` between
-    joining each site. Generally to be used as an initial guess for fitting.
+    each connected site. Generally to be used as an initial guess for fitting.
 
     Parameters
     ----------
@@ -3553,44 +3556,44 @@ def TN1D_matching(tn, max_bond, site_tags=None, dtype=None, **randn_opts):
     -------
     TensorNetwork
     """
-    if site_tags is None:
-        site_tags = tn.site_tags
+    _, neighbors = create_lazy_edge_map(tn, site_tags)
 
-    if dtype is None:
-        dtype = tn.dtype
+    if fill_fn is None:
+        if dtype is None:
+            try:
+                dtype = tn.dtype
+            except AttributeError:
+                # for arrays with no dtype - e.g. autoray.lazy
+                dtype = "float64"
+        fill_fn = get_rand_fill_fn(dtype=dtype, **randn_opts)
 
-    tn_fit = TensorNetwork()
-
+    tn_match = TensorNetwork()
     all_outer_ix = set(tn.outer_inds())
     bonds = collections.defaultdict(rand_uuid)
 
-    for i, site in enumerate(site_tags):
+    for site, other_sites in neighbors.items():
         # get local network at site
         tni = tn.select(site)
         # get all local indices which as also outer indices
-        loix = tuple(ix for ix in tni.ind_map if ix in all_outer_ix)
+        loix = tuple(ix for ix in tni.outer_inds() if ix in all_outer_ix)
         # also inherit all local tags
         ltags = tni.tags
 
+        # add virtual bonds
         shape = []
         inds = []
-        # add bond dimensions
-        if i > 0:
+        for other_site in other_sites:
             shape.append(max_bond)
-            inds.append(bonds[i - 1, i])
-        if i < len(site_tags) - 1:
-            shape.append(max_bond)
-            inds.append(bonds[i, i + 1])
+            inds.append(bonds[frozenset([site, other_site])])
+
         # add physical/outer dimensions
         shape.extend(map(tn.ind_size, loix))
         inds.extend(loix)
 
-        tn_fit |= rand_tensor(
-            shape=shape, inds=inds, tags=ltags, dtype=dtype, **randn_opts
-        )
+        tn_match |= Tensor(data=fill_fn(shape), inds=inds, tags=ltags)
 
     # finally cast the new network as the same type as the original
-    return tn_fit.view_like_(tn)
+    return tn_match.view_like_(tn)
 
 
 # --------------------------------------------------------------------------- #

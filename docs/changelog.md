@@ -72,6 +72,10 @@ Release notes for `quimb`.
   method for applying 'operator' TNs to the lower indices of 'operator' TNs like $B \rightarrow B A$.
 - add [`tnop.gate_sandwich_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_sandwich_with_op_lazy)
   method for applying 'operator' TNs to the upper and lower indices of 'operator' TNs like $B \rightarrow A B A^\dagger$.
+- unify all TN summing routines into
+  [`tensor_network_ag_sum](quimb.tensor.tensor_arbgeom.tensor_network_ag_sum),
+  which allows summing any two tensor networks with matching site tags and
+  outer indices, replacing specific MPS, MPO, PEPS, PEPO, etc. summing routines.
 - add [`rand_symmetric_array`](quimb.tensor.tensor_builder.rand_symmetric_array),
   [`rand_tensor_symmetric`](quimb.tensor.tensor_builder.rand_tensor_symmetric)
   [`TN2D_rand_symmetric`](quimb.tensor.tensor_builder.TN2D_rand_symmetric)

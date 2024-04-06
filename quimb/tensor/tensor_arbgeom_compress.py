@@ -10,40 +10,8 @@ the tensor network can locally have arbitrary structure and outer indices.
 """
 
 from ..utils import ensure_dict
+from .tensor_arbgeom import create_lazy_edge_map
 from .tensor_core import choose_local_compress_gauge_settings
-
-
-def create_lazy_edge_map(tn, site_tags=None):
-    """Given a tensor network, where each tensor is in exactly one group or
-    'site', compute which sites are connected to each other, without checking
-    each pair.
-    """
-    if site_tags is None:
-        site_tags = set(tn.site_tags)
-    else:
-        site_tags = set(site_tags)
-
-    edges = {}
-    neighbors = {}
-
-    for ix in tn.ind_map:
-        ts = tn._inds_get(ix)
-        tags = {tag for t in ts for tag in t.tags if tag in site_tags}
-        if len(tags) >= 2:
-            # index spans multiple sites
-            i, j = tuple(sorted(tags))
-
-            if (i, j) in edges:
-                # already processed this edge
-                continue
-
-            # add to neighbor map
-            neighbors.setdefault(i, []).append(j)
-            neighbors.setdefault(j, []).append(i)
-
-            edges[(i, j)] = None
-
-    return edges, neighbors
 
 
 def tensor_network_ag_compress_projector(
@@ -207,16 +175,18 @@ def tensor_network_ag_compress_local_early(
         )
     )
 
-    seen = set()
-    queue = [next(iter(site_tags))]
+    st0 = next(iter(site_tags))
+    seen = {st0}
+    queue = [st0]
 
     while queue:
         # process sites in a breadth-first manner
-        taga = queue.pop()
-        seen.add(taga)
+        taga = queue.pop(0)
+
         for tagb in neighbors[taga]:
             if tagb not in seen:
                 queue.append(tagb)
+                seen.add(tagb)
 
         # contract this site
         tnc.contract_(taga, optimize=optimize)

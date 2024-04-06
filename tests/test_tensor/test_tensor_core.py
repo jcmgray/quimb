@@ -1370,10 +1370,10 @@ class TestTensorNetwork:
         assert B1.shape == (4, 6)
         if absorb == "right":
             # assert A is isometric
-            assert A1.norm()**2 == pytest.approx(4)
+            assert A1.norm() ** 2 == pytest.approx(4)
         if absorb == "left":
             # assert B is isometric
-            assert B1.norm()**2 == pytest.approx(4)
+            assert B1.norm() ** 2 == pytest.approx(4)
         # compute the optimal fidelity
         d1 = (A1 @ B1).distance(AB)
         assert 0 < d1
@@ -1383,9 +1383,9 @@ class TestTensorNetwork:
         assert A2.shape == (3, 4, 4)
         assert B2.shape == (4, 6)
         if absorb == "right":
-            assert A2.norm()**2 == pytest.approx(4)
+            assert A2.norm() ** 2 == pytest.approx(4)
         if absorb == "left":
-            assert B2.norm()**2 == pytest.approx(4)
+            assert B2.norm() ** 2 == pytest.approx(4)
         d2 = (A2 @ B2).distance(AB)
         # reduced mode should also be optimal
         assert d2 == pytest.approx(d1)
@@ -1397,9 +1397,9 @@ class TestTensorNetwork:
         if absorb == "right":
             # A won't be canonical
             assert Ar.left_inds is None
-            assert Ar.norm()**2 != pytest.approx(4)
+            assert Ar.norm() ** 2 != pytest.approx(4)
         if absorb == "left":
-            assert Br.norm()**2 == pytest.approx(4)
+            assert Br.norm() ** 2 == pytest.approx(4)
         dr = (Ar @ Br).distance(AB)
         # right reduced mode should not be optimal
         assert dr > d1
@@ -1408,9 +1408,9 @@ class TestTensorNetwork:
         qtn.tensor_canonize_bond(Ar, Br, absorb="right")
         qtn.tensor_compress_bond(Ar, Br, reduced="right", **kws)
         if absorb == "right":
-            assert Ar.norm()**2 == pytest.approx(4)
+            assert Ar.norm() ** 2 == pytest.approx(4)
         if absorb == "left":
-            assert Br.norm()**2 == pytest.approx(4)
+            assert Br.norm() ** 2 == pytest.approx(4)
         dr = (Ar @ Br).distance(AB)
         assert dr == pytest.approx(d1)
 
@@ -1419,11 +1419,11 @@ class TestTensorNetwork:
         assert Al.shape == (3, 4, 4)
         assert Bl.shape == (4, 6)
         if absorb == "right":
-            assert Al.norm()**2 == pytest.approx(4)
+            assert Al.norm() ** 2 == pytest.approx(4)
         if absorb == "left":
             # B won't be canonical
             assert Bl.left_inds is None
-            assert Bl.norm()**2 != pytest.approx(4)
+            assert Bl.norm() ** 2 != pytest.approx(4)
         dl = (Al @ Bl).distance(AB)
         # left reduced mode should not be optimal
         assert dl > d1
@@ -1432,9 +1432,9 @@ class TestTensorNetwork:
         qtn.tensor_canonize_bond(Al, Bl, absorb="left")
         qtn.tensor_compress_bond(Al, Bl, reduced="left", **kws)
         if absorb == "right":
-            assert Al.norm()**2 == pytest.approx(4)
+            assert Al.norm() ** 2 == pytest.approx(4)
         if absorb == "left":
-            assert Bl.norm()**2 == pytest.approx(4)
+            assert Bl.norm() ** 2 == pytest.approx(4)
         dl = (Al @ Bl).distance(AB)
         assert dl == pytest.approx(d1)
 
@@ -1611,9 +1611,9 @@ class TestTensorNetwork:
         ta = qtn.rand_tensor((2, 2, 2), inds="abc", tags="A")
         tb = qtn.rand_tensor((2, 2, 2), inds="cde", tags="B")
         tn = ta | tb
-        tn.cut_bond('c', new_left_ind='l', new_right_ind='r')
-        assert ta.inds == ('a', 'b', 'l')
-        assert tb.inds == ('r', 'd', 'e')
+        tn.cut_bond("c", new_left_ind="l", new_right_ind="r")
+        assert ta.inds == ("a", "b", "l")
+        assert tb.inds == ("r", "d", "e")
 
     def test_draw(self):
         import matplotlib

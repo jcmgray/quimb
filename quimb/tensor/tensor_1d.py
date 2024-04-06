@@ -1,35 +1,37 @@
 """Classes and algorithms related to 1D tensor networks."""
 
-import operator
+import collections
 import functools
 import itertools
-import collections
+import operator
 from math import log2
 from numbers import Integral
 
 import scipy.sparse.linalg as spla
-from autoray import do, dag, reshape, conj, get_dtype_name, transpose
+from autoray import conj, dag, do, get_dtype_name, reshape, transpose
 
-from ..utils import print_multi_line, ensure_dict, partition_all, deprecated
 import quimb as qu
+
+from ..linalg.base_linalg import norm_trace_dense
+from ..utils import deprecated, ensure_dict, partition_all, print_multi_line
+from . import array_ops as ops
+from .tensor_arbgeom import (
+    TensorNetworkGen,
+    TensorNetworkGenOperator,
+    TensorNetworkGenVector,
+    tensor_network_ag_sum,
+    tensor_network_align,
+    tensor_network_apply_op_op,
+    tensor_network_apply_op_vec,
+)
 from .tensor_core import (
     Tensor,
     TensorNetwork,
-    rand_uuid,
     bonds,
     oset,
+    rand_uuid,
     tags_to_oset,
 )
-from .tensor_arbgeom import (
-    TensorNetworkGen,
-    TensorNetworkGenVector,
-    TensorNetworkGenOperator,
-    tensor_network_align,
-    tensor_network_apply_op_vec,
-)
-from ..linalg.base_linalg import norm_trace_dense
-from . import array_ops as ops
-
 
 align_TN_1D = deprecated(
     tensor_network_align, "align_TN_1D", "tensor_network_align"
@@ -1580,36 +1582,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             site_tag_id=site_tag_id,
         )
 
-    def add_MPS(self, other, inplace=False, compress=False, **compress_opts):
+    def add_MPS(self, other, inplace=False, **kwargs):
         """Add another MatrixProductState to this one."""
-        if self.L != other.L:
-            raise ValueError("Can't add MPS with another of different length.")
-
-        new_mps = self if inplace else self.copy()
-
-        for i in new_mps.gen_sites_present():
-            t1, t2 = new_mps[i], other[i]
-
-            if set(t1.inds) != set(t2.inds):
-                # Need to use bonds to match indices
-                reindex_map = {}
-
-                if i > 0 or self.cyclic:
-                    pair = ((i - 1) % self.L, i)
-                    reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
-
-                if i < new_mps.L - 1 or self.cyclic:
-                    pair = (i, (i + 1) % self.L)
-                    reindex_map[other.bond(*pair)] = new_mps.bond(*pair)
-
-                t2 = t2.reindex(reindex_map)
-
-            t1.direct_product_(t2, sum_inds=new_mps.site_ind(i))
-
-        if compress:
-            new_mps.compress(**compress_opts)
-
-        return new_mps
+        return tensor_network_ag_sum(self, other, inplace=inplace, **kwargs)
 
     add_MPS_ = functools.partialmethod(add_MPS, inplace=True)
 
@@ -1633,22 +1608,6 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
                 inds["r"] = self.bond(i, (i + 1) % self.L)
             inds = [inds[s] for s in shape if s in inds]
             self[i].transpose_(*inds)
-
-    def __add__(self, other):
-        """MPS addition."""
-        return self.add_MPS(other, inplace=False)
-
-    def __iadd__(self, other):
-        """In-place MPS addition."""
-        return self.add_MPS(other, inplace=True)
-
-    def __sub__(self, other):
-        """MPS subtraction."""
-        return self.add_MPS(other * -1, inplace=False)
-
-    def __isub__(self, other):
-        """In-place MPS subtraction."""
-        return self.add_MPS(other * -1, inplace=True)
 
     def normalize(self, bra=None, eps=1e-15, insert=None):
         """Normalize this MPS, optional with co-vector ``bra``. For periodic
@@ -2931,40 +2890,8 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
 
         return mpo
 
-    def add_MPO(self, other, inplace=False, compress=False, **compress_opts):
-        """Add another MatrixProductState to this one."""
-        if self.L != other.L:
-            raise ValueError(
-                "Can't add MPO with another of different length."
-                f"Got lengths {self.L} and {other.L}"
-            )
-
-        summed = self if inplace else self.copy()
-
-        for i in summed.gen_sites_present():
-            t1, t2 = summed[i], other[i]
-
-            if set(t1.inds) != set(t2.inds):
-                # Need to use bonds to match indices
-                reindex_map = {}
-
-                if i > 0 or self.cyclic:
-                    pair = ((i - 1) % self.L, i)
-                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
-
-                if i < summed.L - 1 or self.cyclic:
-                    pair = (i, (i + 1) % self.L)
-                    reindex_map[other.bond(*pair)] = summed.bond(*pair)
-
-                t2 = t2.reindex(reindex_map)
-
-            sum_inds = (summed.upper_ind(i), summed.lower_ind(i))
-            t1.direct_product_(t2, sum_inds=sum_inds)
-
-        if compress:
-            summed.compress(**compress_opts)
-
-        return summed
+    def add_MPO(self, other, inplace=False, **kwargs):
+        return tensor_network_ag_sum(self, other, inplace=inplace, **kwargs)
 
     add_MPO_ = functools.partialmethod(add_MPO, inplace=True)
 
@@ -2979,34 +2906,16 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
             **compress_opts,
         )
 
-    def _apply_mpo(self, other, compress=False, **compress_opts):
-        A, B = self.copy(), other.copy()
-
-        # align the indices and combine into a ladder
-        A.upper_ind_id = B.upper_ind_id
-        B.upper_ind_id = "__tmp{}__"
-        A.lower_ind_id = "__tmp{}__"
-        AB = A | B
-
-        # contract each pair of tensors at each site
-        for i in range(A.L):
-            AB ^= A.site_tag(i)
-
-        # convert back to MPO and fuse the double bonds
-        AB.view_as_(
-            MatrixProductOperator,
-            upper_ind_id=A.upper_ind_id,
-            lower_ind_id=B.lower_ind_id,
-            cyclic=self.cyclic,
+    def _apply_mpo(
+        self, other, compress=False, contract=True, **compress_opts
+    ):
+        return tensor_network_apply_op_op(
+            A=self,
+            B=other,
+            contract=contract,
+            compress=compress,
+            **compress_opts,
         )
-
-        AB.fuse_multibonds_()
-
-        # optionally compress
-        if compress:
-            AB.compress(**compress_opts)
-
-        return AB
 
     def apply(self, other, compress=False, **compress_opts):
         r"""Act with this MPO on another MPO or MPS, such that the resulting
@@ -3123,22 +3032,6 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         tn.reindex_({tn.lower_ind(i): tn.upper_ind(i) for i in sysa})
         tn.reindex_({tmp_ind_id.format(i): tn.lower_ind(i) for i in sysa})
         return tn
-
-    def __add__(self, other):
-        """MPO addition."""
-        return self.add_MPO(other, inplace=False)
-
-    def __iadd__(self, other):
-        """In-place MPO addition."""
-        return self.add_MPO(other, inplace=True)
-
-    def __sub__(self, other):
-        """MPO subtraction."""
-        return self.add_MPO(-1 * other, inplace=False)
-
-    def __isub__(self, other):
-        """In-place MPO subtraction."""
-        return self.add_MPO(-1 * other, inplace=True)
 
     def rand_state(self, bond_dim, **mps_opts):
         """Get a random vector matching this MPO."""

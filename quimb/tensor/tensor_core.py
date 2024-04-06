@@ -44,7 +44,7 @@ from ..utils import (
     unique,
     valmap,
 )
-from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni, rand_iso
+from ..gen.rand import randn, seed_rand, rand_matrix, rand_uni
 from . import decomp
 from .array_ops import (
     asarray,
@@ -1085,7 +1085,12 @@ def tensor_network_sum(tnA, tnB, inplace=False):
         tb = tnB.tensor_map[tid]
 
         if set(ta.inds) != set(tb.inds):
-            raise ValueError("Can only sum TNs with exactly matching indices.")
+            raise ValueError(
+                "This function can only sum TNs with exactly matching indices."
+                " See `tensor_network_ag_sum` if the two TNs have matching "
+                "`site_tags` structure and outer indices but different bond "
+                "names."
+            )
 
         sum_inds = [ix for ix in ta.inds if ix in oix]
         tab = tensor_direct_product(ta, tb, sum_inds)
@@ -3208,6 +3213,18 @@ class Tensor:
         new_tags = self.tags | other.tags
         return self.__class__(data_out, inds=new_inds, tags=new_tags)
 
+    def negate(self, inplace=False):
+        """Negate this tensor."""
+        t = self if inplace else self.copy()
+        t.modify(apply=lambda x: -x)
+        return t
+
+    negate_ = functools.partialmethod(negate, inplace=True)
+
+    def __neg__(self):
+        """Negate this tensor."""
+        return self.negate()
+
     def as_network(self, virtual=True):
         """Return a ``TensorNetwork`` with only this tensor."""
         return TensorNetwork((self,), virtual=virtual)
@@ -4619,6 +4636,15 @@ class TensorNetwork(object):
 
     multiply_each_ = functools.partialmethod(multiply_each, inplace=True)
 
+    def negate(self, inplace=False):
+        """Negate this tensor network."""
+        negated = self if inplace else self.copy()
+        t = next(iter(negated))
+        t.negate_()
+        return negated
+
+    negate_ = functools.partialmethod(negate, inplace=True)
+
     def __mul__(self, other):
         """Scalar multiplication."""
         return self.multiply(other)
@@ -4638,6 +4664,10 @@ class TensorNetwork(object):
     def __itruediv__(self, other):
         """Inplace scalar division."""
         return self.multiply_(other**-1)
+
+    def __neg__(self):
+        """Negate this tensor network."""
+        return self.negate()
 
     def __iter__(self):
         return iter(self.tensor_map.values())

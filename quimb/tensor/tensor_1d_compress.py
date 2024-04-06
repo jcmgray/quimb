@@ -18,7 +18,7 @@ import warnings
 
 from .tensor_arbgeom import tensor_network_apply_op_vec
 from .tensor_arbgeom_compress import tensor_network_ag_compress
-from .tensor_builder import TN1D_matching
+from .tensor_builder import TN_matching
 from .tensor_core import (
     TensorNetwork,
     ensure_dict,
@@ -312,7 +312,11 @@ def tensor_network_1d_compress_dm(
             right_inds.append(new_bonds["b", i + 1])
 
         # contract and then split it
-        rhoi = tensor_contract(*rho_tensors, optimize=optimize)
+        rhoi = tensor_contract(
+            *rho_tensors,
+            preserve_tensor=True,
+            optimize=optimize,
+        )
         U, s, UH = rhoi.split(
             left_inds=left_inds,
             right_inds=right_inds,
@@ -682,6 +686,7 @@ def _tn1d_fit_sum_sweep_1site(
     envs=None,
     prepare=True,
     reverse=False,
+    compute_tdiff=True,
     optimize="auto-hq",
 ):
     """Core sweep of the 1-site 1D fit algorithm."""
@@ -784,9 +789,10 @@ def _tn1d_fit_sum_sweep_1site(
 
         tfinew.conj_()
 
-        # track change in tensor norm
-        dt = tfi.distance_normalized(tfinew)
-        max_tdiff = max(max_tdiff, dt)
+        if compute_tdiff:
+            # track change in tensor norm
+            dt = tfi.distance_normalized(tfinew)
+            max_tdiff = max(max_tdiff, dt)
 
         # reinsert into all viewing tensor networks
         tfi.modify(data=tfinew.data)
@@ -804,6 +810,7 @@ def _tn1d_fit_sum_sweep_2site(
     prepare=True,
     reverse=False,
     optimize="auto-hq",
+    compute_tdiff=True,
     **compress_opts,
 ):
     """Core sweep of the 2-site 1D fit algorithm."""
@@ -908,9 +915,10 @@ def _tn1d_fit_sum_sweep_2site(
             **compress_opts,
         )
 
-        # track change in tensor norm
-        dt = (tfi0 | tfi1).distance_normalized(tfinew0 | tfinew1)
-        max_tdiff = max(max_tdiff, dt)
+        if compute_tdiff:
+            # track change in tensor norm
+            dt = (tfi0 | tfi1).distance_normalized(tfinew0 | tfinew1)
+            max_tdiff = max(max_tdiff, dt)
 
         # reinsert into all viewing tensor networks
         tfinew0.transpose_like_(tfi0)
@@ -1097,7 +1105,7 @@ def tensor_network_1d_compress_fit(
 
         if tn_fit is None:
             # random initial guess
-            tn_fit = TN1D_matching(
+            tn_fit = TN_matching(
                 tns[0], max_bond=current_bond_dim, site_tags=site_tags
             )
         else:
@@ -1140,6 +1148,9 @@ def tensor_network_1d_compress_fit(
 
         its = ProgBar(its, total=max_iterations)
 
+    # whether to compute the maximum change in tensor norm
+    compute_tdiff = (tol != 0.0) or progbar
+
     try:
         for i in its:
             next_direction = next(sweeps)
@@ -1162,6 +1173,7 @@ def tensor_network_1d_compress_fit(
                 site_tags=site_tags,
                 reverse=reverse,
                 optimize=optimize,
+                compute_tdiff=compute_tdiff,
                 **compress_opts,
             )
 
@@ -1201,118 +1213,12 @@ def tensor_network_1d_compress_fit(
     return tn_fit
 
 
-def tensor_network_1d_compress_projector(
-    tn,
-    max_bond=None,
-    cutoff=1e-10,
-    site_tags=None,
-    canonize=True,
-    canonize_opts=None,
-    cutoff_mode="rsum2",
-    lazy=False,
-    permute_arrays=True,
-    optimize="auto-hq",
-    sweep_reverse=False,
-    inplace=False,
-    **compress_opts,
-):
-    """Compress a 1D-like tensor network using the local projector method, in
-    the style of CTMRG or HOTRG. The projectors only contain information about
-    the local neighborhood tensors (although pre-gauging the network with
-    ``canonize=True`` can mitigate this somewhat) which significantly limits
-    the accuracy in most cases.
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        The tensor network to compress. Every tensor should have exactly one of
-        the site tags. Each site can have multiple tensors and output indices.
-    max_bond : int
-        The maximum bond dimension to compress to.
-    cutoff : float, optional
-        A dynamic threshold for discarding singular values when compressing.
-    site_tags : sequence of str, optional
-        The tags to use to group and order the tensors from ``tn``. If not
-        given, uses ``tn.site_tags``. The tensor network built will have one
-        tensor per site, in the order given by ``site_tags``.
-    canonize : bool, optional
-        Whether to pseudo canonicalize the initial tensor network.
-    canonize_opts
-        Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.gauge_all`.
-    cutoff_mode : {"rsum2", "rel", ...}, optional
-        The mode to use when truncating the singular values of the decomposed
-        tensors. See :func:`~quimb.tensor.tensor_split`.
-    lazy : bool, optional
-        Whether to leave the computed projectors uncontracted, default: False.
-    permute_arrays : bool or str, optional
-        Whether to permute the array indices of the final tensor network into
-        canonical order. If ``True`` will use the default order, otherwise if a
-        string this specifies a custom order.
-    optimize : str, optional
-        The contraction path optimizer to use for computing the projectors
-        and contracting them into the network.
-    sweep_reverse : bool, optional
-        Dummy argument to match the signature of other compression methods.
-    inplace : bool, optional
-        Whether to perform the compression inplace.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
-
-    Returns
-    -------
-    TensorNetwork
-    """
-    if sweep_reverse:
-        warnings.warn("sweep_reverse has no effect for the projector method.")
-
-    tn = tn if inplace else tn.copy()
-
-    if site_tags is None:
-        site_tags = tn.site_tags
-    N = len(site_tags)
-
-    if canonize:
-        # precondition
-        canonize_opts = ensure_dict(canonize_opts)
-        tn.gauge_all_(**canonize_opts)
-
-    tn_calc = tn.copy()
-    for i in range(N - 1):
-        ltags = (site_tags[i],)
-        rtags = (site_tags[i + 1],)
-
-        tn_calc.insert_compressor_between_regions_(
-            ltags,
-            rtags,
-            new_ltags=ltags,
-            new_rtags=rtags,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            insert_into=tn,
-            optimize=optimize,
-            **compress_opts,
-        )
-
-    if not lazy:
-        for i in range(N):
-            tn.contract_tags_(site_tags[i], optimize=optimize)
-
-        if permute_arrays:
-            # possibly put the array indices in
-            # canonical order (e.g. when MPS or MPO)
-            possibly_permute_(tn, permute_arrays)
-
-    return tn
-
-
 _TN1D_COMPRESS_METHODS = {
     "direct": tensor_network_1d_compress_direct,
     "dm": tensor_network_1d_compress_dm,
     "zipup": tensor_network_1d_compress_zipup,
     "zipup-first": tensor_network_1d_compress_zipup_first,
     "fit": tensor_network_1d_compress_fit,
-    "projector": tensor_network_1d_compress_projector,
 }
 
 

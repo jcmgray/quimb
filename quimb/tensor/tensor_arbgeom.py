@@ -1,22 +1,22 @@
 """Classes and algorithms related to arbitrary geometry tensor networks."""
 
-import functools
 import contextlib
+import functools
 from operator import add
 
-from autoray import do, dag, size
+from autoray import dag, do, size
 
 from ..utils import check_opt, deprecated, ensure_dict
 from ..utils import progbar as Progbar
+from . import decomp
+from .contraction import get_symbol
 from .tensor_core import (
+    TensorNetwork,
     group_inds,
     oset,
     rand_uuid,
     tags_to_oset,
-    TensorNetwork,
 )
-from .contraction import get_symbol
-from . import decomp
 
 
 def get_coordinate_formatter(ndims):
@@ -304,6 +304,124 @@ def tensor_network_apply_op_op(
     return B
 
 
+def create_lazy_edge_map(tn, site_tags=None):
+    """Given a tensor network, where each tensor is in exactly one group or
+    'site', compute which sites are connected to each other, without checking
+    each pair.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to analyze.
+    site_tags : None or sequence of str, optional
+        Which tags to consider as 'sites', by default uses ``tn.site_tags``.
+
+    Returns
+    -------
+    edges : dict[tuple[str, str], list[str]]
+        Each key is a sorted pair of tags, which are connected, and the value
+        is a list of the indices connecting them.
+    neighbors : dict[str, list[str]]
+        For each site tag, the other site tags it is connected to.
+    """
+    if site_tags is None:
+        site_tags = set(tn.site_tags)
+    else:
+        site_tags = set(site_tags)
+
+    edges = {}
+    neighbors = {}
+
+    for ix in tn.ind_map:
+        ts = tn._inds_get(ix)
+        tags = {tag for t in ts for tag in t.tags if tag in site_tags}
+        if len(tags) >= 2:
+            # index spans multiple sites
+            i, j = tuple(sorted(tags))
+
+            if (i, j) not in edges:
+                # record indices per edge
+                edges[(i, j)] = [ix]
+
+                # add to neighbor map
+                neighbors.setdefault(i, []).append(j)
+                neighbors.setdefault(j, []).append(i)
+            else:
+                # already processed this edge
+                edges[(i, j)].append(ix)
+
+    return edges, neighbors
+
+
+def tensor_network_ag_sum(
+    tna,
+    tnb,
+    site_tags=None,
+    negate=False,
+    compress=False,
+    inplace=False,
+    **compress_opts,
+):
+    """Add two tensor networks with arbitrary, but matching, geometries. They
+    should have the same site tags, with a single tensor per site and sites
+    connected by a single index only (but the name of this index can differ in
+    the two TNs).
+
+    Parameters
+    ----------
+    tna : TensorNetworkGen
+        The first tensor network to add.
+    tnb : TensorNetworkGen
+        The second tensor network to add.
+    site_tags : None or sequence of str, optional
+        Which tags to consider as 'sites', by default uses ``tna.site_tags``.
+    negate : bool, optional
+        Whether to negate the second tensor network before adding.
+    compress : bool, optional
+        Whether to compress the resulting tensor network, by calling the
+        ``compress`` method with the given options.
+    inplace : bool, optional
+        Whether to modify the first tensor network inplace.
+
+    Returns
+    -------
+    TensorNetworkGen
+        The resulting tensor network.
+    """
+    tna = tna if inplace else tna.copy()
+
+    edges_a, neighbors_a = create_lazy_edge_map(tna, site_tags)
+    edges_b, _ = create_lazy_edge_map(tnb, site_tags)
+
+    reindex_map = {}
+    for (si, sj), inds in edges_a.items():
+        (ixa,) = inds
+        (ixb,) = edges_b.pop((si, sj))
+        reindex_map[ixb] = ixa
+
+    if edges_b:
+        raise ValueError("Not all edges matched.")
+
+    for si in neighbors_a:
+        ta, tb = tna[si], tnb[si]
+
+        # the local outer indices
+        sum_inds = [ix for ix in tb.inds if ix not in reindex_map]
+
+        tb = tb.reindex(reindex_map)
+        if negate:
+            tb.negate_()
+            # only need to negate a single tensor
+            negate = False
+
+        ta.direct_product_(tb, sum_inds)
+
+    if compress:
+        tna.compress(**compress_opts)
+
+    return tna
+
+
 class TensorNetworkGen(TensorNetwork):
     """A tensor network which notionally has a single tensor per 'site',
     though these could be labelled arbitrarily could also be linked in an
@@ -498,6 +616,18 @@ class TensorNetworkGen(TensorNetwork):
         return tensor_network_align(self, *args, inplace=inplace, **kwargs)
 
     align_ = functools.partialmethod(align, inplace=True)
+
+    def __add__(self, other):
+        return tensor_network_ag_sum(self, other)
+
+    def __sub__(self, other):
+        return tensor_network_ag_sum(self, other, negate=True)
+
+    def __iadd__(self, other):
+        return tensor_network_ag_sum(self, other, inplace=True)
+
+    def __isub__(self, other):
+        return tensor_network_ag_sum(self, other, negate=True, inplace=True)
 
 
 def gauge_product_boundary_vector(
@@ -1925,7 +2055,7 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         -------
         TensorNetworkGenOperator
         """
-        B  = self if inplace else self.copy()
+        B = self if inplace else self.copy()
         B.gate_upper_with_op_lazy_(A)
         B.gate_lower_with_op_lazy_(A.conj(), transpose=True)
         return B
@@ -1933,6 +2063,7 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     gate_sandwich_with_op_lazy_ = functools.partialmethod(
         gate_sandwich_with_op_lazy, inplace=True
     )
+
 
 def _compute_expecs_maybe_in_parallel(
     fn,

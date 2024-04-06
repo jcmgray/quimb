@@ -27,6 +27,7 @@ from .tensor_arbgeom import (
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
+    tensor_network_ag_sum,
     tensor_network_apply_op_vec,
 )
 from .tensor_core import (
@@ -1265,16 +1266,41 @@ class TensorNetwork2D(TensorNetworkGen):
         site_tag = r2d.site_tag
         istep = r2d.istep
 
+        def _do_compress(site_tag_tmps):
+            nonlocal self
+
+            # split off the boundary network
+            self, tn_boundary = self.partition(site_tag_tmps, inplace=True)
+
+            # compress it inplace
+            tensor_network_1d_compress(
+                tn_boundary,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                method=method,
+                site_tags=site_tag_tmps,
+                inplace=True,
+                **compress_opts,
+            )
+
+            # recombine with the main network
+            self |= tn_boundary
+
+        # maybe compress the initial row, which may be multiple layers
+        # and have effective bond dimension > max_bond already
+        site_tag_tmps = [site_tag(r2d.sweep[0], j) for j in r2d.sweep_other]
+        if any(len(self.tag_map[st]) > 1 for st in site_tag_tmps):
+            _do_compress(site_tag_tmps)
+
         site_tag_tmps = [f"__ST{j}__" for j in r2d.sweep_other]
 
         if layer_tags is None:
             layer_tags = [None]
 
-        # XXX: compress the initial row, which may be multiple tensors?
-
         for i in r2d.sweep[:-1]:
             for layer_tag in layer_tags:
                 for j, st in zip(r2d.sweep_other, site_tag_tmps):
+                    # group outer single tensor with inner tensor(s)
                     tag1 = site_tag(i, j)  # outer
                     tag2 = site_tag(i + istep, j)  # inner
                     if layer_tag is None:
@@ -1285,22 +1311,7 @@ class TensorNetwork2D(TensorNetworkGen):
                         self.select_all((tag1,)).add_tag(st)
                         self.select_all((tag2, layer_tag)).add_tag(st)
 
-                # split off the boundary network
-                self, tn_boundary = self.partition(site_tag_tmps, inplace=True)
-
-                # compress it inplace
-                tensor_network_1d_compress(
-                    tn_boundary,
-                    max_bond=max_bond,
-                    cutoff=cutoff,
-                    method=method,
-                    site_tags=site_tag_tmps,
-                    inplace=True,
-                    **compress_opts,
-                )
-
-                # recombine with the main network
-                self |= tn_boundary
+                _do_compress(site_tag_tmps)
 
         self.drop_tags(site_tag_tmps)
 
@@ -4884,7 +4895,8 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             Whether the lattice is cyclic in the x and y directions.
         shape : str, optional
             How to layout the indices of the tensors, the default is
-            ``(up, right, down, left bra, ket) == 'urdlbk'``.
+            ``(up, right, down, left, phys) == 'urdlbk'``. This is the order
+            of the shape supplied to the filling function.
         peps_opts
             Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
 
@@ -4905,7 +4917,9 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             for which in shape:
                 if (which == "u") and (cyclicx or (i < Lx - 1)):  # bond up
                     shp.append(bond_dim)
-                elif (which == "r") and (cyclicy or (j < Ly - 1)):  # bond right
+                elif (which == "r") and (
+                    cyclicy or (j < Ly - 1)
+                ):  # bond right
                     shp.append(bond_dim)
                 elif (which == "d") and (cyclicx or (i > 0)):  # bond down
                     shp.append(bond_dim)
@@ -5045,46 +5059,9 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         )
 
     def add_PEPS(self, other, inplace=False):
-        """Add this PEPS with another."""
-        if (self.Lx, self.Ly) != (other.Lx, other.Ly):
-            raise ValueError("PEPS must be the same size.")
-
-        peps = self if inplace else self.copy()
-        for coo in peps.gen_site_coos():
-            t1, t2 = peps[coo], other[coo]
-
-            if set(t1.inds) != set(t2.inds):
-                # Need to use bonds to match indices
-                reindex_map = {}
-                i, j = coo
-                if i > 0:
-                    pair = ((i - 1, j), (i, j))
-                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
-                if i < self.Lx - 1:
-                    pair = ((i, j), (i + 1, j))
-                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
-                if j > 0:
-                    pair = ((i, j - 1), (i, j))
-                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
-                if j < self.Ly - 1:
-                    pair = ((i, j), (i, j + 1))
-                    reindex_map[other.bond(*pair)] = peps.bond(*pair)
-
-                t2 = t2.reindex(reindex_map)
-
-            t1.direct_product_(t2, sum_inds=peps.site_ind(*coo))
-
-        return peps
+        return tensor_network_ag_sum(self, other, inplace=inplace)
 
     add_PEPS_ = functools.partialmethod(add_PEPS, inplace=True)
-
-    def __add__(self, other):
-        """PEPS addition."""
-        return self.add_PEPS(other, inplace=False)
-
-    def __iadd__(self, other):
-        """In-place PEPS addition."""
-        return self.add_PEPS(other, inplace=True)
 
     def show(self):
         """Print a unicode schematic of this PEPS and its bond dimensions."""
@@ -5297,7 +5274,9 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         bond_dim,
         phys_dim=2,
         herm=False,
-        dtype=float,
+        dist="normal",
+        loc=0.0,
+        dtype="float64",
         seed=None,
         **pepo_opts,
     ):
@@ -5332,7 +5311,9 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
 
         def fill_fn(shape):
             X = ops.sensibly_scale(
-                ops.sensibly_scale(randn(shape, dtype=dtype))
+                ops.sensibly_scale(
+                    randn(shape, dist=dist, loc=loc, dtype=dtype)
+                )
             )
             if herm:
                 new_order = list(range(len(shape)))
@@ -5395,47 +5376,9 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         )
 
     def add_PEPO(self, other, inplace=False):
-        """Add this PEPO with another."""
-        if (self.Lx, self.Ly) != (other.Lx, other.Ly):
-            raise ValueError("PEPOs must be the same size.")
-
-        pepo = self if inplace else self.copy()
-        for coo in pepo.gen_site_coos():
-            t1, t2 = pepo[coo], other[coo]
-
-            if set(t1.inds) != set(t2.inds):
-                # Need to use bonds to match indices
-                reindex_map = {}
-                i, j = coo
-                if i > 0:
-                    pair = ((i - 1, j), (i, j))
-                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
-                if i < self.Lx - 1:
-                    pair = ((i, j), (i + 1, j))
-                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
-                if j > 0:
-                    pair = ((i, j - 1), (i, j))
-                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
-                if j < self.Ly - 1:
-                    pair = ((i, j), (i, j + 1))
-                    reindex_map[other.bond(*pair)] = pepo.bond(*pair)
-
-                t2 = t2.reindex(reindex_map)
-
-            sum_inds = (pepo.upper_ind(*coo), pepo.lower_ind(*coo))
-            t1.direct_product_(t2, sum_inds=sum_inds)
-
-        return pepo
+        return tensor_network_ag_sum(self, other, inplace=inplace)
 
     add_PEPO_ = functools.partialmethod(add_PEPO, inplace=True)
-
-    def __add__(self, other):
-        """PEPO addition."""
-        return self.add_PEPO(other, inplace=False)
-
-    def __iadd__(self, other):
-        """In-place PEPO addition."""
-        return self.add_PEPO(other, inplace=True)
 
     def _apply_peps(
         self, other, compress=False, contract=True, **compress_opts

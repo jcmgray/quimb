@@ -2216,10 +2216,14 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         self._Lx = len(arrays)
         self._Ly = len(arrays[0])
         self._Lz = len(arrays[0][0])
-        tensors = []
+
+        cyclicx = sum(d > 1 for d in arrays[0][1][1].shape) == 7
+        cyclicy = sum(d > 1 for d in arrays[1][0][1].shape) == 7
+        cyclicz = sum(d > 1 for d in arrays[0][1][0].shape) == 7
 
         # cache for both creating and retrieving indices
         ix = defaultdict(rand_uuid)
+        tensors = []
 
         for i, j, k in self.gen_site_coos():
             array = arrays[i][j][k]
@@ -2227,17 +2231,17 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             # figure out if we need to transpose the arrays from some order
             #     other than up right front down left behind physical
             array_order = shape
-            if i == self.Lx - 1:
+            if (not cyclicx) and (i == self.Lx - 1):
                 array_order = array_order.replace("u", "")
-            if j == self.Ly - 1:
+            if (not cyclicy) and (j == self.Ly - 1):
                 array_order = array_order.replace("r", "")
-            if k == self.Lz - 1:
+            if (not cyclicz) and (k == self.Lz - 1):
                 array_order = array_order.replace("f", "")
-            if i == 0:
+            if (not cyclicx) and (i == 0):
                 array_order = array_order.replace("d", "")
-            if j == 0:
+            if (not cyclicy) and (j == 0):
                 array_order = array_order.replace("l", "")
-            if k == 0:
+            if (not cyclicz) and (k == 0):
                 array_order = array_order.replace("b", "")
 
             # allow convention of missing bonds to be singlet dimensions
@@ -2253,17 +2257,23 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                inds.append(ix[(i, j, k), (i + 1, j, k)])
+                i_u = (i + 1) % self.Lx
+                inds.append(ix[frozenset(((i, j, k), (i_u, j, k)))])
             if "r" in array_order:
-                inds.append(ix[(i, j, k), (i, j + 1, k)])
+                j_r = (j + 1) % self.Ly
+                inds.append(ix[frozenset(((i, j, k), (i, j_r, k)))])
             if "f" in array_order:
-                inds.append(ix[(i, j, k), (i, j, k + 1)])
+                k_f = (k + 1) % self.Lz
+                inds.append(ix[frozenset(((i, j, k), (i, j, k_f)))])
             if "d" in array_order:
-                inds.append(ix[(i - 1, j, k), (i, j, k)])
+                i_d = (i - 1) % self.Lx
+                inds.append(ix[frozenset(((i_d, j, k), (i, j, k)))])
             if "l" in array_order:
-                inds.append(ix[(i, j - 1, k), (i, j, k)])
+                j_l = (j - 1) % self.Ly
+                inds.append(ix[frozenset(((i, j_l, k), (i, j, k)))])
             if "b" in array_order:
-                inds.append(ix[(i, j, k - 1), (i, j, k)])
+                k_b = (k - 1) % self.Lz
+                inds.append(ix[frozenset(((i, j, k_b), (i, j, k)))])
             inds.append(self.site_ind(i, j, k))
 
             # mix site, slice and global tags
@@ -2317,7 +2327,10 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
     @classmethod
     def from_fill_fn(
-        cls, fill_fn, Lx, Ly, Lz, bond_dim, phys_dim=2, **peps3d_opts
+        cls, fill_fn, Lx, Ly, Lz, bond_dim, phys_dim=2,
+        cyclic=False,
+        shape="urfdlbp",
+        **peps3d_opts
     ):
         """Create a 3D PEPS from a filling function with signature
         ``fill_fn(shape)``.
@@ -2332,8 +2345,12 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             The number of z-slices.
         bond_dim : int
             The bond dimension.
-        physical : int, optional
+        phys_dim : int, optional
             The physical index dimension.
+        shape : str, optional
+            How to layout the indices of the tensors, the default is
+            ``(up, right, front, down, left, back, phys) == 'urfdlbp'``. This
+            is the order of the shape supplied to the filling function.
         peps_opts
             Supplied to :class:`~quimb.tensor.tensor_3d.PEPS3D`.
 
@@ -2345,23 +2362,31 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             [[None for _ in range(Lz)] for _ in range(Ly)] for _ in range(Lx)
         ]
 
-        for i, j, k in product(range(Lx), range(Ly), range(Lz)):
-            shape = []
-            if i != Lx - 1:  # bond up
-                shape.append(bond_dim)
-            if j != Ly - 1:  # bond right
-                shape.append(bond_dim)
-            if k != Lz - 1:  # bond front
-                shape.append(bond_dim)
-            if i != 0:  # bond down
-                shape.append(bond_dim)
-            if j != 0:  # bond left
-                shape.append(bond_dim)
-            if k != 0:  # bond behind
-                shape.append(bond_dim)
-            shape.append(phys_dim)
+        try:
+            cyclicx, cyclicy, cyclicz = cyclic
+        except (TypeError, ValueError):
+            cyclicx = cyclicy = cyclicz = cyclic
 
-            arrays[i][j][k] = fill_fn(shape)
+        for i, j, k in product(range(Lx), range(Ly), range(Lz)):
+            shp = []
+
+            for which in shape:
+                if (which == "u") and (cyclicx or (i != Lx - 1)):  # up
+                    shp.append(bond_dim)
+                elif (which == "r") and (cyclicy or (j != Ly - 1)):  # right
+                    shp.append(bond_dim)
+                elif (which == "f") and (cyclicz or (k != Lz - 1)):  # front
+                    shp.append(bond_dim)
+                elif (which == "d") and (cyclicx or (i != 0)):  # down
+                    shp.append(bond_dim)
+                elif (which == "l") and (cyclicy or (j != 0)):  # left
+                    shp.append(bond_dim)
+                elif (which == "b") and (cyclicz or (k != 0)):  # back
+                    shp.append(bond_dim)
+
+            shp.append(phys_dim)
+
+            arrays[i][j][k] = fill_fn(shp)
 
         return cls(arrays, **peps3d_opts)
 
@@ -2465,6 +2490,8 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         Lz,
         bond_dim,
         phys_dim=2,
+        dist="normal",
+        loc=0.0,
         dtype="float64",
         seed=None,
         **peps3d_opts,
@@ -2503,7 +2530,9 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
         def fill_fn(shape):
             return ops.sensibly_scale(
-                ops.sensibly_scale(randn(shape, dtype=dtype))
+                ops.sensibly_scale(
+                    randn(shape, dist=dist, loc=loc, dtype=dtype)
+                )
             )
 
         return cls.from_fill_fn(
