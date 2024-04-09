@@ -266,7 +266,10 @@ class TestDot:
         assert isinstance(cq, qarray)
         cq = mat_s @ ket_d
         assert isinstance(cq, qarray)
-        cn = mat_s._mul_vector(ket_d)
+        try:
+            cn = mat_s._matmul_vector(ket_d)
+        except AttributeError:
+            cn = mat_s._mul_vector(ket_d)
         assert not issparse(cq)
         assert isdense(cq)
         assert_allclose(cq.A.ravel(), cn)
