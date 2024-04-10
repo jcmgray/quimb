@@ -94,7 +94,12 @@ class TestSimpleUpdate:
         ham.apply_to_arrays(to_backend)
 
         su = qtn.SimpleUpdate(
-            psi0, ham, progbar=True, keep_best=True, compute_energy_every=10
+            psi0,
+            ham,
+            progbar=True,
+            keep_best=True,
+            compute_energy_every=10,
+            ordering="largest_first",
         )
 
         su.evolve(33, tau=0.3)
