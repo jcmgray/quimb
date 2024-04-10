@@ -1491,7 +1491,7 @@ class TensorNetwork3D(TensorNetworkGen):
         lazy=False,
         mode="projector",
         compress_opts=None,
-        sequence=("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"),
+        sequence=None,
         xmin=None,
         xmax=None,
         ymin=None,
@@ -1517,6 +1517,23 @@ class TensorNetwork3D(TensorNetworkGen):
         if lazy:
             # we are implicitly asking for the tensor network
             final_contract = False
+
+        if sequence is None:
+            sequence = []
+            if self.is_cyclic_x():
+                sequence.append("xmin")
+            else:
+                sequence.extend(["xmin", "xmax"])
+
+            if self.is_cyclic_y():
+                sequence.append("ymin")
+            else:
+                sequence.extend(["ymin", "ymax"])
+
+            if self.is_cyclic_z():
+                sequence.append("zmin")
+            else:
+                sequence.extend(["zmin", "zmax"])
 
         return self._contract_interleaved_boundary_sequence(
             contract_boundary_opts=contract_boundary_opts,
