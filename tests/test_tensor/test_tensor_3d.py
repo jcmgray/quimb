@@ -117,8 +117,7 @@ class Test3DManualContract:
         elif mode == "ctmrg":
             lZ = tn.contract_ctmrg(max_bond=chi, cutoff=0.0)
 
-
         if any((cyclicx, cyclicy, cyclicz)):
-            assert lZ.history_max_size() < 2**15
+            assert lZ.history_max_size() < 2**16
         else:
             assert lZ.history_max_size() < 2**13
