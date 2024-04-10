@@ -3,8 +3,8 @@
 Release notes for `quimb`.
 
 
-(whats-new-1-7-4)=
-## v1.7.4 (unreleased)
+(whats-new-1-8-0)=
+## v1.8.0 (2024-04-10)
 
 **Breaking Changes**
 
@@ -84,6 +84,7 @@ Release notes for `quimb`.
 **Bug fixes:**
 
 - fix scipy sparse monkey patch for scipy>=1.13 ({issue}`222`)
+- fix autoblock bug where connected sectors were not being merged ({issue}`223`)
 
 
 (whats-new-1-7-3)=
