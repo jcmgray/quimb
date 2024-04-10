@@ -13,7 +13,7 @@ def get_nz(A):  # pragma: no cover
     return np.nonzero(A)
 
 
-@njit("List(List(int64))(int64[:], int64[:], int_)")
+@njit
 def compute_blocks(ix, jx, d):  # pragma: no cover
     """Find the charge sectors (blocks in matrix terms) given element
     coordinates ``ix`` and ``jx`` and total size ``d``.
