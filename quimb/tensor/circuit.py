@@ -1606,7 +1606,7 @@ class Circuit:
         """Apply the raw array ``U`` as a gate on qubits in ``where``. It will
         be assumed to be unitary for the sake of computing reverse lightcones.
         """
-        gate = Gate.from_raw(U, where, gate_round)
+        gate = Gate.from_raw(U, where, round=gate_round)
         self._apply_gate(gate, **gate_opts)
 
     def apply_gates(self, gates, **gate_opts):
