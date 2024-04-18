@@ -99,7 +99,11 @@ class BeliefPropagationCommon:
             info["rolling_abs_mean_diff"] = rdm.absmeandiff()
 
 
-def initialize_hyper_messages(tn, fill_fn=None, smudge_factor=1e-12):
+def initialize_hyper_messages(
+    tn,
+    fill_fn=None,
+    smudge_factor=1e-12,
+):
     """Initialize messages for belief propagation, this is equivalent to doing
     a single round of belief propagation with uniform messages.
 

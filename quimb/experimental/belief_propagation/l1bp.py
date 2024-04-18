@@ -1,11 +1,12 @@
 import autoray as ar
 
 import quimb.tensor as qtn
+from quimb.utils import oset
 
 from .bp_common import (
     BeliefPropagationCommon,
-    create_lazy_community_edge_map,
     combine_local_contractions,
+    create_lazy_community_edge_map,
 )
 
 
@@ -23,6 +24,8 @@ class L1BP(BeliefPropagationCommon):
         these are inferred automatically.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -37,8 +40,8 @@ class L1BP(BeliefPropagationCommon):
         tn,
         site_tags=None,
         damping=0.0,
+        update="sequential",
         local_convergence=True,
-        update="parallel",
         optimize="auto-hq",
         message_init_function=None,
         **contract_opts,
@@ -61,7 +64,7 @@ class L1BP(BeliefPropagationCommon):
             self.local_tns,
             self.touch_map,
         ) = create_lazy_community_edge_map(tn, site_tags)
-        self.touched = set()
+        self.touched = oset()
 
         self._abs = ar.get_lib_fn(self.backend, "abs")
         self._max = ar.get_lib_fn(self.backend, "max")
@@ -72,6 +75,12 @@ class L1BP(BeliefPropagationCommon):
         self._norm = ar.get_lib_fn(self.backend, "linalg.norm")
 
         def _normalize(x):
+
+            # sx = self._sum(x)
+            # sphase = sx / self._abs(sx)
+            # smag = self._norm(x)**0.5
+            # return x / (smag * sphase)
+
             return x / self._sum(x)
             # return x / self._norm(x)
             # return x / self._max(x)
@@ -135,7 +144,7 @@ class L1BP(BeliefPropagationCommon):
         ncheck = len(self.touched)
         nconv = 0
         max_mdiff = -1.0
-        new_touched = set()
+        new_touched = oset()
 
         def _compute_m(key):
             i, j = key
@@ -154,7 +163,10 @@ class L1BP(BeliefPropagationCommon):
 
             tm = self.messages[key]
 
-            if self.damping != 0.0:
+            if callable(self.damping):
+                damping_m = self.damping()
+                data = (1 - damping_m) * data + damping_m * tm.data
+            elif self.damping != 0.0:
                 data = (1 - self.damping) * data + self.damping * tm.data
 
             mdiff = float(self._distance(tm.data, data))
@@ -222,6 +234,19 @@ class L1BP(BeliefPropagationCommon):
             tvals, mvals, self.backend, strip_exponent=strip_exponent
         )
 
+    def normalize_messages(self):
+        """Normalize all messages such that for each bond `<m_i|m_j> = 1` and
+        `<m_i|m_i> = <m_j|m_j>` (but in general != 1).
+        """
+        for i, j in self.edges:
+            tmi = self.messages[i, j]
+            tmj = self.messages[j, i]
+            nij = abs(tmi @ tmj)**0.5
+            nii = (tmi @ tmi)**0.25
+            njj = (tmj @ tmj)**0.25
+            tmi /= (nij * nii / njj)
+            tmj /= (nij * njj / nii)
+
 
 def contract_l1bp(
     tn,
@@ -229,8 +254,8 @@ def contract_l1bp(
     tol=5e-6,
     site_tags=None,
     damping=0.0,
+    update="sequential",
     local_convergence=True,
-    update="parallel",
     optimize="auto-hq",
     strip_exponent=False,
     info=None,
@@ -253,6 +278,8 @@ def contract_l1bp(
         automatically.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.

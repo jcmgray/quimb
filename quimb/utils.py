@@ -1,10 +1,9 @@
-"""Misc utility functions.
-"""
+"""Misc utility functions."""
+
+import collections
 import functools
 import itertools
-import collections
 from importlib.util import find_spec
-
 
 try:
     import cytoolz
@@ -373,7 +372,13 @@ class oset:
 
     def update(self, *others):
         for o in others:
-            self._d.update(o._d)
+            try:
+                # oset
+                self._d.update(o._d)
+            except AttributeError:
+                # iterable
+                for k in o:
+                    self._d[k] = None
 
     def union(self, *others):
         u = self.copy()
@@ -418,6 +423,8 @@ class oset:
 
     def popright(self):
         return self._d.popitem()[0]
+
+    pop = popright
 
     def __eq__(self, other):
         if isinstance(other, oset):

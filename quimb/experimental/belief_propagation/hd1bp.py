@@ -5,6 +5,7 @@ network directly as a factor graph. Messages are processed one at a time.
 TODO:
 
 - [ ] implement 'touching', so that only necessary messages are updated
+- [ ] implement sequential update
 
 """
 import autoray as ar
@@ -202,7 +203,7 @@ def iterate_belief_propagation_basic(
     backend = ar.infer_backend(next(iter(messages.values())))
 
     # _sum = ar.get_lib_fn(backend, "sum")
-    # nb at small sizes python sum is faster than numpy sum
+    # n.b. at small sizes python sum is faster than numpy sum
     _sum = ar.get_lib_fn(backend, "sum")
     # _max = ar.get_lib_fn(backend, "max")
     _abs = ar.get_lib_fn(backend, "abs")
@@ -289,6 +290,28 @@ class HD1BP(BeliefPropagationCommon):
             **kwargs,
         )
         return None, None, max_dm
+
+    def get_gauged_tn(self):
+        """Assuming the supplied tensor network has no hyper or dangling
+        indices, gauge it by inserting the BP-approximated transfer matrix
+        eigenvectors, which may be complex. The BP-contraction of this gauged
+        network is then simply the product of zeroth entries of each tensor.
+        """
+        tng = self.tn.copy()
+        for ind, tids in self.tn.ind_map.items():
+            tida, tidb = tids
+            ka = (ind, tida)
+            kb = (ind, tidb)
+            ma = self.messages[ka]
+            mb = self.messages[kb]
+
+            el, ev = ar.do('linalg.eig', ar.do('outer', ma, mb))
+            k = ar.do('argsort', -ar.do('abs', el))
+            ev = ev[:, k]
+            Uinv = ev
+            U = ar.do('linalg.inv', ev)
+            tng._insert_gauge_tids(U, tida, tidb, Uinv)
+        return tng
 
     def contract(self, strip_exponent=False):
         """Estimate the total contraction, i.e. the exponential of the 'Bethe

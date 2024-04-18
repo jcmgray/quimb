@@ -1,5 +1,7 @@
 import autoray as ar
+
 import quimb.tensor as qtn
+from quimb.utils import oset
 
 from .bp_common import (
     BeliefPropagationCommon,
@@ -32,6 +34,10 @@ class D2BP(BeliefPropagationCommon):
         Computed automatically if not specified.
     optimize : str or PathOptimizer, optional
         The path optimizer to use when contracting the messages.
+    damping : float, optional
+        The damping factor to use, 0.0 means no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -45,8 +51,9 @@ class D2BP(BeliefPropagationCommon):
         messages=None,
         output_inds=None,
         optimize="auto-hq",
-        local_convergence=True,
         damping=0.0,
+        update="sequential",
+        local_convergence=True,
         **contract_opts,
     ):
         from quimb.tensor.contraction import array_contract_expression
@@ -54,8 +61,9 @@ class D2BP(BeliefPropagationCommon):
         self.tn = tn
         self.contract_opts = contract_opts
         self.contract_opts.setdefault("optimize", optimize)
-        self.local_convergence = local_convergence
         self.damping = damping
+        self.local_convergence = local_convergence
+        self.update = update
 
         if output_inds is None:
             self.output_inds = set(self.tn.outer_inds())
@@ -82,7 +90,7 @@ class D2BP(BeliefPropagationCommon):
 
         # record which messages touch each others, for efficient updates
         self.touch_map = {}
-        self.touched = set()
+        self.touched = oset()
         self.exprs = {}
 
         # populate any messages
@@ -168,40 +176,55 @@ class D2BP(BeliefPropagationCommon):
             self.touched.update(self.exprs.keys())
 
         ncheck = len(self.touched)
-        new_messages = {}
-        while self.touched:
-            key = self.touched.pop()
+        nconv = 0
+        max_mdiff = -1.0
+        new_touched = oset()
+
+        def _compute_m(key):
             expr, data = self.exprs[key]
             m = expr(*data[:2], *(self.messages[mkey] for mkey in data[2:]))
             # enforce hermiticity and normalize
-            m = m + ar.dag(m)
-            m = self._normalize(m)
+            return self._normalize(m + ar.dag(m))
 
+        def _update_m(key, new_m):
+            nonlocal nconv, max_mdiff
+
+            old_m = self.messages[key]
             if self.damping > 0.0:
-                m = self._normalize(
-                    # new message
-                    (1 - self.damping) * m
-                    +
-                    # old message
-                    self.damping * self.messages[key]
+                new_m = self._normalize(
+                    self.damping * old_m + (1 - self.damping) * new_m
                 )
-
-            new_messages[key] = m
-
-        # process modified messages
-        nconv = 0
-        max_mdiff = -1.0
-        for key, m in new_messages.items():
-            mdiff = float(self._distance(m, self.messages[key]))
-
+            try:
+                mdiff = float(self._distance(old_m, new_m))
+            except (TypeError, ValueError):
+                # handle e.g. lazy arrays
+                mdiff = float("inf")
             if mdiff > tol:
                 # mark touching messages for update
-                self.touched.update(self.touch_map[key])
+                new_touched.update(self.touch_map[key])
             else:
                 nconv += 1
-
             max_mdiff = max(max_mdiff, mdiff)
-            self.messages[key] = m
+            self.messages[key] = new_m
+
+        if self.update == "parallel":
+            new_messages = {}
+            # compute all new messages
+            while self.touched:
+                key = self.touched.pop()
+                new_messages[key] = _compute_m(key)
+            # insert all new messages
+            for key, new_m in new_messages.items():
+                _update_m(key, new_m)
+
+        elif self.update == "sequential":
+            # compute each new message and immediately re-insert it
+            while self.touched:
+                key = self.touched.pop()
+                new_m = _compute_m(key)
+                _update_m(key, new_m)
+
+        self.touched = new_touched
 
         return nconv, ncheck, max_mdiff
 
@@ -354,8 +377,9 @@ def contract_d2bp(
     messages=None,
     output_inds=None,
     optimize="auto-hq",
-    local_convergence=True,
     damping=0.0,
+    update="sequential",
+    local_convergence=True,
     max_iterations=1000,
     tol=5e-6,
     strip_exponent=False,
@@ -382,11 +406,13 @@ def contract_d2bp(
         Computed automatically if not specified.
     optimize : str or PathOptimizer, optional
         The path optimizer to use when contracting the messages.
+    damping : float, optional
+        The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
-    damping : float, optional
-        The damping parameter to use, defaults to no damping.
     strip_exponent : bool, optional
         Whether to strip the exponent from the final result. If ``True``
         then the returned result is ``(mantissa, exponent)``.
@@ -407,8 +433,9 @@ def contract_d2bp(
         messages=messages,
         output_inds=output_inds,
         optimize=optimize,
-        local_convergence=local_convergence,
         damping=damping,
+        local_convergence=local_convergence,
+        update=update,
         **contract_opts,
     )
     bp.run(
@@ -429,8 +456,9 @@ def compress_d2bp(
     messages=None,
     output_inds=None,
     optimize="auto-hq",
-    local_convergence=True,
     damping=0.0,
+    update="sequential",
+    local_convergence=True,
     max_iterations=1000,
     tol=5e-6,
     inplace=False,
@@ -465,6 +493,8 @@ def compress_d2bp(
         The path optimizer to use when contracting the messages.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -487,8 +517,9 @@ def compress_d2bp(
         messages=messages,
         output_inds=output_inds,
         optimize=optimize,
-        local_convergence=local_convergence,
         damping=damping,
+        update=update,
+        local_convergence=local_convergence,
         **contract_opts,
     )
     bp.run(

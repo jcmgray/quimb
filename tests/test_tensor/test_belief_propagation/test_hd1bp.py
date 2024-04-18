@@ -3,6 +3,7 @@ import pytest
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.experimental.belief_propagation.hd1bp import (
+    HD1BP,
     contract_hd1bp,
     sample_hd1bp,
 )
@@ -49,3 +50,15 @@ def test_sample(damping):
     assert tn_config.num_indices == 0
     assert tn_config.contract() == pytest.approx(1.0)
     assert 0.0 < omega < 1.0
+
+
+def test_get_gauged_tn():
+    tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
+    Z = tn.contract()
+    bp = HD1BP(tn)
+    bp.run()
+    Zbp = bp.contract()
+    assert Z == pytest.approx(Zbp, rel=1e-1)
+    tn_gauged = bp.get_gauged_tn()
+    Zg = qu.prod(array.item(0) for array in tn_gauged.arrays)
+    assert Z == pytest.approx(Zg, rel=1e-1)

@@ -366,7 +366,7 @@ def tensor_network_ag_compress_l2bp(
     canonize=True,
     damping=0.0,
     local_convergence=True,
-    update="parallel",
+    update="sequential",
     optimize="auto-hq",
     inplace=False,
     **compress_opts,

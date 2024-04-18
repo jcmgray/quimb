@@ -3,23 +3,47 @@ import math
 import autoray as ar
 
 import quimb.tensor as qtn
+from quimb.utils import oset
+
 from .bp_common import (
     BeliefPropagationCommon,
-    create_lazy_community_edge_map,
     combine_local_contractions,
+    create_lazy_community_edge_map,
 )
 
 
 class L2BP(BeliefPropagationCommon):
-    """A simple class to hold all the data for a L2BP run."""
+    """Lazy (as in multiple uncontracted tensors per site) 2-norm (as in for
+    wavefunctions and operators) belief propagation.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to form the 2-norm of and run BP on.
+    site_tags : sequence of str, optional
+        The tags identifying the sites in ``tn``, each tag forms a region,
+        which should not overlap. If the tensor network is structured, then
+        these are inferred automatically.
+    damping : float, optional
+        The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
+    local_convergence : bool, optional
+        Whether to allow messages to locally converge - i.e. if all their
+        input messages have converged then stop updating them.
+    optimize : str or PathOptimizer, optional
+        The path optimizer to use when contracting the messages.
+    contract_opts
+        Other options supplied to ``cotengra.array_contract``.
+    """
 
     def __init__(
         self,
         tn,
         site_tags=None,
         damping=0.0,
+        update="sequential",
         local_convergence=True,
-        update="parallel",
         optimize="auto-hq",
         **contract_opts,
     ):
@@ -41,7 +65,7 @@ class L2BP(BeliefPropagationCommon):
             self.local_tns,
             self.touch_map,
         ) = create_lazy_community_edge_map(tn, site_tags)
-        self.touched = set()
+        self.touched = oset()
 
         _abs = ar.get_lib_fn(self.backend, "abs")
         _sum = ar.get_lib_fn(self.backend, "sum")
@@ -67,7 +91,7 @@ class L2BP(BeliefPropagationCommon):
         self.messages = {}
 
         for pair, bix in self.edges.items():
-            cix = tuple(ix + "*" for ix in bix)
+            cix = tuple(ix + "_l2bp*" for ix in bix)
             remapper = dict(zip(bix, cix))
             output_inds = cix + bix
 
@@ -107,10 +131,10 @@ class L2BP(BeliefPropagationCommon):
                 for ix in tn_i_right.ind_map:
                     if ix in bix:
                         # bra outputs
-                        remapper[ix] = ix + "**"
+                        remapper[ix] = ix + "_l2bp**"
                     elif ix in outer_bix:
                         # messages connected
-                        remapper[ix] = ix + "*"
+                        remapper[ix] = ix + "_l2bp*"
                     # remaining indices are either internal and will be mangled
                     # or global outer indices and will be contracted directly
 
@@ -130,12 +154,12 @@ class L2BP(BeliefPropagationCommon):
         ncheck = len(self.touched)
         nconv = 0
         max_mdiff = -1.0
-        new_touched = set()
+        new_touched = oset()
 
         def _compute_m(key):
             i, j = key
             bix = self.edges[(i, j) if i < j else (j, i)]
-            cix = tuple(ix + "**" for ix in bix)
+            cix = tuple(ix + "_l2bp**" for ix in bix)
             output_inds = cix + bix
 
             tn_i_to_j = self.contraction_tns[i, j]
@@ -159,7 +183,11 @@ class L2BP(BeliefPropagationCommon):
             if self.damping > 0.0:
                 data = (1 - self.damping) * data + self.damping * tm.data
 
-            mdiff = float(self._distance(tm.data, data))
+            try:
+                mdiff = float(self._distance(tm.data, data))
+            except (TypeError, ValueError):
+                # handle e.g. lazy arrays
+                mdiff = float("inf")
 
             if mdiff > tol:
                 # mark touching messages for update
@@ -191,6 +219,19 @@ class L2BP(BeliefPropagationCommon):
 
         return nconv, ncheck, max_mdiff
 
+    def normalize_messages(self):
+        """Normalize all messages such that for each bond `<m_i|m_j> = 1` and
+        `<m_i|m_i> = <m_j|m_j>` (but in general != 1).
+        """
+        for i, j in self.edges:
+            tmi = self.messages[i, j]
+            tmj = self.messages[j, i]
+            nij = (tmi @ tmj)**0.5
+            nii = (tmi @ tmi)**0.25
+            njj = (tmj @ tmj)**0.25
+            tmi /= (nij * nii / njj)
+            tmj /= (nij * njj / nii)
+
     def contract(self, strip_exponent=False):
         """Estimate the contraction of the norm squared using the current
         messages.
@@ -201,7 +242,7 @@ class L2BP(BeliefPropagationCommon):
             # disconnected but still appear in local_tns
             ks = self.neighbors.get(i, ())
             bix = [ix for k in ks for ix in self.edges[tuple(sorted((k, i)))]]
-            bra = ket.H.reindex_({ix: ix + "*" for ix in bix})
+            bra = ket.H.reindex_({ix: ix + "_l2bp*" for ix in bix})
             tni = qtn.TensorNetwork(
                 (
                     ket,
@@ -253,11 +294,11 @@ class L2BP(BeliefPropagationCommon):
         for ix in tn_bra_i.ind_map:
             if ix == ket_site_ind:
                 # open up the site index
-                bra_site_ind = ix + "**"
+                bra_site_ind = ix + "_l2bp**"
                 ind_changes[ix] = bra_site_ind
             if ix in outer_bix:
                 # attach bra message indices
-                ind_changes[ix] = ix + "*"
+                ind_changes[ix] = ix + "_l2bp*"
         tn_bra_i.reindex_(ind_changes)
 
         tn_rho_i &= tn_bra_i
@@ -345,6 +386,7 @@ def contract_l2bp(
     tn,
     site_tags=None,
     damping=0.0,
+    update="sequential",
     local_convergence=True,
     optimize="auto-hq",
     max_iterations=1000,
@@ -364,6 +406,8 @@ def contract_l2bp(
         The tags identifying the sites in ``tn``, each tag forms a region.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -388,6 +432,7 @@ def contract_l2bp(
         tn,
         site_tags=site_tags,
         damping=damping,
+        update=update,
         local_convergence=local_convergence,
         optimize=optimize,
         **contract_opts,
@@ -410,6 +455,7 @@ def compress_l2bp(
     tol=5e-6,
     site_tags=None,
     damping=0.0,
+    update="sequential",
     local_convergence=True,
     optimize="auto-hq",
     lazy=False,
@@ -441,6 +487,8 @@ def compress_l2bp(
         automatically.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
+    update : {'parallel', 'sequential'}, optional
+        Whether to update all messages in parallel or sequentially.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -469,6 +517,7 @@ def compress_l2bp(
         tnc,
         site_tags=site_tags,
         damping=damping,
+        update=update,
         local_convergence=local_convergence,
         optimize=optimize,
         **contract_opts,

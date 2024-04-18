@@ -59,7 +59,7 @@ Overall that gives 12 possible BP flavors, some implemented here:
 - [ ] (HV2BP) hyper, vectorized, 2-norm
 - [ ] (HL1BP) hyper, lazy, 1-norm
 - [ ] (HL2BP) hyper, lazy, 2-norm
-- [ ] (D1BP) simple, dense, 1-norm
+- [x] (D1BP) simple, dense, 1-norm - simple BP for simple tensor networks
 - [x] (D2BP) simple, dense, 2-norm - this is the standard PEPS BP algorithm
 - [ ] (V1BP) simple, vectorized, 1-norm
 - [ ] (V2BP) simple, vectorized, 2-norm
@@ -78,14 +78,30 @@ update messages adjacent to messages which have changed.
 """
 
 from .bp_common import initialize_hyper_messages
-from .d2bp import D2BP, contract_d2bp, compress_d2bp, sample_d2bp
+from .d1bp import D1BP, contract_d1bp
+from .d2bp import D2BP, compress_d2bp, contract_d2bp, sample_d2bp
+from .hd1bp import HD1BP, contract_hd1bp, sample_hd1bp
+from .hv1bp import HV1BP, contract_hv1bp, sample_hv1bp
+from .l1bp import L1BP, contract_l1bp
+from .l2bp import L2BP, compress_l2bp, contract_l2bp
 
 __all__ = (
-    "initialize_hyper_messages",
-    "D2BP",
-    "contract_d2bp",
     "compress_d2bp",
-    "sample_d2bp",
+    "compress_l2bp",
+    "contract_d1bp",
+    "contract_d2bp",
+    "contract_hd1bp",
+    "contract_hv1bp",
+    "contract_l1bp",
+    "contract_l2bp",
+    "D1BP",
+    "D2BP",
     "HD1BP",
     "HV1BP",
+    "initialize_hyper_messages",
+    "L1BP",
+    "L2BP",
+    "sample_d2bp",
+    "sample_hd1bp",
+    "sample_hv1bp",
 )
