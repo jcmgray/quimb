@@ -2345,6 +2345,7 @@ def TN2D_classical_ising_partition_function(
             (ni < Lx - 1 or cyclic_x, ((ni, nj), ((ni + 1) % Lx, nj)), "u"),
             (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj), (ni, nj)), "d"),
         ]:
+            pair = tuple(sorted(pair))
             if inbounds:
                 js += (j_factory(*pair),)
                 directions += direction
@@ -2491,6 +2492,7 @@ def TN3D_classical_ising_partition_function(
             ),
             (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj, nk), (ni, nj, nk)), "d"),
         ]:
+            pair = tuple(sorted(pair))
             if inbounds:
                 js += (j_factory(*pair),)
                 directions += direction
@@ -2618,6 +2620,8 @@ def TN_classical_partition_function_from_edges(
     h=0.0,
     site_tag_id="I{}",
     bond_ind_id="b{},{}",
+    outputs=(),
+    ind_id="s{}",
 ):
     """Build a regular tensor network representation of a classical ising model
     partition function by specifying graph edges. There will be a single
@@ -2654,23 +2658,29 @@ def TN_classical_partition_function_from_edges(
     to_contract = collections.defaultdict(list)
     ts = []
     for node_a, node_b in gen_unique_edges(edges):
+
+        # the variable indices (unless the node is
+        # an output, these will be contracted)
+        ix_a = ind_id.format(node_a)
+        ix_b = ind_id.format(node_b)
+
         j_ab = j_factory(node_a, node_b)
         bond_ab = bond_ind_id.format(node_a, node_b)
 
         # left tensor factor
         data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm="l")
-        inds = [f"s{node_a}", bond_ab]
+        inds = [ix_a, bond_ab]
         tags = [site_tag_id.format(node_a)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))
 
         # right tensor factor
         data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm="r")
-        inds = [bond_ab, f"s{node_b}"]
+        inds = [bond_ab, ix_b]
         tags = [site_tag_id.format(node_b)]
         ts.append(Tensor(data=data, inds=inds, tags=tags))
 
-        to_contract[f"s{node_a}"].append(bond_ab)
-        to_contract[f"s{node_b}"].append(bond_ab)
+        to_contract[ix_a].append(bond_ab)
+        to_contract[ix_b].append(bond_ab)
 
     sites = tuple(sorted(set(concat(edges))))
 
@@ -2684,10 +2694,14 @@ def TN_classical_partition_function_from_edges(
 
         for node in sites:
             data = classical_ising_H_matrix(beta, h=float(h_factory(node)))
-            inds = [f"s{node}"]
+            inds = [ind_id.format(node)]
             tags = [site_tag_id.format(node)]
             ts.append(Tensor(data=data, inds=inds, tags=tags))
-            to_contract[f"s{node}"].extend(())
+            to_contract[ind_id.format(node)].extend(())
+
+    for node in outputs:
+        ix = ind_id.format(node)
+        to_contract[ix].append(ix)
 
     tn = TensorNetwork(ts)
 
