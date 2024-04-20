@@ -23,6 +23,7 @@ def tensor_network_ag_compress_projector(
     canonize_opts=None,
     lazy=False,
     optimize="auto-hq",
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -52,6 +53,10 @@ def tensor_network_ag_compress_projector(
         Whether to leave the computed projectors uncontracted, default: False.
     optimize : str, optional
         The contraction path optimizer to use.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     compress_opts
@@ -71,7 +76,10 @@ def tensor_network_ag_compress_projector(
     if canonize:
         # optionally precondition the uncontracted network
         canonize_opts = ensure_dict(canonize_opts)
-        tn.gauge_all_(**canonize_opts)
+        tn.gauge_all_(
+            equalize_norms=equalize_norms,
+            **canonize_opts
+        )
 
     # then compute projectors using local information
     tn_calc = tn.copy()
@@ -93,6 +101,12 @@ def tensor_network_ag_compress_projector(
         for st in site_tags:
             tn.contract_(st, optimize=optimize)
 
+    # XXX: do better than simply waiting til the end to equalize norms
+    if equalize_norms is True:
+        tn.equalize_norms_()
+    elif equalize_norms:
+        tn.equalize_norms_(value=equalize_norms)
+
     return tn
 
 
@@ -107,6 +121,7 @@ def tensor_network_ag_compress_local_early(
     canonize_after_distance=None,
     mode="auto",
     optimize="auto-hq",
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -148,6 +163,10 @@ def tensor_network_ag_compress_local_early(
         virtual tree gauging, or basic if `tree_gauge_distance` is 0.
     optimize : str, optional
         The contraction path optimizer to use.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     compress_opts
@@ -205,6 +224,11 @@ def tensor_network_ag_compress_local_early(
                 **compress_opts,
             )
 
+    if equalize_norms is True:
+        tnc.equalize_norms_()
+    elif equalize_norms:
+        tnc.equalize_norms_(value=equalize_norms)
+
     return tnc
 
 
@@ -219,6 +243,7 @@ def tensor_network_ag_compress_local_late(
     canonize_after_distance=None,
     mode="auto",
     optimize="auto-hq",
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -259,6 +284,10 @@ def tensor_network_ag_compress_local_late(
         virtual tree gauging, or basic if `tree_gauge_distance` is 0.
     optimize : str, optional
         The contraction path optimizer to use.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     compress_opts
@@ -288,6 +317,11 @@ def tensor_network_ag_compress_local_late(
         **compress_opts,
     )
 
+    if equalize_norms is True:
+        tnc.equalize_norms_()
+    elif equalize_norms:
+        tnc.equalize_norms_(value=equalize_norms)
+
     return tnc
 
 
@@ -298,6 +332,7 @@ def tensor_network_ag_compress_superorthogonal(
     site_tags=None,
     canonize=True,
     optimize="auto-hq",
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -323,6 +358,10 @@ def tensor_network_ag_compress_superorthogonal(
         Whether to locally gauge before each compression, defaults to True.
     optimize : str, optional
         The contraction path optimizer to use.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     compress_opts
@@ -355,6 +394,11 @@ def tensor_network_ag_compress_superorthogonal(
         **compress_opts,
     )
 
+    if equalize_norms is True:
+        tnc.equalize_norms_()
+    elif equalize_norms:
+        tnc.equalize_norms_(value=equalize_norms)
+
     return tnc
 
 
@@ -368,6 +412,7 @@ def tensor_network_ag_compress_l2bp(
     local_convergence=True,
     update="sequential",
     optimize="auto-hq",
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -398,6 +443,10 @@ def tensor_network_ag_compress_l2bp(
         'parallel'.
     optimize : str, optional
         The contraction path optimizer to use.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     compress_opts
@@ -426,6 +475,11 @@ def tensor_network_ag_compress_l2bp(
         **compress_opts,
     )
 
+    if equalize_norms is True:
+        tnc.equalize_norms_()
+    elif equalize_norms:
+        tnc.equalize_norms_(value=equalize_norms)
+
     return tnc
 
 
@@ -446,6 +500,7 @@ def tensor_network_ag_compress(
     site_tags=None,
     canonize=True,
     optimize="auto-hq",
+    equalize_norms=False,
     inplace=False,
     **kwargs,
 ):
@@ -485,6 +540,10 @@ def tensor_network_ag_compress(
         the method, before compressing.
     optimize : str, optional
         The contraction path optimizer to use.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     kwargs
@@ -497,6 +556,7 @@ def tensor_network_ag_compress(
         site_tags=site_tags,
         canonize=canonize,
         optimize=optimize,
+        equalize_norms=equalize_norms,
         inplace=inplace,
         **kwargs,
     )

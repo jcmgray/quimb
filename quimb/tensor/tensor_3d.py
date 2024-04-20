@@ -985,6 +985,75 @@ class TensorNetwork3D(TensorNetworkGen):
                 tag_a, tag_b, max_bond=max_bond, cutoff=cutoff, **compress_opts
             )
 
+    def _contract_boundary_core_via_2d(
+        self,
+        xrange,
+        yrange,
+        zrange,
+        from_which,
+        max_bond,
+        cutoff=1e-10,
+        method="local-early",
+        layer_tags=None,
+        **compress_opts,
+    ):
+        from quimb.tensor.tensor_2d_compress import tensor_network_2d_compress
+
+        r2d = Rotator3D(self, xrange, yrange, zrange, from_which)
+        site_tag = r2d.site_tag
+        istep = r2d.istep
+
+        def _do_compress(site_tag_tmps):
+            nonlocal self
+
+            # split off the boundary network
+            self, tn_boundary = self.partition(site_tag_tmps, inplace=True)
+
+            # compress it inplace
+            tensor_network_2d_compress(
+                tn_boundary,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                method=method,
+                site_tags=site_tag_tmps,
+                inplace=True,
+                **compress_opts,
+            )
+
+            # recombine with the main network
+            self |= tn_boundary
+
+        # maybe compress the initial row, which may be multiple layers
+        # and have effective bond dimension > max_bond already
+        site_tag_tmps = [
+            site_tag(r2d.sweep[0], j, k) for j, k in r2d.sweep_other
+        ]
+        if any(len(self.tag_map[st]) > 1 for st in site_tag_tmps):
+            _do_compress(site_tag_tmps)
+
+        site_tag_tmps = [f"__ST{j},{k}__" for j, k in r2d.sweep_other]
+
+        if layer_tags is None:
+            layer_tags = [None]
+
+        for i in r2d.sweep[:-1]:
+            for layer_tag in layer_tags:
+                for (j, k), st in zip(r2d.sweep_other, site_tag_tmps):
+                    # group outer single tensor with inner tensor(s)
+                    tag1 = site_tag(i, j, k)  # outer
+                    tag2 = site_tag(i + istep, j, k)  # inner
+                    if layer_tag is None:
+                        # tag and compress any inner tensors
+                        self.select_any((tag1, tag2)).add_tag(st)
+                    else:
+                        # only tag and compress one inner layer
+                        self.select_all((tag1,)).add_tag(st)
+                        self.select_all((tag2, layer_tag)).add_tag(st)
+
+                _do_compress(site_tag_tmps)
+
+        self.drop_tags(site_tag_tmps)
+
     def _contract_boundary_core(
         self,
         xrange,
@@ -1187,8 +1256,6 @@ class TensorNetwork3D(TensorNetworkGen):
         """Unified entrypoint for contracting any rectangular patch of tensors
         from any direction, with any boundary method.
         """
-        check_opt("mode", mode, ("peps", "projector"))
-
         tn = self if inplace else self.copy()
 
         # universal options
@@ -1201,15 +1268,22 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_opts["equalize_norms"] = equalize_norms
         contract_boundary_opts["compress_opts"] = compress_opts
 
-        if mode == "projector":
+        if mode == "peps":
+            return tn._contract_boundary_core(
+                canonize_opts=canonize_opts,
+                **contract_boundary_opts,
+            )
+
+        if mode == "l2bp3d":
+            return tn._contract_boundary_l2bp(**contract_boundary_opts)
+
+        if mode == "projector3d":
             return tn._contract_boundary_projector(
                 canonize_opts=canonize_opts, **contract_boundary_opts
             )
 
-        # mode == 'peps' options
-        return tn._contract_boundary_core(
-            canonize_opts=canonize_opts,
-            **contract_boundary_opts,
+        return tn._contract_boundary_core_via_2d(
+            method=mode, **contract_boundary_opts
         )
 
     contract_boundary_from_ = functools.partialmethod(

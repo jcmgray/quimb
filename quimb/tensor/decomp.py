@@ -23,9 +23,7 @@ from autoray import (
 )
 
 from ..core import njit
-from ..linalg import base_linalg
-from ..linalg import rand_linalg
-
+from ..linalg import base_linalg, rand_linalg
 
 _CUTOFF_MODE_MAP = {
     "abs": 1,

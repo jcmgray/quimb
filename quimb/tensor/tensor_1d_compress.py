@@ -188,6 +188,7 @@ def tensor_network_1d_compress_dm(
     optimize="auto-hq",
     sweep_reverse=False,
     canonize=True,
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -232,6 +233,10 @@ def tensor_network_1d_compress_dm(
         canonical form instead of right canonical.
     canonize : bool, optional
         Dummy argument to match the signature of other compression methods.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -376,6 +381,12 @@ def tensor_network_1d_compress_dm(
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(new, permute_arrays)
 
+    # XXX: do better than simply waiting til the end to equalize norms
+    if equalize_norms is True:
+        new.equalize_norms_()
+    elif equalize_norms:
+        new.equalize_norms_(value=equalize_norms)
+
     return new
 
 
@@ -390,6 +401,7 @@ def tensor_network_1d_compress_zipup(
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -436,6 +448,10 @@ def tensor_network_1d_compress_zipup(
     sweep_reverse : bool, optional
         Whether to sweep in the reverse direction, resulting in a left
         canonical form instead of right canonical.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -541,6 +557,12 @@ def tensor_network_1d_compress_zipup(
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(new, permute_arrays)
 
+    # XXX: do better than simply waiting til the end to equalize norms
+    if equalize_norms is True:
+        new.equalize_norms_()
+    elif equalize_norms:
+        new.equalize_norms_(value=equalize_norms)
+
     return new
 
 
@@ -557,6 +579,7 @@ def tensor_network_1d_compress_zipup_first(
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
+    equalize_norms=False,
     inplace=False,
     **compress_opts,
 ):
@@ -611,6 +634,10 @@ def tensor_network_1d_compress_zipup_first(
     sweep_reverse : bool, optional
         Whether to sweep in the reverse direction, resulting in a left
         canonical form instead of right canonical.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -650,6 +677,7 @@ def tensor_network_1d_compress_zipup_first(
         cutoff_mode=cutoff_mode,
         optimize=optimize,
         sweep_reverse=True,
+        equalize_norms=equalize_norms,
         inplace=inplace,
         **compress_opts,
     )
@@ -664,6 +692,7 @@ def tensor_network_1d_compress_zipup_first(
             max_bond=max_bond,
             cutoff=cutoff,
             cutoff_mode=cutoff_mode,
+            equalize_norms=equalize_norms,
             **compress_opts,
         )
 
@@ -673,6 +702,11 @@ def tensor_network_1d_compress_zipup_first(
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(tn, permute_arrays)
+
+    if equalize_norms is True:
+        tn.equalize_norms_()
+    elif equalize_norms:
+        tn.equalize_norms_(value=equalize_norms)
 
     return tn
 
@@ -946,6 +980,7 @@ def tensor_network_1d_compress_fit(
     optimize="auto-hq",
     canonize=True,
     sweep_reverse=False,
+    equalize_norms=False,
     inplace_fit=False,
     inplace=False,
     progbar=False,
@@ -1021,12 +1056,16 @@ def tensor_network_1d_compress_fit(
         string this specifies a custom order.
     optimize : str, optional
         The contraction path optimizer to use.
+    canonize : bool, optional
+        Dummy argument to match the signature of other compression methods.
     sweep_reverse : bool, optional
         Whether to sweep in the reverse direction, swapping whether the final
         tensor network is in right or left canonical form, which also depends
         on the last sweep direction.
-    canonize : bool, optional
-        Dummy argument to match the signature of other compression methods.
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace_fit : bool, optional
         Whether to perform the compression inplace on the initial guess tensor
         network, ``tn_fit``, if supplied.
@@ -1210,6 +1249,12 @@ def tensor_network_1d_compress_fit(
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(tn_fit, permute_arrays)
 
+    # XXX: do better than simply waiting til the end to equalize norms
+    if equalize_norms is True:
+        tn_fit.equalize_norms_()
+    elif equalize_norms:
+        tn_fit.equalize_norms_(value=equalize_norms)
+
     return tn_fit
 
 
@@ -1268,6 +1313,10 @@ def tensor_network_1d_compress(
         Whether to sweep in the reverse direction, resulting in a left
         canonical form instead of right canonical (for the fit method, this
         also depends on the last sweep direction).
+    equalize_norms : bool or float, optional
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is give, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
     kwargs
@@ -1289,6 +1338,7 @@ def tensor_network_1d_compress(
             permute_arrays=permute_arrays,
             optimize=optimize,
             sweep_reverse=sweep_reverse,
+            equalize_norms=equalize_norms,
             inplace=inplace,
             **compress_opts,
             **kwargs,
@@ -1310,6 +1360,7 @@ def tensor_network_1d_compress(
             site_tags=site_tags,
             canonize=canonize,
             optimize=optimize,
+            equalize_norms=equalize_norms,
             inplace=inplace,
             **compress_opts,
             **kwargs,
