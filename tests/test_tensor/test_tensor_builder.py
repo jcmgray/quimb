@@ -321,7 +321,7 @@ def test_tn2d_classical_ising_partition_function(cyclic):
         Lx,
         Ly,
         beta=0.44,
-        j=lambda cooa, coob: coupling[(cooa, coob)],
+        j=coupling,
         h=h,
         outputs=[(1, 2), (3, 4)],
         cyclic=cyclic,
@@ -331,7 +331,7 @@ def test_tn2d_classical_ising_partition_function(cyclic):
         Lx,
         Ly,
         beta=0.44,
-        j=lambda cooa, coob: coupling[(cooa, coob)],
+        j=coupling,
         h=h,
         cyclic=cyclic,
     )

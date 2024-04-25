@@ -2069,6 +2069,31 @@ def classical_ising_T_matrix(
     return array_contract(arrays, inputs, out)
 
 
+def parse_j_coupling_to_function(j):
+    """Parse the ``j`` argument to a function that can be called to get the
+    coupling strength between two nodes. The input can be a constant, dict or
+    function.
+    """
+    if callable(j):
+        return j
+
+    elif isinstance(j, dict):
+
+        def j_factory(node_a, node_b):
+            try:
+                return j[node_a, node_b]
+            except KeyError:
+                return j[node_b, node_a]
+
+        return j_factory
+    else:
+
+        def j_factory(node_a, node_b):
+            return j
+
+        return j_factory
+
+
 def HTN2D_classical_ising_partition_function(
     Lx,
     Ly,
@@ -2118,16 +2143,7 @@ def HTN2D_classical_ising_partition_function(
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
-    if callable(j):
-        j_factory = j
-    elif isinstance(j, dict):
-
-        def j_factory(node_a, node_b):
-            return j[node_a, node_b]
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
+    j_factory = parse_j_coupling_to_function(j)
 
     ts = []
     for ni, nj in itertools.product(range(Lx), range(Ly)):
@@ -2152,28 +2168,6 @@ def HTN2D_classical_ising_partition_function(
             ts.append(Tensor(data, inds=(ind_id.format(ni, nj),)))
 
     return TensorNetwork(ts)
-
-
-def parse_j_coupling_to_function(j):
-    """Parse the ``j`` argument to a function that can be called to get the
-    coupling strength between two nodes. The input can be a constant, dict or
-    function.
-    """
-    if callable(j):
-        return j
-
-    elif isinstance(j, dict):
-
-        def j_factory(node_a, node_b):
-            return j[node_a, node_b]
-
-        return j_factory
-    else:
-
-        def j_factory(node_a, node_b):
-            return j
-
-        return j_factory
 
 
 def HTN3D_classical_ising_partition_function(
@@ -2345,7 +2339,6 @@ def TN2D_classical_ising_partition_function(
             (ni < Lx - 1 or cyclic_x, ((ni, nj), ((ni + 1) % Lx, nj)), "u"),
             (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj), (ni, nj)), "d"),
         ]:
-            pair = tuple(sorted(pair))
             if inbounds:
                 js += (j_factory(*pair),)
                 directions += direction
@@ -2492,7 +2485,6 @@ def TN3D_classical_ising_partition_function(
             ),
             (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj, nk), (ni, nj, nk)), "d"),
         ]:
-            pair = tuple(sorted(pair))
             if inbounds:
                 js += (j_factory(*pair),)
                 directions += direction
