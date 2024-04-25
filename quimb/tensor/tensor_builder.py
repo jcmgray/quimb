@@ -2658,7 +2658,6 @@ def TN_classical_partition_function_from_edges(
     to_contract = collections.defaultdict(list)
     ts = []
     for node_a, node_b in gen_unique_edges(edges):
-
         # the variable indices (unless the node is
         # an output, these will be contracted)
         ix_a = ind_id.format(node_a)
@@ -3978,15 +3977,13 @@ def MPO_zeros(L, phys_dim=2, dtype="float64", cyclic=False, **mpo_opts):
     -------
     MatrixProductOperator
     """
-    cyc_dim = (1,) if cyclic else ()
 
-    def gen_arrays():
-        yield np.zeros((*cyc_dim, 1, phys_dim, phys_dim), dtype=dtype)
-        for _ in range(L - 2):
-            yield np.zeros((1, 1, phys_dim, phys_dim), dtype=dtype)
-        yield np.zeros((1, *cyc_dim, phys_dim, phys_dim), dtype=dtype)
+    def fill_fn(shape):
+        return np.zeros(shape, dtype=dtype)
 
-    return MatrixProductOperator(gen_arrays(), **mpo_opts)
+    return MatrixProductOperator.from_fill_fn(
+        fill_fn, L=L, bond_dim=1, phys_dim=phys_dim, cyclic=cyclic, **mpo_opts
+    )
 
 
 def MPO_zeros_like(mpo, **mpo_opts):
@@ -4089,25 +4086,31 @@ def MPO_rand(
     mpo_opts
         Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
     """
-    cyc_shp = (bond_dim,) if cyclic else ()
+    base_fill_fn = get_rand_fill_fn(
+        dtype=dtype, dist=dist, loc=loc, scale=scale
+    )
 
-    shapes = [
-        (*cyc_shp, bond_dim, phys_dim, phys_dim),
-        *((bond_dim, bond_dim, phys_dim, phys_dim),) * (L - 2),
-        (bond_dim, *cyc_shp, phys_dim, phys_dim),
-    ]
+    if not herm:
 
-    def gen_data(shape):
-        data = randn(shape, dtype=dtype, dist=dist, loc=loc, scale=scale)
-        if not herm:
-            return data
+        def fill_fn(shape):
+            return sensibly_scale(base_fill_fn(shape))
+    else:
 
-        trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
-        return data + data.transpose(*trans).conj()
+        def fill_fn(shape):
+            data = base_fill_fn(shape)
+            trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
+            data += data.transpose(*trans).conj()
+            return sensibly_scale(data)
 
-    arrays = map(sensibly_scale, map(gen_data, shapes))
-
-    rmpo = MatrixProductOperator(arrays, **mpo_opts)
+    rmpo = MatrixProductOperator.from_fill_fn(
+        fill_fn,
+        L=L,
+        bond_dim=bond_dim,
+        phys_dim=phys_dim,
+        cyclic=cyclic,
+        shape="lrud",
+        **mpo_opts,
+    )
 
     if normalize:
         rmpo /= (rmpo.H @ rmpo) ** 0.5

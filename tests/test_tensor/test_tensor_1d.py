@@ -82,7 +82,7 @@ class TestMatrixProductState:
     def test_from_dense(self):
         L = 8
         psi = qu.rand_ket(2**L)
-        mps = MatrixProductState.from_dense(psi, dims=[2] * L)
+        mps = MatrixProductState.from_dense(psi)
         assert mps.tags == oset(f"I{i}" for i in range(L))
         assert mps.site_inds == tuple(f"k{i}" for i in range(L))
         assert mps.L == L
@@ -955,6 +955,46 @@ class TestMatrixProductOperator:
         assert mpo[1].shape == (2, 3, 2, 3)
         Af = mpo.to_qarray()
         assert_allclose(A0, Af)
+
+    def test_from_dense(self):
+        A = qu.rand_uni(2**4)
+        mpo = MatrixProductOperator.from_dense(A)
+        assert mpo.L == 4
+        assert_allclose(A, mpo.to_dense())
+
+    def test_from_dense_sites(self):
+        dims = [2, 3, 4, 5]
+        A = qu.rand_uni(2 * 3 * 4 * 5)
+        sites = [3, 1, 0, 2]
+        mpo = MatrixProductOperator.from_dense(A, dims, sites=sites)
+        assert mpo.L == 4
+        perm = [sites.index(i) for i in range(4)]
+        assert_allclose(qu.permute(A, dims, perm), mpo.to_dense())
+
+    def test_fill_empty_sites_with_identities(self):
+        mps = MPS_rand_state(7, 3)
+        k = mps.to_dense()
+        A, B, C = (qu.rand_uni(2) for _ in range(3))
+        Ak = qu.ikron((A, B, C), [2] * 7, [5, 2, 3]) @ k
+
+        ABC = A & B & C
+        mpo = MatrixProductOperator.from_dense(ABC, sites=[5, 2, 3], L=7)
+        assert mpo.bond_size(2, 3) == 1
+        assert mpo.num_tensors == 3
+        assert mpo[3].bonds(mpo[5])
+        mpo.fill_empty_sites_with_identities_("minimal")
+        assert not mpo[3].bonds(mpo[5])
+        assert mpo.num_tensors == 4
+        assert_allclose(
+            mps.gate_with_op_lazy(mpo).to_dense(),
+            Ak,
+        )
+        mpo.fill_empty_sites_with_identities_("full")
+        assert mpo.num_tensors == 7
+        assert_allclose(
+            mps.gate_with_op_lazy(mpo).to_dense(),
+            Ak,
+        )
 
 
 # --------------------------------------------------------------------------- #

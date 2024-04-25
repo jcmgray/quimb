@@ -4,16 +4,23 @@ import collections
 import functools
 import itertools
 import operator
-from math import log2
+from math import log, log2
 from numbers import Integral
 
 import scipy.sparse.linalg as spla
-from autoray import conj, dag, do, get_dtype_name, reshape, transpose
+from autoray import conj, dag, do, get_dtype_name, reshape, size, transpose
 
 import quimb as qu
 
 from ..linalg.base_linalg import norm_trace_dense
-from ..utils import deprecated, ensure_dict, partition_all, print_multi_line
+from ..utils import (
+    check_opt,
+    deprecated,
+    ensure_dict,
+    pairwise,
+    partition_all,
+    print_multi_line,
+)
 from . import array_ops as ops
 from .tensor_arbgeom import (
     TensorNetworkGen,
@@ -28,6 +35,7 @@ from .tensor_core import (
     Tensor,
     TensorNetwork,
     bonds,
+    new_bond,
     oset,
     rand_uuid,
     tags_to_oset,
@@ -1501,7 +1509,13 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
     @classmethod
     def from_dense(
-        cls, psi, dims, site_ind_id="k{}", site_tag_id="I{}", **split_opts
+        cls,
+        psi,
+        dims=2,
+        tags=None,
+        site_ind_id="k{}",
+        site_tag_id="I{}",
+        **split_opts,
     ):
         """Create a ``MatrixProductState`` directly from a dense vector
 
@@ -1509,8 +1523,11 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         ----------
         psi : array_like
             The dense state to convert to MPS from.
-        dims : sequence of int
-            Physical subsystem dimensions of each site.
+        dims : int or sequence of int
+            Physical subsystem dimensions of each site. If a single int, all
+            sites have this same dimension, by default, 2.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
         site_ind_id : str, optional
             How to index the physical sites, see
             :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
@@ -1540,47 +1557,51 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         """
         set_default_compress_mode(split_opts)
         # ensure compression is canonical / optimal
-        split_opts.setdefault("absorb", "left")
+        split_opts.setdefault("absorb", "right")
 
-        L = len(dims)
-        inds = [site_ind_id.format(i) for i in range(L)]
+        # make sure array_like
+        psi = ops.asarray(psi)
 
-        def gen_tensors():
-            #           split
-            #       <--  : yield
-            #            : :
-            #     OOOOOOO--O-O-O
-            #     |||||||  | | |
-            #     .......
-            #    left_inds
-            tm = Tensor(
-                data=reshape(ops.asarray(psi), dims),
-                inds=inds,
-            )
-            for i in range(L - 1, 0, -1):
-                tm, tr = tm.split(
-                    left_inds=inds[:i],
-                    get="tensors",
-                    rtags=site_tag_id.format(i),
-                    **split_opts,
-                )
-                yield tr
-            tm.add_tag(site_tag_id.format(0))
-            yield tm
+        if isinstance(dims, Integral):
+            # assume all sites have the same dimension
+            L = round(log(size(psi), dims))
+            dims = (dims,) * L
+        else:
+            dims = tuple(dims)
+            L = len(dims)
 
-        # the reverse is purely asthetic so the tensors are stored in the
-        # TN dictionary in the same order as the sites
-        ts = tuple(gen_tensors())[::-1]
-
-        mps = TensorNetwork(ts)
-        # cast as correct TN class
-        return mps.view_as_(
-            cls,
+        # create a bare MPS TN object
+        mps = cls.new(
             L=L,
             cyclic=False,
             site_ind_id=site_ind_id,
             site_tag_id=site_tag_id,
         )
+
+        inds = [mps.site_ind(i) for i in range(L)]
+
+        tm = Tensor(data=reshape(psi, dims), inds=inds)
+        for i in range(L - 1):
+            # progressively split off one more physical index
+            tl, tm = tm.split(
+                left_inds=None,
+                right_inds=inds[i + 1 :],
+                ltags=mps.site_tag(i),
+                get="tensors",
+                **split_opts,
+            )
+            # add left tensor
+            mps |= tl
+
+        # add final right tensor
+        tm.add_tag(mps.site_tag(L - 1))
+        mps |= tm
+
+        # add global tags
+        if tags is not None:
+            mps.add_tag(tags)
+
+        return mps
 
     def add_MPS(self, other, inplace=False, **kwargs):
         """Add another MatrixProductState to this one."""
@@ -2889,6 +2910,186 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
             mpo |= Tensor(data, inds=inds, tags=tags)
 
         return mpo
+
+    @classmethod
+    def from_dense(
+        cls,
+        A,
+        dims=2,
+        sites=None,
+        L=None,
+        tags=None,
+        site_tag_id="I{}",
+        upper_ind_id="k{}",
+        lower_ind_id="b{}",
+        **split_opts,
+    ):
+        """Build an MPO from a raw dense matrix.
+
+        Parameters
+        ----------
+        A : array
+            The dense operator, it should be reshapeable to ``(*dims, *dims)``.
+        dims : int, sequence of int, optional
+            The physical subdimensions of the operator. If any integer, assume
+            all sites have the same dimension. If a sequence, the dimension of
+            each site. Default is 2.
+        sites : sequence of int, optional
+            The sites to place the operator on. If None, will place it on
+            first `len(dims)` sites.
+        L : int, optional
+            The total number of sites in the MPO, if the operator represents
+            only a subset.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
+        site_tag_id : str, optional
+            The string to use to label the site tags.
+        upper_ind_id : str, optional
+            The string to use to label the upper physical indices.
+        lower_ind_id : str, optional
+            The string to use to label the lower physical indices.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+
+        Returns
+        -------
+        MatrixProductOperator
+        """
+        set_default_compress_mode(split_opts)
+        # ensure compression is canonical / optimal
+        split_opts.setdefault("absorb", "right")
+
+        # make sure array_like
+        A = ops.asarray(A)
+
+        if isinstance(dims, Integral):
+            # assume all sites have the same dimension
+            ng = round(log(size(A), dims) / 2)
+            dims = (dims,) * ng
+        else:
+            dims = tuple(dims)
+            ng = len(dims)
+
+        if sites is None:
+            sorted_sites = sites = range(ng)
+        else:
+            sorted_sites = sorted(sites)
+
+        if L is None:
+            L = max(sites) + 1
+
+        # create a bare MPO TN object
+        mpo = cls.new(
+            L=L,
+            cyclic=False,
+            upper_ind_id=upper_ind_id,
+            lower_ind_id=lower_ind_id,
+            site_tag_id=site_tag_id,
+        )
+
+        # initial inds and tensor contains desired site order ...
+        uix = [mpo.upper_ind(i) for i in sites]
+        lix = [mpo.lower_ind(i) for i in sites]
+        tm = Tensor(data=reshape(A, (*dims, *dims)), inds=uix + lix)
+
+        # ... but want to create MPO in sorted site order
+        uix = [mpo.upper_ind(i) for i in sorted_sites]
+        lix = [mpo.lower_ind(i) for i in sorted_sites]
+
+        for i, site in enumerate(sorted_sites[:-1]):
+            # progressively split off one more pair of physical indices
+            tl, tm = tm.split(
+                left_inds=None,
+                right_inds=uix[i + 1 :] + lix[i + 1 :],
+                ltags=mpo.site_tag(site),
+                get="tensors",
+                **split_opts,
+            )
+            # add left tensor
+            mpo |= tl
+
+        # add final right tensor
+        tm.add_tag(mpo.site_tag(sorted_sites[-1]))
+        mpo |= tm
+
+        # add global tags
+        if tags is not None:
+            mpo.add_tag(tags)
+
+        return mpo
+
+    def fill_empty_sites_with_identities(
+        self, mode="full", phys_dim=None, inplace=False
+    ):
+        """Fill any empty sites of this MPO with identity tensors, adding
+        size 1 bonds or draping existing bonds where necessary such that the
+        resulting tensor has nearest neighbor bonds only.
+
+        Parameters
+        ----------
+        mode : {'full', 'minimal'}, optional
+            Whether to fill in all sites, including at either end, or simply
+            the minimal range covering the min to max current sites present.
+        phys_dim : int, optional
+            The physical dimension of the identity tensors to add. If not
+            specified, will use the upper physical dimension of the first
+            present site.
+        inplace : bool, optional
+            Whether to perform the operation inplace.
+
+        Returns
+        -------
+        MatrixProductOperator
+            The modified MPO.
+        """
+        check_opt("mode", mode, ("full", "minimal"))
+
+        mpo = self if inplace else self.copy()
+
+        sites_present = tuple(mpo.gen_sites_present())
+        sites_present_set = set(sites_present)
+        sitei = sites_present[0]
+        sitef = sites_present[-1]
+
+        t0 = mpo[sitei]
+
+        if phys_dim is None:
+            d = mpo.phys_dim(sitei)
+
+        if mode == "full":
+            site_range = range(mpo.L)
+        else:  # mode == "minimal"
+            site_range = range(sitei, sitef + 1)
+
+        for site in site_range:
+            if site not in sites_present_set:
+                mpo |= Tensor(
+                    data=do("eye", d, dtype=t0.dtype, like=t0.data),
+                    inds=(mpo.upper_ind(site), mpo.lower_ind(site)),
+                    tags=mpo.site_tag(site),
+                )
+
+        for si, sj in pairwise(sites_present):
+            if bonds(mpo[si], mpo[sj]):
+                # need to drape existing bonds
+                for i in range(si, sj - 1):
+                    mpo.drape_bond_between_(i, sj, i + 1)
+            else:
+                # just add bond dim 1
+                for i in range(si, sj):
+                    new_bond(mpo[i], mpo[i + 1])
+
+        if mode == "full":
+            for i in range(0, sitei):
+                new_bond(mpo[i], mpo[i + 1])
+            for i in range(sitef, mpo.L - 1):
+                new_bond(mpo[i], mpo[i + 1])
+
+        return mpo
+
+    fill_empty_sites_with_identities_ = functools.partialmethod(
+        fill_empty_sites_with_identities, inplace=True
+    )
 
     def add_MPO(self, other, inplace=False, **kwargs):
         return tensor_network_ag_sum(self, other, inplace=inplace, **kwargs)

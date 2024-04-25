@@ -3,6 +3,23 @@
 Release notes for `quimb`.
 
 
+(whats-new-1-8-1)=
+## v1.8.1 (unreleased)
+
+**Enhancements:**
+
+- add [`MatrixProductOperator.from_dense`](quimb.tensor.tensor_1d.MatrixProductOperator.from_dense) for constructing MPOs from dense matrices, including an only subset of sites
+- add [`MatrixProductOperator.fill_empty_sites_with_identities`](quimb.tensor.tensor_1d.MatrixProductOperator.fill_empty_sites_with_identities) for 'completing' an MPO which only has tensors on a subset of sites with identities
+- add [`TensorNetwork.drape_bond_between`](quimb.tensor.tensor_core.TensorNetwork.drape_bond_between) for 'draping' an existing bond between two tensors through a third
+- add [`Tensor.new_ind_pair_with_identity`](quimb.tensor.tensor_core.Tensor.new_ind_pair_with_identity)
+- TN2D, TN3D and arbitrary geom classical partition function builders now all support `outputs=` kwarg specifying non-marginalized variables
+- add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.experimental.belief_propagation.d1bp.D1BP)
+
+**Bug fixes:**
+
+- [`Circuit.apply_gate_raw`](quimb.tensor.circuit.Circuit.apply_gate_raw): fix kwarg bug ({pull}`226`)
+
+
 (whats-new-1-8-0)=
 ## v1.8.0 (2024-04-10)
 

@@ -1615,6 +1615,20 @@ class TestTensorNetwork:
         assert ta.inds == ("a", "b", "l")
         assert tb.inds == ("r", "d", "e")
 
+    def test_drape_bond_between(self):
+        tx = qtn.rand_tensor([2, 3, 4], ['a', 'b', 'c'], tags="X")
+        ty = qtn.rand_tensor([3, 4, 6], ['b', 'd', 'e'], tags="Y")
+        tz = qtn.rand_tensor([5], ['f'], tags="Z")
+        tn = (tx | ty | tz)
+        assert tn.num_indices == 6
+        assert len(tn.subgraphs()) == 2
+        te = tn.contract()
+        tn.drape_bond_between_("X", "Y", "Z")
+        assert tn.num_indices == 7
+        assert len(tn.subgraphs()) == 1
+        t = tn.contract()
+        assert t.distance_normalized(te) == pytest.approx(0.0)
+
     def test_draw(self):
         import matplotlib
         from matplotlib import pyplot as plt

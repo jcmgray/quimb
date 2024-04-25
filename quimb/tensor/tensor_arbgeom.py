@@ -177,14 +177,16 @@ def tensor_network_apply_op_vec(
             f"Invalid `which_A`: {which_A}, should be 'lower' or 'upper'."
         )
 
-    x.reindex_sites_(inner_ind_id)
+    # only want to reindex on sites that being acted on
+    sites_present_in_A = tuple(A.gen_sites_present())
+    x.reindex_sites_(inner_ind_id, where=sites_present_in_A)
 
     # combine the tensor networks
     x |= A
 
     if contract:
         # optionally contract all tensor at each site
-        for site in x.gen_sites_present():
+        for site in sites_present_in_A:
             x ^= site
 
         if fuse_multibonds:

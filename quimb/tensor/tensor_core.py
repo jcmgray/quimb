@@ -2173,6 +2173,47 @@ class Tensor:
         new_inds.insert(axis, name)
         self.modify(data=new_data, inds=new_inds)
 
+    def new_ind_pair_with_identity(
+        self, new_left_ind, new_right_ind, d, inplace=False,
+    ):
+        """Expand this tensor with two new indices of size ``d``, by taking an
+        (outer) tensor product with the identity operator. The two new indices
+        are added as axes at the start of the tensor.
+
+        Parameters
+        ----------
+        new_left_ind : str
+            Name of the new left index.
+        new_right_ind : str
+            Name of the new right index.
+        d : int
+            Size of the new indices.
+        inplace : bool, optional
+            Whether to perform the expansion inplace.
+
+        Returns
+        -------
+        Tensor
+        """
+        t = self if inplace else self.copy()
+
+        # tensor product identity in
+        x_id = do("eye", d, dtype=t.dtype, like=t.data)
+        output = tuple(range(t.ndim + 2))
+        new_data = array_contract(
+            arrays=(x_id, t.data),
+            inputs=(output[:2], output[2:]),
+            output=output
+        )
+        # update indices
+        new_inds = (new_left_ind, new_right_ind, *t.inds)
+        t.modify(data=new_data, inds=new_inds)
+        return t
+
+    new_ind_pair_with_identity_ = functools.partialmethod(
+        new_ind_pair_with_identity, inplace=True
+    )
+
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices)."""
         t = self if inplace else self.copy()
@@ -8150,6 +8191,80 @@ class TensorNetwork(object):
         tl.reindex_({bond: new_left_ind})
         tr.reindex_({bond: new_right_ind})
         return new_left_ind, new_right_ind
+
+    def drape_bond_between(
+        self,
+        tagsa,
+        tagsb,
+        tags_target,
+        left_ind=None,
+        right_ind=None,
+        inplace=False,
+    ):
+        r"""Take the bond(s) connecting the tensors tagged at ``tagsa`` and
+        ``tagsb``, and 'drape' it through the tensor tagged at ``tags_target``,
+        effectively adding an identity tensor between the two and contracting
+        it with the third::
+
+             ┌─┐    ┌─┐      ┌─┐     ┌─┐
+            ─┤A├─Id─┤B├─    ─┤A├─┐ ┌─┤B├─
+             └─┘    └─┘      └─┘ │ │ └─┘
+                         left_ind│ │right_ind
+                 ┌─┐     -->     ├─┤
+                ─┤C├─           ─┤D├─
+                 └┬┘             └┬┘     where D = C ⊗ Id
+                  │               │
+
+        This increases the size of the target tensor by ``d**2``, and
+        disconnects the tensors at ``tagsa`` and ``tagsb``.
+
+        Parameters
+        ----------
+        tagsa : str or sequence of str
+            The tag(s) identifying the first tensor.
+        tagsb : str or sequence of str
+            The tag(s) identifying the second tensor.
+        tags_target : str or sequence of str
+            The tag(s) identifying the target tensor.
+        left_ind : str, optional
+            The new index to give to the left tensor.
+        right_ind : str, optional
+            The new index to give to the right tensor.
+        inplace : bool, optional
+            Whether to perform the draping inplace.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        # TODO: tids version?
+        tn = self if inplace else self.copy()
+
+        ta = tn[tagsa]
+        tb = tn[tagsb]
+        _, bix, _ = tensor_make_single_bond(ta, tb)
+        d = ta.ind_size(bix)
+
+        if left_ind is None:
+            left_ind = rand_uuid()
+        if left_ind != bix:
+            ta.reindex_({bix: left_ind})
+
+        if right_ind is None:
+            right_ind = rand_uuid()
+        elif right_ind == left_ind:
+            raise ValueError("right_ind cannot be the same as left_ind")
+        if right_ind != bix:
+            tb.reindex_({bix: right_ind})
+
+        t_target = tn[tags_target]
+        t_target.new_ind_pair_with_identity_(left_ind, right_ind, d)
+
+        return tn
+
+    drape_bond_between_ = functools.partialmethod(
+        drape_bond_between, inplace=True
+    )
 
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor
