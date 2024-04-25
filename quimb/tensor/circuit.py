@@ -976,6 +976,9 @@ def build_controlled_gate_htn(
     tags_all=None,
     bond_ind=None,
 ):
+    """Build a low rank hyper tensor network (CP-decomp like) representation of
+    a multi controlled gate.
+    """
     ngate = len(gate.qubits)
     gate_shape = (2,) * (2 * ngate)
     array = gate.array.reshape(gate_shape)
@@ -3614,6 +3617,17 @@ class CircuitMPS(Circuit):
 
     def _init_state(self, N, dtype="complex128"):
         return MPS_computational_state("0" * N, dtype=dtype)
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        if gate.controls:
+            raise ValueError("`CircuitMPS` does not yet support `controls`.")
+
+        if len(gate.qubits) > 2:
+            raise ValueError(
+                "`CircuitMPS` does not yet support 3+ qubit gates."
+            )
+
+        super()._apply_gate(gate, tags=tags, **gate_opts)
 
     @property
     def psi(self):
