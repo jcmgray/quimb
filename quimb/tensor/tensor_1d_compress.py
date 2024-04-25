@@ -16,15 +16,110 @@ import collections
 import itertools
 import warnings
 
+from autoray import do
+
 from .tensor_arbgeom import tensor_network_apply_op_vec
 from .tensor_arbgeom_compress import tensor_network_ag_compress
 from .tensor_builder import TN_matching
 from .tensor_core import (
+    Tensor,
     TensorNetwork,
     ensure_dict,
     rand_uuid,
     tensor_contract,
 )
+
+
+def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
+    """Check that ``tn`` is 1D-like with OBC, i.e. 1) that each tensor has
+    exactly one of the given ``site_tags``. If not, raise a ValueError. 2) That
+    there are no hyper indices. And 3) that there are only bonds within sites
+    or between nearest neighbor sites. This issue can be optionally
+    automatically fixed by inserting a string of identity tensors.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to check.
+    site_tags : sequence of str, optional
+        The tags to use to group and order the tensors from ``tn``. If not
+        given, uses ``tn.site_tags``.
+    fix_bonds : bool, optional
+        Whether to fix the bond structure by inserting identity tensors.
+    inplace : bool, optional
+        Whether to perform the fix inplace or not.
+
+    Raises
+    ------
+    ValueError
+        If the tensor network is not 1D-like.
+    """
+    tn = tn if inplace else tn.copy()
+
+    if site_tags is None:
+        site_tags = tn.site_tags
+
+    tag_to_site = {tag: i for i, tag in enumerate(site_tags)}
+    tid_to_site = {}
+
+    def _check_tensor_site(tid, t):
+        if tid in tid_to_site:
+            return tid_to_site[tid]
+
+        sites = []
+        for tag in t.tags:
+            site = tag_to_site.get(tag, None)
+            if site is not None:
+                sites.append(site)
+        if len(sites) != 1:
+            raise ValueError(
+                f"{t} does not have one site tag, it has {sites}."
+            )
+
+        return sites[0]
+
+    for ix, tids in list(tn.ind_map.items()):
+        if len(tids) == 1:
+            # assume outer
+            continue
+        elif len(tids) != 2:
+            raise ValueError(
+                f"TN has a hyper index, {ix}, connecting more than 2 tensors."
+            )
+
+        tida, tidb = tids
+        ta = tn.tensor_map[tida]
+        tb = tn.tensor_map[tidb]
+
+        # get which single site each tensor belongs too
+        sa = _check_tensor_site(tida, ta)
+        sb = _check_tensor_site(tidb, tb)
+        if sa > sb:
+            sa, sb = sb, sa
+
+        if sb - sa > 1:
+            if not fix_bonds:
+                raise ValueError(
+                    f"Tensor {ta} and {tb} are not nearest "
+                    "neighbors, and `fix_bonds=False`."
+                )
+
+            # not 1d like: bond is not nearest neighbor
+            # but can insert identites along string to fix
+            d = ta.ind_size(ix)
+            ixl = ix
+            for i in range(sa + 1, sb):
+                ixr = rand_uuid()
+                tn |= Tensor(
+                    data=do("eye", d, like=ta.data, dtype=ta.dtype),
+                    inds=[ixl, ixr],
+                    tags=site_tags[i],
+                )
+                ixl = ixr
+
+            tb.reindex_({ix: ixl})
+
+    return tn
 
 
 def possibly_permute_(tn, permute_arrays):
@@ -111,12 +206,12 @@ def tensor_network_1d_compress_direct(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
-    new = tn if inplace else tn.copy()
-
     if site_tags is None:
-        site_tags = new.site_tags
+        site_tags = tn.site_tags
     if sweep_reverse:
         site_tags = tuple(reversed(site_tags))
+
+    new = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
 
     # contract the first site group
     new.contract_tags_(site_tags[0], optimize=optimize)
@@ -256,8 +351,9 @@ def tensor_network_1d_compress_dm(
         site_tags = tn.site_tags
     if sweep_reverse:
         site_tags = tuple(reversed(site_tags))
-
     N = len(site_tags)
+
+    ket = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
 
     # partition outer indices, and create conjugate bra indices
     ket_site_inds = []
@@ -266,7 +362,7 @@ def tensor_network_1d_compress_dm(
     for tag in site_tags:
         k_inds_i = []
         b_inds_i = []
-        for kix in tn.select(tag)._outer_inds & tn._outer_inds:
+        for kix in ket.select(tag)._outer_inds & ket._outer_inds:
             bix = rand_uuid()
             k_inds_i.append(kix)
             b_inds_i.append(bix)
@@ -274,7 +370,6 @@ def tensor_network_1d_compress_dm(
         ket_site_inds.append(tuple(k_inds_i))
         bra_site_inds.append(tuple(b_inds_i))
 
-    ket = tn.copy()
     bra = ket.H
     # doing this means forming the norm doesn't do its own mangling
     bra.mangle_inner_()
@@ -470,6 +565,8 @@ def tensor_network_1d_compress_zipup(
         site_tags = tuple(reversed(site_tags))
     N = len(site_tags)
 
+    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+
     # calculate the local site (outer) indices
     site_inds = [
         tuple(tn.select(tag)._outer_inds & tn._outer_inds) for tag in site_tags
@@ -484,7 +581,7 @@ def tensor_network_1d_compress_zipup(
         #     │ │ │ │ │ │ │ │ │ │
         #     ▶─▶─▶─▶─▶─▶─▶─▶─▶─○  MPS
         #
-        tn = tn.canonize_around(site_tags[-1], inplace=inplace)
+        tn = tn.canonize_around_(site_tags[-1])
 
     # zip along the bonds
     ts = []
@@ -500,9 +597,13 @@ def tensor_network_1d_compress_zipup(
         #        .... contract
         if Us is None:
             # first site
-            C = tn.select(site_tags[i]).contract(optimize=optimize)
+            C = tensor_contract(
+                *tn.select_tensors(site_tags[i]), optimize=optimize
+            )
         else:
-            C = (Us | tn.select(site_tags[i])).contract(optimize=optimize)
+            C = tensor_contract(
+                Us, *tn.select_tensors(site_tags[i]), optimize=optimize
+            )
         #         i
         #      │  │    │ │
         #     ─▶──□━━━━◀━◀━
@@ -536,7 +637,9 @@ def tensor_network_1d_compress_zipup(
         #     ─▶  : :
         #       U*s VH
 
-    U0 = (Us | tn.select(site_tags[0])).contract(optimize=optimize)
+    U0 = tensor_contract(
+        Us, *tn.select_tensors(site_tags[0]), optimize=optimize
+    )
 
     if normalize:
         # in right canonical form already
@@ -1103,6 +1206,10 @@ def tensor_network_1d_compress_fit(
         site_tags = next(
             tn.site_tags for tn in tns if hasattr(tn, "site_tags")
         )
+
+    tns = tuple(
+        enforce_1d_like(tn, site_tags=site_tags, inplace=inplace) for tn in tns
+    )
 
     # choose the block size of the sweeping function
     if bsz == "auto":
