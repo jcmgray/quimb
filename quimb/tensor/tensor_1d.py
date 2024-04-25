@@ -1725,7 +1725,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             mps.swap_site_to_(i + 1, j, cur_orthog=(i, i + 1))
             return mps
 
-        mps.canonize((i, j), cur_orthog)
+        mps.canonize((i, j), cur_orthog=cur_orthog)
 
         # get site tensors and indices
         ix_i, ix_j = map(mps.site_ind, (i, j))

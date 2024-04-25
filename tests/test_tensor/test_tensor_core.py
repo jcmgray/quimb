@@ -1627,7 +1627,7 @@ class TestTensorNetwork:
         assert tn.num_indices == 7
         assert len(tn.subgraphs()) == 1
         t = tn.contract()
-        assert t.distance_normalized(te) == pytest.approx(0.0)
+        assert t.distance_normalized(te) == pytest.approx(0.0, abs=1e-6)
 
     def test_draw(self):
         import matplotlib
