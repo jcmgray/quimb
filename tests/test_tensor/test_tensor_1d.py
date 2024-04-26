@@ -8,27 +8,6 @@ import quimb.tensor as qtn
 dtypes = ["float32", "float64", "complex64", "complex128"]
 
 
-class TestTensor1DCompress:
-    @pytest.mark.parametrize(
-        "method", ["direct", "dm", "fit", "zipup", "zipup-first"]
-    )
-    @pytest.mark.parametrize("dtype", dtypes)
-    def test_mps_partial_mpo_apply(self, method, dtype):
-        mps = qtn.MPS_rand_state(10, 7, dtype=dtype)
-        A = qu.rand_uni(2**3, dtype=dtype)
-        where = [8, 4, 5]
-        mpo = qtn.MatrixProductOperator.from_dense(A, sites=where)
-        new = mps.gate_with_op_lazy(mpo)
-        assert (
-            qtn.tensor_network_1d_compress(new, method=method, inplace=True)
-            is new
-        )
-        assert new.num_tensors == 10
-        assert new.distance_normalized(mps.gate(A, where)) == pytest.approx(
-            0.0, abs=1e-3 if dtype in ("float32", "complex64") else 1e-6
-        )
-
-
 class TestMatrixProductState:
     def test_matrix_product_state(self):
         tensors = (
@@ -766,6 +745,17 @@ class TestMatrixProductState:
         kf = mps.to_qarray()
         assert qu.fidelity(k0, kf) == pytest.approx(1.0)
 
+    @pytest.mark.parametrize("where", [(7, 2, 4), (0, 1), (6, 7), (0, 3, 7)])
+    @pytest.mark.parametrize("phys_dim", [2, 3])
+    def test_gate_non_local(self, where, phys_dim):
+        psi = qtn.MPS_rand_state(8, 3, phys_dim=phys_dim, dtype="complex128")
+        G = qu.rand_uni(phys_dim ** len(where))
+        Gpsi = psi.gate_nonlocal(G, where=where)
+        assert Gpsi.H @ Gpsi == pytest.approx(1.0)
+        assert Gpsi.distance_normalized(
+            psi.gate(G, where, contract=False)
+        ) == pytest.approx(0.0, abs=1e-6)
+
 
 class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", [False, True])
@@ -1101,3 +1091,50 @@ class TestDense1D:
         assert t_psi.shape == (2,) * 7
         assert t_psi.dtype == "complex64"
         assert (t_psi.H @ t_psi) == pytest.approx(1.0)
+
+
+class TestTensor1DCompress:
+    @pytest.mark.parametrize(
+        "method", ["direct", "dm", "fit", "zipup", "zipup-first"]
+    )
+    @pytest.mark.parametrize("dtype", dtypes)
+    def test_mps_partial_mpo_apply(self, method, dtype):
+        mps = qtn.MPS_rand_state(10, 7, dtype=dtype)
+        A = qu.rand_uni(2**3, dtype=dtype)
+        where = [8, 4, 5]
+        mpo = qtn.MatrixProductOperator.from_dense(A, sites=where)
+        new = mps.gate_with_op_lazy(mpo)
+        assert (
+            qtn.tensor_network_1d_compress(new, method=method, inplace=True)
+            is new
+        )
+        assert new.num_tensors == 10
+        assert new.distance_normalized(mps.gate(A, where)) == pytest.approx(
+            0.0, abs=1e-3 if dtype in ("float32", "complex64") else 1e-6
+        )
+
+    @pytest.mark.parametrize(
+        "method", ["direct", "dm", "fit", "zipup", "zipup-first"]
+    )
+    @pytest.mark.parametrize("sweep_reverse", [False, True])
+    def test_mpo_compress_opts(self, method, sweep_reverse):
+        L = 6
+        A = qtn.MPO_rand(L, 2, phys_dim=3)
+        B = qtn.MPO_rand(L, 3, phys_dim=3)
+        AB = A.gate_upper_with_op_lazy(B)
+        assert AB.num_tensors == 2 * L
+        ABc = qtn.tensor_network_1d_compress(
+            AB,
+            method=method,
+            max_bond=5,
+            cutoff=1e-6,
+            sweep_reverse=sweep_reverse,
+            inplace=False,
+        )
+        assert ABc.num_tensors == L
+        assert ABc.num_indices == 2 * L + L - 1
+        assert ABc.max_bond() == 5
+        if sweep_reverse:
+            assert ABc.calc_current_orthog_center() == (L - 1, L - 1)
+        else:
+            assert ABc.calc_current_orthog_center() == (0, 0)

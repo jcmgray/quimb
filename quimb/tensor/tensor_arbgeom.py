@@ -853,7 +853,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
-    def gate_with_op_lazy(self, A, transpose=False, inplace=False):
+    def gate_with_op_lazy(self, A, transpose=False, inplace=False, **kwargs):
         r"""Act lazily with the operator tensor network ``A``, which should
         have matching structure, on this vector/state tensor network, like
         ``A @ x``. The returned tensor network will have the same structure as
@@ -894,6 +894,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             which_A="upper" if transpose else "lower",
             contract=False,
             inplace=inplace,
+            **kwargs
         )
 
     gate_with_op_lazy_ = functools.partialmethod(

@@ -61,11 +61,6 @@ from .tensor_1d import (
 from .tensor_1d_compress import (
     enforce_1d_like,
     tensor_network_1d_compress,
-    tensor_network_1d_compress_direct,
-    tensor_network_1d_compress_dm,
-    tensor_network_1d_compress_fit,
-    tensor_network_1d_compress_zipup,
-    tensor_network_1d_compress_zipup_first,
 )
 from .tensor_1d_tebd import (
     NNI,
@@ -347,11 +342,6 @@ __all__ = (
     "tensor_direct_product",
     "tensor_fuse_squeeze",
     "tensor_linop_backend",
-    "tensor_network_1d_compress_direct",
-    "tensor_network_1d_compress_dm",
-    "tensor_network_1d_compress_fit",
-    "tensor_network_1d_compress_zipup_first",
-    "tensor_network_1d_compress_zipup",
     "tensor_network_1d_compress",
     "tensor_network_align",
     "tensor_network_apply_op_op",

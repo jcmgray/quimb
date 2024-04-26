@@ -106,12 +106,12 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
 
             # not 1d like: bond is not nearest neighbor
             # but can insert identites along string to fix
-            d = ta.ind_size(ix)
+            data = do("eye", ta.ind_size(ix), like=ta.data, dtype=ta.dtype)
             ixl = ix
             for i in range(sa + 1, sb):
                 ixr = rand_uuid()
                 tn |= Tensor(
-                    data=do("eye", d, like=ta.data, dtype=ta.dtype),
+                    data=data,
                     inds=[ixl, ixr],
                     tags=site_tags[i],
                 )
@@ -1435,8 +1435,10 @@ def tensor_network_1d_compress(
     """
     compress_opts = compress_opts or {}
 
-    try:
-        return _TN1D_COMPRESS_METHODS[method](
+    f_tn1d = _TN1D_COMPRESS_METHODS.get(method, None)
+    if f_tn1d is not None:
+        # 1D specific compression methods
+        return f_tn1d(
             tn,
             max_bond=max_bond,
             cutoff=cutoff,
@@ -1450,33 +1452,31 @@ def tensor_network_1d_compress(
             **compress_opts,
             **kwargs,
         )
-    except KeyError:
-        # try arbitrary geometry methods
 
-        if sweep_reverse:
-            warnings.warn(
-                "sweep_reverse has no effect for "
-                "arbitrary geometry (AG) methods."
-            )
-
-        tnc = tensor_network_ag_compress(
-            tn,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            method=method,
-            site_tags=site_tags,
-            canonize=canonize,
-            optimize=optimize,
-            equalize_norms=equalize_norms,
-            inplace=inplace,
-            **compress_opts,
-            **kwargs,
+    # generic tensor network compression methods
+    if sweep_reverse:
+        warnings.warn(
+            "sweep_reverse has no effect for arbitrary geometry (AG) methods."
         )
 
-        if permute_arrays:
-            possibly_permute_(tnc, permute_arrays)
+    tnc = tensor_network_ag_compress(
+        tn,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        method=method,
+        site_tags=site_tags,
+        canonize=canonize,
+        optimize=optimize,
+        equalize_norms=equalize_norms,
+        inplace=inplace,
+        **compress_opts,
+        **kwargs,
+    )
 
-        return tnc
+    if permute_arrays:
+        possibly_permute_(tnc, permute_arrays)
+
+    return tnc
 
 
 # --------------- MPO-MPS gating using 1D compression methods --------------- #

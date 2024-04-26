@@ -700,6 +700,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         tl, tr = self[i], self[i + 1]
         tensor_canonize_bond(tl, tr)
         if bra is not None:
+            # TODO: handle left inds
             bra[i].modify(data=conj(tl.data))
             bra[i + 1].modify(data=conj(tr.data))
 
@@ -721,6 +722,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         tl, tr = self[i - 1], self[i]
         tensor_canonize_bond(tr, tl)
         if bra is not None:
+            # TODO: handle left inds
             bra[i].modify(data=conj(tr.data))
             bra[i - 1].modify(data=conj(tl.data))
 
@@ -962,9 +964,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         tensor_compress_bond(tl, tr, **compress_opts)
 
         if bra is not None:
+            # TODO: handle left inds
             bra[i].modify(data=conj(tl.data))
             bra[i + 1].modify(data=conj(tr.data))
-
 
     def right_compress_site(self, i, bra=None, **compress_opts):
         """Right compress this 1D TN's ith site, such that the site is then
@@ -987,6 +989,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         tensor_compress_bond(tl, tr, **compress_opts)
 
         if bra is not None:
+            # TODO: handle left inds
             bra[i].modify(data=conj(tr.data))
             bra[i - 1].modify(data=conj(tl.data))
 
@@ -1080,9 +1083,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
 
         else:
             raise ValueError(
-                f"Form specifier {form} not understood, should be"
-                " either 'left', 'right', 'flat' or an int "
-                "specifiying a new orthog center."
+                f"Form specifier {form} not understood, should be either "
+                "'left', 'right', 'flat' or an int specifiying a new orthog "
+                "center."
             )
 
     def compress_site(
@@ -1269,12 +1272,11 @@ class TensorNetwork1DFlat(TensorNetwork1D):
 
         Returns
         -------
-        int or (int, int)
-            The site, or min/max, around which this MPS is orthogonal.
+        (int, int)
+            The min/max of sites around which the TN is currently orthogonal.
         """
         lo, ro = self.count_canonized()
-        i, j = lo, self.L - ro - 1
-        return i if i == j else i, j
+        return lo, self.L - ro - 1
 
     def as_cyclic(self, inplace=False):
         """Convert this flat, 1D, TN into cyclic form by adding a dummy bond
@@ -1854,6 +1856,226 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         gate_with_auto_swap,
         inplace=True,
     )
+
+    def gate_with_submpo(
+        self,
+        submpo,
+        where=None,
+        cur_orthog="calc",
+        method="direct",
+        transpose=False,
+        inplace=False,
+        inplace_mpo=False,
+        **compress_opts,
+    ):
+        """Apply an MPO, which only acts on a subset of sites, to this MPS,
+        compressing the MPS with the MPO only on the minimal set of sites
+        covering `where`, keeping the MPS form.
+
+                │   │ │
+                A───A─A
+                │   │ │         ->    │ │ │ │ │ │ │ │
+                                      >─>─O━O━O━O─<─<
+            │ │ │ │ │ │ │ │
+            o─o─o─o─o─o─o─o
+
+        Parameters
+        ----------
+        submpo : MatrixProductOperator
+            The MPO to apply.
+        where : sequence of int, optional
+            The range of sites the MPO acts on, will be inferred from the
+            support of the MPO if not given.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit'}, optional
+            The compression method to use.
+        transpose : bool, optional
+            Whether to transpose the MPO before applying it. By default the
+            lower inds of the MPO are contracted with the MPS, if transposed
+            the upper inds are contracted.
+        inplace : bool, optional
+            Whether to perform the application and compression inplace.
+        compress_opts
+            Supplied to
+            :func:`~quimb.tensor.tensor_1d_compress.tensor_network_1d_compress`.
+
+        Returns
+        -------
+        MatrixProductState
+        """
+        from .tensor_1d_compress import tensor_network_1d_compress
+
+        psi = self if inplace else self.copy()
+
+        # get the span of sites the sub-MPO acts on
+        if where is None:
+            where = tuple(submpo.gen_sites_present())
+        si, sf = min(where), max(where)
+
+        # make the psi canonical around the sub-MPO region
+        psi.canonize((si, sf), cur_orthog=cur_orthog)
+
+        # lazily combine the sub-MPO with the MPS
+        psi.gate_with_op_lazy_(
+            submpo,
+            transpose=transpose,
+            inplace_op=inplace_mpo,
+        )
+
+        # split off the sub MPS-MPO TN section
+        sub_site_tags = [psi.site_tag(s) for s in range(si, sf + 1)]
+        _, subpsi = psi.partition(sub_site_tags, which="any", inplace=True)
+
+        # compress it!
+        tensor_network_1d_compress(
+            subpsi,
+            site_tags=sub_site_tags,
+            method=method,
+            # the sub TN can't be automatically permuted when missing sites
+            permute_arrays=False,
+            inplace=True,
+            **compress_opts,
+        )
+
+        # recombine the compressed sub region TN
+        psi |= subpsi
+
+        return psi
+
+    gate_with_submpo_ = functools.partialmethod(
+        gate_with_submpo,
+        inplace=True,
+    )
+
+    def gate_with_mpo(
+        self,
+        mpo,
+        method="direct",
+        transpose=False,
+        inplace=False,
+        inplace_mpo=False,
+        **compress_opts,
+    ):
+        """Gate this MPS with an MPO and compress the result with one of
+        various methods back to MPS form.
+
+            │ │ │ │ │ │ │ │
+            A─A─A─A─A─A─A─A
+            │ │ │ │ │ │ │ │     ->    │ │ │ │ │ │ │ │
+                                      O━O━O━O━O━O━O━O
+            │ │ │ │ │ │ │ │
+            o─o─o─o─o─o─o─o
+
+        Parameters
+        ----------
+        mpo : MatrixProductOperator
+            The MPO to apply.
+        max_bond : int, optional
+            A maximum bond dimension to keep when compressing.
+        cutoff : float, optional
+            A singular value cutoff to use when compressing.
+        method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit', ...}, optional
+            The compression method to use.
+        transpose : bool, optional
+            Whether to transpose the MPO before applying it. By default the
+            lower inds of the MPO are contracted with the MPS, if transposed
+            the upper inds are contracted.
+        inplace : bool, optional
+            Whether to perform the compression inplace.
+        inplace_mpo : bool, optional
+            Whether the modify the MPO in place, a minor performance gain.
+        compress_opts
+            Other options supplied to
+            :func:`~quimb.tensor.tensor_1d_compress.tensor_network_1d_compress`.
+
+        Returns
+        -------
+        MatrixProductState
+        """
+        from .tensor_1d_compress import tensor_network_1d_compress
+
+        psi = self if inplace else self.copy()
+
+        # lazily combine the MPO with the MPS
+        psi.gate_with_op_lazy_(
+            mpo,
+            transpose=transpose,
+            inplace=inplace_mpo,
+        )
+
+        # compress it!
+        return tensor_network_1d_compress(
+            psi,
+            method=method,
+            inplace=True,
+            **compress_opts,
+        )
+
+    gate_with_mpo_ = functools.partialmethod(gate_with_mpo, inplace=True)
+
+    def gate_nonlocal(
+        self,
+        G,
+        where,
+        dims=None,
+        cur_orthog="calc",
+        method="direct",
+        inplace=False,
+        **compress_opts,
+    ):
+        """Apply a potentially non-local gate to this MPS by first decomposing
+        it into an MPO, then compressing the MPS with MPO only on the minimal
+        set of sites covering `where`.
+
+        Parameters
+        ----------
+        G : array_like
+            The gate to apply.
+        where : sequence of int
+            The sites to apply the gate to.
+        max_bond : int, optional
+            A maximum bond dimension to keep when compressing.
+        cutoff : float, optional
+            A singular value cutoff to use when compressing.
+        dims : sequence of int, optional
+            The factorized dimensions of the gate ``G``, which should match the
+            physical dimensions of the sites it acts on. Calculated if not
+            supplied. If a single int, all sites are assumed to have this same
+            dimension.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit', ...}, optional
+            The compression method to use.
+        inplace : bool, optional
+            Whether to perform the compression inplace.
+        compress_opts
+            Supplied to
+            :func:`~quimb.tensor.tensor_1d_compress.tensor_network_1d_compress`.
+
+        Returns
+        -------
+        MatrixProductState
+        """
+        if dims is None:
+            dims = tuple(self.phys_dim(i) for i in where)
+
+        # create a sub-MPO and lazily combine it with the MPS
+        mpo = MatrixProductOperator.from_dense(
+            G, dims=dims, sites=where, L=self.L
+        )
+
+        return self.gate_with_submpo_(
+            mpo,
+            where=where,
+            cur_orthog=cur_orthog,
+            method=method,
+            inplace=inplace,
+            inplace_mpo=True,
+            **compress_opts,
+        )
+
+    gate_nonlocal_ = functools.partialmethod(gate_nonlocal, inplace=True)
 
     def flip(self, inplace=False):
         """Reverse the order of the sites in the MPS, such that site ``i`` is
