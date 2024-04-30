@@ -3679,13 +3679,9 @@ def MPS_rand_state(
     )
 
     if normalize == "left":
-        if cyclic:
-            raise ValueError("Cannot left normalize cyclic MPS.")
-        mps.left_canonize(normalize=True)
+        mps.left_canonicalize_(normalize=True)
     elif normalize == "right":
-        if cyclic:
-            raise ValueError("Cannot right normalize cyclic MPS.")
-        mps.left_canonize(normalize=True)
+        mps.right_canonicalize_(normalize=True)
     elif normalize:
         mps.normalize()
 

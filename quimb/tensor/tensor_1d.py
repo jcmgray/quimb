@@ -224,18 +224,45 @@ def gate_TN_1D(
         where = (where,)
     ng = len(where)  # number of sites the gate acts on
 
+    if contract == "auto-mps":
+        # automatically choose a contract mode based on maintaining MPS form
+        if ng == 1:
+            contract = True
+        elif ng == 2:
+            contract = "swap+split"
+        else:
+            contract = "nonlocal"
+
+    # check special MPS methods
     if contract == "swap+split":
-        if ng >= 2:
+        if ng == 1:
+            # no swapping or splitting needed
+            contract = True
+        else:
             return tn.gate_with_auto_swap(
                 G,
                 where,
                 cur_orthog=cur_orthog,
+                info=info,
                 inplace=inplace,
                 **compress_opts,
             )
-        else:
-            contract = True
 
+    elif contract == "nonlocal":
+        if ng == 1:
+            # no MPO needed
+            contract = True
+        else:
+            return tn.gate_nonlocal(
+                G,
+                where,
+                cur_orthog=cur_orthog,
+                info=info,
+                inplace=inplace,
+                **compress_opts,
+            )
+
+    # can use generic gate method
     return TensorNetworkGenVector.gate(
         tn,
         G,
@@ -332,6 +359,27 @@ def superop_TN_1D(
         reindex_map[so_outer_lower_ind_id.format(i)] = lower_ind_id.format(i)
 
     return tn_super.reindex(reindex_map) & tn_op.reindex(reindex_map)
+
+
+def parse_cur_orthog(cur_orthog="calc", info=None):
+    if info is None:
+        info = {}
+
+    if isinstance(cur_orthog, Integral):
+        info.setdefault("cur_orthog", (cur_orthog, cur_orthog))
+    else:
+        info.setdefault("cur_orthog", cur_orthog)
+
+    return info
+
+
+def convert_cur_orthog(fn):
+    @functools.wraps(fn)
+    def wrapped(self, *args, cur_orthog=None, info=None, **kwargs):
+        info = parse_cur_orthog(cur_orthog, info)
+        return fn(self, *args, info=info, **kwargs)
+
+    return wrapped
 
 
 class TensorNetwork1D(TensorNetworkGen):
@@ -726,8 +774,16 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             bra[i].modify(data=conj(tr.data))
             bra[i - 1].modify(data=conj(tl.data))
 
-    def left_canonize(self, stop=None, start=None, normalize=False, bra=None):
-        r"""Left canonize all or a portion of this TN. If this is a MPS,
+    def left_canonicalize(
+        self,
+        stop=None,
+        start=None,
+        normalize=False,
+        bra=None,
+        inplace=False,
+    ):
+        r"""Left canonicalize all or a portion of this TN (i.e. sweep the
+        orthogonality center to the right). If this is a MPS,
         this implies that::
 
                           i              i
@@ -738,32 +794,48 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         Parameters
         ----------
         start : int, optional
-            If given, the site to start left canonizing at.
+            If given, the site to start left canonicalizing at.
         stop : int, optional
-            If given, the site to stop left canonizing at.
+            If given, the site to stop left canonicalizing at.
         normalize : bool, optional
             Whether to normalize the state, only works for OBC.
         bra : MatrixProductState, optional
-            If supplied, simultaneously left canonize this MPS too, assuming it
-            to be the conjugate state.
+            If supplied, simultaneously left canonicalize this MPS too,
+            assuming it to be the conjugate state.
+        inplace : bool, optional
+            Whether to perform the operation inplace. If ``bra`` is supplied
+            then it is always modifed inplace.
+
+        Returns
+        -------
+        TensorNetwork1DFlat
         """
+        mps = self if inplace else self.copy()
+
         if start is None:
-            start = -1 if self.cyclic else 0
+            start = -1 if mps.cyclic else 0
         if stop is None:
-            stop = self.L - 1
+            stop = mps.L - 1
 
         for i in range(start, stop):
-            self.left_canonize_site(i, bra=bra)
+            mps.left_canonize_site(i, bra=bra)
 
         if normalize:
-            factor = self[-1].norm()
-            self[-1] /= factor
+            factor = mps[-1].norm()
+            mps[-1] /= factor
             if bra is not None:
                 bra[-1] /= factor
 
-    def right_canonize(self, stop=None, start=None, normalize=False, bra=None):
-        r"""Right canonize all or a portion of this TN. If this is a MPS,
-        this implies that::
+        return mps
+
+    left_canonicalize_ = functools.partialmethod(
+        left_canonicalize, inplace=True
+    )
+    left_canonize = left_canonicalize_
+
+    def right_canonicalize(self, stop=None, start=None, normalize=False, bra=None, inplace=False):
+        r"""Right canonicalize all or a portion of this TN (i.e. sweep the
+        orthogonality center to the left). If this is a MPS,
 
                    i                           i
                 -o-o-<-<-<-<-<-<-<          -o-o-+
@@ -780,22 +852,36 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         normalize : bool, optional
             Whether to normalize the state.
         bra : MatrixProductState, optional
-            If supplied, simultaneously right canonize this MPS too, assuming
-            it to be the conjugate state.
+            If supplied, simultaneously right canonicalize this MPS too,
+            assuming it to be the conjugate state.
+        inplace : bool, optional
+            Whether to perform the operation inplace. If ``bra`` is supplied
+            then it is always modifed inplace.
+
+        Returns
+        -------
+        TensorNetwork1DFlat
         """
+        mps = self if inplace else self.copy()
+
         if start is None:
-            start = self.L - (0 if self.cyclic else 1)
+            start = mps.L - (0 if mps.cyclic else 1)
         if stop is None:
             stop = 0
 
         for i in range(start, stop, -1):
-            self.right_canonize_site(i, bra=bra)
+            mps.right_canonize_site(i, bra=bra)
 
         if normalize:
-            factor = self[0].norm()
-            self[0] /= factor
+            factor = mps[0].norm()
+            mps[0] /= factor
             if bra is not None:
                 bra[0] /= factor
+
+    right_canonicalize_ = functools.partialmethod(
+        right_canonicalize, inplace=True
+    )
+    right_canonize = right_canonicalize_
 
     def canonize_cyclic(self, i, bra=None, method="isvd", inv_tol=1e-10):
         """Bring this MatrixProductState into (possibly only approximate)
@@ -884,22 +970,29 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             for i in range(current, new, -1):
                 self.right_canonize_site(i, bra=bra)
 
-    def canonize(self, where, cur_orthog="calc", bra=None):
-        r"""Mixed canonize this TN. If this is a MPS, this implies that::
+    def canonicalize(
+        self,
+        where,
+        cur_orthog="calc",
+        info=None,
+        bra=None,
+        inplace=False,
+    ):
+        r"""Gauge this MPS into mixed canonical form, implying::
 
                           i                      i
             >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
             | | | | |...| | |...| | | | |  ->  | | |
             >->->->->- ->-o-<- -<-<-<-<-<      +-o-+
 
-        You can also supply a set of indices to orthogonalize around, and a
+        You can also supply a min/max of sites to orthogonalize around, and a
         current location of the orthogonality center for efficiency::
 
                   current                              where
                   .......                              .....
-            >->->-c-c-c-c-<-<-<-<-<-<      >->->->->->-w-w-w-<-<-<-<
+            >->->-c-c-c-c-<-<-<-<-<-<      >->->->->->-w-<-<-<-<-<-<
             | | | | | | | | | | | | |  ->  | | | | | | | | | | | | |
-            >->->-c-c-c-c-<-<-<-<-<-<      >->->->->->-w-w-w-<-<-<-<
+            >->->-c-c-c-c-<-<-<-<-<-<      >->->->->->-w-<-<-<-<-<-<
                cmin     cmax                           i   j
 
         This would only move ``cmin`` to ``i`` and ``cmax`` to ``j`` if
@@ -910,21 +1003,35 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         where : int or sequence of int
             Which site(s) to orthogonalize around. If a sequence of int then
             make sure that section from min(where) to max(where) is orthog.
-        cur_orthog : int, sequence of int, or 'calc'
-            If given, the current site(s), so as to shift the orthogonality
-            ceneter as efficiently as possible. If 'calc', calculate the
-            current orthogonality center.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
         bra : MatrixProductState, optional
-            If supplied, simultaneously mixed canonize this MPS too, assuming
-            it to be the conjugate state.
+            If supplied, simultaneously mixed canonicalize this MPS too,
+            assuming it to be the conjugate state.
+        inplace : bool, optional
+            Whether to perform the operation inplace. If ``bra`` is supplied
+            then it is always modifed inplace.
+
+        Returns
+        -------
+        MatrixProductState
+            The mixed canonical form MPS.
         """
+        mps = self if inplace else self.copy()
+
         if isinstance(where, int):
             i = j = where
         else:
             i, j = min(where), max(where)
 
+        info = parse_cur_orthog(cur_orthog, info)
+        cur_orthog = info["cur_orthog"]
         if cur_orthog == "calc":
-            cur_orthog = self.calc_current_orthog_center()
+            cur_orthog = mps.calc_current_orthog_center()
 
         if cur_orthog is not None:
             if isinstance(cur_orthog, int):
@@ -932,16 +1039,26 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             else:
                 cmin, cmax = min(cur_orthog), max(cur_orthog)
 
-            if cmax > j:
-                self.shift_orthogonality_center(cmax, j, bra=bra)
-            if cmin < i:
-                self.shift_orthogonality_center(cmin, i, bra=bra)
+            if i > cmin:
+                mps.shift_orthogonality_center(cmin, i, bra=bra)
+            else:
+                i = min(j, cmin)
+
+            if j < cmax:
+                mps.shift_orthogonality_center(cmax, j, bra=bra)
+            else:
+                j = max(i, cmax)
 
         else:
-            self.left_canonize(i, bra=bra)
-            self.right_canonize(j, bra=bra)
+            mps.left_canonicalize_(i, bra=bra)
+            mps.right_canonicalize_(j, bra=bra)
 
-        return self
+        info["cur_orthog"] = (i, j)
+
+        return mps
+
+    canonicalize_ = functools.partialmethod(canonicalize, inplace=True)
+    canonize = canonicalize_
 
     def left_compress_site(self, i, bra=None, **compress_opts):
         """Left compress this 1D TN's ith site, such that the site is then
@@ -1088,8 +1205,14 @@ class TensorNetwork1DFlat(TensorNetwork1D):
                 "center."
             )
 
+    @convert_cur_orthog
     def compress_site(
-        self, i, canonize=True, cur_orthog="calc", bra=None, **compress_opts
+        self,
+        i,
+        canonize=True,
+        info=None,
+        bra=None,
+        **compress_opts,
     ):
         r"""Compress the bonds adjacent to site ``i``, by default first setting
         the orthogonality center to that site::
@@ -1104,16 +1227,19 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             Which site to compress around
         canonize : bool, optional
             Whether to first set the orthogonality center to site ``i``.
-        cur_orthog : int, optional
-            If given, the known current orthogonality center, to speed up the
-            mixed canonization.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
         bra : MatrixProductState, optional
             The conjugate state to also apply the compression to.
         compress_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
         """
         if canonize:
-            self.canonize(i, cur_orthog=cur_orthog, bra=bra)
+            self.canonicalize_(i, info=info, bra=bra)
 
         if self.cyclic or i > 0:
             self.left_compress_site(i - 1, bra=bra, **compress_opts)
@@ -1159,7 +1285,8 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         mps_b = self.isel(selector)
         return mps_b ^ ...
 
-    def singular_values(self, i, cur_orthog=None, method="svd"):
+    @convert_cur_orthog
+    def singular_values(self, i, info=None, method="svd"):
         r"""Find the singular values associated with the ith bond::
 
             ....L....   i
@@ -1174,10 +1301,12 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         i : int
             Which bond, or equivalently, the number of sites in the
             left partition.
-        cur_orthog : int
-            If given, the known current orthogonality center, to speed up the
-            mixed canonization, e.g. if sweeping this function from left to
-            right would use ``i - 1``.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
 
         Returns
         -------
@@ -1187,7 +1316,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         if not (0 < i < self.L):
             raise ValueError(f"Need 0 < i < {self.L}, got i={i}.")
 
-        self.canonize(i, cur_orthog)
+        self.canonicalize_(i, info=info)
 
         Tm1 = self[i]
         left_inds = Tm1.bonds(self[i - 1])
@@ -1257,7 +1386,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             else:
                 break
 
-        for j in reversed(range(i + 1, self.L)):
+        for j in reversed(range(num_can_l + 1, self.L)):
             ov ^= slice(j, min(self.L, j + 2))
             x = ov[j].data
             if isidentity(x):
@@ -1694,8 +1823,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
     gate_split_ = functools.partialmethod(gate_split, inplace=True)
 
+    @convert_cur_orthog
     def swap_sites_with_compress(
-        self, i, j, cur_orthog=None, inplace=False, **compress_opts
+        self, i, j, info=None, inplace=False, **compress_opts
     ):
         """Swap sites ``i`` and ``j`` by contracting, then splitting with the
         physical indices swapped. If the sites are not adjacent, this will
@@ -1709,6 +1839,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             The second site to swap.
         cur_orthog : int, sequence of int, or 'calc'
             If known, the current orthogonality center.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
         inplace : bond, optional
             Perform the swaps inplace.
         compress_opts
@@ -1718,12 +1854,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         i, j = sorted((i, j))
         if i + 1 != j:
-            mps.swap_site_to_(j, i, cur_orthog=cur_orthog)
+            mps.swap_site_to_(j, i, info=info)
             # first site is now at j + 1, move back up
-            mps.swap_site_to_(i + 1, j, cur_orthog=(i, i + 1))
+            mps.swap_site_to_(i + 1, j, info=info)
             return mps
 
-        mps.canonize((i, j), cur_orthog=cur_orthog)
+        mps.canonicalize_((i, j), info=info)
 
         # get site tensors and indices
         ix_i, ix_j = map(mps.site_ind, (i, j))
@@ -1737,13 +1873,16 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         sTi, sTj = Tij.split(lix, get="tensors", **compress_opts)
 
         # reindex and transpose the tensors to directly update original tensors
-        sTi.reindex_({ix_j: ix_i})
-        sTj.reindex_({ix_i: ix_j})
-        sTi.transpose_like_(Ti)
-        sTj.transpose_like_(Tj)
-
+        sTi.reindex_({ix_j: ix_i}).transpose_like_(Ti)
         Ti.modify(data=sTi.data)
+        sTj.reindex_({ix_i: ix_j}).transpose_like_(Tj)
         Tj.modify(data=sTj.data)
+
+        absorb = compress_opts.get("absorb", None)
+        if absorb == "left":
+            info["cur_orthog"] = (i, i)
+        elif absorb == "right":
+            info["cur_orthog"] = (j, j)
 
         return mps
 
@@ -1752,15 +1891,21 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         inplace=True,
     )
 
+    @convert_cur_orthog
     def swap_site_to(
-        self, i, f, cur_orthog=None, inplace=False, **compress_opts
+        self,
+        i,
+        f,
+        info=None,
+        inplace=False,
+        **compress_opts,
     ):
         r"""Swap site ``i`` to site ``f``, compressing the bond after each
         swap::
 
                   i       f
             0 1 2 3 4 5 6 7 8 9      0 1 2 4 5 6 7 3 8 9
-            o-o-o-x-o-o-o-o-o-o      o-o-o-o-o-o-o-x-o-o
+            o-o-o-x-o-o-o-o-o-o      >->->->->->->-x-<-<
             | | | | | | | | | |  ->  | | | | | | | | | |
 
 
@@ -1770,8 +1915,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             The site to move.
         f : int
             The new location for site ``i``.
-        cur_orthog : int, sequence of int, or 'calc'
-            If known, the current orthogonality center.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
         inplace : bond, optional
             Perform the swaps inplace.
         compress_opts
@@ -1782,22 +1931,30 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         if i == f:
             return mps
         if i < f:
+            compress_opts.setdefault("absorb", "right")
             js = range(i, f)
         if f < i:
+            compress_opts.setdefault("absorb", "left")
             js = range(i - 1, f - 1, -1)
 
         for j in js:
             mps.swap_sites_with_compress(
-                j, j + 1, inplace=True, cur_orthog=cur_orthog, **compress_opts
+                j, j + 1, info=info, inplace=True, **compress_opts
             )
-            cur_orthog = (j, j + 1)
 
         return mps
 
     swap_site_to_ = functools.partialmethod(swap_site_to, inplace=True)
 
+    @convert_cur_orthog
     def gate_with_auto_swap(
-        self, G, where, inplace=False, cur_orthog=None, **compress_opts
+        self,
+        G,
+        where,
+        info=None,
+        swap_back=True,
+        inplace=False,
+        **compress_opts,
     ):
         """Perform a two site gate on this MPS by, if necessary, swapping and
         compressing the sites until they are adjacent, using ``gate_split``,
@@ -1809,8 +1966,17 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             The gate, with shape ``(d**2, d**2)`` for physical dimension ``d``.
         where : (int, int)
             Indices of the sites to apply the gate to.
-        cur_orthog : int, sequence of int, or 'calc'
-            If known, the current orthogonality center.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
+        swap_back : bool, optional
+            Whether to swap the sites back to their original position after
+            applying the gate. If not, for sites ``i < j``, the site ``j`` will
+            remain swapped to ``i + 1``, and sites between ``i + 1`` and ``j``
+            will be shifted one place up.
         inplace : bond, optional
             Perform the swaps inplace.
         compress_opts
@@ -1824,30 +1990,38 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         i, j = where
 
-        need2flip = i > j
-        if need2flip:
+        if i > j:
             # work with i < j but flip application of gate when necessary
             i, j = j, i
+            final_gate_where = (i + 1, i)
+            absorb = "left"
+        else:
+            final_gate_where = (i, i + 1)
+            absorb = "right"
 
-        need2swap = i + 1 != j
+        need_to_swap = i + 1 != j
 
         # move j site adjacent to i site
-        if need2swap:
+        if need_to_swap:
             mps.swap_site_to(
-                j, i + 1, cur_orthog=cur_orthog, inplace=True, **compress_opts
+                j, i + 1, info=info, inplace=True, **compress_opts
             )
-            cur_orthog = (i + 1, i + 2)
 
-        # make sure sites are orthog center, then apply and split
-        mps.canonize((i, i + 1), cur_orthog=cur_orthog)
+        # make sure sites are orthog center
+        mps.canonicalize_((i, i + 1), info=info)
+
+        # apply gate and split back into MPS form
         mps.gate_split_(
-            G, where=(i + 1, i) if need2flip else (i, i + 1), **compress_opts
+            G, where=final_gate_where, absorb=absorb, **compress_opts
         )
 
-        if need2swap:
+        # absorb setting guarantees this
+        info["cur_orthog"] = (i + 1, i + 1)
+
+        if need_to_swap and swap_back:
             # move j site back to original position
             mps.swap_site_to(
-                i + 1, j, cur_orthog=(i, i + 1), inplace=True, **compress_opts
+                i + 1, j, info=info, inplace=True, **compress_opts
             )
 
         return mps
@@ -1857,13 +2031,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         inplace=True,
     )
 
+    @convert_cur_orthog
     def gate_with_submpo(
         self,
         submpo,
         where=None,
-        cur_orthog="calc",
         method="direct",
         transpose=False,
+        info=None,
         inplace=False,
         inplace_mpo=False,
         **compress_opts,
@@ -1886,14 +2061,18 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         where : sequence of int, optional
             The range of sites the MPO acts on, will be inferred from the
             support of the MPO if not given.
-        cur_orthog : int, sequence of int, or 'calc'
-            If known, the current orthogonality center.
         method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit'}, optional
             The compression method to use.
         transpose : bool, optional
             Whether to transpose the MPO before applying it. By default the
             lower inds of the MPO are contracted with the MPS, if transposed
             the upper inds are contracted.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
         inplace : bool, optional
             Whether to perform the application and compression inplace.
         compress_opts
@@ -1914,7 +2093,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         si, sf = min(where), max(where)
 
         # make the psi canonical around the sub-MPO region
-        psi.canonize((si, sf), cur_orthog=cur_orthog)
+        psi.canonicalize_((si, sf), info=info)
 
         # lazily combine the sub-MPO with the MPS
         psi.gate_with_op_lazy_(
@@ -1938,15 +2117,17 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             **compress_opts,
         )
 
+        if compress_opts.get("sweep_reverse", False):
+            info["cur_orthog"] = (sf, sf)
+        else:
+            info["cur_orthog"] = (si, si)
+
         # recombine the compressed sub region TN
         psi |= subpsi
 
         return psi
 
-    gate_with_submpo_ = functools.partialmethod(
-        gate_with_submpo,
-        inplace=True,
-    )
+    gate_with_submpo_ = functools.partialmethod(gate_with_submpo, inplace=True)
 
     def gate_with_mpo(
         self,
@@ -2014,13 +2195,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
     gate_with_mpo_ = functools.partialmethod(gate_with_mpo, inplace=True)
 
+    @convert_cur_orthog
     def gate_nonlocal(
         self,
         G,
         where,
         dims=None,
-        cur_orthog="calc",
         method="direct",
+        info=None,
         inplace=False,
         **compress_opts,
     ):
@@ -2043,10 +2225,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             physical dimensions of the sites it acts on. Calculated if not
             supplied. If a single int, all sites are assumed to have this same
             dimension.
-        cur_orthog : int, sequence of int, or 'calc'
-            If known, the current orthogonality center.
         method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit', ...}, optional
             The compression method to use.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
         inplace : bool, optional
             Whether to perform the compression inplace.
         compress_opts
@@ -2068,8 +2254,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         return self.gate_with_submpo_(
             mpo,
             where=where,
-            cur_orthog=cur_orthog,
             method=method,
+            info=info,
             inplace=inplace,
             inplace_mpo=True,
             **compress_opts,
@@ -2092,7 +2278,13 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         return flipped.retag_(retag_map).reindex_(reindex_map)
 
-    def magnetization(self, i, direction="Z", cur_orthog=None):
+    @convert_cur_orthog
+    def magnetization(
+        self,
+        i,
+        direction="Z",
+        info=None,
+    ):
         """Compute the magnetization at site ``i``."""
         if self.cyclic:
             msg = (
@@ -2102,7 +2294,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             )
             raise NotImplementedError(msg)
 
-        self.canonize(i, cur_orthog)
+        self.canonicalize_(i, info=info)
 
         # +-k-+
         # | O |
@@ -2117,7 +2309,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         return Tk.contract(TO, Tb)
 
-    def schmidt_values(self, i, cur_orthog=None, method="svd"):
+    @convert_cur_orthog
+    def schmidt_values(self, i, info=None, method="svd"):
         r"""Find the schmidt values associated with the bipartition of this
         MPS between sites on either site of ``i``. In other words, ``i`` is the
         number of sites in the left hand partition::
@@ -2135,9 +2328,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         ----------
         i : int
             The number of sites in the left partition.
-        cur_orthog : int
-            If given, the known current orthogonality center, to speed up the
-            mixed canonization.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
 
         Returns
         -------
@@ -2147,9 +2341,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         if self.cyclic:
             raise NotImplementedError
 
-        return self.singular_values(i, cur_orthog, method=method) ** 2
+        return self.singular_values(i, info=info, method=method) ** 2
 
-    def entropy(self, i, cur_orthog=None, method="svd"):
+    @convert_cur_orthog
+    def entropy(self, i, info=None, method="svd"):
         """The entropy of bipartition between the left block of ``i`` sites and
         the rest.
 
@@ -2157,9 +2352,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         ----------
         i : int
             The number of sites in the left partition.
-        cur_orthog : int
-            If given, the known current orthogonality center, to speed up the
-            mixed canonization.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
 
         Returns
         -------
@@ -2172,11 +2368,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             )
             raise NotImplementedError(msg)
 
-        S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
+        S = self.schmidt_values(i, info=info, method=method)
         S = S[S > 0.0]
         return do("sum", -S * do("log2", S))
 
-    def schmidt_gap(self, i, cur_orthog=None, method="svd"):
+    @convert_cur_orthog
+    def schmidt_gap(self, i, info=None, method="svd"):
         """The schmidt gap of bipartition between the left block of ``i`` sites
         and the rest.
 
@@ -2184,9 +2381,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         ----------
         i : int
             The number of sites in the left partition.
-        cur_orthog : int
-            If given, the known current orthogonality center, to speed up the
-            mixed canonization.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
 
         Returns
         -------
@@ -2195,7 +2393,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         if self.cyclic:
             raise NotImplementedError
 
-        S = self.schmidt_values(i, cur_orthog=cur_orthog, method=method)
+        S = self.schmidt_values(i, info=info, method=method)
 
         if len(S) == 1:
             return S[0]
@@ -2293,7 +2491,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             keep, upper_ind_id, rescale_sites=rescale_sites
         )
 
-    def bipartite_schmidt_state(self, sz_a, get="ket", cur_orthog=None):
+    @convert_cur_orthog
+    def bipartite_schmidt_state(self, sz_a, get="ket", info=None):
         r"""Compute the reduced state for a bipartition of an OBC MPS, in terms
         of the minimal left/right schmidt basis::
 
@@ -2315,14 +2514,15 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             - 'ket-dense': like 'ket' but return ``qarray``.
             - 'rho-dense': like 'rho' but return ``qarray``.
 
-        cur_orthog : int, optional
-            If given, take as the current orthogonality center so as to
-            efficienctly move it a minimal distance.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
         """
         if self.cyclic:
             raise NotImplementedError("MPS must have OBC.")
 
-        s = do("diag", self.singular_values(sz_a, cur_orthog=cur_orthog))
+        s = do("diag", self.singular_values(sz_a, info=info))
 
         if "dense" in get:
             kd = qu.qarray(s.reshape(-1, 1))
@@ -2856,13 +3056,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         # clip below 0
         return max(0, log2(tr_norm))
 
+    @convert_cur_orthog
     def measure(
         self,
         site,
         remove=False,
         outcome=None,
         renorm=True,
-        cur_orthog=None,
+        info=None,
         get=None,
         inplace=False,
     ):
@@ -2892,9 +3093,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             will be randomly sampled according to the local density matrix.
         renorm : bool, optional
             Whether to renormalize the state post measurement.
-        cur_orthog : None or int, optional
-            If you already know the orthogonality center, you can supply it
-            here for efficiencies sake.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
         get : {None, 'outcome'}, optional
             If ``'outcome'``, simply return the outcome, and don't perform any
             projection.
@@ -2916,10 +3118,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         d = self.phys_dim(site)
 
         # make sure MPS is canonicalized
-        if cur_orthog is not None:
-            tn.shift_orthogonality_center(cur_orthog, site)
-        else:
-            tn.canonize(site)
+        tn.canonicalize_(site, info=info)
 
         # local tensor and physical dim
         t = tn[site]

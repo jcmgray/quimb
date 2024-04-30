@@ -136,7 +136,7 @@ class TestMatrixProductState:
         k = qtn.MPS_rand_state(
             n, 10, site_tag_id="foo{}", tags="bar", normalize=False
         )
-        k.left_canonize(normalize=True)
+        k.left_canonicalize_(normalize=True)
 
         assert k.count_canonized() == (9, 0)
 
@@ -150,7 +150,7 @@ class TestMatrixProductState:
             n, 10, site_tag_id="foo{}", tags="bar", normalize=False
         )
         b = k.H
-        k.left_canonize(normalize=True, bra=b)
+        k.left_canonicalize_(normalize=True, bra=b)
         assert_allclose(b @ k, 1)
         p_tn = (b & k) ^ slice(0, 9)
         assert_allclose(p_tn["foo8"].data, np.eye(10), atol=1e-13)
@@ -160,7 +160,7 @@ class TestMatrixProductState:
         k = qtn.MPS_rand_state(
             n, 10, site_tag_id="foo{}", tags="bar", normalize=False
         )
-        k.right_canonize(normalize=True)
+        k.right_canonicalize_(normalize=True)
         assert_allclose(k.H @ k, 1)
         p_tn = (k.H & k) ^ slice(..., 0, -1)
         assert_allclose(p_tn["foo1"].data, np.eye(10), atol=1e-13)
@@ -171,7 +171,7 @@ class TestMatrixProductState:
             n, 10, site_tag_id="foo{}", tags="bar", normalize=False
         )
         b = k.H
-        k.right_canonize(normalize=True, bra=b)
+        k.right_canonicalize_(normalize=True, bra=b)
         assert_allclose(b @ k, 1)
         p_tn = (b & k) ^ slice(..., 0, -1)
         assert_allclose(p_tn["foo1"].data, np.eye(10), atol=1e-13)
@@ -183,7 +183,7 @@ class TestMatrixProductState:
         )
 
         # move to the center
-        rmps.canonize(4)
+        rmps.canonicalize_(4)
         assert rmps.count_canonized() == (4, 5)
         assert_allclose(rmps.H @ rmps, 1)
         p_tn = (rmps.H & rmps) ^ slice(0, 4) ^ slice(..., 4, -1)
@@ -209,10 +209,10 @@ class TestMatrixProductState:
         p = qtn.MPS_rand_state(20, 3, dtype=dtype)
         co = p.calc_current_orthog_center()
         assert co == (0, 19)
-        p.canonize((5, 15), co)
+        p.canonicalize_((5, 15), co)
         co = p.calc_current_orthog_center()
         assert co == (5, 15)
-        p.canonize((8, 11), co)
+        p.canonicalize_((8, 11), co)
         co = p.calc_current_orthog_center()
         assert co == (8, 11)
         assert p.dtype == dtype
@@ -354,12 +354,13 @@ class TestMatrixProductState:
     def test_schmidt_values_entropy_gap_simple(self):
         n = 12
         p = qtn.MPS_rand_state(n, 16)
-        p.right_canonize()
+        p.right_canonicalize_()
         svns = []
         sgs = []
+        info = {}
         for i in range(1, n):
-            sgs.append(p.schmidt_gap(i, cur_orthog=i - 1))
-            svns.append(p.entropy(i, cur_orthog=i))
+            sgs.append(p.schmidt_gap(i, info=info))
+            svns.append(p.entropy(i, info=info))
 
         pd = p.to_qarray()
         ex_svns = [
@@ -706,7 +707,7 @@ class TestMatrixProductState:
     def test_mps_measure(self, cur_orthog, site, outcome, renorm, remove):
         psi = qtn.MPS_rand_state(10, 7, phys_dim=3, dtype=complex)
         if cur_orthog:
-            psi.canonize(cur_orthog)
+            psi.canonicalize_(cur_orthog)
         outcome, psim = psi.measure(
             site,
             outcome=outcome,
@@ -737,7 +738,7 @@ class TestMatrixProductState:
     def test_permute_arrays(self):
         mps = qtn.MPS_rand_state(7, 5)
         k0 = mps.to_qarray()
-        mps.canonize(3)
+        mps.canonicalize_(3)
         mps.permute_arrays("prl")
         assert mps[0].shape == (2, 2)
         assert mps[1].shape == (2, 4, 2)

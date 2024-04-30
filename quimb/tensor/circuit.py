@@ -15,35 +15,36 @@ import re
 import warnings
 
 import numpy as np
-from autoray import do, reshape, backend_like
+from autoray import backend_like, do, reshape
 
 import quimb as qu
-from ..utils import progbar as _progbar
+
 from ..utils import (
+    LRU,
     concatv,
     deprecated,
     ensure_dict,
-    LRU,
     partition_all,
     partitionby,
 )
+from ..utils import progbar as _progbar
+from . import array_ops as ops
+from .tensor_1d import Dense1D
+from .tensor_arbgeom import TensorNetworkGenOperator
+from .tensor_builder import (
+    HTN_CP_operator_from_products,
+    MPS_computational_state,
+    TN_from_sites_computational_state,
+)
 from .tensor_core import (
+    PTensor,
+    Tensor,
     get_tags,
     oset_union,
-    PTensor,
     rand_uuid,
     tags_to_oset,
     tensor_contract,
-    Tensor,
 )
-from .tensor_builder import (
-    MPS_computational_state,
-    TN_from_sites_computational_state,
-    HTN_CP_operator_from_products,
-)
-from .tensor_arbgeom import TensorNetworkGenOperator
-from .tensor_1d import Dense1D
-from . import array_ops as ops
 
 
 def recursive_stack(x):
@@ -952,15 +953,29 @@ register_param_gate("SU4", su4_gate_param_gen, 2)
 
 # special non-tensor gates
 
+_MPS_METHODS = {
+    "auto-mps",
+    "nonlocal",
+    "swap+split",
+}
+
 
 def apply_swap(psi, i, j, **gate_opts):
     contract = gate_opts.pop("contract", None)
-    if contract == "swap+split":
-        gate_opts.pop("propagate_tags", None)
-        psi.swap_sites_with_compress_(i, j, **gate_opts)
-    else:
+
+    if contract not in _MPS_METHODS:
+        # just do swap by lazily reindexing
         iind, jind = map(psi.site_ind, (int(i), int(j)))
         psi.reindex_({iind: jind, jind: iind})
+
+    else:
+        # tensors are absorbed so propagate_tags is not needed
+        gate_opts.pop("propagate_tags", None)
+
+        if contract == "nonlocal":
+            psi.gate_nonlocal_(qu.swap(2), (i, j), **gate_opts)
+        else:  # {"swap+split", "auto-mps"}:
+            psi.swap_sites_with_compress_(i, j, **gate_opts)
 
 
 register_special_gate("SWAP", apply_swap, 2, array=qu.swap(2))
@@ -3601,6 +3616,53 @@ class CircuitMPS(Circuit):
     you think the circuit will not build up much entanglement, or you just want
     to keep a rigorous handle on how much entanglement is present, this can
     be useful.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits in the circuit.
+    psi0 : TensorNetwork1DVector, optional
+        The initial state, assumed to be ``|00000....0>`` if not given. The
+        state is always copied and the tag ``PSI0`` added.
+    gate_opts : dict, optional
+        Default options to pass to each gate, for example, "max_bond" and
+        "cutoff" etc.
+    gate_contract : str, optional
+        The default method for applying gates. Relevant MPS options are:
+
+        - ``'auto-mps'``: automatically choose a method that maintains the
+          MPS form (default). This uses ``'swap+split'`` for 2-qubit gates
+          and ``'nonlocal'`` for 3+ qubit gates.
+        - ``'swap+split'``: swap nonlocal qubits to be next to each other,
+          before applying the gate, then swapping them back
+        - ``'nonlocal'``: turn the gate into a potentially nonlocal (sub) MPO
+          and apply it directly. See :func:`tensor_network_1d_compress`.
+
+    circuit_opts
+        Supplied to :class:`~quimb.tensor.circuit.Circuit`.
+
+    Attributes
+    ----------
+    psi : MatrixProductState
+        The current state of the circuit, always in MPS form.
+
+    Examples
+    --------
+
+    Create a circuit object that always uses the "nonlocal" method for
+    contracting in gates, and the "dm" compression method within that, using
+    a large cutoff and maximum bond dimension::
+
+        circ = qtn.CircuitMPS(
+            N=56,
+            gate_opts=dict(
+                contract="nonlocal",
+                method="dm",
+                max_bond=1024,
+                cutoff=1e-3,
+            )
+        )
+
     """
 
     def __init__(
@@ -3608,11 +3670,13 @@ class CircuitMPS(Circuit):
         N=None,
         psi0=None,
         gate_opts=None,
-        gate_contract="swap+split",
+        gate_contract="auto-mps",
         **circuit_opts,
     ):
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault("contract", gate_contract)
+        # this is used to pass around the canonical form
+        gate_opts.setdefault("info", {})
         super().__init__(N, psi0, gate_opts, **circuit_opts)
 
     def _init_state(self, N, dtype="complex128"):
@@ -3621,11 +3685,6 @@ class CircuitMPS(Circuit):
     def _apply_gate(self, gate, tags=None, **gate_opts):
         if gate.controls:
             raise ValueError("`CircuitMPS` does not yet support `controls`.")
-
-        if len(gate.qubits) > 2:
-            raise ValueError(
-                "`CircuitMPS` does not yet support 3+ qubit gates."
-            )
 
         super()._apply_gate(gate, tags=tags, **gate_opts)
 
@@ -3637,8 +3696,7 @@ class CircuitMPS(Circuit):
     @property
     def uni(self):
         raise ValueError(
-            "You can't extract the circuit unitary "
-            "TN from a ``CircuitMPS``."
+            "You can't extract the circuit unitary TN from a ``CircuitMPS``."
         )
 
     def calc_qubit_ordering(self, qubits=None):
@@ -3675,8 +3733,7 @@ class CircuitDense(Circuit):
     @property
     def uni(self):
         raise ValueError(
-            "You can't extract the circuit unitary "
-            "TN from a ``CircuitDense``."
+            "You can't extract the circuit unitary TN from a ``CircuitDense``."
         )
 
     def calc_qubit_ordering(self, qubits=None):

@@ -8,7 +8,8 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add [`MatrixProductState.gate_nonlocal](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal) for applying a gate, supplied as a raw matrix, to a non-local and arbitrary number of sites
+- [`CircuitMPS`](quimb.tensor.circuit.CircuitMPS) now supports multi qubit gates, and faster simulation via better orthogonality center tracking.
+- add [`MatrixProductState.gate_nonlocal](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal) for applying a gate, supplied as a raw matrix, to a non-local and arbitrary number of sites. The kwarg `contract="nonlocal"` can be used to force this method, or the new option ``"auto-mps"`` will select this method if the gate is non-local.
 - add [`MatrixProductState.gate_with_mpo](quimb.tensor.tensor_1d.MatrixProductState.gate_with_mpo) for applying an MPO to an MPS, and immediately compressing back to MPS form using [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
 - add [`MatrixProductState.gate_with_submpo](quimb.tensor.tensor_1d.MatrixProductState.gate_with_submpo) for applying an MPO acting only of a subset of sites to an MPS
 - add [`MatrixProductOperator.from_dense`](quimb.tensor.tensor_1d.MatrixProductOperator.from_dense) for constructing MPOs from dense matrices, including an only subset of sites
@@ -18,6 +19,9 @@ Release notes for `quimb`.
 - TN2D, TN3D and arbitrary geom classical partition function builders now all support `outputs=` kwarg specifying non-marginalized variables
 - add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.experimental.belief_propagation.d1bp.D1BP)
 - add [`qtn.enforce_1d_like`](quimb.tensor.tensor_1d_compress.enforce_1d_like) for checking whether a tensor network is 1D-like, including automatically adding strings of identities between non-local bonds, expanding applicability of [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
+- add [`MatrixProductState.canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.left_canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.left_canonicalize) as (by default *non-inplace*) version of `left_canonize`, to follow the pattern of other tensor network methods. `left_canonize` is now an alias for `left_canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.right_canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.right_canonicalize) as (by default *non-inplace*) version of `right_canonize`, to follow the pattern of other tensor network methods. `right_canonize` is now an alias for `right_canonicalize_` [note trailing underscore].
 
 **Bug fixes:**
 

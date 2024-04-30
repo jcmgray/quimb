@@ -569,14 +569,14 @@ class TestTensorFunctions:
         assert_allclose(real_svn, svn)
 
         # use tensor to left of bipartition
-        p.canonize(2)
+        p.canonicalize_(2)
         t1 = p["I2"]
         left_inds = set(t1.inds) - set(p["I3"].inds)
         svn = (t1).entropy(left_inds, method=method)
         assert_allclose(real_svn, svn)
 
         # use tensor to right of bipartition
-        p.canonize(3)
+        p.canonicalize_(3)
         t2 = p["I3"]
         left_inds = set(t2.inds) & set(p["I2"].inds)
         svn = (t2).entropy(left_inds, method=method)
