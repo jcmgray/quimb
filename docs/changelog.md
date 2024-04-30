@@ -9,6 +9,7 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - [`CircuitMPS`](quimb.tensor.circuit.CircuitMPS) now supports multi qubit gates, and faster simulation via better orthogonality center tracking.
+- add [`CircuitPermMPS`](quimb.tensor.circuit.CircuitPermMPS)
 - add [`MatrixProductState.gate_nonlocal`](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal) for applying a gate, supplied as a raw matrix, to a non-local and arbitrary number of sites. The kwarg `contract="nonlocal"` can be used to force this method, or the new option `"auto-mps"` will select this method if the gate is non-local.
 - add [`MatrixProductState.gate_with_mpo`](quimb.tensor.tensor_1d.MatrixProductState.gate_with_mpo) for applying an MPO to an MPS, and immediately compressing back to MPS form using [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
 - add [`MatrixProductState.gate_with_submpo`](quimb.tensor.tensor_1d.MatrixProductState.gate_with_submpo) for applying an MPO acting only of a subset of sites to an MPS

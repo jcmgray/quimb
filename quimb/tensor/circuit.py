@@ -30,7 +30,7 @@ from ..utils import (
 from ..utils import progbar as _progbar
 from . import array_ops as ops
 from .tensor_1d import Dense1D
-from .tensor_arbgeom import TensorNetworkGenOperator
+from .tensor_arbgeom import TensorNetworkGenVector, TensorNetworkGenOperator
 from .tensor_builder import (
     HTN_CP_operator_from_products,
     MPS_computational_state,
@@ -1150,6 +1150,20 @@ class Gate:
         new._array = U
         return new
 
+    def copy(self):
+        new = object.__new__(self.__class__)
+        new._label = self._label
+        new._params = self._params
+        new._qubits = self._qubits
+        new._controls = self._controls
+        new._round = self._round
+        new._parametrize = self._parametrize
+        new._tag = self._tag
+        new._special = self._special
+        new._constant = self._constant
+        new._array = self._array
+        return new
+
     @property
     def label(self):
         return self._label
@@ -1161,6 +1175,13 @@ class Gate:
     @property
     def qubits(self):
         return self._qubits
+
+    @qubits.setter
+    def qubits(self, qubits):
+        if qubits is None:
+            self._qubits = None
+        else:
+            self._qubits = tuple(qubits)
 
     @property
     def controls(self):
@@ -3711,6 +3732,74 @@ class CircuitMPS(Circuit):
         is not meaningful.
         """
         return self.psi
+
+
+class CircuitPermMPS(CircuitMPS):
+    """Quantum circuit simulation keeping the state always in an MPS form, but
+    lazily tracking the qubit ordering rather than 'swapping back' qubits after
+    applying non-local gates. This can be useful for circuits with no
+    expectation of locality. The qubit ordering is always tracked in the
+    attribute ``qubits``. The ``psi`` attribute returns the TN with the sites
+    reindexed and retagged according to the current qubit ordering, meaning it
+    is no longer an MPS. Use `circ.get_psi_unordered()` to get the unpermuted
+    MPS and use `circ.qubits` to get the current qubit ordering if you prefer.
+    """
+    def __init__(
+        self,
+        N=None,
+        psi0=None,
+        gate_opts=None,
+        gate_contract="swap+split",
+        **circuit_opts,
+    ):
+        gate_opts = ensure_dict(gate_opts)
+        gate_opts.setdefault("contract", gate_contract)
+        # this is used to pass around the canonical form
+        gate_opts.setdefault("info", {})
+        super().__init__(N, psi0, gate_opts, **circuit_opts)
+        # keep track of the current qubit ordering
+        self.qubits = list(range(self.N))
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        qubits = gate.qubits
+        phys_sites = [self.qubits.index(q) for q in qubits]
+        gate = gate.copy()
+        gate.qubits = phys_sites
+
+        if len(phys_sites) == 2:
+            i, j = sorted(phys_sites)
+            q = self.qubits.pop(j)
+            self.qubits.insert(i + 1, q)
+            gate_opts["swap_back"] = False
+
+        super()._apply_gate(gate, tags=tags, **gate_opts)
+
+    def calc_qubit_ordering(self, qubits=None):
+        if qubits is None:
+            return tuple(self.qubits)
+        else:
+            return tuple(sorted(qubits, key=self.qubits.index))
+
+    def get_psi_unordered(self):
+        """Return the MPS representing the state but without reordering the
+        sites.
+        """
+        return self._psi.copy()
+
+    @property
+    def psi(self):
+        # need to reindex and retag the MPS
+        psi = self._psi.copy()
+        psi.view_as_(TensorNetworkGenVector)
+        psi.reindex_({
+            psi.site_ind(i): psi.site_ind(q)
+            for i, q in enumerate(self.qubits)
+        })
+        psi.retag_({
+            psi.site_tag(i): psi.site_tag(q)
+            for i, q in enumerate(self.qubits)
+        })
+        return psi
 
 
 class CircuitDense(Circuit):
