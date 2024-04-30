@@ -1023,7 +1023,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         """
         mps = self if inplace else self.copy()
 
-        if isinstance(where, int):
+        if isinstance(where, Integral):
             i = j = where
         else:
             i, j = min(where), max(where)

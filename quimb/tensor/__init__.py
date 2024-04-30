@@ -5,6 +5,7 @@ from .circuit import (
     Circuit,
     CircuitDense,
     CircuitMPS,
+    Gate,
 )
 from .circuit_gen import (
     circ_ansatz_1D_brickwork,
@@ -252,6 +253,7 @@ __all__ = (
     "expec_TN_1D",
     "FullUpdate",
     "gate_TN_1D",
+    "Gate",
     "gen_2d_bonds",
     "gen_3d_bonds",
     "get_contract_backend",

@@ -1064,7 +1064,7 @@ def _cached_param_gate_build(fn, params):
 
 
 class Gate:
-    """A simple class for storing the details of a gate.
+    """A simple class for storing the details of a quantum circuit gate.
 
     Parameters
     ----------
@@ -1270,7 +1270,7 @@ def parse_to_gate(
         if gate_args:
             raise ValueError(
                 "You cannot specify ``gate_args`` for an already "
-                "encapsulated gate."
+                "encapsulated `Gate` object."
             )
 
         if any((params, qubits, controls, gate_round, parametrize)):
@@ -1573,7 +1573,7 @@ class Circuit:
         qubits=None,
         controls=None,
         gate_round=None,
-        parametrize=False,
+        parametrize=None,
         **gate_opts,
     ):
         """Apply a single gate to this tensor network quantum circuit. If
