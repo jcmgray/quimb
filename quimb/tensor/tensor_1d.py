@@ -2045,7 +2045,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     ):
         """Apply an MPO, which only acts on a subset of sites, to this MPS,
         compressing the MPS with the MPO only on the minimal set of sites
-        covering `where`, keeping the MPS form.
+        covering `where`, keeping the MPS form::
 
                 │   │ │
                 A───A─A
@@ -2139,7 +2139,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         **compress_opts,
     ):
         """Gate this MPS with an MPO and compress the result with one of
-        various methods back to MPS form.
+        various methods back to MPS form::
 
             │ │ │ │ │ │ │ │
             A─A─A─A─A─A─A─A
