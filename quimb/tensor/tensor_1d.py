@@ -833,7 +833,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
     )
     left_canonize = left_canonicalize_
 
-    def right_canonicalize(self, stop=None, start=None, normalize=False, bra=None, inplace=False):
+    def right_canonicalize(
+        self, stop=None, start=None, normalize=False, bra=None, inplace=False
+    ):
         r"""Right canonicalize all or a portion of this TN (i.e. sweep the
         orthogonality center to the left). If this is a MPS,
 
@@ -1461,10 +1463,19 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     ----------
     arrays : sequence of arrays
         The tensor arrays to form into a MPS.
+    sites : sequence of int, optional
+        Construct the MPO on these sites only. If not given, enumerate from
+        zero. Should be monotonically increasing and match ``arrays``.
+    L : int, optional
+        The number of sites the MPO should be defined on. If not given, this is
+        taken as the max ``sites`` value plus one (i.e.g the number of arrays
+        if ``sites`` is not given).
     shape : str, optional
         String specifying layout of the tensors. E.g. 'lrp' (the default)
         indicates the shape corresponds left-bond, right-bond, physical index.
         End tensors have either 'l' or 'r' dropped from the string.
+    tags : str or sequence of str, optional
+        Global tags to attach to all tensors.
     site_ind_id : str
         A string specifiying how to label the physical site indices. Should
         contain a ``'{}'`` placeholder. It is used to generate the actual
@@ -1473,10 +1484,6 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         A string specifiying how to tag the tensors at each site. Should
         contain a ``'{}'`` placeholder. It is used to generate the actual tags
         like: ``map(site_tag_id.format, range(len(arrays)))``.
-    tags : str or sequence of str, optional
-        Global tags to attach to all tensors.
-    bond_name : str, optional
-        The base name of the bond indices, onto which uuids will be added.
     """
 
     _EXTRA_PROPS = (
@@ -1490,9 +1497,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         self,
         arrays,
         *,
+        sites=None,
+        L=None,
         shape="lrp",
         tags=None,
-        bond_name="",
         site_ind_id="k{}",
         site_tag_id="I{}",
         **tn_opts,
@@ -1504,51 +1512,61 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         arrays = tuple(arrays)
 
+        if sites is None:
+            # assume dense
+            sites = range(len(arrays))
+            if L is None:
+                L = len(arrays)
+            num_sites = L
+        else:
+            sites = tuple(sites)
+            if L is None:
+                L = max(sites) + 1
+            num_sites = len(sites)
+
         self._L = len(arrays)
-
-        # process site indices
         self._site_ind_id = site_ind_id
-        site_inds = map(site_ind_id.format, range(self.L))
-
-        # process site tags
         self._site_tag_id = site_tag_id
-        site_tags = map(site_tag_id.format, range(self.L))
-        if tags is not None:
-            # mix in global tags
-            tags = tags_to_oset(tags)
-            site_tags = (tags | oset((st,)) for st in site_tags)
-
         self.cyclic = ops.ndim(arrays[0]) == 3
 
-        # transpose arrays to 'lrp' order.
-        def gen_orders():
-            lp_ord = tuple(shape.replace("r", "").find(x) for x in "lp")
-            lrp_ord = tuple(shape.find(x) for x in "lrp")
-            rp_ord = tuple(shape.replace("l", "").find(x) for x in "rp")
-            yield lp_ord if not self.cyclic else lrp_ord
-            for _ in range(self.L - 2):
-                yield lrp_ord
-            yield rp_ord if not self.cyclic else lrp_ord
+        # this is the perm needed to bring the arrays from
+        # their current `shape`, to the desired 'lrud' order
+        lrp_ord = tuple(map(shape.find, "lrp"))
 
-        def gen_inds():
-            cyc_bond = (rand_uuid(base=bond_name),) if self.cyclic else ()
+        tensors = []
+        tags = tags_to_oset(tags)
+        bonds = [rand_uuid() for _ in range(num_sites)]
+        bonds.append(bonds[0])
 
-            nbond = rand_uuid(base=bond_name)
-            yield cyc_bond + (nbond, next(site_inds))
-            pbond = nbond
-            for _ in range(self.L - 2):
-                nbond = rand_uuid(base=bond_name)
-                yield (pbond, nbond, next(site_inds))
-                pbond = nbond
-            yield (pbond,) + cyc_bond + (next(site_inds),)
+        for i, (site, array) in enumerate(zip(sites, arrays)):
+            inds = []
 
-        def gen_tensors():
-            for array, site_tag, inds, order in zip(
-                arrays, site_tags, gen_inds(), gen_orders()
-            ):
-                yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
+            if (i == 0) and not self.cyclic:
+                # only right bond
+                order = tuple(shape.replace("l", "").find(x) for x in "rp")
+                inds.append(bonds[i + 1])
+            elif (i == num_sites - 1) and not self.cyclic:
+                # only left bond
+                order = tuple(shape.replace("r", "").find(x) for x in "lp")
+                inds.append(bonds[i])
+            else:
+                order = lrp_ord
+                # both bonds
+                inds.append(bonds[i])
+                inds.append(bonds[i + 1])
 
-        super().__init__(gen_tensors(), virtual=True, **tn_opts)
+            # physical index
+            inds.append(site_ind_id.format(site))
+
+            tensors.append(
+                Tensor(
+                    data=transpose(array, order),
+                    inds=inds,
+                    tags=tags | oset([site_tag_id.format(site)]),
+                )
+            )
+
+        super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
     def from_fill_fn(
@@ -1557,13 +1575,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         L,
         bond_dim,
         phys_dim=2,
+        sites=None,
         cyclic=False,
         shape="lrp",
         site_ind_id="k{}",
         site_tag_id="I{}",
         tags=None,
     ):
-        """Create a random MPS by supplying a function to generate the data
+        """Create an MPS by supplying a 'filling' function to generate the data
         for each site.
 
         Parameters
@@ -1578,6 +1597,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         phys_dim : int or Sequence[int], optional
             The physical dimension(s) of each site, if a sequence it will be
             cycled over.
+        sites : None or sequence of int, optional
+            Construct the MPS on these sites only. If not given, enumerate from
+            zero.
         cyclic : bool, optional
             Whether the MPS should be cyclic (periodic).
         shape : str, optional
@@ -1610,26 +1632,35 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             site_ind_id=site_ind_id,
             site_tag_id=site_tag_id,
         )
-        global_tags = tags_to_oset(tags)
-        bonds = collections.defaultdict(rand_uuid)
 
-        for i in range(L):
+        # which sites are actually present
+        if sites is None:
+            sites = range(L)
+        else:
+            sites = tuple(sites)
+        num_sites = len(sites)
+
+        global_tags = tags_to_oset(tags)
+        bonds = [rand_uuid() for _ in range(num_sites)]
+        bonds.append(bonds[0])
+
+        for i, site in enumerate(sites):
             inds = []
             data_shape = []
             for c in shape:
                 if c == "l":
                     if (i - 1) >= 0 or cyclic:
-                        inds.append(bonds[frozenset([(i - 1) % L, i])])
+                        inds.append(bonds[i])
                         data_shape.append(bond_dim)
                 elif c == "r":
-                    if (i + 1) < L or cyclic:
-                        inds.append(bonds[frozenset([i, (i + 1) % L])])
+                    if (i + 1) < num_sites or cyclic:
+                        inds.append(bonds[i + 1])
                         data_shape.append(bond_dim)
                 else:  # c == 'p':
-                    inds.append(site_ind_id.format(i))
+                    inds.append(site_ind_id.format(site))
                     data_shape.append(next(phys_dims))
             data = fill_fn(data_shape)
-            tags = global_tags | oset((site_tag_id.format(i),))
+            tags = global_tags | oset((site_tag_id.format(site),))
             mps |= Tensor(data, inds=inds, tags=tags)
 
         return mps
@@ -3169,11 +3200,20 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
     ----------
     arrays : sequence of arrays
         The tensor arrays to form into a MPO.
+    sites : sequence of int, optional
+        Construct the MPO on these sites only. If not given, enumerate from
+        zero. Should be monotonically increasing and match ``arrays``.
+    L : int, optional
+        The number of sites the MPO should be defined on. If not given, this is
+        taken as the max ``sites`` value plus one (i.e.g the number of arrays
+        if ``sites`` is not given).
     shape : str, optional
         String specifying layout of the tensors. E.g. 'lrud' (the default)
         indicates the shape corresponds left-bond, right-bond, 'up' physical
         index, 'down' physical index.
         End tensors have either 'l' or 'r' dropped from the string.
+    tags : str or sequence of str, optional
+        Global tags to attach to all tensors.
     upper_ind_id : str
         A string specifiying how to label the upper physical site indices.
         Should contain a ``'{}'`` placeholder. It is used to generate the
@@ -3186,10 +3226,6 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         A string specifiying how to tag the tensors at each site. Should
         contain a ``'{}'`` placeholder. It is used to generate the actual tags
         like: ``map(site_tag_id.format, range(len(arrays)))``.
-    tags : str or sequence of str, optional
-        Global tags to attach to all tensors.
-    bond_name : str, optional
-        The base name of the bond indices, onto which uuids will be added.
     """
 
     _EXTRA_PROPS = (
@@ -3203,12 +3239,14 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
     def __init__(
         self,
         arrays,
+        *,
+        sites=None,
+        L=None,
         shape="lrud",
-        site_tag_id="I{}",
         tags=None,
         upper_ind_id="k{}",
         lower_ind_id="b{}",
-        bond_name="",
+        site_tag_id="I{}",
         **tn_opts,
     ):
         # short-circuit for copying
@@ -3218,56 +3256,63 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
 
         arrays = tuple(arrays)
 
-        self._L = len(arrays)
+        if sites is None:
+            # assume dense
+            sites = range(len(arrays))
+            if L is None:
+                L = len(arrays)
+            num_sites = L
+        else:
+            sites = tuple(sites)
+            if L is None:
+                L = max(sites) + 1
+            num_sites = len(sites)
 
-        # process site indices
+        self._L = L
         self._upper_ind_id = upper_ind_id
         self._lower_ind_id = lower_ind_id
-        upper_inds = map(upper_ind_id.format, range(self.L))
-        lower_inds = map(lower_ind_id.format, range(self.L))
-
-        # process site tags
         self._site_tag_id = site_tag_id
-        site_tags = map(site_tag_id.format, range(self.L))
-        if tags is not None:
-            if isinstance(tags, str):
-                tags = (tags,)
-            else:
-                tags = tuple(tags)
-
-            site_tags = tuple((st,) + tags for st in site_tags)
-
         self.cyclic = ops.ndim(arrays[0]) == 4
 
-        # transpose arrays to 'lrud' order.
-        def gen_orders():
-            lud_ord = tuple(shape.replace("r", "").find(x) for x in "lud")
-            rud_ord = tuple(shape.replace("l", "").find(x) for x in "rud")
-            lrud_ord = tuple(map(shape.find, "lrud"))
-            yield rud_ord if not self.cyclic else lrud_ord
-            for _ in range(self.L - 2):
-                yield lrud_ord
-            yield lud_ord if not self.cyclic else lrud_ord
+        # this is the perm needed to bring the arrays from
+        # their current `shape`, to the desired 'lrud' order
+        lrud_order = tuple(map(shape.find, "lrud"))
 
-        def gen_inds():
-            cyc_bond = (rand_uuid(base=bond_name),) if self.cyclic else ()
+        tensors = []
+        tags = tags_to_oset(tags)
+        bonds = [rand_uuid() for _ in range(num_sites)]
+        bonds.append(bonds[0])
 
-            nbond = rand_uuid(base=bond_name)
-            yield (*cyc_bond, nbond, next(upper_inds), next(lower_inds))
-            pbond = nbond
-            for _ in range(self.L - 2):
-                nbond = rand_uuid(base=bond_name)
-                yield (pbond, nbond, next(upper_inds), next(lower_inds))
-                pbond = nbond
-            yield (pbond, *cyc_bond, next(upper_inds), next(lower_inds))
+        for i, (site, array) in enumerate(zip(sites, arrays)):
+            inds = []
 
-        def gen_tensors():
-            for array, site_tag, inds, order in zip(
-                arrays, site_tags, gen_inds(), gen_orders()
-            ):
-                yield Tensor(transpose(array, order), inds=inds, tags=site_tag)
+            if (i == 0) and not self.cyclic:
+                # only right bond
+                order = tuple(shape.replace("l", "").find(x) for x in "rud")
+                inds.append(bonds[i + 1])
+            elif (i == num_sites - 1) and not self.cyclic:
+                # only left bond
+                order = tuple(shape.replace("r", "").find(x) for x in "lud")
+                inds.append(bonds[i])
+            else:
+                order = lrud_order
+                # both bonds
+                inds.append(bonds[i])
+                inds.append(bonds[i + 1])
 
-        super().__init__(gen_tensors(), virtual=True, **tn_opts)
+            # physical indices
+            inds.append(upper_ind_id.format(site))
+            inds.append(lower_ind_id.format(site))
+
+            tensors.append(
+                Tensor(
+                    data=transpose(array, order),
+                    inds=inds,
+                    tags=tags | oset([site_tag_id.format(site)]),
+                )
+            )
+
+        super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
     def from_fill_fn(
@@ -3276,13 +3321,55 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         L,
         bond_dim,
         phys_dim=2,
+        sites=None,
         cyclic=False,
         shape="lrud",
-        site_tag_id="I{}",
         tags=None,
         upper_ind_id="k{}",
         lower_ind_id="b{}",
+        site_tag_id="I{}",
     ):
+        """Create an MPO by supplying a 'filling' function to generate the data
+        for each site.
+
+        Parameters
+        ----------
+        fill_fn : callable
+            A function with signature
+            ``fill_fn(shape : tuple[int]) -> array_like``.
+        L : int
+            The number of sites.
+        bond_dim : int
+            The bond dimension.
+        phys_dim : int or Sequence[int], optional
+            The physical dimension(s) of each site, if a sequence it will be
+            cycled over.
+        sites : None or sequence of int, optional
+            Construct the MPO on these sites only. If not given, enumerate from
+            zero.
+        cyclic : bool, optional
+            Whether the MPO should be cyclic (periodic).
+        shape : str, optional
+            String specifying layout of the tensors. E.g. 'lrud' (the default)
+            indicates the shape corresponds left-bond, right-bond, 'up'
+            physical index, 'down' physical index. End tensors have either
+            'l' or 'r' dropped from the string.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
+        upper_ind_id : str
+            A string specifiying how to label the upper physical site indices.
+            Should contain a ``'{}'`` placeholder.
+        lower_ind_id : str
+            A string specifiying how to label the lower physical site indices.
+            Should contain a ``'{}'`` placeholder.
+        site_tag_id : str, optional
+            How to tag the physical sites. Should contain a ``'{}'``
+            placeholder.
+
+        Returns
+        -------
+        MatrixProductState
+        """
         if set(shape) - {"l", "r", "u", "d"}:
             raise ValueError(f"Invalid shape string: {shape}.")
 
@@ -3300,30 +3387,38 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
             lower_ind_id=lower_ind_id,
         )
 
-        global_tags = tags_to_oset(tags)
-        bonds = collections.defaultdict(rand_uuid)
+        # which sites are actually present
+        if sites is None:
+            sites = range(L)
+        else:
+            sites = tuple(sites)
+        num_sites = len(sites)
 
-        for i in range(L):
+        global_tags = tags_to_oset(tags)
+        bonds = [rand_uuid() for _ in range(num_sites)]
+        bonds.append(bonds[0])
+
+        for i, site in enumerate(sites):
             p = next(phys_dims)
             inds = []
             data_shape = []
             for c in shape:
                 if c == "l":
                     if (i - 1) >= 0 or cyclic:
-                        inds.append(bonds[frozenset([(i - 1) % L, i])])
+                        inds.append(bonds[i])
                         data_shape.append(bond_dim)
                 elif c == "r":
                     if (i + 1) < L or cyclic:
-                        inds.append(bonds[frozenset([i, (i + 1) % L])])
+                        inds.append(bonds[i + 1])
                         data_shape.append(bond_dim)
                 elif c == "u":
-                    inds.append(upper_ind_id.format(i))
+                    inds.append(upper_ind_id.format(site))
                     data_shape.append(p)
                 else:  # c == "d"
-                    inds.append(lower_ind_id.format(i))
+                    inds.append(lower_ind_id.format(site))
                     data_shape.append(p)
             data = fill_fn(data_shape)
-            tags = global_tags | oset((site_tag_id.format(i),))
+            tags = global_tags | oset((site_tag_id.format(site),))
             mpo |= Tensor(data, inds=inds, tags=tags)
 
         return mpo
@@ -3435,8 +3530,8 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
 
         return mpo
 
-    def fill_empty_sites_with_identities(
-        self, mode="full", phys_dim=None, inplace=False
+    def fill_empty_sites(
+        self, mode="full", phys_dim=None, fill_array=None, inplace=False
     ):
         """Fill any empty sites of this MPO with identity tensors, adding
         size 1 bonds or draping existing bonds where necessary such that the
@@ -3451,6 +3546,9 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
             The physical dimension of the identity tensors to add. If not
             specified, will use the upper physical dimension of the first
             present site.
+        fill_array : array, optional
+            The array to use for the identity tensors. If not specified, will
+            use the identity array of the same dtype as the first present site.
         inplace : bool, optional
             Whether to perform the operation inplace.
 
@@ -3459,8 +3557,6 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         MatrixProductOperator
             The modified MPO.
         """
-        check_opt("mode", mode, ("full", "minimal"))
-
         mpo = self if inplace else self.copy()
 
         sites_present = tuple(mpo.gen_sites_present())
@@ -3468,45 +3564,65 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         sitei = sites_present[0]
         sitef = sites_present[-1]
 
-        t0 = mpo[sitei]
-
-        if phys_dim is None:
-            d = mpo.phys_dim(sitei)
+        if fill_array is None:
+            t0 = mpo[sitei]
+            if phys_dim is None:
+                d = mpo.phys_dim(sitei)
+            fill_array = do("eye", d, dtype=t0.dtype, like=t0.data)
 
         if mode == "full":
-            site_range = range(mpo.L)
-        else:  # mode == "minimal"
-            site_range = range(sitei, sitef + 1)
+            sites_to_add = [
+                site for site in range(mpo.L) if site not in sites_present_set
+            ]
+        elif mode == "minimal":
+            sites_to_add = [
+                site
+                for site in range(sitei, sitef + 1)
+                if site not in sites_present_set
+            ]
+        else:
+            sites_to_add = list(mode)
+        sites_to_add_set = set(sites_to_add)
 
-        for site in site_range:
-            if site not in sites_present_set:
-                mpo |= Tensor(
-                    data=do("eye", d, dtype=t0.dtype, like=t0.data),
-                    inds=(mpo.upper_ind(site), mpo.lower_ind(site)),
-                    tags=mpo.site_tag(site),
-                )
+        new_sites = list(sites_present)
+        new_sites.extend(sites_to_add)
+        new_sites.sort()
 
+        # add desired identites
+        for site in sites_to_add:
+            mpo |= Tensor(
+                data=fill_array,
+                inds=(mpo.upper_ind(site), mpo.lower_ind(site)),
+                tags=mpo.site_tag(site),
+            )
+
+        # connect up between existing tensors
         for si, sj in pairwise(sites_present):
             if bonds(mpo[si], mpo[sj]):
-                # need to drape existing bonds
-                for i in range(si, sj - 1):
-                    mpo.drape_bond_between_(i, sj, i + 1)
-            else:
-                # just add bond dim 1
-                for i in range(si, sj):
-                    new_bond(mpo[i], mpo[i + 1])
+                # existing bond -> drape it thru
+                sl = si
+                for k in range(si + 1, sj):
+                    if k in sites_to_add_set:
+                        mpo.drape_bond_between_(sl, sj, k)
+                        sl = k
 
-        if mode == "full":
-            for i in range(0, sitei):
-                new_bond(mpo[i], mpo[i + 1])
-            for i in range(sitef, mpo.L - 1):
-                new_bond(mpo[i], mpo[i + 1])
+            else:
+                # no bond -> just add bond dim 1
+                sl = si
+                for k in range(si, sj - 1):
+                    if k in sites_to_add_set:
+                        new_bond(mpo[sl], mpo[k])
+                        sl = k
+                new_bond(mpo[sl], mpo[sj])
+
+        # connect up on either side of existing patch
+        for si, sj in pairwise(new_sites):
+            if (sj <= sitei) or (si >= sitef):
+                new_bond(mpo[si], mpo[sj])
 
         return mpo
 
-    fill_empty_sites_with_identities_ = functools.partialmethod(
-        fill_empty_sites_with_identities, inplace=True
-    )
+    fill_empty_sites_ = functools.partialmethod(fill_empty_sites, inplace=True)
 
     def add_MPO(self, other, inplace=False, **kwargs):
         return tensor_network_ag_sum(self, other, inplace=inplace, **kwargs)

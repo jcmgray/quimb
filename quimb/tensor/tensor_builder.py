@@ -3899,7 +3899,9 @@ def MPS_sampler(L, dtype=complex, squeeze=True, **mps_opts):
 # --------------------------------------------------------------------------- #
 
 
-def MPO_identity(L, phys_dim=2, dtype="float64", cyclic=False, **mpo_opts):
+def MPO_identity(
+    L, sites=None, phys_dim=2, dtype="float64", cyclic=False, **mpo_opts
+):
     """Generate an identity MPO of size ``L``.
 
     Parameters
@@ -3919,29 +3921,43 @@ def MPO_identity(L, phys_dim=2, dtype="float64", cyclic=False, **mpo_opts):
     II = np.identity(phys_dim, dtype=dtype)
     cyc_dim = (1,) if cyclic else ()
 
-    def gen_arrays():
-        yield II.reshape(*cyc_dim, 1, phys_dim, phys_dim)
-        for _ in range(L - 2):
-            yield II.reshape(1, 1, phys_dim, phys_dim)
-        yield II.reshape(1, *cyc_dim, phys_dim, phys_dim)
+    if sites is None:
+        si = 0
+        sf = L - 1
+        num_middle = L - 2
+    else:
+        sites = tuple(sites)
+        si = sites[0]
+        sf = sites[-1]
+        num_middle = len(sites) - 2
+        mpo_opts["sites"] = sites
 
-    return MatrixProductOperator(gen_arrays(), **mpo_opts)
+    if si == sf:
+        raise ValueError(
+            "Identity MPO cannot have the same start and end site."
+        )
+
+    IIl = reshape(II, (*cyc_dim, 1, phys_dim, phys_dim))
+    IIm = reshape(II, (1, 1, phys_dim, phys_dim))
+    IIr = reshape(II, (1, *cyc_dim, phys_dim, phys_dim))
+
+    arrays = [IIl] + [IIm] * num_middle + [IIr]
+
+    return MatrixProductOperator(arrays, **mpo_opts)
 
 
 def MPO_identity_like(mpo, **mpo_opts):
     """Return an identity matrix operator with the same physical index and
     inds/tags as ``mpo``.
     """
-    return MPO_identity(
-        L=mpo.L,
-        phys_dim=mpo.phys_dim(),
-        dtype=mpo.dtype,
-        site_tag_id=mpo.site_tag_id,
-        cyclic=mpo.cyclic,
-        upper_ind_id=mpo.upper_ind_id,
-        lower_ind_id=mpo.lower_ind_id,
-        **mpo_opts,
-    )
+    mpo_opts.setdefault("L", mpo.L)
+    mpo_opts.setdefault("phys_dim", mpo.phys_dim())
+    mpo_opts.setdefault("dtype", mpo.dtype)
+    mpo_opts.setdefault("site_tag_id", mpo.site_tag_id)
+    mpo_opts.setdefault("cyclic", mpo.cyclic)
+    mpo_opts.setdefault("upper_ind_id", mpo.upper_ind_id)
+    mpo_opts.setdefault("lower_ind_id", mpo.lower_ind_id)
+    return MPO_identity(**mpo_opts)
 
 
 def MPO_zeros(L, phys_dim=2, dtype="float64", cyclic=False, **mpo_opts):
@@ -3987,16 +4003,14 @@ def MPO_zeros_like(mpo, **mpo_opts):
     -------
     MatrixProductOperator
     """
-    return MPO_zeros(
-        L=mpo.L,
-        phys_dim=mpo.phys_dim(),
-        dtype=mpo.dtype,
-        site_tag_id=mpo.site_tag_id,
-        upper_ind_id=mpo.upper_ind_id,
-        cyclic=mpo.cyclic,
-        lower_ind_id=mpo.lower_ind_id,
-        **mpo_opts,
-    )
+    mpo_opts.setdefault("L", mpo.L)
+    mpo_opts.setdefault("phys_dim", mpo.phys_dim())
+    mpo_opts.setdefault("dtype", mpo.dtype)
+    mpo_opts.setdefault("site_tag_id", mpo.site_tag_id)
+    mpo_opts.setdefault("cyclic", mpo.cyclic)
+    mpo_opts.setdefault("upper_ind_id", mpo.upper_ind_id)
+    mpo_opts.setdefault("lower_ind_id", mpo.lower_ind_id)
+    return MPO_zeros(**mpo_opts)
 
 
 def MPO_product_operator(
@@ -4400,7 +4414,6 @@ class SpinHam1D:
         lower_ind_id="b{}",
         site_tag_id="I{}",
         tags=None,
-        bond_name="",
     ):
         """Build an MPO instance of this spin hamiltonian of size ``L``. See
         also ``MatrixProductOperator``.
@@ -4456,7 +4469,6 @@ class SpinHam1D:
 
         return MatrixProductOperator(
             arrays=gen_tensors(),
-            bond_name=bond_name,
             upper_ind_id=upper_ind_id,
             lower_ind_id=lower_ind_id,
             site_tag_id=site_tag_id,

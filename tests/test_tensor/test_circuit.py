@@ -641,6 +641,46 @@ class TestCircuit:
         (b,) = circ.sample(1, group_size=3)
         assert b[N - 2] == "0"
 
+    def test_multi_controlled_mps_circuit(self):
+        N = 10
+        rng = np.random.default_rng(42)
+
+        gates = []
+        for i in range(N):
+            gates.append(
+                qtn.Gate(
+                    "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                )
+            )
+        gates.append(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[6, 2],
+                controls=[8, 3, 4, 0],
+            )
+        )
+        for i in range(N):
+            gates.append(
+                qtn.Gate(
+                    "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                )
+            )
+        gates.append(
+            qtn.Gate.from_raw(
+                qu.rand_uni(2**3), qubits=[0, 9, 5], controls=[1, 2, 7]
+            )
+        )
+
+        circ = qtn.Circuit(N=10)
+        circ.apply_gates(gates)
+        psi_lazy = circ.psi
+        circ = qtn.CircuitMPS(N=10)
+        circ.apply_gates(gates)
+        mps = circ.psi
+        assert mps.norm() == pytest.approx(1.0)
+        assert mps.distance_normalized(psi_lazy) < 1e-6
+
 
 class TestCircuitGen:
     @pytest.mark.parametrize(

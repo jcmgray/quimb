@@ -29,10 +29,11 @@ from ..utils import (
 )
 from ..utils import progbar as _progbar
 from . import array_ops as ops
-from .tensor_1d import Dense1D
+from .tensor_1d import Dense1D, MatrixProductOperator
 from .tensor_arbgeom import TensorNetworkGenVector, TensorNetworkGenOperator
 from .tensor_builder import (
     HTN_CP_operator_from_products,
+    MPO_identity_like,
     MPS_computational_state,
     TN_from_sites_computational_state,
 )
@@ -1022,14 +1023,20 @@ def build_controlled_gate_htn(
     return htn
 
 
-def apply_controlled_gate(
+def _apply_controlled_gate_mps(psi, gate, tags=None, **gate_opts):
+    """Apply a multi-controlled gate to a state represented as an MPS."""
+    submpo = gate.build_mpo()
+    where = sorted((*gate.controls, *gate.qubits))
+    psi.gate_with_submpo_(submpo, where, **gate_opts)
+
+
+def _apply_controlled_gate_htn(
     psi,
     gate,
     tags=None,
-    contract="auto-split-gate",
     propagate_tags="register",
+    **gate_opts
 ):
-    assert contract == "auto-split-gate"
     assert propagate_tags == "register"
 
     all_qubits = (*gate.controls, *gate.qubits)
@@ -1055,7 +1062,29 @@ def apply_controlled_gate(
         htn,
         lower_inds,
         upper_inds,
+        **gate_opts,
     )
+
+
+def apply_controlled_gate(
+    psi,
+    gate,
+    tags=None,
+    contract="auto-split-gate",
+    propagate_tags="register",
+    **gate_opts,
+):
+    if contract in ("auto-mps", "nonlocal"):
+        _apply_controlled_gate_mps(psi, gate, tags=tags, **gate_opts)
+    elif contract in ("auto-split-gate",):
+        _apply_controlled_gate_htn(
+            psi, gate, tags=tags, propagate_tags=propagate_tags, **gate_opts
+        )
+    else:
+        raise ValueError(
+            f"Contract method '{contract}' not "
+            "supported for multi-controlled gates."
+        )
 
 
 @functools.lru_cache(2**15)
@@ -1205,7 +1234,7 @@ class Gate:
 
     def build_array(self):
         """Build the array representation of the gate. For controlled gates
-        this excludes the control qubits.
+        this *excludes* the control qubits.
         """
         if self._special and (self._label not in CONSTANT_GATES):
             # these don't have an array representation
@@ -1232,6 +1261,37 @@ class Gate:
         if self._array is None:
             self._array = self.build_array()
         return self._array
+
+    def build_mpo(self, L=None, **kwargs):
+        """Build an MPO representation of this gate."""
+        G = self.array
+
+        if L is None:
+            L = max((*self.qubits, *self.controls), default=0) + 1
+
+        if not self.controls:
+            return MatrixProductOperator.from_dense(
+                G, sites=self.qubits, L=L, **kwargs
+            )
+
+        IG = qu.identity(2 ** len(self.qubits))
+        IG = reshape(IG, G.shape)
+        p1 = qu.down(qtype="dop")
+
+        # form (G - 1) on target qubits
+        mpo = MatrixProductOperator.from_dense(
+            G - IG, sites=self.qubits, L=L, **kwargs
+        )
+
+        # take tensor product with |11...><11...| on controls
+        mpo.fill_empty_sites_(mode=self.controls, fill_array=p1)
+
+        # add with identity on all qubits
+        mpo_I = MPO_identity_like(
+            mpo, sites=sorted((*self.qubits, *self.controls))
+        )
+
+        return mpo.add_MPO_(mpo_I)
 
     def __repr__(self):
         return (
@@ -1377,6 +1437,11 @@ class Circuit:
     gate_opts : dict_like, optional
         Default keyword arguments to supply to each
         :func:`~quimb.tensor.tensor_1d.gate_TN_1D` call during the circuit.
+    gate_contract : str, optional
+        Shortcut for setting the default `'contract'` option in `gate_opts`.
+    gate_propagate_tags : str, optional
+        Shortcut for setting the default `'propagate_tags'` option in
+        `gate_opts`.
     tags : str or sequence of str, optional
         Tag(s) to add to the initial wavefunction tensors (whether these are
         propagated to the rest of the circuit's tensors depends on
@@ -1385,6 +1450,15 @@ class Circuit:
         Ensure the initial state has this dtype.
     psi0_tag : str, optional
         Ensure the initial state has this tag.
+    tag_gate_numbers : bool, optional
+        Whether to tag each gate tensor with its number in the circuit, like
+        ``"GATE_{g}"``.
+    tag_gate_rounds : bool, optional
+        Whether to tag each gate tensor with its number in the circuit, like
+        ``"ROUND_{r}"``.
+    tag_gate_labels : bool, optional
+        Whether to tag each gate tensor with its gate type label, e.g.
+        ``{"X_1/2", "ISWAP", "CCX", ...}``..
     bra_site_ind_id : str, optional
         Use this to label 'bra' site indices when creating certain (mostly
         internal) intermediate tensor networks.
@@ -1447,7 +1521,11 @@ class Circuit:
         tags=None,
         psi0_dtype="complex128",
         psi0_tag="PSI0",
+        tag_gate_numbers=True,
+        tag_gate_rounds=True,
+        tag_gate_labels=True,
         bra_site_ind_id="b{}",
+        to_backend=None,
     ):
         if (N is None) and (psi0 is None):
             raise ValueError("You must supply one of `N` or `psi0`.")
@@ -1473,6 +1551,17 @@ class Circuit:
                 tags = (tags,)
             for tag in tags:
                 self._psi.add_tag(tag)
+
+        self.tag_gate_numbers = tag_gate_numbers
+        self.tag_gate_rounds = tag_gate_rounds
+        self.tag_gate_labels = tag_gate_labels
+
+        self.to_backend = to_backend
+        if self.to_backend is not None:
+            self._psi.apply_to_arrays(self.to_backend)
+            self._backend_gate_cache = {}
+        else:
+            self._backend_gate_cache = None
 
         self.gate_opts = ensure_dict(gate_opts)
         self.gate_opts.setdefault("contract", gate_contract)
@@ -1561,12 +1650,22 @@ class Circuit:
         )
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
-        """Apply a ``Gate`` to this ``Circuit``."""
+        """Apply a ``Gate`` to this ``Circuit``. This is the main method that
+        all calls to apply a gate should go through.
+
+        Parameters
+        ----------
+        gate : Gate
+            The gate to apply.
+        tags : str or sequence of str, optional
+            Tags to add to the gate tensor(s).
+        """
         tags = tags_to_oset(tags)
-        tags.add(f"GATE_{len(self.gates)}")
-        if gate.round is not None:
+        if self.tag_gate_numbers:
+            tags.add(f"GATE_{len(self.gates)}")
+        if self.tag_gate_rounds and (gate.round is not None):
             tags.add(f"ROUND_{gate.round}")
-        if gate.tag is not None:
+        if self.tag_gate_labels and (gate.tag is not None):
             tags.add(gate.tag)
 
         # overide any default gate opts
@@ -1580,8 +1679,15 @@ class Circuit:
                 self._psi, *gate.params, *gate.qubits, **opts
             )
         else:
+            G = gate.array
+            if self.to_backend is not None:
+                key = id(G)
+                if key not in self._backend_gate_cache:
+                    self._backend_gate_cache[key] = self.to_backend(G)
+                G = self._backend_gate_cache[key]
+
             # apply the gate to the TN!
-            self._psi.gate_(gate.array, gate.qubits, tags=tags, **opts)
+            self._psi.gate_(G, gate.qubits, tags=tags, **opts)
 
         # keep track of the gates applied
         self.gates.append(gate)
@@ -1641,11 +1747,13 @@ class Circuit:
         )
         self._apply_gate(gate, **gate_opts)
 
-    def apply_gate_raw(self, U, where, gate_round=None, **gate_opts):
+    def apply_gate_raw(
+        self, U, where, controls=None, gate_round=None, **gate_opts
+    ):
         """Apply the raw array ``U`` as a gate on qubits in ``where``. It will
         be assumed to be unitary for the sake of computing reverse lightcones.
         """
-        gate = Gate.from_raw(U, where, round=gate_round)
+        gate = Gate.from_raw(U, where, controls=controls, round=gate_round)
         self._apply_gate(gate, **gate_opts)
 
     def apply_gates(self, gates, **gate_opts):
@@ -3696,18 +3804,18 @@ class CircuitMPS(Circuit):
     ):
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault("contract", gate_contract)
+        gate_opts.setdefault("propagate_tags", False)
         # this is used to pass around the canonical form
         gate_opts.setdefault("info", {})
+
+        circuit_opts.setdefault("tag_gate_numbers", False)
+        circuit_opts.setdefault("tag_gate_rounds", False)
+        circuit_opts.setdefault("tag_gate_labels", False)
+
         super().__init__(N, psi0, gate_opts, **circuit_opts)
 
     def _init_state(self, N, dtype="complex128"):
         return MPS_computational_state("0" * N, dtype=dtype)
-
-    def _apply_gate(self, gate, tags=None, **gate_opts):
-        if gate.controls:
-            raise ValueError("`CircuitMPS` does not yet support `controls`.")
-
-        super()._apply_gate(gate, tags=tags, **gate_opts)
 
     @property
     def psi(self):
@@ -3733,6 +3841,18 @@ class CircuitMPS(Circuit):
         """
         return self.psi
 
+    def fidelity_estimate(self):
+        """Estimate the fidelity of the current state based on its norm, which
+        tracks how much the state has been truncated.
+        """
+        cur_orthog = self.gate_opts["info"].get("cur_orthog", None)
+
+        if cur_orthog is None:
+            return abs(self._psi.norm()) ** 2
+
+        cmin, cmax = cur_orthog
+        return abs(self._psi[cmin : cmax + 1].norm()) ** 2
+
 
 class CircuitPermMPS(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
@@ -3744,6 +3864,7 @@ class CircuitPermMPS(CircuitMPS):
     is no longer an MPS. Use `circ.get_psi_unordered()` to get the unpermuted
     MPS and use `circ.qubits` to get the current qubit ordering if you prefer.
     """
+
     def __init__(
         self,
         N=None,
@@ -3761,11 +3882,13 @@ class CircuitPermMPS(CircuitMPS):
         self.qubits = list(range(self.N))
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
+        # first translate gate qubits to their current 'physical' location
         qubits = gate.qubits
         phys_sites = [self.qubits.index(q) for q in qubits]
         gate = gate.copy()
         gate.qubits = phys_sites
 
+        # if the gate is non-local, account for swap (without swap back)
         if len(phys_sites) == 2:
             i, j = sorted(phys_sites)
             q = self.qubits.pop(j)
@@ -3775,6 +3898,7 @@ class CircuitPermMPS(CircuitMPS):
         super()._apply_gate(gate, tags=tags, **gate_opts)
 
     def calc_qubit_ordering(self, qubits=None):
+        """Given by the current qubit permutation."""
         if qubits is None:
             return tuple(self.qubits)
         else:
@@ -3791,14 +3915,18 @@ class CircuitPermMPS(CircuitMPS):
         # need to reindex and retag the MPS
         psi = self._psi.copy()
         psi.view_as_(TensorNetworkGenVector)
-        psi.reindex_({
-            psi.site_ind(i): psi.site_ind(q)
-            for i, q in enumerate(self.qubits)
-        })
-        psi.retag_({
-            psi.site_tag(i): psi.site_tag(q)
-            for i, q in enumerate(self.qubits)
-        })
+        psi.reindex_(
+            {
+                psi.site_ind(i): psi.site_ind(q)
+                for i, q in enumerate(self.qubits)
+            }
+        )
+        psi.retag_(
+            {
+                psi.site_tag(i): psi.site_tag(q)
+                for i, q in enumerate(self.qubits)
+            }
+        )
         return psi
 
 

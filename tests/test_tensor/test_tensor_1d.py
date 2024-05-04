@@ -967,7 +967,7 @@ class TestMatrixProductOperator:
         perm = [sites.index(i) for i in range(4)]
         assert_allclose(qu.permute(A, dims, perm), mpo.to_dense())
 
-    def test_fill_empty_sites_with_identities(self):
+    def test_fill_empty_sites(self):
         mps = qtn.MPS_rand_state(7, 3)
         k = mps.to_dense()
         A, B, C = (qu.rand_uni(2) for _ in range(3))
@@ -978,14 +978,14 @@ class TestMatrixProductOperator:
         assert mpo.bond_size(2, 3) == 1
         assert mpo.num_tensors == 3
         assert mpo[3].bonds(mpo[5])
-        mpo.fill_empty_sites_with_identities_("minimal")
+        mpo.fill_empty_sites_("minimal")
         assert not mpo[3].bonds(mpo[5])
         assert mpo.num_tensors == 4
         assert_allclose(
             mps.gate_with_op_lazy(mpo).to_dense(),
             Ak,
         )
-        mpo.fill_empty_sites_with_identities_("full")
+        mpo.fill_empty_sites_("full")
         assert mpo.num_tensors == 7
         assert_allclose(
             mps.gate_with_op_lazy(mpo).to_dense(),
