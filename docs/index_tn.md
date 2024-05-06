@@ -11,5 +11,6 @@ tensor-optimization
 tensor-1d
 tensor-2d
 tensor-circuit
+tensor-circuit-mps
 tensor-design
 ```

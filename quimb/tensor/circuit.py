@@ -1031,11 +1031,7 @@ def _apply_controlled_gate_mps(psi, gate, tags=None, **gate_opts):
 
 
 def _apply_controlled_gate_htn(
-    psi,
-    gate,
-    tags=None,
-    propagate_tags="register",
-    **gate_opts
+    psi, gate, tags=None, propagate_tags="register", **gate_opts
 ):
     assert propagate_tags == "register"
 
@@ -1211,6 +1207,13 @@ class Gate:
             self._qubits = None
         else:
             self._qubits = tuple(qubits)
+
+    @property
+    def total_qubit_count(self):
+        nq = len(self._qubits)
+        if self._controls:
+            nq += len(self._controls)
+        return nq
 
     @property
     def controls(self):
@@ -1644,6 +1647,36 @@ class Circuit:
         qc.apply_gates(info["gates"])
         return qc
 
+    @classmethod
+    def from_gates(cls, gates, N=None, progbar=False, **kwargs):
+        """Generate a ``Circuit`` instance from a sequence of gates.
+
+        Parameters
+        ----------
+        gates : sequence[Gate] or sequence[tuple]
+            The sequence of gates to apply.
+        N : int, optional
+            The number of qubits. If not given, will be inferred from the
+            gates.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        kwargs
+            Supplied to the ``Circuit`` constructor.
+        """
+        if N is None:
+            gates = tuple(gates)
+
+            N = 0
+            for gate in gates:
+                if gate.qubits:
+                    N = max(N, max(gate.qubits) + 1)
+                if gate.controls:
+                    N = max(N, max(gate.controls) + 1)
+
+        qc = cls(N, **kwargs)
+        qc.apply_gates(gates, progbar=progbar)
+        return qc
+
     def _init_state(self, N, dtype="complex128"):
         return TN_from_sites_computational_state(
             site_map={i: "0" for i in range(N)}, dtype=dtype
@@ -1756,16 +1789,21 @@ class Circuit:
         gate = Gate.from_raw(U, where, controls=controls, round=gate_round)
         self._apply_gate(gate, **gate_opts)
 
-    def apply_gates(self, gates, **gate_opts):
+    def apply_gates(self, gates, progbar=False, **gate_opts):
         """Apply a sequence of gates to this tensor network quantum circuit.
 
         Parameters
         ----------
-        gates : list[list[str]]
+        gates : Sequence[Gate] or Sequence[Tuple]
             The sequence of gates to apply.
         gate_opts
             Supplied to :meth:`~quimb.tensor.circuit.Circuit.apply_gate`.
         """
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = _progbar(gates)
+
         for gate in gates:
             if isinstance(gate, Gate):
                 self._apply_gate(gate, **gate_opts)
@@ -3753,6 +3791,12 @@ class CircuitMPS(Circuit):
     psi0 : TensorNetwork1DVector, optional
         The initial state, assumed to be ``|00000....0>`` if not given. The
         state is always copied and the tag ``PSI0`` added.
+    max_bond : int, optional
+        The maximum bond dimension to truncate to when applying gates, if any.
+        This is simply a shortcut for setting ``gate_opts['max_bond']``.
+    cutoff : float, optional
+        The singular value cutoff to use when truncating the state.
+        This is simply a shortcut for setting ``gate_opts['cutoff']``.
     gate_opts : dict, optional
         Default options to pass to each gate, for example, "max_bond" and
         "cutoff" etc.
@@ -3797,7 +3841,10 @@ class CircuitMPS(Circuit):
     def __init__(
         self,
         N=None,
+        *,
         psi0=None,
+        max_bond=None,
+        cutoff=1e-10,
         gate_opts=None,
         gate_contract="auto-mps",
         **circuit_opts,
@@ -3805,6 +3852,8 @@ class CircuitMPS(Circuit):
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault("contract", gate_contract)
         gate_opts.setdefault("propagate_tags", False)
+        gate_opts.setdefault("max_bond", max_bond)
+        gate_opts.setdefault("cutoff", cutoff)
         # this is used to pass around the canonical form
         gate_opts.setdefault("info", {})
 
@@ -3816,6 +3865,30 @@ class CircuitMPS(Circuit):
 
     def _init_state(self, N, dtype="complex128"):
         return MPS_computational_state("0" * N, dtype=dtype)
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+            gates.set_description(
+                f"max_bond={self._psi.max_bond()}, "
+                f"error~={self.error_estimate():.3g}"
+            )
+
+        for gate in gates:
+            if isinstance(gate, Gate):
+                self._apply_gate(gate, **gate_opts)
+            else:
+                self.apply_gate(*gate, **gate_opts)
+
+            if progbar and (gate.total_qubit_count >= 2):
+                # these don't change for single qubit gates
+                gates.set_description(
+                    f"max_bond={self._psi.max_bond()}, "
+                    f"error~={self.error_estimate():.3g}"
+                )
 
     @property
     def psi(self):
@@ -3842,8 +3915,19 @@ class CircuitMPS(Circuit):
         return self.psi
 
     def fidelity_estimate(self):
-        """Estimate the fidelity of the current state based on its norm, which
-        tracks how much the state has been truncated.
+        r"""Estimate the fidelity of the current state based on its norm, which
+        tracks how much the state has been truncated:
+
+        .. math::
+
+            \tilde{F} =
+            \left| \langle \psi | \psi \rangle \right|^2
+            \approx
+            \left|\langle \psi_\mathrm{ideal} | \psi \rangle\right|^2
+
+        See Also
+        --------
+        error_estimate
         """
         cur_orthog = self.gate_opts["info"].get("cur_orthog", None)
 
@@ -3851,7 +3935,21 @@ class CircuitMPS(Circuit):
             return abs(self._psi.norm()) ** 2
 
         cmin, cmax = cur_orthog
-        return abs(self._psi[cmin : cmax + 1].norm()) ** 2
+        return abs(self._psi[cmin : cmax + 1].norm(tags=all)) ** 2
+
+    def error_estimate(self):
+        r"""Estimate the error in the current state based on the norm of the
+        discarded part of the state:
+
+        .. math::
+
+            \epsilon = 1 - \tilde{F}
+
+        See Also
+        --------
+        fidelity_estimate
+        """
+        return 1 - self.fidelity_estimate()
 
 
 class CircuitPermMPS(CircuitMPS):
@@ -3877,7 +3975,7 @@ class CircuitPermMPS(CircuitMPS):
         gate_opts.setdefault("contract", gate_contract)
         # this is used to pass around the canonical form
         gate_opts.setdefault("info", {})
-        super().__init__(N, psi0, gate_opts, **circuit_opts)
+        super().__init__(N, psi0=psi0, gate_opts=gate_opts, **circuit_opts)
         # keep track of the current qubit ordering
         self.qubits = list(range(self.N))
 
