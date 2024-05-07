@@ -326,5 +326,11 @@ def array_contract_pathinfo(*args, **kwargs):
     path = tree.get_path()
     eq = tree.get_eq()
 
+    if (eq == "->") and (len(path) == 0):
+        # XXX: opt_einsum does not support empty paths
+        # https://github.com/jcmgray/quimb/issues/231
+        # https://github.com/dgasmith/opt_einsum/pull/229
+        path = ((0,),)
+
     return oe.contract_path(eq, *shapes, shapes=True, optimize=path)[1]
 
