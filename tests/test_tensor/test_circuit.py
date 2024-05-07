@@ -282,7 +282,7 @@ class TestCircuit:
         random.shuffle(g_nq_np)
 
         psi0 = qtn.MPS_rand_state(2, 2)
-        circ = Circ(2, psi0, tags="PSI0")
+        circ = Circ(2, psi0=psi0, tags="PSI0")
 
         for g, n_q, n_p in g_nq_np:
             args = [
