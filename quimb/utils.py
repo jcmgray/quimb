@@ -690,8 +690,9 @@ def tree_flatten(tree, get_ref=False, is_leaf=is_not_container):
     objs : list
         The flattened list of leaf objects.
     (ref_tree) : pytree
-        If ``get_ref`` is ``True``, a reference tree, with leaves of None, is
-        returned which can be used to reconstruct the original tree.
+        If ``get_ref`` is ``True``, a reference tree, with leaves of type
+        ``Leaf``, is returned which can be used to reconstruct the original
+        tree.
     """
     objs = []
     if get_ref:

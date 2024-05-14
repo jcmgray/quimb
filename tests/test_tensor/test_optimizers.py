@@ -447,3 +447,36 @@ def test_shared_tags(tagged_qaoa_tn, backend):
                 test_data = t.get_params()
             else:
                 assert_allclose(test_data, t.get_params())
+
+
+@pytest.mark.parametrize(
+    "backend", [jax_case, autograd_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("simplify", ["ADCRS", "R"])
+def test_optimize_circuit_directly(backend, simplify):
+    if backend == "jax" and simplify == "ADCRS":
+        pytest.skip("JAX does not support dynamic simplification.")
+
+    circ = qtn.Circuit(2)
+    rng = np.random.default_rng(42)
+    circ.u3(*rng.uniform(high=2 * np.pi, size=3), 0, parametrize=True)
+    circ.u3(*rng.uniform(high=2 * np.pi, size=3), 1, parametrize=True)
+    circ.cnot(0, 1)
+    circ.u3(*rng.uniform(high=2 * np.pi, size=3), 0, parametrize=True)
+    circ.u3(*rng.uniform(high=2 * np.pi, size=3), 1, parametrize=True)
+
+    H = qu.ham_heis(2).astype("complex128")
+
+    def loss(circ, H):
+        return real(
+            circ.local_expectation(H, (0, 1), simplify_sequence=simplify)
+        )
+
+    assert loss(circ, H) > -0.74
+    tnopt = qtn.TNOptimizer(
+        circ, loss, loss_constants=dict(H=H), autodiff_backend=backend
+    )
+    circ_opt = tnopt.optimize(10)
+    assert circ_opt is not circ
+    assert loss(circ_opt, H) < -0.74
+    assert {t.backend for t in circ_opt.psi} == {"numpy"}

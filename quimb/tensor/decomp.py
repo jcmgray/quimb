@@ -108,6 +108,14 @@ def sgn_numba(x):
     return (x + x0) / (np.abs(x) + x0)
 
 
+@sgn.register("tensorflow")
+def sgn_tf(x):
+    with backend_like(x):
+        x0 = do("cast", do("equal", x, 0.0), x.dtype)
+        xa = do("cast", do("abs", x), x.dtype)
+        return (x + x0) / (xa + x0)
+
+
 def _trim_and_renorm_svd_result(
     U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
 ):
@@ -940,7 +948,7 @@ _similarity_compress_fns = {
 }
 
 
-def similarity_compress(X, max_bond, renorm=True, method="eigh"):
+def similarity_compress(X, max_bond, renorm=False, method="eigh"):
     if method == "eig":
         if get_dtype_name(X) == "float64":
             X = astype(X, "complex128")
@@ -1014,11 +1022,7 @@ def isometrize_cayley(x, backend):
         )
         x = x - dag(x)
         x = x / 2.0
-        if backend == "torch":
-            # XXX: move device handling upstream in to autoray?
-            Id = do("eye", d, like=x, device=x.device)
-        else:
-            Id = do("eye", d, like=x)
+        Id = do("eye", d, like=x)
         Q = do("linalg.solve", Id - x, Id + x)
         return Q[:m, :n]
 

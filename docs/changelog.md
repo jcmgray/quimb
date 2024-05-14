@@ -2,6 +2,15 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-8-2)=
+## v1.8.2 (unreleased)
+
+**Enhancements:**
+
+- [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer) can now accept an arbitrary pytree (nested combination of dicts, lists, tuples, etc. with `TensorNetwork`, `Tensor` or raw `array_like` objects as the leaves) as the target object to optimize.
+- [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer) can now directly optimize [`Circuit`](quimb.tensor.circuit.Circuit) objects, returning a new optimized circuit with updated parameters.
+- [`Circuit`](quimb.tensor.circuit.Circuit): add `.copy()`, `.get_params()` and `.set_params()` interface methods.
+
 
 (whats-new-1-8-1)=
 ## v1.8.1 (2024-05-06)
@@ -18,7 +27,7 @@ Release notes for `quimb`.
 -  [`MatrixProductState`](quimb.tensor.tensor_1d.MatrixProductState) and [`MatrixProductOperator`](quimb.tensor.tensor_1d.MatrixProductOperator), now support the ``sites`` kwarg in common constructors, enabling the TN to act on a subset of the full ``L`` sites.
 - add [`TensorNetwork.drape_bond_between`](quimb.tensor.tensor_core.TensorNetwork.drape_bond_between) for 'draping' an existing bond between two tensors through a third
 - add [`Tensor.new_ind_pair_with_identity`](quimb.tensor.tensor_core.Tensor.new_ind_pair_with_identity)
-- TN2D, TN3D and arbitrary geom classical partition function builders now all support `outputs=` kwarg specifying non-marginalized variables
+- TN2D, TN3D and arbitrary geom classical partition function builders ([`TN_classical_partition_function_from_edges`](quimb.tensor.tensor_builder.TN_classical_partition_function_from_edges)) now all support `outputs=` kwarg specifying non-marginalized variables
 - add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.experimental.belief_propagation.d1bp.D1BP)
 - add [`qtn.enforce_1d_like`](quimb.tensor.tensor_1d_compress.enforce_1d_like) for checking whether a tensor network is 1D-like, including automatically adding strings of identities between non-local bonds, expanding applicability of [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
 - add [`MatrixProductState.canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].

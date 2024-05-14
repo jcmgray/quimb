@@ -1,5 +1,5 @@
-"""Backend agnostic array operations.
-"""
+"""Backend agnostic array operations."""
+
 import functools
 import itertools
 
@@ -28,7 +28,7 @@ def asarray(array):
         # if numpy make sure array not subclass
         return numpy.asarray(array)
 
-    if hasattr(array, 'shape'):
+    if hasattr(array, "shape"):
         # otherwise don't touch things which are already array like
         return array
 
@@ -41,7 +41,7 @@ def asarray(array):
             return x
 
         backend = infer_backend(x)
-        if backend != 'builtins':
+        if backend != "builtins":
             # don't iterate any non-builtin containers
             backends.add(backend)
             return x
@@ -59,9 +59,9 @@ def asarray(array):
     if not backends:
         backend = "numpy"
     else:
-        backend, = backends
+        (backend,) = backends
 
-    return do('array', nested_tup, like=backend)
+    return do("array", nested_tup, like=backend)
 
 
 @functools.lru_cache(2**14)
@@ -76,11 +76,11 @@ def calc_fuse_perm_and_shape(shape, axes_groups):
     # n.b. all new groups will be inserted at the *first fused axis*
     position = min(g for gax in axes_groups for g in gax)
     axes_before = tuple(
-        ax for ax in range(position)
-        if ax2group.setdefault(ax, None) is None
+        ax for ax in range(position) if ax2group.setdefault(ax, None) is None
     )
     axes_after = tuple(
-        ax for ax in range(position, ndim)
+        ax
+        for ax in range(position, ndim)
         if ax2group.setdefault(ax, None) is None
     )
     perm = (*axes_before, *(ax for g in axes_groups for ax in g), *axes_after)
@@ -142,7 +142,7 @@ def fuse(x, *axes_groups, backend=None):
     _transpose = get_lib_fn(backend, "transpose")
     _reshape = get_lib_fn(backend, "reshape")
 
-    axes_groups =tuple(map(tuple, axes_groups))
+    axes_groups = tuple(map(tuple, axes_groups))
     if not any(axes_groups):
         return x
 
@@ -158,8 +158,7 @@ def fuse(x, *axes_groups, backend=None):
 
 
 def ndim(array):
-    """The number of dimensions of an array.
-    """
+    """The number of dimensions of an array."""
     try:
         return array.ndim
     except AttributeError:
@@ -168,22 +167,21 @@ def ndim(array):
 
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
+
 def iscomplex(x):
-    """Does ``x`` have a complex dtype?
-    """
-    if infer_backend(x) == 'builtins':
+    """Does ``x`` have a complex dtype?"""
+    if infer_backend(x) == "builtins":
         return isinstance(x, complex)
-    return 'complex' in get_dtype_name(x)
+    return "complex" in get_dtype_name(x)
 
 
 @compose
 def norm_fro(x):
-    """The frobenius norm of an array.
-    """
+    """The frobenius norm of an array."""
     try:
         return do("linalg.norm", reshape(x, (-1,)))
     except AttributeError:
-        return do("sum", do("abs", x)**2) ** 0.5
+        return do("sum", do("abs", x) ** 2) ** 0.5
 
 
 norm_fro.register("numpy", norm_fro_dense)
@@ -193,7 +191,7 @@ def sensibly_scale(x):
     """Take an array and scale it *very* roughly such that random tensor
     networks consisting of such arrays do not have gigantic norms.
     """
-    return x / norm_fro(x)**(1.5 / ndim(x))
+    return x / norm_fro(x) ** (1.5 / ndim(x))
 
 
 @njit
@@ -268,21 +266,23 @@ def find_diag_axes(x, atol=1e-12):
         return None
 
     backend = infer_backend(x)
+    zero = do("zeros", (), like=x)
 
     # use numba-accelerated version for numpy arrays
-    if backend == 'numpy':
+    if backend == "numpy":
         diag_axes = _numba_find_diag_axes(x, atol=atol)
         if diag_axes:
             # make it determinstic
             return min(diag_axes)
         return None
-    indxrs = do('indices', shape, like=backend)
+    indxrs = do("indices", shape, like=backend)
 
     for i, j in itertools.combinations(range(len(shape)), 2):
         if shape[i] != shape[j]:
             continue
-        if do('allclose', x[indxrs[i] != indxrs[j]], 0.0,
-              atol=atol, like=backend):
+        if do(
+            "allclose", x[indxrs[i] != indxrs[j]], zero, atol=atol, like=backend
+        ):
             return (i, j)
     return None
 
@@ -364,21 +364,27 @@ def find_antidiag_axes(x, atol=1e-12):
     backend = infer_backend(x)
 
     # use numba-accelerated version for numpy arrays
-    if backend == 'numpy':
+    if backend == "numpy":
         antidiag_axes = _numba_find_antidiag_axes(x, atol=atol)
         if antidiag_axes:
             # make it determinstic
             return min(antidiag_axes)
         return None
 
-    indxrs = do('indices', shape, like=backend)
+    indxrs = do("indices", shape, like=backend)
+    zero = do("zeros", (), like=x)
 
     for i, j in itertools.combinations(range(len(shape)), 2):
         di, dj = shape[i], shape[j]
         if di != dj:
             continue
-        if do('allclose', x[indxrs[i] != dj - 1 - indxrs[j]], 0.0,
-              atol=atol, like=backend):
+        if do(
+            "allclose",
+            x[indxrs[i] != dj - 1 - indxrs[j]],
+            zero,
+            atol=atol,
+            like=backend,
+        ):
             return (i, j)
     return None
 
@@ -459,17 +465,20 @@ def find_columns(x, atol=1e-12):
     backend = infer_backend(x)
 
     # use numba-accelerated version for numpy arrays
-    if backend == 'numpy':
+    if backend == "numpy":
         columns_pairs = _numba_find_columns(x, atol)
         if columns_pairs:
             return min(columns_pairs)
         return None
 
-    indxrs = do('indices', shape, like=backend)
+    indxrs = do("indices", shape, like=backend)
+    zero = do("zeros", (), like=x)
 
     for i in range(len(shape)):
         for j in range(shape[i]):
-            if do('allclose', x[indxrs[i] != j], 0.0, atol=atol, like=backend):
+            if do(
+                "allclose", x[indxrs[i] != j], zero, atol=atol, like=backend
+            ):
                 return (i, j)
 
     return None
@@ -492,7 +501,7 @@ class PArray:
     PTensor
     """
 
-    __slots__ = ('_fn', '_params', '_data', '_shape', '_shape_fn_id')
+    __slots__ = ("_fn", "_params", "_data", "_shape", "_shape_fn_id")
 
     def __init__(self, fn, params, shape=None):
         self.fn = fn

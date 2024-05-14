@@ -26,6 +26,7 @@ from ..utils import (
     ensure_dict,
     partition_all,
     partitionby,
+    tree_map,
 )
 from ..utils import progbar as _progbar
 from . import array_ops as ops
@@ -1072,7 +1073,10 @@ def apply_controlled_gate(
 ):
     if contract in ("auto-mps", "nonlocal"):
         _apply_controlled_gate_mps(psi, gate, tags=tags, **gate_opts)
-    elif contract in ("auto-split-gate",):
+    elif contract in (
+        "auto-split-gate",
+        "split-gate",
+    ):
         _apply_controlled_gate_htn(
             psi, gate, tags=tags, propagate_tags=propagate_tags, **gate_opts
         )
@@ -1134,7 +1138,7 @@ class Gate:
         if self._label not in ALL_GATES:
             raise ValueError(f"Unknown gate: {self._label}.")
 
-        self._params = tuple(params)
+        self._params = ops.asarray(params)
         if qubits is None:
             self._qubits = None
         else:
@@ -1234,6 +1238,18 @@ class Gate:
     @property
     def tag(self):
         return self._tag
+
+    def copy_with(self, **kwargs):
+        """Take a copy of this gate but with some attributes changed."""
+        label = kwargs.get("label", self._label)
+        params = kwargs.get("params", self._params)
+        qubits = kwargs.get("qubits", self._qubits)
+        controls = kwargs.get("controls", self._controls)
+        round = kwargs.get("round", self._round)
+        parametrize = kwargs.get("parametrize", self._parametrize)
+        return self.__class__(
+            label, params, qubits, controls, round, parametrize
+        )
 
     def build_array(self):
         """Build the array representation of the gate. For controlled gates
@@ -1428,7 +1444,9 @@ def parse_to_gate(
 
 
 class Circuit:
-    """Class for simulating quantum circuits using tensor networks.
+    """Class for simulating quantum circuits using tensor networks. The class
+    keeps a list of :class:`Gate` objects in sync with a tensor network
+    representing the current state of the circuit.
 
     Parameters
     ----------
@@ -1455,9 +1473,15 @@ class Circuit:
         Ensure the initial state has this tag.
     tag_gate_numbers : bool, optional
         Whether to tag each gate tensor with its number in the circuit, like
+        ``"GATE_{g}"``. This is required for updating the circuit parameters.
+    gate_tag_id : str, optional
+        The format string for tagging each gate tensor, by default e.g.
         ``"GATE_{g}"``.
     tag_gate_rounds : bool, optional
         Whether to tag each gate tensor with its number in the circuit, like
+        ``"ROUND_{r}"``.
+    round_tag_id : str, optional
+        The format string for tagging each round of gates, by default e.g.
         ``"ROUND_{r}"``.
     tag_gate_labels : bool, optional
         Whether to tag each gate tensor with its gate type label, e.g.
@@ -1469,7 +1493,11 @@ class Circuit:
     Attributes
     ----------
     psi : TensorNetwork1DVector
-        The current wavefunction.
+        The current circuit wavefunction as a tensor network.
+    uni : TensorNetwork1DOperator
+        The current circuit unitary operator as a tensor network.
+    gates : tuple[Gate]
+        The gates in the circuit.
 
     Examples
     --------
@@ -1512,6 +1540,10 @@ class Circuit:
         111
         000
         000
+
+    See Also
+    --------
+    Gate
     """
 
     def __init__(
@@ -1525,7 +1557,9 @@ class Circuit:
         psi0_dtype="complex128",
         psi0_tag="PSI0",
         tag_gate_numbers=True,
+        gate_tag_id="GATE_{}",
         tag_gate_rounds=True,
+        round_tag_id="ROUND_{}",
         tag_gate_labels=True,
         bra_site_ind_id="b{}",
         to_backend=None,
@@ -1569,10 +1603,12 @@ class Circuit:
         self.gate_opts = ensure_dict(gate_opts)
         self.gate_opts.setdefault("contract", gate_contract)
         self.gate_opts.setdefault("propagate_tags", gate_propagate_tags)
-        self.gates = []
+        self._gates = []
 
         self._ket_site_ind_id = self._psi.site_ind_id
         self._bra_site_ind_id = bra_site_ind_id
+        self._gate_tag_id = gate_tag_id
+        self._round_tag_id = round_tag_id
 
         if self._ket_site_ind_id == self._bra_site_ind_id:
             raise ValueError(
@@ -1582,12 +1618,63 @@ class Circuit:
                 )
             )
 
-        self.ket_site_ind = self._ket_site_ind_id.format
-        self.bra_site_ind = self._bra_site_ind_id.format
-
         self._sample_n_gates = -1
         self._storage = dict()
         self._sampled_conditionals = dict()
+
+    def copy(self):
+        """Copy the circuit and its state."""
+        new = object.__new__(self.__class__)
+        new.N = self.N
+        new._psi = self._psi.copy()
+        new.gate_opts = tree_map(lambda x: x, self.gate_opts)
+        new.tag_gate_numbers = self.tag_gate_numbers
+        new.tag_gate_rounds = self.tag_gate_rounds
+        new.tag_gate_labels = self.tag_gate_labels
+        new.to_backend = self.to_backend
+        new._backend_gate_cache = self._backend_gate_cache
+        new._gates = self._gates.copy()
+        new._ket_site_ind_id = self._ket_site_ind_id
+        new._bra_site_ind_id = self._bra_site_ind_id
+        new._gate_tag_id = self._gate_tag_id
+        new._round_tag_id = self._round_tag_id
+        new._sample_n_gates = self._sample_n_gates
+        new._storage = self._storage.copy()
+        new._sampled_conditionals = self._sampled_conditionals.copy()
+        return new
+
+    def apply_to_arrays(self, fn):
+        """Apply a function to all the arrays in the circuit."""
+        self._psi.apply_to_arrays(fn)
+
+    def get_params(self):
+        """Get a pytree - in this case a dict - of all the parameters in the
+        circuit.
+
+        Returns
+        -------
+        dict[int, tuple]
+            A dictionary mapping gate numbers to their parameters.
+        """
+        return {
+            i: self._psi[self.gate_tag(i)].params
+            for i, gate in enumerate(self._gates)
+            if gate.parametrize
+        }
+
+    def set_params(self, params):
+        """Set the parameters of the circuit.
+
+        Parameters
+        ----------
+        params : dict`
+            A dictionary mapping gate numbers to the new parameters.
+        """
+        for i, p in params.items():
+            self._psi[self.gate_tag(i)].params = p
+            self._gates[i] = self._gates[i].copy_with(params=ops.asarray(p))
+
+        self.clear_storage()
 
     @classmethod
     def from_qsim_str(cls, contents, **circuit_opts):
@@ -1677,6 +1764,30 @@ class Circuit:
         qc.apply_gates(gates, progbar=progbar)
         return qc
 
+    @property
+    def gates(self):
+        return tuple(self._gates)
+
+    @property
+    def num_gates(self):
+        return len(self._gates)
+
+    def ket_site_ind(self, i):
+        """Get the site index for the given qubit."""
+        return self._ket_site_ind_id.format(i)
+
+    def bra_site_ind(self, i):
+        """Get the 'bra' site index for the given qubit, if forming an operator."""
+        return self._bra_site_ind_id.format(i)
+
+    def gate_tag(self, g):
+        """Get the tag for the given gate, indexed linearly."""
+        return self._gate_tag_id.format(g)
+
+    def round_tag(self, r):
+        """Get the tag for the given round (/layer)."""
+        return self._round_tag_id.format(r)
+
     def _init_state(self, N, dtype="complex128"):
         return TN_from_sites_computational_state(
             site_map={i: "0" for i in range(N)}, dtype=dtype
@@ -1695,9 +1806,9 @@ class Circuit:
         """
         tags = tags_to_oset(tags)
         if self.tag_gate_numbers:
-            tags.add(f"GATE_{len(self.gates)}")
+            tags.add(self.gate_tag(self.num_gates))
         if self.tag_gate_rounds and (gate.round is not None):
-            tags.add(f"ROUND_{gate.round}")
+            tags.add(self.round_tag(gate.round))
         if self.tag_gate_labels and (gate.tag is not None):
             tags.add(gate.tag)
 
@@ -1705,13 +1816,17 @@ class Circuit:
         opts = {**self.gate_opts, **gate_opts}
 
         if gate.controls:
+            # handle extra (low-rank) control structure
             apply_controlled_gate(self._psi, gate, tags=tags, **opts)
+
         elif gate.special:
             # these are specified as a general function
             SPECIAL_GATES[gate.label](
                 self._psi, *gate.params, *gate.qubits, **opts
             )
+
         else:
+            # gate supplied as a matrix/tensor
             G = gate.array
             if self.to_backend is not None:
                 key = id(G)
@@ -1723,7 +1838,7 @@ class Circuit:
             self._psi.gate_(G, gate.qubits, tags=tags, **opts)
 
         # keep track of the gates applied
-        self.gates.append(gate)
+        self._gates.append(gate)
 
     def apply_gate(
         self,
@@ -2265,7 +2380,7 @@ class Circuit:
 
         lightcone_tags = []
 
-        for i, gate in reversed(tuple(enumerate(self.gates))):
+        for i, gate in reversed(tuple(enumerate(self._gates))):
             if gate.label == "IDEN":
                 continue
             elif gate.controls:
@@ -2273,7 +2388,7 @@ class Circuit:
                 # elsewhere to make sure tensors aren't then missing
                 regs = {*gate.controls, *gate.qubits}
                 if regs & cone:
-                    lightcone_tags.append(f"GATE_{i}")
+                    lightcone_tags.append(self.gate_tag(i))
                     cone |= regs
             elif gate.label == "SWAP":
                 i, j = gate.qubits
@@ -2290,7 +2405,7 @@ class Circuit:
             else:
                 regs = set(gate.qubits)
                 if regs & cone:
-                    lightcone_tags.append(f"GATE_{i}")
+                    lightcone_tags.append(self.gate_tag(i))
                     cone |= regs
 
         # initial state is always part of the lightcone
@@ -2338,15 +2453,17 @@ class Circuit:
 
         return psi_lc
 
+    def clear_storage(self):
+        """Clear all cached data."""
+        self._storage.clear()
+        self._sampled_conditionals.clear()
+        self._marginal_storage_size = 0
+        self._sample_n_gates = self.num_gates
+
     def _maybe_init_storage(self):
         # clear/create the cache if circuit has changed
-        if self._sample_n_gates != len(self.gates):
-            self._sample_n_gates = len(self.gates)
-
-            # storage
-            self._storage.clear()
-            self._sampled_conditionals.clear()
-            self._marginal_storage_size = 0
+        if self._sample_n_gates != self.num_gates:
+            self.clear_storage()
 
     def get_psi_simplified(
         self, seq="ADCRS", atol=1e-12, equalize_norms=False
@@ -3744,8 +3861,8 @@ class Circuit:
         tn : TensorNetwork
             The tensor network to find the updated parameters from.
         """
-        for i, gate in enumerate(self.gates):
-            tag = f"GATE_{i}"
+        for i, gate in enumerate(self._gates):
+            tag = self.gate_tag(i)
             t = tn[tag]
 
             # sanity check that tensor(s) `t` correspond to the correct gate
@@ -3761,7 +3878,7 @@ class Circuit:
                 self._psi[tag].params = t.params
 
                 # update the circuit's gate record
-                self.gates[i] = Gate(
+                self._gates[i] = Gate(
                     label=gate.label,
                     params=t.params,
                     qubits=gate.qubits,
@@ -3769,9 +3886,7 @@ class Circuit:
                     parametrize=True,
                 )
 
-    @property
-    def num_gates(self):
-        return len(self.gates)
+        self.clear_storage()
 
     def __repr__(self):
         r = "<Circuit(n={}, num_gates={}, gate_opts={})>"
@@ -3983,8 +4098,7 @@ class CircuitPermMPS(CircuitMPS):
         # first translate gate qubits to their current 'physical' location
         qubits = gate.qubits
         phys_sites = [self.qubits.index(q) for q in qubits]
-        gate = gate.copy()
-        gate.qubits = phys_sites
+        gate = gate.copy_with(qubits=phys_sites)
 
         # if the gate is non-local, account for swap (without swap back)
         if len(phys_sites) == 2:

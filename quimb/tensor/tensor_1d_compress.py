@@ -106,7 +106,8 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
 
             # not 1d like: bond is not nearest neighbor
             # but can insert identites along string to fix
-            data = do("eye", ta.ind_size(ix), like=ta.data, dtype=ta.dtype)
+            data = do("eye", ta.ind_size(ix), like=ta.data)
+
             ixl = ix
             for i in range(sa + 1, sb):
                 ixr = rand_uuid()

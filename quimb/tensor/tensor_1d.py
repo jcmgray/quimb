@@ -1377,7 +1377,8 @@ class TensorNetwork1DFlat(TensorNetwork1D):
                 rtol, atol = 1e-5, 1e-6
             else:
                 rtol, atol = 1e-9, 1e-11
-            idtty = do("eye", d, dtype=x.dtype, like=x)
+
+            idtty = do("eye", d, like=x)
             return do("allclose", x, idtty, rtol=rtol, atol=atol)
 
         for i in range(self.L - 1):

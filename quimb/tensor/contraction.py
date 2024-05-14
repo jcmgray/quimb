@@ -308,8 +308,8 @@ def array_contract_path(*args, optimize=None, **kwargs):
         optimize = get_contract_strategy()
     return ctg.array_contract_path(*args, optimize=optimize, **kwargs)
 
-
 def array_contract_pathinfo(*args, **kwargs):
+
     import opt_einsum as oe
 
     tree = array_contract_tree(*args, **kwargs)
