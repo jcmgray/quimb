@@ -6620,6 +6620,27 @@ class TensorNetwork(object):
 
         return neighbors
 
+    def _get_neighbor_inds(self, inds):
+        """Get the indices connected to the index(es) at ``inds``.
+
+        Parameters
+        ----------
+        inds : str or sequence of str
+            The index(es) to get the neighbors of.
+
+        Returns
+        -------
+        oset[str]
+        """
+        inds = tags_to_oset(inds)
+        neighbor_inds = oset_union(
+            self.tensor_map[tid].inds
+            for ind in inds
+            for tid in self.ind_map[ind]
+        )
+        neighbor_inds -= inds
+        return neighbor_inds
+
     def _get_subgraph_tids(self, tids):
         """Get the tids of tensors connected, by any distance, to the tensor or
         region of tensors ``tids``.
