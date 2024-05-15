@@ -1795,6 +1795,7 @@ class TNOptimizer:
         ax.plot(xs, ys, ".-")
         if xscale == "symlog":
             ax.set_xscale(xscale, linthresh=xscale_linthresh)
+            ax.axvline(xscale_linthresh, color=(.5, .5, .5), ls="-", lw=0.5)
         else:
             ax.set_xscale(xscale)
         ax.set_xlabel("Iteration")
