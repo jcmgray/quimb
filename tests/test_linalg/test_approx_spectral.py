@@ -306,6 +306,10 @@ class TestLanczosApprox:
         approx_Z = tr_exp_approx(-beta * h, bsz=bsz)
         assert_allclose(actual_Z, approx_Z, rtol=3e-2)
 
+    def test_approx_spectral_plot(self):
+        X = rand_herm(1000, sparse=True)
+        approx_spectral_function(X, lambda x: abs(x), plot=True)
+
 
 # ------------------------ Test specific quantities ------------------------- #
 
