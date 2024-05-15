@@ -11,6 +11,8 @@ Release notes for `quimb`.
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer) can now directly optimize [`Circuit`](quimb.tensor.circuit.Circuit) objects, returning a new optimized circuit with updated parameters.
 - [`Circuit`](quimb.tensor.circuit.Circuit): add `.copy()`, `.get_params()` and `.set_params()` interface methods.
 - Update generic TN optimizer docs.
+- add [`tn.gen_inds_loops`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_loops) for generating all loops of indices in a TN.
+- add [`tn.gen_inds_connected`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_connected) for generating all connected sets of indices in a TN.
 
 
 (whats-new-1-8-1)=

@@ -10153,12 +10153,132 @@ class TensorNetwork(object):
         Yields
         ------
         tuple[int]
+
+        See Also
+        --------
+        gen_inds_loops
         """
         from cotengra.core import get_hypergraph
 
         inputs = {tid: t.inds for tid, t in self.tensor_map.items()}
         hg = get_hypergraph(inputs, accel="auto")
         return hg.compute_loops(max_loop_length=max_loop_length)
+
+    def gen_inds_loops(self, max_loop_length=None):
+        """Generate all sequences of indices, up to a specified length, that
+        represent loops in this tensor network. Unlike ``gen_loops`` this
+        function will return the indices of the tensors in the loop rather
+        than the tensor ids, allowing one to differentiate between e.g. a
+        double loop and a 'figure of eight' loop.
+
+        Parameters
+        ----------
+        max_loop_length : None or int
+            Set the maximum number of indices that can appear in a loop. If
+            ``None``, wait until any loop is found and set that as the
+            maximum length.
+
+        Yields
+        ------
+        tuple[str]
+
+        See Also
+        --------
+        gen_loops, gen_inds_connected
+        """
+
+        def _normalize_loop(seq):
+            # this returns the lexicographically smallest equivalent
+            # sequence, up to rolling (rotating) and reversing.
+            N = len(seq)
+            i = min(enumerate(seq), key=lambda x: x[1])[0]
+            el_prev = seq[(i - 1) % N]
+            el_next = seq[(i + 1) % N]
+            if el_prev > el_next:
+                return (*seq[i:], *seq[:i])
+            else:
+                return (*seq[i::-1], *seq[-1:i:-1])
+
+        queue = []
+        for ind, tids in self.ind_map.items():
+            # initial starting points - we store both index and tid to keep track
+            # of direction properly, (only need one direction initially)
+            queue.append(((ind, next(iter(tids))),))
+
+        seen = set()
+        while queue:
+            s = queue.pop(0)
+            last_ind, last_tid = s[-1]
+            # get the other connecting tid and tensor
+            # XXX: this will break for dangling and hyper indices
+            (next_tid,) = (
+                tid for tid in self.ind_map[last_ind] if tid != last_tid
+            )
+            next_t = self.tensor_map[next_tid]
+
+            # candidate expansions
+            expansions = [
+                nind for nind in next_t.inds
+                if nind != last_ind
+            ]
+
+            current_inds = {x[0] for x in s}
+            current_tids = {x[1] for x in s}
+
+            for nind in expansions:
+                next_pair = (nind, next_tid)
+
+                if next_pair == s[0]:
+                    # finished a loop! - normalize it to check for duplicates
+                    loop = _normalize_loop([x[0] for x in s])
+                    if loop not in seen:
+                        seen.add(loop)
+                        if max_loop_length is None:
+                            max_loop_length = len(loop)
+                        yield loop
+
+                elif (
+                    # don't double up on indices
+                    (nind not in current_inds) and
+                    # and don't self intersect? XXX: make this a switch?
+                    (next_tid not in current_tids) and
+                    # and don't make the loop too long
+                    (max_loop_length is None) or (len(s) < max_loop_length)
+                ):
+                    # valid candidate extension!
+                    queue.append(s + (next_pair,))
+
+    def gen_inds_connected(self, max_length):
+        """Generate all index 'patches' of size up to ``max_length``.
+
+        Parameters
+        ----------
+        max_length : int
+            The maximum number of indices in the patch.
+
+        Yields
+        ------
+        tuple[str]
+
+        See Also
+        --------
+        gen_inds_loops
+        """
+        queue = [(ix,) for ix in self.ind_map]
+        seen = {frozenset(s) for s in queue}
+        while queue:
+            s = queue.pop()
+            if len(s) == max_length:
+                continue
+            expansions = self._get_neighbor_inds(s)
+            for ix in expansions:
+                next_s = s + (ix,)
+                key = frozenset(next_s)
+                if key not in seen:
+                    # new string
+                    yield next_s
+                    seen.add(key)
+                    queue.append(next_s)
 
     def _get_string_between_tids(self, tida, tidb):
         strings = [(tida,)]

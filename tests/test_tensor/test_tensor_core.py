@@ -1616,10 +1616,10 @@ class TestTensorNetwork:
         assert tb.inds == ("r", "d", "e")
 
     def test_drape_bond_between(self):
-        tx = qtn.rand_tensor([2, 3, 4], ['a', 'b', 'c'], tags="X")
-        ty = qtn.rand_tensor([3, 4, 6], ['b', 'd', 'e'], tags="Y")
-        tz = qtn.rand_tensor([5], ['f'], tags="Z")
-        tn = (tx | ty | tz)
+        tx = qtn.rand_tensor([2, 3, 4], ["a", "b", "c"], tags="X")
+        ty = qtn.rand_tensor([3, 4, 6], ["b", "d", "e"], tags="Y")
+        tz = qtn.rand_tensor([5], ["f"], tags="Z")
+        tn = tx | ty | tz
         assert tn.num_indices == 6
         assert len(tn.subgraphs()) == 2
         te = tn.contract()
@@ -1870,6 +1870,16 @@ class TestTensorNetwork:
         assert tn._outer_inds == oset(["k0", "k1", "k2", "b0", "b1", "b2"])
         assert tn.num_tensors == 4
         assert tn.num_indices == 9
+
+    def test_gen_inds_loops(self):
+        tn = qtn.TN2D_rand(3, 4, 2)
+        loops = tuple(tn.gen_inds_loops())
+        assert len(loops) == 6
+
+    def test_gen_inds_connected(self):
+        tn = qtn.TN2D_rand(3, 4, 2)
+        patches = tuple(tn.gen_inds_connected(2))
+        assert len(patches) == 34
 
 
 class TestTensorNetworkSimplifications:
