@@ -1,5 +1,5 @@
-"""Classes and algorithms related to Fermionic 2D tensor networks.
-"""
+"""Classes and algorithms related to Fermionic 2D tensor networks."""
+
 import functools
 from operator import add
 from itertools import product
@@ -7,12 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from ...utils import check_opt, pairwise
-from ..tensor_core import (
-    bonds,
-    rand_uuid,
-    oset,
-    tags_to_oset
-)
+from ..tensor_core import bonds, rand_uuid, oset, tags_to_oset
 from ..tensor_2d import (
     Rotator2D,
     TensorNetwork2D,
@@ -24,17 +19,14 @@ from ..tensor_2d import (
     is_lone_coo,
     gen_long_range_path,
     calc_plaquette_sizes,
-    calc_plaquette_map
+    calc_plaquette_map,
 )
-from .fermion_core import (
-    FermionTensor,
-    FermionTensorNetwork,
-    tensor_contract
-)
+from .fermion_core import FermionTensor, FermionTensorNetwork, tensor_contract
 from .block_gen import rand_all_blocks, ones_single_block
 from .block_tools import inv_with_smudge
 
 INVERSE_CUTOFF = 1e-10
+
 
 class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
     """A subclass of ``quimb.tensor.tensor_2d.TensorNetwork2D`` that overrides methods
@@ -43,22 +35,22 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
     plaquettes are placed correctly
 
     """
+
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
     )
 
     def _compatible_2d(self, other):
         """Check whether ``self`` and ``other`` are compatible 2D tensor
         networks such that they can remain a 2D tensor network when combined.
         """
-        return (
-            isinstance(other, FermionTensorNetwork2D) and
-            all(getattr(self, e) == getattr(other, e)
-                for e in FermionTensorNetwork2D._EXTRA_PROPS)
+        return isinstance(other, FermionTensorNetwork2D) and all(
+            getattr(self, e) == getattr(other, e)
+            for e in FermionTensorNetwork2D._EXTRA_PROPS
         )
 
     def __and__(self, other):
@@ -119,25 +111,27 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             raise KeyError("direction not supported")
 
         for i, j in iterator:
-            x, y = (i, j) if direction=="row" else (j, i)
+            x, y = (i, j) if direction == "row" else (j, i)
             site_tag = self.site_tag(x, y)
             tids = self._get_tids_from_tags(site_tag)
             if len(tids) == 1:
-                tid, = tids
+                (tid,) = tids
                 if tid not in tid_map:
                     tid_map[tid] = current_position
-                    current_position +=1
+                    current_position += 1
             else:
                 if layer_tags is None:
                     _tags = [self.tensor_map[ix].tags for ix in tids]
                     _tmp_tags = _tags[0].copy()
                     for itag in _tags[1:]:
                         _tmp_tags &= itag
-                    _layer_tags = sorted([list(i-_tmp_tags)[0] for i in _tags])
+                    _layer_tags = sorted(
+                        [list(i - _tmp_tags)[0] for i in _tags]
+                    )
                 else:
                     _layer_tags = layer_tags
                 for tag in _layer_tags:
-                    tid, = self._get_tids_from_tags((site_tag, tag))
+                    (tid,) = self._get_tids_from_tags((site_tag, tag))
                     if tid not in tid_map:
                         tid_map[tid] = current_position
                         current_position += 1
@@ -150,9 +144,9 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         from_which,
         max_bond,
         cutoff=0.0,
-        method='eigh',
+        method="eigh",
         renorm=True,
-        optimize='auto-hq',
+        optimize="auto-hq",
         opposite_envs=None,
         contract_boundary_opts=None,
     ):
@@ -167,21 +161,23 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
+        mode="mps",
         layer_tags=None,
         dense=False,
         compress_opts=None,
         envs=None,
-        **contract_boundary_opts
+        **contract_boundary_opts,
     ):
         """Compute the ``self.Lx`` 1D boundary tensor networks describing
         the environments of rows and columns. The returned tensor network
         also contains the original plaquettes
         """
-        direction = {"ymin": "col",
-                     "ymax": "col",
-                     "xmax": "row",
-                     "xmin": "row"}[from_which]
+        direction = {
+            "ymin": "col",
+            "ymax": "col",
+            "xmax": "row",
+            "xmin": "row",
+        }[from_which]
         tn = self.reorder(direction, layer_tags=layer_tags)
 
         r2d = Rotator2D(tn, xrange, yrange, from_which)
@@ -190,14 +186,14 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         if envs is None:
             envs = {}
 
-        if mode == 'full-bond':
+        if mode == "full-bond":
             # set shared storage for opposite env contractions
-            contract_boundary_opts.setdefault('opposite_envs', {})
+            contract_boundary_opts.setdefault("opposite_envs", {})
 
         envs[from_which, sweep[0]] = FermionTensorNetwork([])
         first_row = x_tag(sweep[0])
-        envs['mid', sweep[0]] = tn.select(first_row).copy()
-        if len(sweep)==1:
+        envs["mid", sweep[0]] = tn.select(first_row).copy()
+        if len(sweep) == 1:
             return envs
         if dense:
             tn ^= first_row
@@ -206,16 +202,16 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         for i in sweep[2:]:
             iprevprev = i - 2 * sweep.step
             iprev = i - sweep.step
-            envs['mid', iprev] = tn.select(x_tag(iprev)).copy()
+            envs["mid", iprev] = tn.select(x_tag(iprev)).copy()
             if dense:
                 tn ^= (x_tag(iprevprev), x_tag(iprev))
             else:
                 tn.contract_boundary_from_(
                     xrange=(
-                        (iprevprev, iprev) if r2d.plane == 'x' else r2d.xrange
+                        (iprevprev, iprev) if r2d.plane == "x" else r2d.xrange
                     ),
                     yrange=(
-                        (iprevprev, iprev) if r2d.plane == 'y' else r2d.yrange
+                        (iprevprev, iprev) if r2d.plane == "y" else r2d.yrange
                     ),
                     from_which=from_which,
                     max_bond=max_bond,
@@ -232,16 +228,20 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         return envs
 
     compute_xmin_environments = functools.partialmethod(
-        compute_environments, from_which='xmin')
+        compute_environments, from_which="xmin"
+    )
 
     compute_xmax_environments = functools.partialmethod(
-        compute_environments, from_which='xmax')
+        compute_environments, from_which="xmax"
+    )
 
     compute_ymin_environments = functools.partialmethod(
-        compute_environments, from_which='ymin')
+        compute_environments, from_which="ymin"
+    )
 
     compute_ymax_environments = functools.partialmethod(
-        compute_environments, from_which='ymax')
+        compute_environments, from_which="ymax"
+    )
 
     def _compute_plaquette_environments_x_first(
         self,
@@ -253,15 +253,19 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         layer_tags=None,
         second_dense=None,
         x_envs=None,
-        **compute_environment_opts
+        **compute_environment_opts,
     ):
         if second_dense is None:
             second_dense = x_bsz < 2
 
         if x_envs is None:
             x_envs = self.compute_x_environments(
-                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
-                layer_tags=layer_tags, **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                **compute_environment_opts,
+            )
 
         # next we form vertical strips and contract in both y directions
         y_envs = dict()
@@ -275,11 +279,13 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #     ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱ ╲ ╱
             #      ●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●━━━●
             #
-            tn_xi = FermionTensorNetwork((
-                x_envs['xmax', i],
-                *[x_envs['mid', i+x] for x in range(x_bsz)],
-                x_envs['xmin', i + x_bsz - 1],
-            )).view_as_(FermionTensorNetwork2D, like=self)
+            tn_xi = FermionTensorNetwork(
+                (
+                    x_envs["xmax", i],
+                    *[x_envs["mid", i + x] for x in range(x_bsz)],
+                    x_envs["xmin", i + x_bsz - 1],
+                )
+            ).view_as_(FermionTensorNetwork2D, like=self)
             #
             #           y_bsz
             #           <-->               second_dense=True
@@ -294,16 +300,20 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #
             y_envs[i] = tn_xi.compute_y_environments(
                 xrange=(max(i - 1, 0), min(i + x_bsz, self.Lx - 1)),
-                max_bond=max_bond, cutoff=cutoff,
-                canonize=canonize, layer_tags=layer_tags,
-                dense=second_dense, **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                dense=second_dense,
+                **compute_environment_opts,
+            )
 
         # then range through all the possible plaquettes, selecting the correct
         # boundary tensors from either the x or y environments
         plaquette_envs = dict()
-        for i0, j0 in product(range(self.Lx - x_bsz + 1),
-                              range(self.Ly - y_bsz + 1)):
-
+        for i0, j0 in product(
+            range(self.Lx - x_bsz + 1), range(self.Ly - y_bsz + 1)
+        ):
             # we want to select bordering tensors from:
             #
             #       L──A──A──R    <- A from the x environments
@@ -316,11 +326,14 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #
             #         j0  j0+1
             #
-            env_ij = FermionTensorNetwork((
-                y_envs[i0]['ymin', j0],
-                *[y_envs[i0]['mid', ix] for ix in range(j0, j0+y_bsz)],
-                y_envs[i0]['ymax', j0 + y_bsz - 1]
-            ), check_collisions=False)
+            env_ij = FermionTensorNetwork(
+                (
+                    y_envs[i0]["ymin", j0],
+                    *[y_envs[i0]["mid", ix] for ix in range(j0, j0 + y_bsz)],
+                    y_envs[i0]["ymax", j0 + y_bsz - 1],
+                ),
+                check_collisions=False,
+            )
 
             plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
@@ -336,7 +349,7 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         layer_tags=None,
         second_dense=None,
         y_envs=None,
-        **compute_environment_opts
+        **compute_environment_opts,
     ):
         if second_dense is None:
             second_dense = y_bsz < 2
@@ -344,8 +357,12 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
         # first we contract from either side to produce y environments
         if y_envs is None:
             y_envs = self.compute_y_environments(
-                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
-                layer_tags=layer_tags, **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                **compute_environment_opts,
+            )
 
         # next we form vertical strips and contract from both x directions
         x_envs = dict()
@@ -365,11 +382,13 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #     ┃╭─|o─|o─╮┃
             #     ●──o╱─o╱──●
             #
-            tn_yj = FermionTensorNetwork((
-                y_envs['ymin', j],
-                *[y_envs['mid', j+jn] for jn in range(y_bsz)],
-                y_envs['ymax', j + y_bsz - 1],
-            )).view_as_(FermionTensorNetwork2D, like=self)
+            tn_yj = FermionTensorNetwork(
+                (
+                    y_envs["ymin", j],
+                    *[y_envs["mid", j + jn] for jn in range(y_bsz)],
+                    y_envs["ymax", j + y_bsz - 1],
+                )
+            ).view_as_(FermionTensorNetwork2D, like=self)
             #
             #        y_bsz
             #        <-->        second_dense=True
@@ -383,16 +402,20 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #
             x_envs[j] = tn_yj.compute_x_environments(
                 yrange=(max(j - 1, 0), min(j + y_bsz, self.Ly - 1)),
-                max_bond=max_bond, cutoff=cutoff, canonize=canonize,
-                layer_tags=layer_tags, dense=second_dense,
-                **compute_environment_opts)
+                max_bond=max_bond,
+                cutoff=cutoff,
+                canonize=canonize,
+                layer_tags=layer_tags,
+                dense=second_dense,
+                **compute_environment_opts,
+            )
 
         # then range through all the possible plaquettes, selecting the correct
         # boundary tensors from either the x or y environments
         plaquette_envs = dict()
-        for i0, j0 in product(range(self.Lx - x_bsz + 1),
-                              range(self.Ly - y_bsz + 1)):
-
+        for i0, j0 in product(
+            range(self.Lx - x_bsz + 1), range(self.Ly - y_bsz + 1)
+        ):
             # we want to select bordering tensors from:
             #
             #          A──A──A──A    <- A from the x environments
@@ -405,20 +428,33 @@ class FermionTensorNetwork2D(FermionTensorNetwork, TensorNetwork2D):
             #
             #            j0  j0+1
             #
-            env_ij = FermionTensorNetwork((
-                x_envs[j0]['xmin', i0],
-                *[x_envs[j0]['mid', ix] for ix in range(i0, i0+x_bsz)],
-                x_envs[j0]['xmax', i0 + x_bsz - 1]
-            ), check_collisions=False)
+            env_ij = FermionTensorNetwork(
+                (
+                    x_envs[j0]["xmin", i0],
+                    *[x_envs[j0]["mid", ix] for ix in range(i0, i0 + x_bsz)],
+                    x_envs[j0]["xmax", i0 + x_bsz - 1],
+                ),
+                check_collisions=False,
+            )
 
             plaquette_envs[(i0, j0), (x_bsz, y_bsz)] = env_ij
 
         return plaquette_envs
 
-def gate_string_split_(TG, where, string, original_ts, bonds_along,
-                       reindex_map, site_ix, info, **compress_opts):
+
+def gate_string_split_(
+    TG,
+    where,
+    string,
+    original_ts,
+    bonds_along,
+    reindex_map,
+    site_ix,
+    info,
+    **compress_opts,
+):
     # by default this means singuvalues are kept in the string 'blob' tensor
-    compress_opts.setdefault('absorb', 'right')
+    compress_opts.setdefault("absorb", "right")
     loc_info = dict([t.get_fermion_info() for t in original_ts])
     # the outer, neighboring indices of each tensor in the string
     neighb_inds = []
@@ -454,17 +490,22 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         qpn_info = [blob.data.dq - qpn_infos[i], qpn_infos[i]]
-        lix = tuple(oset(blob.inds)-oset(lix))
+        lix = tuple(oset(blob.inds) - oset(lix))
         blob, *maybe_svals, inner_ts[i] = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, qpn_info=qpn_info, **compress_opts)
+            left_inds=lix,
+            get="tensors",
+            bond_ind=bix,
+            qpn_info=qpn_info,
+            **compress_opts,
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
 
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
-            coo_pair = (string[i], string[i+1])
-            info['singular_values', coo_pair] = s
+            coo_pair = (string[i], string[i + 1])
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if i != j - 1:
@@ -487,15 +528,20 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         qpn_info = [qpn_infos[j], blob.data.dq - qpn_infos[j]]
-        inner_ts[j], *maybe_svals, blob= blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, qpn_info=qpn_info, **compress_opts)
+        inner_ts[j], *maybe_svals, blob = blob.split(
+            left_inds=lix,
+            get="tensors",
+            bond_ind=bix,
+            qpn_info=qpn_info,
+            **compress_opts,
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
-            coo_pair = (string[j-1], string[j])
-            info['singular_values', coo_pair] = s
+            coo_pair = (string[j - 1], string[j])
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to ungauge later
             if j != i + 1:
@@ -510,8 +556,7 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
     # SVD funcs needs to be modify and make sure S has even parity
     for i, bix, location, s in regauged:
         t = inner_ts[i]
-        t.multiply_index_diagonal_(bix, s,
-                location=location, inverse=True)
+        t.multiply_index_diagonal_(bix, s, location=location, inverse=True)
 
     revert_index_map = {v: k for k, v in reindex_map.items()}
     for to, tn in zip(original_ts, inner_ts):
@@ -520,16 +565,28 @@ def gate_string_split_(TG, where, string, original_ts, bonds_along,
         to.modify(data=tn.data)
 
     for i, (tid, _) in enumerate(fermion_info):
-        if i==0:
+        if i == 0:
             fs.replace_tensor(work_site, original_ts[i], tid=tid, virtual=True)
         else:
-            fs.insert_tensor(work_site+i, original_ts[i], tid=tid, virtual=True)
+            fs.insert_tensor(
+                work_site + i, original_ts[i], tid=tid, virtual=True
+            )
 
     fs._reorder_from_dict(dict(fermion_info))
 
-def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
-                       reindex_map, site_ix, info, **compress_opts):
-    compress_opts.setdefault('absorb', 'right')
+
+def gate_string_reduce_split_(
+    TG,
+    where,
+    string,
+    original_ts,
+    bonds_along,
+    reindex_map,
+    site_ix,
+    info,
+    **compress_opts,
+):
+    compress_opts.setdefault("absorb", "right")
 
     # indices to reduce, first and final include physical indices for gate
     inds_to_reduce = [(bonds_along[0], site_ix[0])]
@@ -543,8 +600,13 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     fs = TG.fermion_owner[0]
 
     for coo, rix, t in zip(string, inds_to_reduce, original_ts):
-        tq, tr = t.split(left_inds=None, right_inds=rix,
-                         method='qr', get='tensors', absorb="right")
+        tq, tr = t.split(
+            left_inds=None,
+            right_inds=rix,
+            method="qr",
+            get="tensors",
+            absorb="right",
+        )
         fermion_info.append(t.get_fermion_info())
         outer_ts.append(tq)
         inner_ts.append(tr.reindex_(reindex_map) if coo in where else tr)
@@ -552,7 +614,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     for tq, tr, t in zip(outer_ts, inner_ts, original_ts):
         isite = t.get_fermion_info()[1]
         fs.replace_tensor(isite, tr, virtual=True)
-        fs.insert_tensor(isite+1, tq, virtual=True)
+        fs.insert_tensor(isite + 1, tq, virtual=True)
 
     blob = tensor_contract(*inner_ts, TG, inplace=True)
     work_site = blob.get_fermion_info()[1]
@@ -563,7 +625,6 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     j = len(string) - 1
 
     while True:
-
         # extract at beginning of string
         lix = bonds(blob, outer_ts[i])
         if i == 0:
@@ -575,16 +636,17 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
         bix = bonds_along[i]
 
         # split the blob!
-        lix = tuple(oset(blob.inds)-oset(lix))
+        lix = tuple(oset(blob.inds) - oset(lix))
         blob, *maybe_svals, inner_ts[i] = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get="tensors", bond_ind=bix, **compress_opts
+        )
 
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
             coo_pair = (string[i], string[i + 1])
-            info['singular_values', coo_pair] = s
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if i != j - 1:
@@ -609,13 +671,14 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
         # split the blob!
         inner_ts[j], *maybe_svals, blob = blob.split(
-            left_inds=lix, get='tensors', bond_ind=bix, **compress_opts)
+            left_inds=lix, get="tensors", bond_ind=bix, **compress_opts
+        )
         # if singular values are returned (``absorb=None``) check if we should
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
             coo_pair = (string[j - 1], string[j])
-            info['singular_values', coo_pair] = s
+            info["singular_values", coo_pair] = s
 
             # regauge the blob but record so as to unguage later
             if j != i + 1:
@@ -629,10 +692,10 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
             break
 
     for i, (tid, _) in enumerate(fermion_info):
-        if i==0:
+        if i == 0:
             fs.replace_tensor(work_site, inner_ts[i], tid=tid, virtual=True)
         else:
-            fs.insert_tensor(work_site+i, inner_ts[i], tid=tid, virtual=True)
+            fs.insert_tensor(work_site + i, inner_ts[i], tid=tid, virtual=True)
     new_ts = [
         tensor_contract(ts, tr, inplace=True).transpose_like_(to)
         for to, ts, tr in zip(original_ts, outer_ts, inner_ts)
@@ -640,8 +703,7 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
 
     for i, bix, location, s in regauged:
         t = new_ts[i]
-        t.multiply_index_diagonal_(bix, s,
-                location=location, inverse=True)
+        t.multiply_index_diagonal_(bix, s, location=location, inverse=True)
 
     for (tid, _), to, t in zip(fermion_info, original_ts, new_ts):
         site = t.get_fermion_info()[1]
@@ -651,20 +713,20 @@ def gate_string_reduce_split_(TG, where, string, original_ts, bonds_along,
     fs._reorder_from_dict(dict(fermion_info))
 
 
-class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
-                                   FermionTensorNetwork,
-                                   TensorNetwork2DVector):
+class FermionTensorNetwork2DVector(
+    FermionTensorNetwork2D, FermionTensorNetwork, TensorNetwork2DVector
+):
     """Mixin class  for a 2D square lattice vector TN, i.e. one with a single
     physical index per site.
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_site_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_site_ind_id",
     )
 
     def to_dense(self, *inds_seq, **contract_opts):
@@ -680,9 +742,9 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         info=None,
         long_range_use_swaps=False,
         long_range_path_sequence=None,
-        **compress_opts
+        **compress_opts,
     ):
-        check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
+        check_opt("contract", contract, (False, True, "split", "reduce-split"))
 
         psi = self if inplace else self.copy()
 
@@ -702,7 +764,9 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         bnds = [rand_uuid() for _ in range(ng)]
         reindex_map = dict(zip(site_ix, bnds))
 
-        TG = FermionTensor(G.copy(), inds=site_ix+bnds, tags=tags, left_inds=site_ix) # [bnds first, then site_ix]
+        TG = FermionTensor(
+            G.copy(), inds=site_ix + bnds, tags=tags, left_inds=site_ix
+        )  # [bnds first, then site_ix]
 
         if contract is False:
             #
@@ -723,13 +787,16 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             #      ╱   ╱
             #
             psi.reindex_(reindex_map)
-            input_tids = psi._get_tids_from_inds(bnds, which='any')
-            isite = [psi.tensor_map[itid].get_fermion_info()[1] for itid in input_tids]
+            input_tids = psi._get_tids_from_inds(bnds, which="any")
+            isite = [
+                psi.tensor_map[itid].get_fermion_info()[1]
+                for itid in input_tids
+            ]
 
             psi.fermion_space.add_tensor(TG, virtual=True)
 
             # get the sites that used to have the physical indices
-            site_tids = psi._get_tids_from_inds(bnds, which='any')
+            site_tids = psi._get_tids_from_inds(bnds, which="any")
 
             # pop the sites, contract, then re-add
             pts = [psi._pop_tensor(tid) for tid in site_tids]
@@ -749,27 +816,37 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         psi.fermion_space.add_tensor(TG, virtual=True)
         # check if we are not nearest neighbour and need to swap first
 
-        string = tuple(gen_long_range_path(
-                 *where, sequence=long_range_path_sequence))
+        string = tuple(
+            gen_long_range_path(*where, sequence=long_range_path_sequence)
+        )
 
         # the tensors along this string, which will be updated
         original_ts = [psi[coo] for coo in string]
 
         # the len(string) - 1 indices connecting the string
-        bonds_along = [next(iter(bonds(t1, t2)))
-                       for t1, t2 in pairwise(original_ts)]
+        bonds_along = [
+            next(iter(bonds(t1, t2))) for t1, t2 in pairwise(original_ts)
+        ]
 
-        if contract == 'split':
+        if contract == "split":
             #
             #       │╱  │╱          │╱  │╱
             #     ──GGGGG──  ==>  ──G┄┄┄G──
             #      ╱   ╱           ╱   ╱
             #
             gate_string_split_(
-                TG, where, string, original_ts, bonds_along,
-                reindex_map, site_ix, info, **compress_opts)
+                TG,
+                where,
+                string,
+                original_ts,
+                bonds_along,
+                reindex_map,
+                site_ix,
+                info,
+                **compress_opts,
+            )
 
-        elif contract == 'reduce-split':
+        elif contract == "reduce-split":
             #
             #       │   │             │ │
             #       GGGGG             GGG               │ │
@@ -779,8 +856,16 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             #    <QR> <LQ>                            <SVD>
             #
             gate_string_reduce_split_(
-                TG, where, string, original_ts, bonds_along,
-                reindex_map, site_ix, info, **compress_opts)
+                TG,
+                where,
+                string,
+                original_ts,
+                bonds_along,
+                reindex_map,
+                site_ix,
+                info,
+                **compress_opts,
+            )
         return psi
 
     gate_ = functools.partialmethod(gate, inplace=True)
@@ -792,18 +877,17 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
         *,
         cutoff=1e-10,
         canonize=True,
-        mode='mps',
-        layer_tags=('KET', 'BRA'),
+        mode="mps",
+        layer_tags=("KET", "BRA"),
         normalized=False,
         autogroup=True,
-        contract_optimize='auto-hq',
+        contract_optimize="auto-hq",
         return_all=False,
         plaquette_envs=None,
         plaquette_map=None,
         **plaquette_env_options,
     ):
-        norm, _, bra = self.make_norm(
-                    return_all=True, layer_tags=layer_tags)
+        norm, _, bra = self.make_norm(return_all=True, layer_tags=layer_tags)
 
         plaquette_env_options["max_bond"] = max_bond
         plaquette_env_options["cutoff"] = cutoff
@@ -821,14 +905,19 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
             ng = len(_where)
             site_ix = [bra.site_ind(i, j) for i, j in _where]
             bnds = [rand_uuid() for _ in range(ng)]
-            TG = FermionTensor(op.copy(), inds=site_ix+bnds, left_inds=site_ix)
+            TG = FermionTensor(
+                op.copy(), inds=site_ix + bnds, left_inds=site_ix
+            )
             new_terms[where] = bra.fermion_space.move_past(TG).data
 
         if plaquette_envs is None:
             plaquette_envs = dict()
             for x_bsz, y_bsz in calc_plaquette_sizes(terms.keys(), autogroup):
-                plaquette_envs.update(norm.compute_plaquette_environments(
-                    x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options))
+                plaquette_envs.update(
+                    norm.compute_plaquette_environments(
+                        x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options
+                    )
+                )
 
         if plaquette_map is None:
             # work out which plaquettes to use for which terms
@@ -859,9 +948,10 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
                 site_ix = [bra.site_ind(i, j) for i, j in _where]
                 bnds = [rand_uuid() for _ in range(ng)]
                 reindex_map = dict(zip(site_ix, bnds))
-                TG = FermionTensor(G.copy(),
-                            inds=site_ix+bnds, left_inds=site_ix)
-                tids = newtn._get_tids_from_inds(site_ix, which='any')
+                TG = FermionTensor(
+                    G.copy(), inds=site_ix + bnds, left_inds=site_ix
+                )
+                tids = newtn._get_tids_from_inds(site_ix, which="any")
                 for tid_ in tids:
                     tsr = newtn.tensor_map[tid_]
                     if layer_tags[0] in tsr.tags:
@@ -878,63 +968,73 @@ class FermionTensorNetwork2DVector(FermionTensorNetwork2D,
 
         return functools.reduce(add, (e for e, _ in expecs.values()))
 
-class FermionTensorNetwork2DOperator(FermionTensorNetwork2D,
-                                     FermionTensorNetwork,
-                                     TensorNetwork2DOperator):
 
+class FermionTensorNetwork2DOperator(
+    FermionTensorNetwork2D, FermionTensorNetwork, TensorNetwork2DOperator
+):
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_upper_ind_id',
-        '_lower_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_upper_ind_id",
+        "_lower_ind_id",
     )
 
     def to_dense(self, *inds_seq, **contract_opts):
         raise NotImplementedError
 
 
-class FermionTensorNetwork2DFlat(FermionTensorNetwork2D,
-                                 FermionTensorNetwork,
-                                 TensorNetwork2DFlat):
+class FermionTensorNetwork2DFlat(
+    FermionTensorNetwork2D, FermionTensorNetwork, TensorNetwork2DFlat
+):
     """Mixin class for a 2D square lattice tensor network with a single tensor
     per site, for example, both PEPS and PEPOs.
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
     )
 
-    def expand_bond_dimension(self, new_bond_dim, inplace=True, bra=None,
-                              rand_strength=0.0):
+    def expand_bond_dimension(
+        self, new_bond_dim, inplace=True, bra=None, rand_strength=0.0
+    ):
         raise NotImplementedError
 
 
-class FPEPS(FermionTensorNetwork2DVector,
-            FermionTensorNetwork2DFlat,
-            FermionTensorNetwork2D,
-            FermionTensorNetwork,
-            PEPS):
-
+class FPEPS(
+    FermionTensorNetwork2DVector,
+    FermionTensorNetwork2DFlat,
+    FermionTensorNetwork2D,
+    FermionTensorNetwork,
+    PEPS,
+):
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_site_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_site_ind_id",
     )
 
-    def __init__(self, arrays, *, shape='urdlp', tags=None,
-                 site_ind_id='k{},{}', site_tag_id='I{},{}',
-                 x_tag_id='X{}', y_tag_id='Y{}', **tn_opts):
-
+    def __init__(
+        self,
+        arrays,
+        *,
+        shape="urdlp",
+        tags=None,
+        site_ind_id="k{},{}",
+        site_tag_id="I{},{}",
+        x_tag_id="X{}",
+        y_tag_id="Y{}",
+        **tn_opts,
+    ):
         if isinstance(arrays, FPEPS):
             super().__init__(arrays)
             return
@@ -960,41 +1060,43 @@ class FPEPS(FermionTensorNetwork2DVector,
             #     other than up right down left physical
             array_order = shape
             if i == self.Lx - 1:
-                array_order = array_order.replace('u', '')
+                array_order = array_order.replace("u", "")
             if j == self.Ly - 1:
-                array_order = array_order.replace('r', '')
+                array_order = array_order.replace("r", "")
             if i == 0:
-                array_order = array_order.replace('d', '')
+                array_order = array_order.replace("d", "")
             if j == 0:
-                array_order = array_order.replace('l', '')
+                array_order = array_order.replace("l", "")
 
             # allow convention of missing bonds to be singlet dimensions
             if len(array.shape) != len(array_order):
-                raise TypeError("input array does not ahve right shape of (Lx, Ly)")
+                raise TypeError(
+                    "input array does not ahve right shape of (Lx, Ly)"
+                )
 
             transpose_order = tuple(
-                array_order.find(x) for x in 'urdlp' if x in array_order
+                array_order.find(x) for x in "urdlp" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
                 array = np.transpose(array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
-            if 'u' in array_order:
+            if "u" in array_order:
                 inds.append(ix[(i + 1, j), (i, j)])
-            if 'r' in array_order:
+            if "r" in array_order:
                 inds.append(ix[(i, j), (i, j + 1)])
-            if 'd' in array_order:
+            if "d" in array_order:
                 inds.append(ix[(i, j), (i - 1, j)])
-            if 'l' in array_order:
+            if "l" in array_order:
                 inds.append(ix[(i, j - 1), (i, j)])
             inds.append(self.site_ind(i, j))
 
             # mix site, x, y and global tags
 
-            ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.x_tag(i),
-                                   self.y_tag(j)))
+            ij_tags = tags | oset(
+                (self.site_tag(i, j), self.x_tag(i), self.y_tag(j))
+            )
 
             # create the site tensor!
             tensors.append(FermionTensor(data=array, inds=inds, tags=ij_tags))
@@ -1002,9 +1104,19 @@ class FPEPS(FermionTensorNetwork2DVector,
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
-    def rand(cls, Lx, Ly, bond_dim, symmetry_infos, dq_infos,
-             phys_dim=2, seed=None, dtype=float, **peps_opts):
-        r'''Construct a random 2d FPEPS with given quantum particle number distribution
+    def rand(
+        cls,
+        Lx,
+        Ly,
+        bond_dim,
+        symmetry_infos,
+        dq_infos,
+        phys_dim=2,
+        seed=None,
+        dtype=float,
+        **peps_opts,
+    ):
+        r"""Construct a random 2d FPEPS with given quantum particle number distribution
 
         Parameters
         ----------
@@ -1033,11 +1145,10 @@ class FPEPS(FermionTensorNetwork2DVector,
         Returns
         -------
         FPEPS
-        '''
+        """
         if seed is not None:
             np.random.seed(seed)
-        pattern_map = {"d": "+", "l":"+", "p":"+",
-                           "u": "-", "r":"-"}
+        pattern_map = {"d": "+", "l": "+", "p": "+", "u": "-", "r": "-"}
 
         arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
         for i, j in product(range(Lx), range(Ly)):
@@ -1045,25 +1156,31 @@ class FPEPS(FermionTensorNetwork2DVector,
             pattern = ""
             if i != Lx - 1:  # bond up
                 shape.append(bond_dim)
-                pattern += pattern_map['u']
+                pattern += pattern_map["u"]
             if j != Ly - 1:  # bond right
                 shape.append(bond_dim)
-                pattern += pattern_map['r']
+                pattern += pattern_map["r"]
             if i != 0:  # bond down
                 shape.append(bond_dim)
-                pattern += pattern_map['d']
+                pattern += pattern_map["d"]
             if j != 0:  # bond left
                 shape.append(bond_dim)
-                pattern += pattern_map['l']
+                pattern += pattern_map["l"]
             shape.append(phys_dim)
-            pattern += pattern_map['p']
+            pattern += pattern_map["p"]
             symmetry_info = symmetry_infos[i, j]
-            arrays[i][j] = rand_all_blocks(shape, symmetry_info, dtype=dtype, pattern=pattern, dq=dq_infos[i, j])
+            arrays[i][j] = rand_all_blocks(
+                shape,
+                symmetry_info,
+                dtype=dtype,
+                pattern=pattern,
+                dq=dq_infos[i, j],
+            )
         return FPEPS(arrays, **peps_opts)
 
     @classmethod
     def gen_site_prod_state(cls, Lx, Ly, phys_infos, phys_dim=1, **peps_opts):
-        r'''Construct a 2d FPEPS as site product state
+        r"""Construct a 2d FPEPS as site product state
 
         Parameters
         ----------
@@ -1082,54 +1199,65 @@ class FPEPS(FermionTensorNetwork2DVector,
         Returns
         -------
         FPEPS
-        '''
-        pattern_map = {"d": "+", "l":"+", "p":"+",
-                           "u": "-", "r":"-"}
+        """
+        pattern_map = {"d": "+", "l": "+", "p": "+", "u": "-", "r": "-"}
         arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
         for i, j in product(range(Lx), range(Ly)):
             shape = []
             pattern = ""
             if i != Lx - 1:  # bond up
                 shape.append(1)
-                pattern += pattern_map['u']
+                pattern += pattern_map["u"]
             if j != Ly - 1:  # bond right
                 shape.append(1)
-                pattern += pattern_map['r']
+                pattern += pattern_map["r"]
             if i != 0:  # bond down
                 shape.append(1)
-                pattern += pattern_map['d']
+                pattern += pattern_map["d"]
             if j != 0:  # bond left
                 shape.append(1)
-                pattern += pattern_map['l']
+                pattern += pattern_map["l"]
             shape.append(phys_dim)
-            pattern += pattern_map['p']
-            arrays[i][j] = ones_single_block(shape, pattern, phys_infos[i, j], ind=len(shape)-1)
+            pattern += pattern_map["p"]
+            arrays[i][j] = ones_single_block(
+                shape, pattern, phys_infos[i, j], ind=len(shape) - 1
+            )
         return FPEPS(arrays, **peps_opts)
 
     def add_PEPS(self, other, inplace=False):
         raise NotImplementedError
 
-class FPEPO(FermionTensorNetwork2DOperator,
-            FermionTensorNetwork2DFlat,
-            FermionTensorNetwork2D,
-            FermionTensorNetwork,
-            PEPO):
 
+class FPEPO(
+    FermionTensorNetwork2DOperator,
+    FermionTensorNetwork2DFlat,
+    FermionTensorNetwork2D,
+    FermionTensorNetwork,
+    PEPO,
+):
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_x_tag_id',
-        '_y_tag_id',
-        '_Lx',
-        '_Ly',
-        '_upper_ind_id',
-        '_lower_ind_id',
+        "_site_tag_id",
+        "_x_tag_id",
+        "_y_tag_id",
+        "_Lx",
+        "_Ly",
+        "_upper_ind_id",
+        "_lower_ind_id",
     )
 
-    def __init__(self, arrays, *, shape='urdlbk', tags=None,
-                 upper_ind_id='k{},{}', lower_ind_id='b{},{}',
-                 site_tag_id='I{},{}', x_tag_id='X{}', y_tag_id='Y{}',
-                 **tn_opts):
-
+    def __init__(
+        self,
+        arrays,
+        *,
+        shape="urdlbk",
+        tags=None,
+        upper_ind_id="k{},{}",
+        lower_ind_id="b{},{}",
+        site_tag_id="I{},{}",
+        x_tag_id="X{}",
+        y_tag_id="Y{}",
+        **tn_opts,
+    ):
         if isinstance(arrays, FPEPO):
             super().__init__(arrays)
             return
@@ -1156,41 +1284,43 @@ class FPEPO(FermionTensorNetwork2DOperator,
             #     other than up right down left physical
             array_order = shape
             if i == self.Lx - 1:
-                array_order = array_order.replace('u', '')
+                array_order = array_order.replace("u", "")
             if j == self.Ly - 1:
-                array_order = array_order.replace('r', '')
+                array_order = array_order.replace("r", "")
             if i == 0:
-                array_order = array_order.replace('d', '')
+                array_order = array_order.replace("d", "")
             if j == 0:
-                array_order = array_order.replace('l', '')
+                array_order = array_order.replace("l", "")
 
             # allow convention of missing bonds to be singlet dimensions
             if len(array.shape) != len(array_order):
-                raise ValueError("Input arrays do not have right shape (Lx, Ly)")
+                raise ValueError(
+                    "Input arrays do not have right shape (Lx, Ly)"
+                )
 
             transpose_order = tuple(
-                array_order.find(x) for x in 'urdlbk' if x in array_order
+                array_order.find(x) for x in "urdlbk" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
                 array = np.transpose(array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
-            if 'u' in array_order:
+            if "u" in array_order:
                 inds.append(ix[(i + 1, j), (i, j)])
-            if 'r' in array_order:
+            if "r" in array_order:
                 inds.append(ix[(i, j), (i, j + 1)])
-            if 'd' in array_order:
+            if "d" in array_order:
                 inds.append(ix[(i, j), (i - 1, j)])
-            if 'l' in array_order:
+            if "l" in array_order:
                 inds.append(ix[(i, j - 1), (i, j)])
             inds.append(self.lower_ind(i, j))
             inds.append(self.upper_ind(i, j))
 
             # mix site, x, y and global tags
-            ij_tags = tags | oset((self.site_tag(i, j),
-                                   self.x_tag(i),
-                                   self.y_tag(j)))
+            ij_tags = tags | oset(
+                (self.site_tag(i, j), self.x_tag(i), self.y_tag(j))
+            )
 
             # create the site tensor!
             tensors.append(FermionTensor(data=array, inds=inds, tags=ij_tags))
@@ -1198,11 +1328,19 @@ class FPEPO(FermionTensorNetwork2DOperator,
         super().__init__(tensors, virtual=True, **tn_opts)
 
     @classmethod
-    def rand(cls, Lx, Ly, bond_dim, phys_dim=2, herm=False,
-             dtype=float, seed=None, **pepo_opts):
+    def rand(
+        cls,
+        Lx,
+        Ly,
+        bond_dim,
+        phys_dim=2,
+        herm=False,
+        dtype=float,
+        seed=None,
+        **pepo_opts,
+    ):
         raise NotImplementedError
 
     def add_PEPO(self, other, inplace=False):
-        """Add this PEPO with another.
-        """
+        """Add this PEPO with another."""
         raise NotImplementedError

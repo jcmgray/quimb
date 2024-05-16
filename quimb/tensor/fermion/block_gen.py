@@ -5,6 +5,7 @@ from ...gen.rand import randn
 from .block_interface import dispatch_settings, get_symmetry
 from pyblock3.algebra.symmetry import BondInfo
 
+
 def backend_wrapper(func):
     def new_func(*args, **kwargs):
         T = func(*args, **kwargs)
@@ -12,10 +13,12 @@ def backend_wrapper(func):
         if use_cpp:
             T = T.to_flat()
         return T
+
     return new_func
 
+
 def _dispatch_dq(dq, symmetry):
-    '''Construct pyblock3 fermion symmetry object
+    """Construct pyblock3 fermion symmetry object
 
     Parameters
     ----------
@@ -26,18 +29,26 @@ def _dispatch_dq(dq, symmetry):
     Returns
     -------
     Fermion symmetry object
-    '''
+    """
     if dq is None:
-        dq = (0, )
+        dq = (0,)
     elif isinstance(dq, (int, np.integer, np.float)):
-        dq = (int(dq), )
+        dq = (int(dq),)
     dq = symmetry(*dq)
     return dq
 
+
 @backend_wrapper
-def rand_single_block(shape, dtype=float, seed=None,
-                      pattern=None, dq=None, ind=None, full_shape=None):
-    '''Construct random block tensor with one block
+def rand_single_block(
+    shape,
+    dtype=float,
+    seed=None,
+    pattern=None,
+    dq=None,
+    ind=None,
+    full_shape=None,
+):
+    """Construct random block tensor with one block
 
     Parameters
     ----------
@@ -57,36 +68,46 @@ def rand_single_block(shape, dtype=float, seed=None,
     Returns
     -------
     Block tensor
-    '''
+    """
     if seed is not None:
         np.random.seed(seed)
     symmetry = get_symmetry()
     dq = _dispatch_dq(dq, symmetry)
     if pattern is None:
-        pattern = "-" * (len(shape)-1) + "+"
+        pattern = "-" * (len(shape) - 1) + "+"
     if ind is None:
         try:
             ind = pattern.index("+")
         except:
             ind = 0
     if pattern[ind] == "-":
-        dq = - dq
-    q_labels = [dq if ix==ind else symmetry(0) for ix in range(len(shape))]
+        dq = -dq
+    q_labels = [dq if ix == ind else symmetry(0) for ix in range(len(shape))]
     array = randn(shape, dtype=dtype)
     from pyblock3.algebra import fermion_setting as setting
+
     use_ad = setting.dispatch_settings(ad=None)
     if use_ad:
         from pyblock3.algebra.ad.fermion import SparseFermionTensor, SubTensor
+
         blk = SubTensor(data=array, q_labels=q_labels)
     else:
         from pyblock3.algebra.fermion import SparseFermionTensor, SubTensor
+
         blk = SubTensor(reduced=array, q_labels=q_labels)
-    T = SparseFermionTensor(blocks=[blk, ], pattern=pattern, shape=full_shape)
+    T = SparseFermionTensor(
+        blocks=[
+            blk,
+        ],
+        pattern=pattern,
+        shape=full_shape,
+    )
     return T
+
 
 @backend_wrapper
 def ones_single_block(shape, pattern=None, dq=None, ind=None, full_shape=None):
-    '''Construct block tensor filled with ones with a single block
+    """Construct block tensor filled with ones with a single block
 
     Parameters
     ----------
@@ -102,35 +123,52 @@ def ones_single_block(shape, pattern=None, dq=None, ind=None, full_shape=None):
     Returns
     -------
     Block tensor
-    '''
+    """
     symmetry = get_symmetry()
     dq = _dispatch_dq(dq, symmetry)
     if pattern is None:
-        pattern = "-" * (len(shape)-1) + "+"
+        pattern = "-" * (len(shape) - 1) + "+"
     if ind is None:
         try:
             ind = pattern.index("+")
         except:
             ind = 0
     if pattern[ind] == "-":
-        dq = - dq
-    q_labels = [dq if ix==ind else symmetry(0) for ix in range(len(shape))]
+        dq = -dq
+    q_labels = [dq if ix == ind else symmetry(0) for ix in range(len(shape))]
     array = np.ones(shape)
     from pyblock3.algebra import fermion_setting as setting
+
     use_ad = setting.dispatch_settings(ad=None)
     if use_ad:
         from pyblock3.algebra.ad.fermion import SparseFermionTensor, SubTensor
+
         blk = SubTensor(data=array, q_labels=q_labels)
     else:
         from pyblock3.algebra.fermion import SparseFermionTensor, SubTensor
+
         blk = SubTensor(reduced=array, q_labels=q_labels)
-    T = SparseFermionTensor(blocks=[blk, ], pattern=pattern, shape=full_shape)
+    T = SparseFermionTensor(
+        blocks=[
+            blk,
+        ],
+        pattern=pattern,
+        shape=full_shape,
+    )
     return T
 
+
 @backend_wrapper
-def rand_all_blocks(shape, symmetry_info, dtype=float,
-                    seed=None, pattern=None, dq=None, full_shape=None):
-    '''Construct block tensor with specified blocks
+def rand_all_blocks(
+    shape,
+    symmetry_info,
+    dtype=float,
+    seed=None,
+    pattern=None,
+    dq=None,
+    full_shape=None,
+):
+    """Construct block tensor with specified blocks
 
     Parameters
     ----------
@@ -155,7 +193,7 @@ def rand_all_blocks(shape, symmetry_info, dtype=float,
     Returns
     -------
     Block tensor
-    '''
+    """
     if seed is not None:
         np.random.seed(seed)
     if full_shape is None:
@@ -173,27 +211,42 @@ def rand_all_blocks(shape, symmetry_info, dtype=float,
                 bonds.append(symmetry(ibond))
             else:
                 bonds.append(symmetry(*ibond))
-        bonds = dict(zip(bonds, [sh,]*len(bonds)))
+        bonds = dict(
+            zip(
+                bonds,
+                [
+                    sh,
+                ]
+                * len(bonds),
+            )
+        )
         bond_infos.append(BondInfo(bonds))
     from pyblock3.algebra import fermion_setting as setting
+
     use_ad = setting.dispatch_settings(ad=None)
     if use_ad:
         from pyblock3.algebra.ad.fermion import SparseFermionTensor
     else:
         from pyblock3.algebra.fermion import SparseFermionTensor
-    T = SparseFermionTensor.random(bond_infos, pattern=pattern, dq=dq, dtype=dtype, shape=full_shape)
+    T = SparseFermionTensor.random(
+        bond_infos, pattern=pattern, dq=dq, dtype=dtype, shape=full_shape
+    )
     return T
+
 
 def gen_2d_bonds(*args):
     symmetry = dispatch_settings("symmetry")
-    func = {"U1": gen_2d_bonds_u1,
-            "Z2": gen_2d_bonds_z2,
-            "Z22": gen_2d_bonds_z22,
-            "U11": gen_2d_bonds_u11}[symmetry]
+    func = {
+        "U1": gen_2d_bonds_u1,
+        "Z2": gen_2d_bonds_z2,
+        "Z22": gen_2d_bonds_z22,
+        "U11": gen_2d_bonds_u11,
+    }[symmetry]
     return func(*args)
 
+
 def gen_2d_bonds_z2(pnarray, physical_infos):
-    r'''Construct Z2 symmetry informations for each leg for 2d Fermionic TensorNetwork
+    r"""Construct Z2 symmetry informations for each leg for 2d Fermionic TensorNetwork
 
     Parameters
     ----------
@@ -211,19 +264,21 @@ def gen_2d_bonds_z2(pnarray, physical_infos):
     dq_infos: dict[tuple[int], int]
         A dictionary mapping the site coordinates to the net Z2 symmetry
         on that site
-    '''
+    """
     Lx, Ly = pnarray.shape
     symmetry_infos = dict()
     dq_infos = dict()
     for ix, iy in product(range(Lx), range(Ly)):
-        nvir = (ix != Lx - 1) + (ix != 0) +\
-               (iy != Ly - 1) + (iy != 0)
-        symmetry_infos[ix,iy] = [(0,1)] * nvir + [tuple(physical_infos[ix,iy])]
-        dq_infos[ix,iy]= pnarray[ix,iy]
+        nvir = (ix != Lx - 1) + (ix != 0) + (iy != Ly - 1) + (iy != 0)
+        symmetry_infos[ix, iy] = [(0, 1)] * nvir + [
+            tuple(physical_infos[ix, iy])
+        ]
+        dq_infos[ix, iy] = pnarray[ix, iy]
     return symmetry_infos, dq_infos
 
+
 def gen_2d_bonds_z22(n1array, n2array, physical_infos):
-    r'''Construct Z2 \otimes Z2 symmetry informations for each leg for 2d Fermionic TensorNetwork
+    r"""Construct Z2 \otimes Z2 symmetry informations for each leg for 2d Fermionic TensorNetwork
 
     Parameters
     ----------
@@ -243,19 +298,21 @@ def gen_2d_bonds_z22(n1array, n2array, physical_infos):
     dq_infos: dict[tuple[int], tuple of integers]
         A dictionary mapping the site coordinates to the net quantum particle number
         pair on that site
-    '''
+    """
     Lx, Ly = n1array.shape
     symmetry_infos = dict()
     dq_infos = dict()
     for ix, iy in product(range(Lx), range(Ly)):
-        nvir = (ix != Lx - 1) + (ix != 0) +\
-               (iy != Ly - 1) + (iy != 0)
-        symmetry_infos[ix,iy] = [((0,0),(0,1),(1,0),(1,1))] * nvir + [tuple(physical_infos[ix,iy])]
-        dq_infos[ix,iy]= (n1array[ix,iy], n2array[ix,iy])
+        nvir = (ix != Lx - 1) + (ix != 0) + (iy != Ly - 1) + (iy != 0)
+        symmetry_infos[ix, iy] = [((0, 0), (0, 1), (1, 0), (1, 1))] * nvir + [
+            tuple(physical_infos[ix, iy])
+        ]
+        dq_infos[ix, iy] = (n1array[ix, iy], n2array[ix, iy])
     return symmetry_infos, dq_infos
 
+
 def gen_2d_bonds_u1(pnarray, physical_infos):
-    r'''Construct U1 symmetry informations for each leg for 2d Fermionic TensorNetwork
+    r"""Construct U1 symmetry informations for each leg for 2d Fermionic TensorNetwork
 
     Parameters
     ----------
@@ -273,68 +330,78 @@ def gen_2d_bonds_u1(pnarray, physical_infos):
     dq_infos: dict[tuple[int], int]
         A dictionary mapping the site coordinates to the net quantum particle number
         on that site
-    '''
+    """
     Lx, Ly = pnarray.shape
-    s_type = (Lx % 2==0)
-    vbonds = [[0 for _ in range(Ly)] for _ in range(Lx+1)]
-    hbonds = [[0 for _ in range(Ly+1)] for _ in range(Lx)]
+    s_type = Lx % 2 == 0
+    vbonds = [[0 for _ in range(Ly)] for _ in range(Lx + 1)]
+    hbonds = [[0 for _ in range(Ly + 1)] for _ in range(Lx)]
+
     def _get_bond(ix, iy, *directions):
-        bond_dict = {"r": hbonds[ix][iy+1],
-                     "l": hbonds[ix][iy],
-                     "u": vbonds[ix+1][iy],
-                     "d": vbonds[ix][iy]}
+        bond_dict = {
+            "r": hbonds[ix][iy + 1],
+            "l": hbonds[ix][iy],
+            "u": vbonds[ix + 1][iy],
+            "d": vbonds[ix][iy],
+        }
         return [bond_dict[ix] for ix in directions]
 
-    ave = np.sum(pnarray)/pnarray.size
+    ave = np.sum(pnarray) / pnarray.size
     for ix in range(Lx):
-        sweep_left = (s_type and ix%2==0) or (not s_type and ix%2==1)
+        sweep_left = (s_type and ix % 2 == 0) or (not s_type and ix % 2 == 1)
         if sweep_left:
-            for iy in range(Ly-1,-1,-1):
-                if iy ==0:
+            for iy in range(Ly - 1, -1, -1):
+                if iy == 0:
                     right, left, down = _get_bond(ix, iy, "r", "l", "d")
-                    vbonds[ix+1][iy] = down + left + ave - right - pnarray[ix][iy]
+                    vbonds[ix + 1][iy] = (
+                        down + left + ave - right - pnarray[ix][iy]
+                    )
                 else:
                     right, down, up = _get_bond(ix, iy, "r", "d", "u")
                     hbonds[ix][iy] = pnarray[ix][iy] + up + right - down - ave
         else:
             for iy in range(Ly):
-                if iy ==Ly-1:
+                if iy == Ly - 1:
                     right, left, down = _get_bond(ix, iy, "r", "l", "d")
-                    vbonds[ix+1][iy] = down + left + ave - right - pnarray[ix][iy]
+                    vbonds[ix + 1][iy] = (
+                        down + left + ave - right - pnarray[ix][iy]
+                    )
                 else:
                     left, up, down = _get_bond(ix, iy, "l", "u", "d")
-                    hbonds[ix][iy+1] = down + left + ave - up - pnarray[ix][iy]
+                    hbonds[ix][iy + 1] = (
+                        down + left + ave - up - pnarray[ix][iy]
+                    )
 
-    hbonds = np.asarray(hbonds)[:,1:-1]
+    hbonds = np.asarray(hbonds)[:, 1:-1]
     vbonds = np.asarray(vbonds)[1:-1]
 
     def _round_to_bond(bd):
         if bd.is_integer():
             ibond = np.rint(bd).astype(int)
-            return [ibond-1, ibond, ibond+1]
+            return [ibond - 1, ibond, ibond + 1]
         else:
             ibond = np.floor(bd).astype(int)
-            return [ibond, ibond+1]
+            return [ibond, ibond + 1]
 
     symmetry_infos = dict()
     dq_infos = dict()
     for ix, iy in product(range(Lx), range(Ly)):
         block = []
         if ix != Lx - 1:  # bond up
-            block.append(_round_to_bond(vbonds[ix,iy]))
+            block.append(_round_to_bond(vbonds[ix, iy]))
         if iy != Ly - 1:  # bond right
-            block.append(_round_to_bond(hbonds[ix,iy]))
+            block.append(_round_to_bond(hbonds[ix, iy]))
         if ix != 0:  # bond down
-            block.append(_round_to_bond(vbonds[ix-1,iy]))
+            block.append(_round_to_bond(vbonds[ix - 1, iy]))
         if iy != 0:  # bond left
-            block.append(_round_to_bond(hbonds[ix,iy-1]))
+            block.append(_round_to_bond(hbonds[ix, iy - 1]))
         block.append(physical_infos[ix][iy])
-        symmetry_infos[ix,iy] = block
-        dq_infos[ix,iy]=pnarray[ix,iy]
+        symmetry_infos[ix, iy] = block
+        dq_infos[ix, iy] = pnarray[ix, iy]
     return symmetry_infos, dq_infos
 
+
 def gen_2d_bonds_u11(pnarray, szarray, physical_infos):
-    r'''Construct U1 \otime U1 symmetry informations for each leg for 2d Fermionic TensorNetwork
+    r"""Construct U1 \otime U1 symmetry informations for each leg for 2d Fermionic TensorNetwork
 
     Parameters
     ----------
@@ -355,71 +422,92 @@ def gen_2d_bonds_u11(pnarray, szarray, physical_infos):
     dq_infos: dict[tuple[int], tuple of integers]
         A dictionary mapping the site coordinates to the net quantum particle number
         and SZ number pair on that site
-    '''
+    """
 
     Lx, Ly = pnarray.shape
     if not np.allclose(pnarray % 2, szarray % 2):
         raise ValueError("parity inconsistent")
-    if abs(szarray).max()>1:
+    if abs(szarray).max() > 1:
         raise ValueError("net |SZ| >1 not supported yet")
-    s_type = (Lx % 2==0)
-    vbonds = [[0 for _ in range(Ly)] for _ in range(Lx+1)]
-    hbonds = [[0 for _ in range(Ly+1)] for _ in range(Lx)]
+    s_type = Lx % 2 == 0
+    vbonds = [[0 for _ in range(Ly)] for _ in range(Lx + 1)]
+    hbonds = [[0 for _ in range(Ly + 1)] for _ in range(Lx)]
+
     def _get_bond(ix, iy, *directions):
-        bond_dict = {"r": hbonds[ix][iy+1],
-                     "l": hbonds[ix][iy],
-                     "u": vbonds[ix+1][iy],
-                     "d": vbonds[ix][iy]}
+        bond_dict = {
+            "r": hbonds[ix][iy + 1],
+            "l": hbonds[ix][iy],
+            "u": vbonds[ix + 1][iy],
+            "d": vbonds[ix][iy],
+        }
         return [bond_dict[ix] for ix in directions]
 
-    ave = np.sum(pnarray)/pnarray.size
+    ave = np.sum(pnarray) / pnarray.size
     for ix in range(Lx):
-        sweep_left = (s_type and ix%2==0) or (not s_type and ix%2==1)
+        sweep_left = (s_type and ix % 2 == 0) or (not s_type and ix % 2 == 1)
         if sweep_left:
-            for iy in range(Ly-1,-1,-1):
-                if iy ==0:
+            for iy in range(Ly - 1, -1, -1):
+                if iy == 0:
                     right, left, down = _get_bond(ix, iy, "r", "l", "d")
-                    vbonds[ix+1][iy] = down + left + ave - right - pnarray[ix][iy]
+                    vbonds[ix + 1][iy] = (
+                        down + left + ave - right - pnarray[ix][iy]
+                    )
                 else:
                     right, down, up = _get_bond(ix, iy, "r", "d", "u")
                     hbonds[ix][iy] = pnarray[ix][iy] + up + right - down - ave
         else:
             for iy in range(Ly):
-                if iy ==Ly-1:
+                if iy == Ly - 1:
                     right, left, down = _get_bond(ix, iy, "r", "l", "d")
-                    vbonds[ix+1][iy] = down + left + ave - right - pnarray[ix][iy]
+                    vbonds[ix + 1][iy] = (
+                        down + left + ave - right - pnarray[ix][iy]
+                    )
                 else:
                     left, up, down = _get_bond(ix, iy, "l", "u", "d")
-                    hbonds[ix][iy+1] = down + left + ave - up - pnarray[ix][iy]
-    hbonds = np.asarray(hbonds)[:,1:-1]
+                    hbonds[ix][iy + 1] = (
+                        down + left + ave - up - pnarray[ix][iy]
+                    )
+    hbonds = np.asarray(hbonds)[:, 1:-1]
     vbonds = np.asarray(vbonds)[1:-1]
 
     def _round_to_bond(bd):
         if bd.is_integer():
             ibond = np.rint(bd).astype(int)
-            if ibond % 2==0:
-                return [(ibond-1,1),(ibond-1,-1), (ibond,0), (ibond+1,-1), (ibond+1,1)]
+            if ibond % 2 == 0:
+                return [
+                    (ibond - 1, 1),
+                    (ibond - 1, -1),
+                    (ibond, 0),
+                    (ibond + 1, -1),
+                    (ibond + 1, 1),
+                ]
             else:
-                return [(ibond-1, 0), (ibond, 1), (ibond, -1), (ibond+1, 0)]
+                return [
+                    (ibond - 1, 0),
+                    (ibond, 1),
+                    (ibond, -1),
+                    (ibond + 1, 0),
+                ]
         else:
             ibond = np.floor(bd).astype(int)
-            if ibond % 2==0:
-                return [(ibond,0), (ibond+1,-1), (ibond+1,1)]
+            if ibond % 2 == 0:
+                return [(ibond, 0), (ibond + 1, -1), (ibond + 1, 1)]
             else:
-                return [(ibond, 1), (ibond, -1), (ibond+1, 0)]
+                return [(ibond, 1), (ibond, -1), (ibond + 1, 0)]
+
     symmetry_infos = dict()
     dq_infos = dict()
     for ix, iy in product(range(Lx), range(Ly)):
         block = []
         if ix != Lx - 1:  # bond up
-            block.append(_round_to_bond(vbonds[ix,iy]))
+            block.append(_round_to_bond(vbonds[ix, iy]))
         if iy != Ly - 1:  # bond right
-            block.append(_round_to_bond(hbonds[ix,iy]))
+            block.append(_round_to_bond(hbonds[ix, iy]))
         if ix != 0:  # bond down
-            block.append(_round_to_bond(vbonds[ix-1,iy]))
+            block.append(_round_to_bond(vbonds[ix - 1, iy]))
         if iy != 0:  # bond left
-            block.append(_round_to_bond(hbonds[ix,iy-1]))
+            block.append(_round_to_bond(hbonds[ix, iy - 1]))
         block.append(physical_infos[ix][iy])
-        symmetry_infos[ix,iy] = block
-        dq_infos[ix,iy]= (pnarray[ix,iy],szarray[ix,iy])
+        symmetry_infos[ix, iy] = block
+        dq_infos[ix, iy] = (pnarray[ix, iy], szarray[ix, iy])
     return symmetry_infos, dq_infos

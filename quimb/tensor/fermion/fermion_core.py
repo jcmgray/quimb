@@ -1,5 +1,5 @@
-"""Core tensor network tools.
-"""
+"""Core tensor network tools."""
+
 import copy
 import functools
 from operator import add
@@ -10,34 +10,53 @@ import opt_einsum as oe
 from opt_einsum.contract import parse_backend, _tensordot, _transpose
 from autoray import conj
 
-from ...utils import (oset, valmap, check_opt)
+from ...utils import oset, valmap, check_opt
 from .block_tools import sqrt, inv_with_smudge
 from .block_interface import Constructor
 
-from ..tensor_core import TensorNetwork, rand_uuid, tags_to_oset, group_inds, tensor_contract, get_tensor_linop_backend
+from ..tensor_core import (
+    TensorNetwork,
+    rand_uuid,
+    tags_to_oset,
+    group_inds,
+    tensor_contract,
+    get_tensor_linop_backend,
+)
 from .tensor_block import tensor_split as _tensor_split
-from .tensor_block import tensor_canonize_bond, tensor_compress_bond, BlockTensor, BlockTensorNetwork, tensor_balance_bond
+from .tensor_block import (
+    tensor_canonize_bond,
+    tensor_compress_bond,
+    BlockTensor,
+    BlockTensorNetwork,
+    tensor_balance_bond,
+)
 from functools import wraps
+
 
 def compress_decorator(fn):
     @wraps(fn)
     def wrapper(T1, T2, *args, **kwargs):
         site1 = T1.get_fermion_info()[1]
         site2 = T2.get_fermion_info()[1]
-        if site1<site2:
+        if site1 < site2:
             fn(T1, T2, *args, **kwargs)
         else:
             absorb = kwargs.pop("absorb")
-            kwargs["absorb"] = {"left":"right",
-                                "right":"left",
-                                "both":"both",
-                                None: None}[absorb]
+            kwargs["absorb"] = {
+                "left": "right",
+                "right": "left",
+                "both": "both",
+                None: None,
+            }[absorb]
             fn(T2, T1, *args, **kwargs)
         return T1, T2
+
     return wrapper
+
 
 tensor_compress_bond = compress_decorator(tensor_compress_bond)
 tensor_canonize_bond = compress_decorator(tensor_canonize_bond)
+
 
 class FermionSpace:
     def __init__(self, tensor_order=None, virtual=True):
@@ -54,15 +73,14 @@ class FermionSpace:
 
     @property
     def sites(self):
-        """ return a list of all the occupied positions
-        """
+        """return a list of all the occupied positions"""
         if len(self.tensor_order) == 0:
             return []
         else:
             return [val[1] for val in self.tensor_order.values()]
 
     def copy(self):
-        """ Copy the FermionSpace object. Tensor ids and positions will be
+        """Copy the FermionSpace object. Tensor ids and positions will be
         preserved and tensors will be copied
         """
         new_fs = FermionSpace(self.tensor_order, virtual=False)
@@ -70,7 +88,7 @@ class FermionSpace:
         return new_fs
 
     def add_tensor(self, tsr, tid=None, site=None, virtual=False):
-        """ Add a tensor to the current FermionSpace, eg
+        """Add a tensor to the current FermionSpace, eg
         01234            0123456
         XXXXX, (6, B) -> XXXXX-B
 
@@ -90,16 +108,18 @@ class FermionSpace:
         if (tid is None) or (tid in self.tensor_order):
             tid = self._next_tid()
         if site is None:
-            site = 0 if len(self.sites)==0 else max(self.sites) + 1
+            site = 0 if len(self.sites) == 0 else max(self.sites) + 1
         elif site in self.sites:
-            raise ValueError("site:%s occupied, use replace/insert_tensor method"%site)
+            raise ValueError(
+                "site:%s occupied, use replace/insert_tensor method" % site
+            )
 
         T = tsr if virtual else tsr.copy()
         self.tensor_order[tid] = (T, site)
         T.set_fermion_owner(self, tid)
 
     def replace_tensor(self, site, tsr, tid=None, virtual=False):
-        """ Replace the tensor at a given site, eg
+        """Replace the tensor at a given site, eg
         0123456789            0123456789
         XXXXAXXXXX, (4, B) -> XXXXBXXXXX
 
@@ -125,7 +145,7 @@ class FermionSpace:
         self.tensor_order[tid] = (T, site)
 
     def insert_tensor(self, site, tsr, tid=None, virtual=False):
-        """ insert a tensor at a given site, all tensors afterwards
+        """insert a tensor at a given site, all tensors afterwards
         will be shifted forward by 1, eg,
         012345678            0123456789
         ABCDEFGHI, (4, X) -> ABCDXEFGHI
@@ -150,11 +170,11 @@ class FermionSpace:
             T.set_fermion_owner(self, tid)
             for atid, (atsr, asite) in self.tensor_order.items():
                 if asite >= site:
-                    self.tensor_order.update({atid: (atsr, asite+1)})
+                    self.tensor_order.update({atid: (atsr, asite + 1)})
             self.tensor_order.update({tid: (T, site)})
 
     def insert(self, site, *tsrs, virtual=False):
-        """ insert a group of tensors at a given site, all tensors afterwards
+        """insert a group of tensors at a given site, all tensors afterwards
         will be shifted forward accordingly, eg,
         0123456                0123456789
         ABCDEFG, (4, (X,Y,Z)) -> ABCDXYZEFG
@@ -173,7 +193,7 @@ class FermionSpace:
             site += 1
 
     def get_tid_from_site(self, site):
-        """ Return the tensor id at given site
+        """Return the tensor id at given site
 
         Parameters
         ----------
@@ -181,7 +201,7 @@ class FermionSpace:
             The position to obtain the tensor id
         """
         if site not in self.sites:
-            raise KeyError("site:%s not occupied"%site)
+            raise KeyError("site:%s not occupied" % site)
         idx = self.sites.index(site)
         return list(self.tensor_order.keys())[idx]
 
@@ -196,7 +216,7 @@ class FermionSpace:
         return ind_map
 
     def _reorder_from_dict(self, tid_map):
-        """ inplace reordering of tensors from a tensor_id/position mapping.
+        """inplace reordering of tensors from a tensor_id/position mapping.
         Pizorn algorithm will be applied during moving
 
         Parameters
@@ -216,7 +236,7 @@ class FermionSpace:
                 self.move(tid_lst[ind], isite)
 
     def reorder_all(self, tid_map, ind_map=None, inplace=False):
-        """ reordering of tensors from a tensor_id/position mapping. The tid_map
+        """reordering of tensors from a tensor_id/position mapping. The tid_map
         must contains the mapping for all tensors in this FermionSpace.
         Pizorn algorithm will be applied during moving.
 
@@ -232,7 +252,9 @@ class FermionSpace:
         fs = self if inplace else self.copy()
         # Compute Global Phase
         if len(tid_map) != len(fs.tensor_order):
-            raise ValueError("tid_map must be of equal size as the FermionSpace")
+            raise ValueError(
+                "tid_map must be of equal size as the FermionSpace"
+            )
         nsites = len(fs.tensor_order)
         parity_tab = []
         input_tab = []
@@ -248,19 +270,28 @@ class FermionSpace:
         tid_lst = list(tid_map.keys())
         des_sites = list(tid_map.values())
         global_parity = 0
-        for fsite in range(nsites-1, -1, -1):
+        for fsite in range(nsites - 1, -1, -1):
             idx = des_sites.index(fsite)
             tid = tid_lst[idx]
             isite = input_tab.index(tid)
-            if isite == fsite: continue
-            global_parity += np.sum(parity_tab[isite+1:fsite+1]) * parity_tab[isite]
-            parity_tab[isite:fsite+1] = parity_tab[isite+1:fsite+1]+[parity_tab[isite]]
-            input_tab[isite:fsite+1] = input_tab[isite+1:fsite+1]+[input_tab[isite]]
+            if isite == fsite:
+                continue
+            global_parity += (
+                np.sum(parity_tab[isite + 1 : fsite + 1]) * parity_tab[isite]
+            )
+            parity_tab[isite : fsite + 1] = parity_tab[
+                isite + 1 : fsite + 1
+            ] + [parity_tab[isite]]
+            input_tab[isite : fsite + 1] = input_tab[isite + 1 : fsite + 1] + [
+                input_tab[isite]
+            ]
 
-        _global_flip = (int(global_parity) % 2 == 1)
+        _global_flip = int(global_parity) % 2 == 1
         if _global_flip:
-            if len(free_tids) ==0:
-                raise ValueError("Global flip required on one tensor but all tensors are marked to avoid phase")
+            if len(free_tids) == 0:
+                raise ValueError(
+                    "Global flip required on one tensor but all tensors are marked to avoid phase"
+                )
             T = fs.tensor_order[free_tids[0]][0]
             T.flip_(global_flip=_global_flip)
 
@@ -275,14 +306,17 @@ class FermionSpace:
             T1, isite1 = fs.tensor_order[tid1]
             for ind in T1.inds:
                 tids = ind_map.pop(ind, [])
-                if len(tids) <2:
+                if len(tids) < 2:
                     continue
-                tid2, = tids - oset([tid1])
+                (tid2,) = tids - oset([tid1])
                 T2, isite2 = fs.tensor_order[tid2]
                 fsite2 = tid_map[tid2]
-                if (isite1-isite2) * (fsite1-fsite2) < 0:
+                if (isite1 - isite2) * (fsite1 - fsite2) < 0:
                     if T1.avoid_phase and T2.avoid_phase:
-                        raise ValueError("relative order for %s and %s changed, local phase can not be avoided"%(tid1, tid2))
+                        raise ValueError(
+                            "relative order for %s and %s changed, local phase can not be avoided"
+                            % (tid1, tid2)
+                        )
                     else:
                         marked_tid = tid2 if T1.avoid_phase else tid1
                     if marked_tid not in local_flip_info:
@@ -308,7 +342,7 @@ class FermionSpace:
             self.add_tensor(site, tsr, virtual=True)
 
     def move(self, tid, des_site):
-        """ Move a tensor inside this FermionSpace to the specified position with Pizorn algorithm.
+        """Move a tensor inside this FermionSpace to the specified position with Pizorn algorithm.
         Both local and global phase will be factorized to this single tensor
 
         Parameters
@@ -320,9 +354,14 @@ class FermionSpace:
         """
         tsr, site = self.tensor_order[tid]
         avoid_phase = tsr.avoid_phase
-        if site == des_site: return
-        move_left = (des_site < site)
-        iterator = range(des_site, site) if move_left else range(site+1, des_site+1)
+        if site == des_site:
+            return
+        move_left = des_site < site
+        iterator = (
+            range(des_site, site)
+            if move_left
+            else range(site + 1, des_site + 1)
+        )
         shared_inds = []
         tid_lst = [self.get_tid_from_site(isite) for isite in iterator]
         parity = 0
@@ -330,29 +369,31 @@ class FermionSpace:
             itsr, isite = self.tensor_order[itid]
             i_shared_inds = list(oset(itsr.inds) & oset(tsr.inds))
             if avoid_phase:
-                global_flip = (tsr.parity * itsr.parity == 1)
-                if len(i_shared_inds)>0 or global_flip:
+                global_flip = tsr.parity * itsr.parity == 1
+                if len(i_shared_inds) > 0 or global_flip:
                     if itsr.avoid_phase:
                         raise ValueError("Two tensors marked to avoid phase")
-                    itsr.flip_(global_flip=global_flip, local_inds=i_shared_inds)
+                    itsr.flip_(
+                        global_flip=global_flip, local_inds=i_shared_inds
+                    )
             else:
                 shared_inds += i_shared_inds
                 parity += itsr.parity
 
             if move_left:
-                self.tensor_order[itid] = (itsr, isite+1)
+                self.tensor_order[itid] = (itsr, isite + 1)
             else:
-                self.tensor_order[itid] = (itsr, isite-1)
+                self.tensor_order[itid] = (itsr, isite - 1)
 
         if not avoid_phase:
             global_parity = (parity % 2) * tsr.data.parity
-            global_flip = (global_parity == 1)
+            global_flip = global_parity == 1
             tsr.flip_(global_flip=global_flip, local_inds=shared_inds)
 
         self.tensor_order[tid] = (tsr, des_site)
 
     def move_past(self, tsr, site_range=None):
-        """ Move an external tensor past the specifed site ranges with Pizorn algorithm.
+        """Move an external tensor past the specifed site ranges with Pizorn algorithm.
         Both local and global phase will be factorized to the external tensor.
         The external tensor will not be added to this FermionSpace
 
@@ -365,23 +406,27 @@ class FermionSpace:
         """
         if site_range is None:
             sites = self.sites
-            site_range = (min(sites), max(sites)+1)
+            site_range = (min(sites), max(sites) + 1)
         start, end = site_range
         shared_inds = []
-        tid_lst = [self.get_tid_from_site(isite) for isite in range(start, end)]
+        tid_lst = [
+            self.get_tid_from_site(isite) for isite in range(start, end)
+        ]
         parity = 0
         for itid in tid_lst:
             itsr, isite = self.tensor_order[itid]
             parity += itsr.parity
             shared_inds += list(oset(itsr.inds) & oset(tsr.inds))
         global_parity = (parity % 2) * tsr.data.parity
-        if global_parity != 0: tsr.data._global_flip()
+        if global_parity != 0:
+            tsr.data._global_flip()
         axes = [tsr.inds.index(i) for i in shared_inds]
-        if len(axes)>0: tsr.data._local_flip(axes)
+        if len(axes) > 0:
+            tsr.data._local_flip(axes)
         return tsr
 
     def remove_tensor(self, site):
-        """ remove a specified tensor at a given site, eg
+        """remove a specified tensor at a given site, eg
         012345               01234
         ABCDEF, (3, True) -> ABCEF
         """
@@ -390,23 +435,23 @@ class FermionSpace:
         tsr.remove_fermion_owner()
         del self.tensor_order[tid]
 
-        indent_sites = sorted([isite for isite in self.sites if isite>site])
+        indent_sites = sorted([isite for isite in self.sites if isite > site])
         tid_lst = [self.get_tid_from_site(isite) for isite in indent_sites]
         for tid in tid_lst:
             tsr, site = self.tensor_order[tid]
-            self.tensor_order[tid] = (tsr, site-1)
+            self.tensor_order[tid] = (tsr, site - 1)
 
     @property
     def H(self):
-        """ Construct a FermionSpace for the bra state of the tensors
-        """
+        """Construct a FermionSpace for the bra state of the tensors"""
         max_site = max(self.sites)
         new_fs = FermionSpace()
         for tid, (tsr, site) in self.tensor_order.items():
             T = tsr.copy()
             T.modify(data=T.data.dagger, inds=T.inds[::-1])
-            new_fs.add_tensor(T, tid, max_site-site, virtual=True)
+            new_fs.add_tensor(T, tid, max_site - site, virtual=True)
         return new_fs
+
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
@@ -415,13 +460,13 @@ def _launch_fermion_expression(
     expr,
     tensors,
     inplace=False,
-    backend='auto',
-    preserve_tensor = False,
-    **kwargs
+    backend="auto",
+    preserve_tensor=False,
+    **kwargs,
 ):
     if len(tensors) == 1:
         return tensors[0]
-    evaluate_constants = kwargs.pop('evaluate_constants', False)
+    evaluate_constants = kwargs.pop("evaluate_constants", False)
     if evaluate_constants:
         raise NotImplementedError
 
@@ -444,22 +489,25 @@ def _launch_fermion_expression(
         inds, idx_rm, einsum_str, _, _ = contraction
         tmp_operands = [tensors.pop(x) for x in inds]
         # Call tensordot (check if should prefer einsum, but only if available)
-        input_str, results_index = einsum_str.split('->')
-        input_left, input_right = input_str.split(',')
-        contract_out = (oset(input_left) | oset(input_right)) \
-                     - (oset(input_left) & oset(input_right))
+        input_str, results_index = einsum_str.split("->")
+        input_left, input_right = input_str.split(",")
+        contract_out = (oset(input_left) | oset(input_right)) - (
+            oset(input_left) & oset(input_right)
+        )
         if contract_out == oset(results_index):
             Ta, Tb = tmp_operands
-            input_str, results_index = einsum_str.split('->')
+            input_str, results_index = einsum_str.split("->")
             tid1, site1 = Ta.get_fermion_info()
             tid2, site2 = Tb.get_fermion_info()
             if site1 < site2:
-                fs.move(tid2, site1+1)
+                fs.move(tid2, site1 + 1)
                 input_right, input_left = input_left, input_right
                 Ta, Tb = Tb, Ta
             else:
-                fs.move(tid1, site2+1)
-            tensor_result = "".join(s for s in input_left + input_right if s not in idx_rm)
+                fs.move(tid1, site2 + 1)
+            tensor_result = "".join(
+                s for s in input_left + input_right if s not in idx_rm
+            )
             # Find indices to contract over
             left_pos, right_pos = [], []
             for s in idx_rm:
@@ -467,30 +515,41 @@ def _launch_fermion_expression(
                 right_pos.append(input_right.find(s))
 
             # Contract!
-            new_view = _tensordot(Ta.data, Tb.data, axes=(tuple(left_pos), tuple(right_pos)), backend=backend)
+            new_view = _tensordot(
+                Ta.data,
+                Tb.data,
+                axes=(tuple(left_pos), tuple(right_pos)),
+                backend=backend,
+            )
 
-            global_phase += Ta.phase.get("global_flip", False) \
-                          + Tb.phase.get("global_flip", False)
+            global_phase += Ta.phase.get("global_flip", False) + Tb.phase.get(
+                "global_flip", False
+            )
             _local_inds.extend(Ta.phase.get("local_inds", []))
             _local_inds.extend(Tb.phase.get("local_inds", []))
 
-            o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + \
-                   [ind for ind in Tb.inds if ind not in Ta.inds]
+            o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + [
+                ind for ind in Tb.inds if ind not in Ta.inds
+            ]
 
             # Build a new view if needed
-            if (tensor_result != results_index):
+            if tensor_result != results_index:
                 transpose = tuple(map(tensor_result.index, results_index))
-                new_view = _transpose(new_view, axes=transpose, backend=backend)
+                new_view = _transpose(
+                    new_view, axes=transpose, backend=backend
+                )
                 o_ix = [o_ix[ix] for ix in transpose]
 
             o_tags = oset.union(Ta.tags, Tb.tags)
             if len(o_ix) != 0 or preserve_tensor:
                 new_view = Ta.__class__(data=new_view, inds=o_ix, tags=o_tags)
                 fs.replace_tensor(min(site1, site2), new_view, virtual=True)
-                fs.remove_tensor(min(site1, site2)+1)
+                fs.remove_tensor(min(site1, site2) + 1)
         # Call einsum
         else:
-            raise NotImplementedError("Generic Einsum Operations not supported")
+            raise NotImplementedError(
+                "Generic Einsum Operations not supported"
+            )
         # Append new items and dereference what we can
         tensors.append(new_view)
         del tmp_operands, new_view
@@ -498,46 +557,80 @@ def _launch_fermion_expression(
     if isinstance(tensors[0], FermionTensor):
         local_inds = []
         for ind in tensors[0].inds:
-            if _local_inds.count(ind)==1:
+            if _local_inds.count(ind) == 1:
                 local_inds.append(ind)
-        global_phase = (global_phase % 2)==1
-        tensors[0].phase = {"global_flip": global_phase,
-                            "local_inds": local_inds}
+        global_phase = (global_phase % 2) == 1
+        tensors[0].phase = {
+            "global_flip": global_phase,
+            "local_inds": local_inds,
+        }
 
     return tensors[0]
+
 
 def tensor_split(
     T,
     left_inds,
-    method='svd',
+    method="svd",
     get=None,
-    absorb='both',
+    absorb="both",
     max_bond=None,
     cutoff=1e-10,
-    cutoff_mode='rel',
+    cutoff_mode="rel",
     renorm=None,
     ltags=None,
     rtags=None,
     stags=None,
     bond_ind=None,
     right_inds=None,
-    qpn_info = None,
+    qpn_info=None,
 ):
     if get is not None:
-        return _tensor_split(T, left_inds, method=method, get=get, absorb=absorb, max_bond=max_bond,
-                            cutoff=cutoff, cutoff_mode=cutoff_mode, renorm=renorm, ltags=ltags, rtags=rtags,
-                            stags=stags, bond_ind=bond_ind, right_inds=right_inds, qpn_info=qpn_info)
+        return _tensor_split(
+            T,
+            left_inds,
+            method=method,
+            get=get,
+            absorb=absorb,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            renorm=renorm,
+            ltags=ltags,
+            rtags=rtags,
+            stags=stags,
+            bond_ind=bond_ind,
+            right_inds=right_inds,
+            qpn_info=qpn_info,
+        )
     else:
-        tensors = _tensor_split(T, left_inds, method=method, get="tensors", absorb=absorb, max_bond=max_bond,
-                            cutoff=cutoff, cutoff_mode=cutoff_mode, renorm=renorm, ltags=ltags, rtags=rtags,
-                            stags=stags, bond_ind=bond_ind, right_inds=right_inds, qpn_info=qpn_info)
+        tensors = _tensor_split(
+            T,
+            left_inds,
+            method=method,
+            get="tensors",
+            absorb=absorb,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            renorm=renorm,
+            ltags=ltags,
+            rtags=rtags,
+            stags=stags,
+            bond_ind=bond_ind,
+            right_inds=right_inds,
+            qpn_info=qpn_info,
+        )
         return FermionTensorNetwork(tensors[::-1], check_collisions=False)
+
 
 def is_mergeable(*ts_or_tsn):
     """Check if all FermionTensor or FermionTensorNetwork objects
-       are part of the same FermionSpace
+    are part of the same FermionSpace
     """
-    if len(ts_or_tsn)==1 and isinstance(ts_or_tsn, (FermionTensor, FermionTensorNetwork)):
+    if len(ts_or_tsn) == 1 and isinstance(
+        ts_or_tsn, (FermionTensor, FermionTensorNetwork)
+    ):
         return True
     fs_lst = []
     site_lst = []
@@ -554,10 +647,13 @@ def is_mergeable(*ts_or_tsn):
         else:
             raise TypeError("unable to find fermionspace")
 
-    return all([fs==fs_lst[0] for fs in fs_lst]) and len(set(site_lst)) == len(site_lst)
+    return all([fs == fs_lst[0] for fs in fs_lst]) and len(
+        set(site_lst)
+    ) == len(site_lst)
+
 
 def _dispatch_fermion_space(*tensors, inplace=True):
-    """ Retrieve the FermionSpace and the associated tensor_ids for the tensors.
+    """Retrieve the FermionSpace and the associated tensor_ids for the tensors.
     If the given tensors all belong to the same FermionSpace object (fsobj),
     the underlying fsobj will be returned. Otherwise, a new FermionSpace will be created,
     and the tensors will be placed in the same order as the input tensors.
@@ -596,57 +692,79 @@ def _dispatch_fermion_space(*tensors, inplace=True):
                 fs.add_tensor(tsr_or_tn, virtual=inplace)
             elif isinstance(tsr_or_tn, FermionTensorNetwork):
                 if not tsr_or_tn.is_continuous():
-                    raise ValueError("Input Network not continous, merge not allowed")
+                    raise ValueError(
+                        "Input Network not continous, merge not allowed"
+                    )
                 for itsr in tsr_or_tn:
                     fs.add_tensor(itsr, virtual=inplace)
         tid_lst = list(fs.tensor_order.keys())[::-1]
     return fs, tid_lst
 
-FERMION_FUNCS = {"expression_launcher": _launch_fermion_expression,
-                 "tensor_split": tensor_split,
-                 "tensor_compress_bond": tensor_compress_bond,
-                 "tensor_canonize_bond": tensor_canonize_bond,
-                 "tensor_balance_bond": tensor_balance_bond}
+
+FERMION_FUNCS = {
+    "expression_launcher": _launch_fermion_expression,
+    "tensor_split": tensor_split,
+    "tensor_compress_bond": tensor_compress_bond,
+    "tensor_canonize_bond": tensor_canonize_bond,
+    "tensor_balance_bond": tensor_balance_bond,
+}
+
 
 def _split_and_replace_in_fs(T, insert_gauge=False, **compress_opts):
     compress_opts["get"] = "tensors"
     tensors = T.split(**compress_opts)
     isite = T.get_fermion_info()[1]
     fs = T.fermion_owner[0]
-    fs.replace_tensor(isite, tensors[-1], tid=rand_uuid(base="_T"), virtual=True)
-    if insert_gauge and len(tensors)==3:
-        fs.insert_tensor(isite+1, tensors[1], tid=rand_uuid(base="_T"), virtual=True)
+    fs.replace_tensor(
+        isite, tensors[-1], tid=rand_uuid(base="_T"), virtual=True
+    )
+    if insert_gauge and len(tensors) == 3:
+        fs.insert_tensor(
+            isite + 1, tensors[1], tid=rand_uuid(base="_T"), virtual=True
+        )
         offset = 1
     else:
         offset = 0
-    fs.insert_tensor(isite+1+offset, tensors[0], tid=rand_uuid(base="_T"), virtual=True)
+    fs.insert_tensor(
+        isite + 1 + offset, tensors[0], tid=rand_uuid(base="_T"), virtual=True
+    )
     return tensors
 
+
 def _get_gauge_location(Ti, Tj):
-    if Ti.get_fermion_info()[1]<Tj.get_fermion_info()[1]:
+    if Ti.get_fermion_info()[1] < Tj.get_fermion_info()[1]:
         flip_pattern = False
         return "front", "back", flip_pattern
     else:
         flip_pattern = True
         return "back", "front", flip_pattern
 
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
 
-class FermionTensor(BlockTensor):
 
-    __slots__ = ('_data', '_inds', '_tags', '_left_inds',
-                '_owners', '_fermion_owner', '_avoid_phase',
-                '_phase')
+class FermionTensor(BlockTensor):
+    __slots__ = (
+        "_data",
+        "_inds",
+        "_tags",
+        "_left_inds",
+        "_owners",
+        "_fermion_owner",
+        "_avoid_phase",
+        "_phase",
+    )
 
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
-
         # a new or copied Tensor always has no owners
         self._fermion_owner = None
-        BlockTensor.__init__(self, data=data, inds=inds, tags=tags, left_inds=left_inds)
+        BlockTensor.__init__(
+            self, data=data, inds=inds, tags=tags, left_inds=left_inds
+        )
         if isinstance(data, FermionTensor):
-            if len(data.inds)!=0:
+            if len(data.inds) != 0:
                 self._data = data.data.copy()
             self._avoid_phase = data._avoid_phase
             self._phase = data._phase.copy()
@@ -684,7 +802,7 @@ class FermionTensor(BlockTensor):
         updated_local_inds = []
         for ind in all_inds:
             count = all_inds.count(ind)
-            if count % 2 ==1:
+            if count % 2 == 1:
                 updated_local_inds.append(ind)
         self._phase["local_inds"] = updated_local_inds
 
@@ -703,7 +821,7 @@ class FermionTensor(BlockTensor):
         if old_tid == tid:
             return
         if tid in fs.tensor_order:
-            raise ValueError("tid:%s is already used for another tensor"%tid)
+            raise ValueError("tid:%s is already used for another tensor" % tid)
         _, site = fs.tensor_order[old_tid]
         del fs.tensor_order[old_tid]
         fs.tensor_order[tid] = (self, site)
@@ -711,9 +829,13 @@ class FermionTensor(BlockTensor):
         if self.owners:
             tn = list(self.owners.values())[0][0]()
             for ind in self.inds:
-                tn.ind_map[ind] = (tn.ind_map[ind]-oset([old_tid])) | oset([tid])
+                tn.ind_map[ind] = (tn.ind_map[ind] - oset([old_tid])) | oset(
+                    [tid]
+                )
             for tag in self.tags:
-                tn.tag_map[tag] = (tn.tag_map[tag]-oset([old_tid])) | oset([tid])
+                tn.tag_map[tag] = (tn.tag_map[tag] - oset([old_tid])) | oset(
+                    [tid]
+                )
             del tn.tensor_map[old_tid]
             tn.tensor_map[tid] = self
 
@@ -735,7 +857,7 @@ class FermionTensor(BlockTensor):
         T.set_phase(global_flip=global_flip, local_inds=local_inds)
         if global_flip:
             T.data._global_flip()
-        if local_inds is not None and len(local_inds)>0:
+        if local_inds is not None and len(local_inds) > 0:
             axes = [T.inds.index(ind) for ind in local_inds]
             T.data._local_flip(axes)
         return T
@@ -784,17 +906,17 @@ class FermionTensor(BlockTensor):
         """
         return FermionTensorNetwork((self, other), virtual=True)
 
+
 # --------------------------------------------------------------------------- #
 #                            Tensor Network Class                             #
 # --------------------------------------------------------------------------- #
 
-class FermionTensorNetwork(BlockTensorNetwork):
 
+class FermionTensorNetwork(BlockTensorNetwork):
     _EXTRA_PROPS = ()
     _CONTRACT_STRUCTURED = False
 
     def __init__(self, ts, *, virtual=False, check_collisions=True):
-
         # short-circuit for copying TensorNetworks
         if isinstance(ts, self.__class__):
             fs = FermionSpace()
@@ -815,18 +937,23 @@ class FermionTensorNetwork(BlockTensorNetwork):
                 setattr(self, ep, getattr(ts, ep))
             return
         else:
-            BlockTensorNetwork.__init__(self, ts, virtual=virtual, check_collisions=True)
+            BlockTensorNetwork.__init__(
+                self, ts, virtual=virtual, check_collisions=True
+            )
 
     @property
     def fermion_space(self):
-        if len(self.tensor_map)==0:
+        if len(self.tensor_map) == 0:
             return FermionSpace()
         else:
             return list(self.tensor_map.values())[0].fermion_owner[0]
 
     @property
     def filled_sites(self):
-        return [self.fermion_space.tensor_order[tid][1] for tid in self.tensor_map.keys()]
+        return [
+            self.fermion_space.tensor_order[tid][1]
+            for tid in self.tensor_map.keys()
+        ]
 
     @property
     def H(self):
@@ -835,7 +962,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         max_site = max(fs.sites)
         for tid, (T, site) in fs.tensor_order.items():
             T.modify(data=T.data.dagger, inds=T.inds[::-1])
-            fs.tensor_order.update({tid: (T, max_site-site)})
+            fs.tensor_order.update({tid: (T, max_site - site)})
         return tn
 
     def is_continuous(self):
@@ -843,7 +970,8 @@ class FermionTensorNetwork(BlockTensorNetwork):
         Check if sites in the current tensor network are contiguously occupied
         """
         filled_sites = self.filled_sites
-        if len(filled_sites) ==0 : return True
+        if len(filled_sites) == 0:
+            return True
         return (max(filled_sites) - min(filled_sites) + 1) == len(filled_sites)
 
     def _remove_phase_from_tids(self, tids):
@@ -854,7 +982,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         for tid in tids:
             self.tensor_map[tid].phase = dict()
 
-    def _remove_phase_from_tags(self, tags, which='all'):
+    def _remove_phase_from_tags(self, tags, which="all"):
         tagged_tids = self._get_tids_from_tags(tags, which=which)
         return self._remove_phase_from_tids(tagged_tids)
 
@@ -863,18 +991,19 @@ class FermionTensorNetwork(BlockTensorNetwork):
         ref_order = dict()
         for tid in tids:
             ref_order[tid] = like.tensor_map[tid].get_fermion_info()[1]
-        sort_order = sorted(ref_order,
-                    key=lambda k: ref_order[k])
-        order_map = dict(zip(sort_order, range(ntensors-len(tids), ntensors)))
+        sort_order = sorted(ref_order, key=lambda k: ref_order[k])
+        order_map = dict(
+            zip(sort_order, range(ntensors - len(tids), ntensors))
+        )
         self._reorder_from_tid(order_map, inplace=True)
 
     def _split_tensor_tid(self, tid, left_inds, **split_opts):
         t = self._pop_tensor(tid)
-        tensors = t.split(left_inds=left_inds, get='tensors', **split_opts)
+        tensors = t.split(left_inds=left_inds, get="tensors", **split_opts)
         fs = self.fermion_space
         site = t.get_fermion_info()[1]
         for i, T in enumerate(tensors[::-1]):
-            if i==0:
+            if i == 0:
                 fs.replace_tensor(site, T, virtual=True)
             else:
                 fs.insert_tensor(site, T, virtual=True)
@@ -894,13 +1023,16 @@ class FermionTensorNetwork(BlockTensorNetwork):
         for ind in local_inds:
             linked_tids = self.ind_map[ind] - tids
             if linked_tids:
-                output_tid, = linked_tids
+                (output_tid,) = linked_tids
                 linked_inds_map[ind] = output_tid
             else:
-                raise ValueError(''' can't refactor the local phase on bond %s, either due to:
+                raise ValueError(
+                    """ can't refactor the local phase on bond %s, either due to:
                         1. The bond has an open indices
                         2. The order of the two tensors sharing
-                            this bond needs to be reorderred'''%ind)
+                            this bond needs to be reorderred"""
+                    % ind
+                )
                 return
 
         for ind, otid in linked_inds_map.items():
@@ -917,10 +1049,12 @@ class FermionTensorNetwork(BlockTensorNetwork):
             self.tensor_map[gtid].flip_(global_flip=True)
 
     def __setitem__(self, tags, tensor):
-        raise NotImplementedError("__setitem__ depreciated in Fermion Tensor Network to avoid ambiguity in FermionSpace")
+        raise NotImplementedError(
+            "__setitem__ depreciated in Fermion Tensor Network to avoid ambiguity in FermionSpace"
+        )
 
     def copy(self, full=False, force=False):
-        """ For full copy, the tensors and underlying FermionSpace(all tensors in it) will
+        """For full copy, the tensors and underlying FermionSpace(all tensors in it) will
         be copied. For partial copy, the tensors in this network must be continuously
         placed and a new FermionSpace will be created to hold this continous sector.
         """
@@ -931,8 +1065,10 @@ class FermionTensorNetwork(BlockTensorNetwork):
             newtn = FermionTensorNetwork(tsr, virtual=True)
         else:
             if not self.is_continuous() and not force:
-                raise TypeError("Tensors not continuously placed in the network, \
-                                partial copy not allowed")
+                raise TypeError(
+                    "Tensors not continuously placed in the network, \
+                                partial copy not allowed"
+                )
             else:
                 newtn = FermionTensorNetwork(self)
         newtn.view_like_(self)
@@ -943,7 +1079,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
         Copies the tensors.
         """
         if is_mergeable(self, other):
-            raise ValueError("the two networks are in the same fermionspace, use self |= other")
+            raise ValueError(
+                "the two networks are in the same fermionspace, use self |= other"
+            )
         return FermionTensorNetwork((self, other), virtual=False)
 
     def __or__(self, other):
@@ -963,18 +1101,20 @@ class FermionTensorNetwork(BlockTensorNetwork):
         return tuple([T for T in self])
 
     def __setitem__(self, tags, tensor):
-        """Set the single tensor uniquely associated with ``tags``.
-        """
-        tids = self._get_tids_from_tags(tags, which='all')
+        """Set the single tensor uniquely associated with ``tags``."""
+        tids = self._get_tids_from_tags(tags, which="all")
         if len(tids) != 1:
-            raise KeyError("'TensorNetwork.__setitem__' is meant for a single "
-                           "existing tensor only - found {} with tag(s) '{}'."
-                           .format(len(tids), tags))
+            raise KeyError(
+                "'TensorNetwork.__setitem__' is meant for a single "
+                "existing tensor only - found {} with tag(s) '{}'.".format(
+                    len(tids), tags
+                )
+            )
 
         if not isinstance(tensor, FermionTensor):
             raise TypeError("Can only set value with a new 'FermionTensor'.")
 
-        tid, = tids
+        (tid,) = tids
         site = self.fermion_space.tensor_order[tid][1]
         super()._pop_tensor(tid)
         super().add_tensor(tensor, tid=tid, virtual=True)
@@ -1007,28 +1147,38 @@ class FermionTensorNetwork(BlockTensorNetwork):
         if fs is None:
             self.fermion_space.add_tensor(T, tid, virtual=True)
         else:
-            if hash(fs[0])!= hash(self.fermion_space) and \
-                len(self.tensor_map) >0:
-                raise ValueError("The tensor is not compatible with the current network")
+            if (
+                hash(fs[0]) != hash(self.fermion_space)
+                and len(self.tensor_map) > 0
+            ):
+                raise ValueError(
+                    "The tensor is not compatible with the current network"
+                )
         tid = T.get_fermion_info()[0]
         super().add_tensor(T, tid, virtual=True)
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
         if virtual:
             if min(len(self.tensor_map), len(tn.tensor_map)) == 0:
-                super().add_tensor_network(tn,
-                        virtual=virtual, check_collisions=check_collisions)
+                super().add_tensor_network(
+                    tn, virtual=virtual, check_collisions=check_collisions
+                )
                 return
             elif hash(tn.fermion_space) == hash(self.fermion_space):
                 if is_mergeable(self, tn):
-                    super().add_tensor_network(tn,
-                            virtual=True, check_collisions=check_collisions)
+                    super().add_tensor_network(
+                        tn, virtual=True, check_collisions=check_collisions
+                    )
                 else:
-                    raise ValueError("the two tensornetworks co-share same sites, inplace addition not allowed")
+                    raise ValueError(
+                        "the two tensornetworks co-share same sites, inplace addition not allowed"
+                    )
                 return
 
         if not tn.is_continuous():
-            raise ValueError("input tensor network is not contiguously ordered")
+            raise ValueError(
+                "input tensor network is not contiguously ordered"
+            )
 
         tn = tn if virtual else tn.copy()
         sorted_tensors = []
@@ -1053,7 +1203,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         self.exponent = self.exponent + tn.exponent
 
-    def partition(self, tags, which='any', inplace=False):
+    def partition(self, tags, which="any", inplace=False):
         """Split this FTN into two, based on which tensors have any or all of
         ``tags``. Unlike ``partition_tensors``, both results are FTNs which
         inherit the structure of the initial FTN and are still linked to the
@@ -1080,13 +1230,12 @@ class FermionTensorNetwork(BlockTensorNetwork):
         t1 = self if inplace else self.copy(full=True)
         tagged_tids = t1._get_tids_from_tags(tags, which=which)
         t2s = [t1._pop_tensor(tid) for tid in tagged_tids]
-        kws = {'check_collisions': False,
-               'virtual': True}
+        kws = {"check_collisions": False, "virtual": True}
         t2 = FermionTensorNetwork(t2s, **kws)
         t2.view_like_(self)
         return t1, t2
 
-    def partition_tensors(self, tags, inplace=False, which='any'):
+    def partition_tensors(self, tags, inplace=False, which="any"):
         """Split this TN into a list of tensors containing any or all of
         ``tags`` and a ``FermionTensorNetwork`` of the the rest. All
         FermionTensor and FermionTensorNetwork are still linked to the
@@ -1113,7 +1262,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
         partition, select, select_tensors
         """
         tn = self if inplace else self.copy(full=True)
-        return TensorNetwork.partition_tensors(tn, tags, inplace=True, which=which)
+        return TensorNetwork.partition_tensors(
+            tn, tags, inplace=True, which=which
+        )
 
     def _pop_tensor(self, tid, remove_from_fermion_space=False):
         """Remove a tensor from this network, returning said tensor.
@@ -1137,18 +1288,20 @@ class FermionTensorNetwork(BlockTensorNetwork):
                            then remove tensor from both TN and FermionSpace
             'front'/'end' can potential fail if the tensor has phase on open indices
         """
-        check_opt('remove_from_fermion_space',
-                   remove_from_fermion_space,
-                   (True, False, 'front', 'end'))
+        check_opt(
+            "remove_from_fermion_space",
+            remove_from_fermion_space,
+            (True, False, "front", "end"),
+        )
         if remove_from_fermion_space:
             t = self.tensor_map[tid]
             tid, site = t.get_fermion_info()
-            if remove_from_fermion_space == 'front':
+            if remove_from_fermion_space == "front":
                 site = 0
                 self.fermion_space.move(tid, site)
                 self._refactor_phase_from_tids([tid])
-            elif remove_from_fermion_space == 'end':
-                site = len(self.fermion_space.tensor_order)-1
+            elif remove_from_fermion_space == "end":
+                site = len(self.fermion_space.tensor_order) - 1
                 self.fermion_space.move(tid, site)
                 self._refactor_phase_from_tids([tid])
             self.fermion_space.remove_tensor(site)
@@ -1163,20 +1316,22 @@ class FermionTensorNetwork(BlockTensorNetwork):
         super().contract_between(tags1, tags2, **contract_opts)
 
     def contract_ind(self, ind, **contract_opts):
-        """Contract tensors connected by ``ind``.
-        """
+        """Contract tensors connected by ``ind``."""
         contract_opts["inplace"] = True
         super().contract_ind(ind, **contract_opts)
 
     # ----------------------- contracting the network ----------------------- #
-    def contract_tags(self, tags, inplace=False, which='any', **opts):
+    def contract_tags(self, tags, inplace=False, which="any", **opts):
         untagged_tn, tagged_ts = self.partition_tensors(
-            tags, inplace=inplace, which=which)
+            tags, inplace=inplace, which=which
+        )
 
         contracting_all = untagged_tn is None
         if not tagged_ts:
-            raise ValueError("No tags were found - nothing to contract. "
-                             "(Change this to a no-op maybe?)")
+            raise ValueError(
+                "No tags were found - nothing to contract. "
+                "(Change this to a no-op maybe?)"
+            )
         opts["inplace"] = True
         opts.setdefault("preserve_tensor", not contracting_all)
         contracted = tensor_contract(*tagged_ts, **opts)
@@ -1197,7 +1352,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         inplace=False,
         **compress_opts,
     ):
-        check_opt("contract", contract, (False, True, 'split', 'reduce-split'))
+        check_opt("contract", contract, (False, True, "split", "reduce-split"))
 
         tn = self if inplace else self.copy()
 
@@ -1211,7 +1366,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         # tensor representing the gate
         tags = tags_to_oset(tags)
-        tG = FermionTensor(G.copy(), inds=inds + bnds, tags=tags, left_inds=bnds)
+        tG = FermionTensor(
+            G.copy(), inds=inds + bnds, tags=tags, left_inds=bnds
+        )
         fs = tn.fermion_space
 
         if contract is False:
@@ -1226,7 +1383,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
             tn |= tG
             return tn
 
-        tids = self._get_tids_from_inds(inds, 'any')
+        tids = self._get_tids_from_inds(inds, "any")
 
         fs.add_tensor(tG, virtual=True)
 
@@ -1239,7 +1396,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
             tn.reindex_(reindex_map)
 
             # get the sites that used to have the physical indices
-            site_tids = tn._get_tids_from_inds(bnds, which='any')
+            site_tids = tn._get_tids_from_inds(bnds, which="any")
 
             # pop the sites, contract, then re-add
             pts = [tn._pop_tensor(tid) for tid in site_tids]
@@ -1257,10 +1414,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
         tidl, sitel = tl.get_fermion_info()
         tidr, siter = tr.get_fermion_info()
-        fermion_info = {tidl: sitel,
-                        tidr: siter}
+        fermion_info = {tidl: sitel, tidr: siter}
 
-        if contract == 'split':
+        if contract == "split":
             #
             #       │╱  │╱         │╱  │╱
             #     ──GGGGG──  ->  ──G~~~G──
@@ -1271,23 +1427,30 @@ class FermionTensorNetwork(BlockTensorNetwork):
             tlGr = tensor_contract(
                 tl.reindex_(reindex_map),
                 tr.reindex_(reindex_map),
-                tG, inplace=True)
+                tG,
+                inplace=True,
+            )
 
             tlGr.modify_tid(tidl)
             isite = tlGr.get_fermion_info()[1]
             # decompose back into two tensors
             qpn_info = (tr.net_symmetry, tl.net_symmetry)
             trn, *maybe_svals, tln = tlGr.split(
-                left_inds=bnds_r, right_inds=bnds_l,
-                bond_ind=bix, get='tensors', qpn_info=qpn_info, **compress_opts)
+                left_inds=bnds_r,
+                right_inds=bnds_l,
+                bond_ind=bix,
+                get="tensors",
+                qpn_info=qpn_info,
+                **compress_opts,
+            )
 
             fs.replace_tensor(isite, tl, virtual=True)
-            fs.insert_tensor(isite+1, tr, tid=tidr, virtual=True)
+            fs.insert_tensor(isite + 1, tr, tid=tidr, virtual=True)
             revert_index_map = dict(zip(bnds, inds))
             tl.reindex_(revert_index_map)
             tr.reindex_(revert_index_map)
 
-        if contract == 'reduce-split':
+        if contract == "reduce-split":
             # move physical inds on reduced tensors
             #
             #       │   │             │ │
@@ -1298,14 +1461,24 @@ class FermionTensorNetwork(BlockTensorNetwork):
             #
 
             tmp_bix_l = rand_uuid()
-            tl_Q, tl_R = _split_and_replace_in_fs(tl,
-                        left_inds=None, right_inds=[bix, ixl],
-                        method='qr', bond_ind=tmp_bix_l, absorb="right")
+            tl_Q, tl_R = _split_and_replace_in_fs(
+                tl,
+                left_inds=None,
+                right_inds=[bix, ixl],
+                method="qr",
+                bond_ind=tmp_bix_l,
+                absorb="right",
+            )
 
             tmp_bix_r = rand_uuid()
-            tr_L, tr_Q = _split_and_replace_in_fs(tr,
-                        left_inds=[bix, ixr], right_inds=None,
-                        method='qr', bond_ind=tmp_bix_r, absorb="left")
+            tr_L, tr_Q = _split_and_replace_in_fs(
+                tr,
+                left_inds=[bix, ixr],
+                right_inds=None,
+                method="qr",
+                bond_ind=tmp_bix_r,
+                absorb="left",
+            )
 
             # contract reduced tensors with gate tensor
             #
@@ -1319,7 +1492,9 @@ class FermionTensorNetwork(BlockTensorNetwork):
             tlGr = tensor_contract(
                 tl_R.reindex_(reindex_map),
                 tr_L.reindex_(reindex_map),
-                tG, inplace=True)
+                tG,
+                inplace=True,
+            )
 
             # split to find new reduced factors
             #
@@ -1328,9 +1503,14 @@ class FermionTensorNetwork(BlockTensorNetwork):
             #     ──>──LGR──<──      ──>──L=R──<──
             #      ╱       ╱          ╱       ╱
             #
-            tr_L, *maybe_svals, tl_R = _split_and_replace_in_fs(tlGr,
-                            left_inds=[tmp_bix_r, ixr], right_inds=[tmp_bix_l, ixl],
-                            bond_ind=bix, get='tensors', **compress_opts)
+            tr_L, *maybe_svals, tl_R = _split_and_replace_in_fs(
+                tlGr,
+                left_inds=[tmp_bix_r, ixr],
+                right_inds=[tmp_bix_l, ixl],
+                bond_ind=bix,
+                get="tensors",
+                **compress_opts,
+            )
 
             # absorb reduced factors back into site tensors
             #
@@ -1349,7 +1529,7 @@ class FermionTensorNetwork(BlockTensorNetwork):
         #     return them via ``info``, e.g. for ``SimpleUpdate`
         if maybe_svals and info is not None:
             s = next(iter(maybe_svals)).data
-            info['singular_values', (ixl, ixr)] = s
+            info["singular_values", (ixl, ixr)] = s
 
         # update original tensors
         tl.modify(data=tln.transpose_like_(tl).data)
@@ -1362,12 +1542,12 @@ class FermionTensorNetwork(BlockTensorNetwork):
 
     def make_norm(
         self,
-        mangle_append='*',
-        layer_tags=('KET', 'BRA'),
+        mangle_append="*",
+        layer_tags=("KET", "BRA"),
         return_all=False,
     ):
         ket = self.copy()
-        if len(ket.outer_inds())==0:
+        if len(ket.outer_inds()) == 0:
             return ket
         ket.add_tag(layer_tags[0])
 
@@ -1386,35 +1566,40 @@ class FermionTensorNetwork(BlockTensorNetwork):
         outer = []
         inner = []
 
-
-        if len(self.tensor_map)==len(self.fermion_space.tensor_order):
+        if len(self.tensor_map) == len(self.fermion_space.tensor_order):
             full_ind_map = self.ind_map
         else:
             full_ind_map = self.fermion_space.get_ind_map()
 
         for (ix, iy), g in gauges.items():
             tensors = list(self._inds_get(ix, iy))
-            if len(tensors)==2:
-                tl, = self._inds_get(ix)
-                tr, = self._inds_get(iy)
+            if len(tensors) == 2:
+                (tl,) = self._inds_get(ix)
+                (tr,) = self._inds_get(iy)
                 locl, locr, flip_pattern = _get_gauge_location(tl, tr)
-                bond, = tl.bonds(tr)
+                (bond,) = tl.bonds(tr)
                 g = sqrt(g)
-                tl.multiply_index_diagonal_(bond, g,
-                        location=locl, flip_pattern=flip_pattern)
-                tr.multiply_index_diagonal_(bond, g,
-                        location=locr, flip_pattern=flip_pattern)
+                tl.multiply_index_diagonal_(
+                    bond, g, location=locl, flip_pattern=flip_pattern
+                )
+                tr.multiply_index_diagonal_(
+                    bond, g, location=locr, flip_pattern=flip_pattern
+                )
                 inner.append(((tl, tr), bond, g, (locl, locr), flip_pattern))
-            elif len(tensors)==1:
-                tl, = tensors
-                itid, = full_ind_map[iy] if ix in tl.inds else full_ind_map[ix]
+            elif len(tensors) == 1:
+                (tl,) = tensors
+                (itid,) = (
+                    full_ind_map[iy] if ix in tl.inds else full_ind_map[ix]
+                )
                 tr = self.fermion_space.tensor_order[itid][0]
-                bond, = tl.bonds(tr)
+                (bond,) = tl.bonds(tr)
                 if ix in self.ind_map:
                     locl, _, flip_pattern = _get_gauge_location(tl, tr)
                 else:
                     _, locl, flip_pattern = _get_gauge_location(tr, tl)
-                tl.multiply_index_diagonal_(bond, g, location=locl, flip_pattern=flip_pattern)
+                tl.multiply_index_diagonal_(
+                    bond, g, location=locl, flip_pattern=flip_pattern
+                )
                 outer.append((tl, bond, g, locl, flip_pattern))
         return outer, inner
 
@@ -1431,21 +1616,24 @@ class FermionTensorNetwork(BlockTensorNetwork):
         finally:
             while ungauge_outer and outer:
                 t, ix, g, location, flip_pattern = outer.pop()
-                g = inv_with_smudge(g, gauge_smudge=0.)
-                t.multiply_index_diagonal_(ix, g,
-                        location=location, flip_pattern=flip_pattern)
+                g = inv_with_smudge(g, gauge_smudge=0.0)
+                t.multiply_index_diagonal_(
+                    ix, g, location=location, flip_pattern=flip_pattern
+                )
             while ungauge_inner and inner:
                 (tl, tr), ix, g, location, flip_pattern = inner.pop()
-                ginv = inv_with_smudge(g, gauge_smudge=0.)
-                tl.multiply_index_diagonal_(ix, ginv,
-                        location=location[0], flip_pattern=flip_pattern)
-                tr.multiply_index_diagonal_(ix, ginv,
-                        location=location[1], flip_pattern=flip_pattern)
+                ginv = inv_with_smudge(g, gauge_smudge=0.0)
+                tl.multiply_index_diagonal_(
+                    ix, ginv, location=location[0], flip_pattern=flip_pattern
+                )
+                tr.multiply_index_diagonal_(
+                    ix, ginv, location=location[1], flip_pattern=flip_pattern
+                )
 
     def __matmul__(self, other):
-        """Overload "@" to mean full contraction with another network.
-        """
+        """Overload "@" to mean full contraction with another network."""
         return FermionTensorNetwork((self, other)) ^ ...
+
 
 def _tensors_to_constructors(tensors, inds, inv=True):
     """
@@ -1466,9 +1654,13 @@ def _tensors_to_constructors(tensors, inds, inv=True):
     -------
     constructor: a pyblock3.algebra.fermion.Constructor object
     """
-    string_inv = {"+":"-", "-":"+"}
-    pattern = [None, ] * len(inds)
-    bond_infos = [None, ] * len(inds)
+    string_inv = {"+": "-", "-": "+"}
+    pattern = [
+        None,
+    ] * len(inds)
+    bond_infos = [
+        None,
+    ] * len(inds)
     count = 0
     for T in tensors:
         for ix, ind in enumerate(inds):
@@ -1479,12 +1671,13 @@ def _tensors_to_constructors(tensors, inds, inv=True):
                     pattern[ix] = string_inv[T.data.pattern[ax]]
                 else:
                     pattern[ix] = T.data.pattern[ax]
-                count +=1
+                count += 1
         if count == len(inds):
             break
     pattern = "".join(pattern)
     mycon = Constructor.from_bond_infos(bond_infos, pattern)
     return mycon
+
 
 class FTNLinearOperator(spla.LinearOperator):
     r"""Get a fermionic linear operator - something that replicates the matrix-vector
@@ -1539,9 +1732,18 @@ class FTNLinearOperator(spla.LinearOperator):
     TNLinearOperator
     """
 
-    def __init__(self, tns, left_inds, right_inds, target_symmetry,
-                constructor=None, optimize='auto', backend=None,
-                is_conj=False, location="back"):
+    def __init__(
+        self,
+        tns,
+        left_inds,
+        right_inds,
+        target_symmetry,
+        constructor=None,
+        optimize="auto",
+        backend=None,
+        is_conj=False,
+        location="back",
+    ):
         if backend is None:
             self.backend = get_tensor_linop_backend()
         else:
@@ -1563,19 +1765,19 @@ class FTNLinearOperator(spla.LinearOperator):
 
         if constructor is None:
             self.constructor = _tensors_to_constructors(
-                                        self._tensors, right_inds)
+                self._tensors, right_inds
+            )
         else:
             self.constructor = constructor
-
 
         self.left_inds, self.right_inds = left_inds, right_inds
         self.tags = oset.union(*(t.tags for t in self._tensors))
 
-        self._kws = {'get': 'expression'}
+        self._kws = {"get": "expression"}
 
         # if recent opt_einsum specify constant tensors
-        if hasattr(oe.backends, 'evaluate_constants'):
-            self._kws['constants'] = range(len(self._tensors))
+        if hasattr(oe.backends, "evaluate_constants"):
+            self._kws["constants"] = range(len(self._tensors))
 
         # conjugate inputs/ouputs rather all tensors if necessary
         self.is_conj = is_conj
@@ -1629,14 +1831,19 @@ class FTNLinearOperator(spla.LinearOperator):
             fs.add_tensor(iT, virtual=True)
 
         # cache the contractor
-        if 'matvec' not in self._contractors:
+        if "matvec" not in self._contractors:
             # generate a expression that acts directly on the data
-            self._contractors['matvec'] = tensor_contract(
-                *tensors, output_inds=self.left_inds,
-                optimize=self.optimize, **self._kws)
+            self._contractors["matvec"] = tensor_contract(
+                *tensors,
+                output_inds=self.left_inds,
+                optimize=self.optimize,
+                **self._kws,
+            )
 
-        expr = self._contractors['matvec']
-        out_data = _launch_fermion_expression(expr, tensors, backend=self.backend, inplace=True)
+        expr = self._contractors["matvec"]
+        out_data = _launch_fermion_expression(
+            expr, tensors, backend=self.backend, inplace=True
+        )
         out_data = out_data.data
         if self.is_conj:
             out_data = conj(out_data)
@@ -1646,7 +1853,7 @@ class FTNLinearOperator(spla.LinearOperator):
         if transpose:
             left_inds, right_inds = self.right_inds, self.left_inds
             target_symmetry = -self.dq
-            location = {"back":"front", "front":"back"}[self.location]
+            location = {"back": "front", "front": "back"}[self.location]
         else:
             left_inds, right_inds = self.left_inds, self.right_inds
             target_symmetry = self.dq
@@ -1657,7 +1864,16 @@ class FTNLinearOperator(spla.LinearOperator):
         else:
             is_conj = self.is_conj
 
-        return FTNLinearOperator(self._tensors, left_inds, right_inds, target_symmetry, optimize=self.optimize, backend=self.backend, is_conj=is_conj, location=location)
+        return FTNLinearOperator(
+            self._tensors,
+            left_inds,
+            right_inds,
+            target_symmetry,
+            optimize=self.optimize,
+            backend=self.backend,
+            is_conj=is_conj,
+            location=location,
+        )
 
     def _adjoint(self):
         if self._adjoint_linop is None:
