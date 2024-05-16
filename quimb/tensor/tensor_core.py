@@ -423,7 +423,6 @@ def tensor_split(
     stags=None,
     bond_ind=None,
     right_inds=None,
-    **kwargs
 ):
     """Decompose this tensor into two tensors.
 
@@ -905,12 +904,6 @@ def tensor_make_single_bond(t1, t2, gauges=None):
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
     Inplace operation.
     """
-    # if hasattr(t1, "custom_funcs"):
-    #     func = t1.custom_funcs.get("tensor_fuse_squeeze", None)
-    #     if func is not None:
-    #         return func(t1, t2)
-    #     else:
-    #         return
     left, shared, right = group_inds(t1, t2)
     nshared = len(shared)
 
@@ -7742,10 +7735,6 @@ class TensorNetwork(object):
 
         # the boundary - the set of intermediate tensors
         boundary = oset()
-        contract_opts = {"preserve_tensor": True}
-        is_fermion = hasattr(self, "fermion_space")
-        if is_fermion:
-            contract_opts["inplace"] = True
 
         # options relating to locally canonizing around each compression
         if canonize_distance:
@@ -8446,7 +8435,7 @@ class TensorNetwork(object):
         # reindex one tensor, and add a new A tensor joining the bonds
         nbnd = rand_uuid()
         T2.reindex_({bnd: nbnd})
-        TA = A.__class__(A, inds=(bnd, nbnd), tags=tags)
+        TA = Tensor(A, inds=(bnd, nbnd), tags=tags)
         tn |= TA
 
         return tn
