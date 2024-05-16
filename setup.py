@@ -22,8 +22,8 @@ setup(
     license="Apache",
     packages=find_packages(exclude=["deps", "tests*"]),
     install_requires=[
-        "autoray>=0.6.10",
-        "cotengra>=0.5.6",
+        "autoray>=0.6.12",
+        "cotengra>=0.6.1",
         "cytoolz>=0.8.0",
         "numba>=0.39",
         "numpy>=1.17",
@@ -48,8 +48,8 @@ setup(
         ],
         "docs": [
             "astroid<3.0.0",
-            "autoray>=0.6.7",
-            "cotengra>=0.5.3",
+            "autoray>=0.6.12",
+            "cotengra>=0.6.1",
             "doc2dash>=2.4.1",
             "furo",
             "ipython!=8.7.0",
@@ -71,6 +71,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
     keywords="quantum physics tensor networks tensors dmrg tebd",
 )
