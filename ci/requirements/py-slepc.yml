@@ -2,8 +2,8 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - autoray>=0.6.7
-  - cotengra>=0.5.6
+  - autoray>=0.6.12
+  - cotengra>=0.6.1
   - coverage
   - cytoolz
   - joblib

@@ -1,6 +1,5 @@
 """Classes and algorithms related to 1D tensor networks."""
 
-import collections
 import functools
 import itertools
 import operator
@@ -14,7 +13,6 @@ import quimb as qu
 
 from ..linalg.base_linalg import norm_trace_dense
 from ..utils import (
-    check_opt,
     deprecated,
     ensure_dict,
     pairwise,
