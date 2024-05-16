@@ -11,11 +11,12 @@ import quimb.tensor as qtn
 
 def rand_reg_graph(reg, n, seed=None):
     import networkx as nx
+
     G = nx.random_regular_graph(reg, n, seed=seed)
     return G
 
 
-def graph_to_qasm(G, gamma0=-0.743043, beta0=0.754082):
+def graph_to_qsim(G, gamma0=-0.743043, beta0=0.754082):
     n = G.number_of_nodes()
 
     # add all the gates
@@ -37,17 +38,17 @@ def random_a2a_circ(L, depth, seed=42):
     gates = []
 
     for i in range(L):
-        gates.append((0, 'h', i))
+        gates.append((0, "h", i))
 
     for d in range(depth):
         rng.shuffle(qubits)
 
         for i in range(0, L - 1, 2):
-            g = rng.choice(['cx', 'cy', 'cz', 'iswap'])
+            g = rng.choice(["cx", "cy", "cz", "iswap"])
             gates.append((d, g, qubits[i], qubits[i + 1]))
 
         for q in qubits:
-            g = rng.choice(['rx', 'ry', 'rz'])
+            g = rng.choice(["rx", "ry", "rz"])
             gates.append((d, g, rng.normal(1.0, 0.5), q))
 
     circ = qtn.Circuit(L)
@@ -57,7 +58,6 @@ def random_a2a_circ(L, depth, seed=42):
 
 
 def qft_circ(n, swaps=True, **circuit_opts):
-
     circ = qtn.Circuit(n, **circuit_opts)
 
     for i in range(n):
@@ -82,10 +82,10 @@ def swappy_circ(n, depth):
             qi = pairs[2 * i]
             qj = pairs[2 * i + 1]
 
-            gate = np.random.choice(['FSIM', 'SWAP'])
-            if gate == 'FSIM':
+            gate = np.random.choice(["FSIM", "SWAP"])
+            if gate == "FSIM":
                 params = np.random.randn(2)
-            elif gate == 'FSIMG':
+            elif gate == "FSIMG":
                 params = np.random.randn(5)
             else:
                 params = ()
@@ -95,92 +95,199 @@ def swappy_circ(n, depth):
     return circ
 
 
-class TestCircuit:
+def example_openqasm2_qft():
+    return """
+    // quantum Fourier transform
 
+    OPENQASM 2.0;
+    include "qelib1.inc";
+
+    qreg q[4];
+    creg c[4];
+    x q[0];
+    x q[2];
+    barrier q;
+    h q[0];
+    cu1(pi/2) q[1],q[0];
+    h q[1];
+    cu1(pi/4) q[2],q[0];
+    cu1(pi/2) q[2],q[1];
+    /*
+    This is a multi line comment.
+    */
+    h q[2];
+    cu1(pi/8) q[3],q[0];
+    cu1(pi/4) q[3],q[1];
+    cu1(pi/2) q[3],q[2];
+    h q[3];
+
+    measure q -> c;
+    """
+
+
+class TestCircuit:
     def test_prepare_GHZ(self):
         qc = qtn.Circuit(3)
         gates = [
-            ('H', 0),
-            ('H', 1),
-            ('CNOT', 1, 2),
-            ('CNOT', 0, 2),
-            ('H', 0),
-            ('H', 1),
-            ('H', 2),
+            ("H", 0),
+            ("H", 1),
+            ("CNOT", 1, 2),
+            ("CNOT", 0, 2),
+            ("H", 0),
+            ("H", 1),
+            ("H", 2),
         ]
         qc.apply_gates(gates)
         assert qu.expec(qc.psi.to_dense(), qu.ghz_state(3)) == pytest.approx(1)
         counts = qc.simulate_counts(1024)
         assert len(counts) == 2
-        assert '000' in counts
-        assert '111' in counts
-        assert counts['000'] + counts['111'] == 1024
+        assert "000" in counts
+        assert "111" in counts
+        assert counts["000"] + counts["111"] == 1024
 
-    def test_from_qasm(self):
+    def test_from_qsim(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_qasm(G)
-        qc = qtn.Circuit.from_qasm(qasm)
+        qsim = graph_to_qsim(G)
+        qc = qtn.Circuit.from_qsim_str(qsim)
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
-    def test_from_qasm_mps_swapsplit(self):
+    def test_from_qsim_mps_swapsplit(self):
         G = rand_reg_graph(reg=3, n=18, seed=42)
-        qasm = graph_to_qasm(G)
-        qc = qtn.CircuitMPS.from_qasm(qasm)
+        qsim = graph_to_qsim(G)
+        qc = qtn.CircuitMPS.from_qsim_str(qsim)
         assert len(qc.psi.tensors) == 18
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
+    def test_from_openqasm2(self):
+        qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_openqasm2_custom_gates(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, θ) q
+        {
+            u2(θ / 2, param1) q;
+            u2(param1, θ / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "H",
+            "CX",
+            "U3",
+            "U2",
+            "U2",
+            "H",
+            "CX",
+            "U3",
+        ]
+
+    def test_openqasm2_custom_nested_gates(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate cphase(θ) a, b
+        {
+            U3(0, 0, θ / 2) a;
+            CX a, b;
+            U3(0, 0, -θ / 2) b;
+            CX a, b;
+            U3(0, 0, θ / 2) b;
+        }
+
+        gate doublecphase(θ) a, b, c {
+            cphase(θ) a, b;
+            cphase(θ) b, c;
+        }
+
+        doublecphase(0.1) q[0], q[1], q[2];
+        doublecphase(0.2) q[2], q[0], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "U3",
+            "CX",
+            "U3",
+            "CX",
+            "U3",
+        ] * 4
+
     @pytest.mark.parametrize(
-        'Circ', [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
+        "Circ", [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
     )
     def test_all_gate_methods(self, Circ):
         import random
 
         g_nq_np = [
             # single qubit
-            ('x', 1, 0),
-            ('y', 1, 0),
-            ('z', 1, 0),
-            ('s', 1, 0),
-            ('t', 1, 0),
-            ('h', 1, 0),
-            ('iden', 1, 0),
-            ('x_1_2', 1, 0),
-            ('y_1_2', 1, 0),
-            ('z_1_2', 1, 0),
-            ('w_1_2', 1, 0),
-            ('hz_1_2', 1, 0),
+            ("x", 1, 0),
+            ("y", 1, 0),
+            ("z", 1, 0),
+            ("s", 1, 0),
+            ("t", 1, 0),
+            ("h", 1, 0),
+            ("iden", 1, 0),
+            ("x_1_2", 1, 0),
+            ("y_1_2", 1, 0),
+            ("z_1_2", 1, 0),
+            ("w_1_2", 1, 0),
+            ("hz_1_2", 1, 0),
             # single qubit parametrizable
-            ('rx', 1, 1),
-            ('ry', 1, 1),
-            ('rz', 1, 1),
-            ('u3', 1, 3),
-            ('u2', 1, 2),
-            ('u1', 1, 1),
+            ("rx", 1, 1),
+            ("ry", 1, 1),
+            ("rz", 1, 1),
+            ("u3", 1, 3),
+            ("u2", 1, 2),
+            ("u1", 1, 1),
             # two qubit
-            ('cx', 2, 0),
-            ('cy', 2, 0),
-            ('cz', 2, 0),
-            ('cnot', 2, 0),
-            ('swap', 2, 0),
-            ('iswap', 2, 0),
+            ("cx", 2, 0),
+            ("cy", 2, 0),
+            ("cz", 2, 0),
+            ("cnot", 2, 0),
+            ("swap", 2, 0),
+            ("iswap", 2, 0),
             # two qubit parametrizable
-            ('cu3', 2, 3),
-            ('cu2', 2, 2),
-            ('cu1', 2, 1),
-            ('fsim', 2, 2),
-            ('fsimg', 2, 5),
-            ('rzz', 2, 1),
-            ('su4', 2, 15),
+            ("rxx", 2, 1),
+            ("ryy", 2, 1),
+            ("rzz", 2, 1),
+            ("crx", 2, 1),
+            ("cry", 2, 1),
+            ("crz", 2, 1),
+            ("cu3", 2, 3),
+            ("cu2", 2, 2),
+            ("cu1", 2, 1),
+            ("fsim", 2, 2),
+            ("fsimg", 2, 5),
+            ("rzz", 2, 1),
+            ("su4", 2, 15),
         ]
         random.shuffle(g_nq_np)
 
         psi0 = qtn.MPS_rand_state(2, 2)
-        circ = Circ(2, psi0, tags='PSI0')
+        circ = Circ(2, psi0=psi0, tags="PSI0")
 
         for g, n_q, n_p in g_nq_np:
             args = [
                 *np.random.uniform(0, 2 * np.pi, size=n_p),
-                *np.random.choice([0, 1], replace=False, size=n_q)
+                *np.random.choice([0, 1], replace=False, size=n_q),
             ]
             getattr(circ, g)(*args)
 
@@ -196,11 +303,23 @@ class TestCircuit:
         psi_a = circ_a.to_dense()
 
         circ_b = qtn.Circuit(psi0=psi0)
-        (theta1, phi1, lamda1,
-         theta2, phi2, lamda2,
-         theta3, phi3, lamda3,
-         theta4, phi4, lamda4,
-         t1, t2, t3,) = params
+        (
+            theta1,
+            phi1,
+            lamda1,
+            theta2,
+            phi2,
+            lamda2,
+            theta3,
+            phi3,
+            lamda3,
+            theta4,
+            phi4,
+            lamda4,
+            t1,
+            t2,
+            t3,
+        ) = params
         circ_b.u3(theta1, phi1, lamda1, 0)
         circ_b.u3(theta2, phi2, lamda2, 1)
         circ_b.cnot(1, 0)
@@ -215,39 +334,52 @@ class TestCircuit:
 
         assert qu.fidelity(psi_a, psi_b) == pytest.approx(1.0)
 
-    def test_auto_split_gate(self):
+    def test_three_qubit_gates(self):
+        psi0 = qtn.MPS_rand_state(3, 2)
+        circ = qtn.Circuit(psi0=psi0)
+        circ.ccx(0, 1, 2)
+        circ.cswap(2, 1, 0)
+        circ.toffoli(0, 1, 2)
+        circ.ccy(1, 0, 2)
+        circ.ccz(1, 2, 0)
+        circ.fredkin(2, 1, 0)
+        psi = circ.psi.to_dense()
+        assert qu.expec(psi, psi) == pytest.approx(1.0)
 
+    def test_auto_split_gate(self):
         n = 3
         ops = [
-            ('u3', 1., 2., 3., 0),
-            ('u3', 2., 3., 1., 1),
-            ('u3', 3., 1., 2., 2),
-            ('cz', 0, 1),
-            ('iswap', 1, 2),
-            ('cx', 2, 0),
-            ('iswap', 2, 1),
-            ('h', 0),
-            ('h', 1),
-            ('h', 2),
+            ("u3", 1.0, 2.0, 3.0, 0),
+            ("u3", 2.0, 3.0, 1.0, 1),
+            ("u3", 3.0, 1.0, 2.0, 2),
+            ("cz", 0, 1),
+            ("iswap", 1, 2),
+            ("cx", 2, 0),
+            ("iswap", 2, 1),
+            ("h", 0),
+            ("h", 1),
+            ("h", 2),
         ]
-        cnorm = qtn.Circuit(n, gate_opts=dict(contract='split-gate'))
+        cnorm = qtn.Circuit(n, gate_opts=dict(contract="split-gate"))
         cnorm.apply_gates(ops)
         assert cnorm.psi.max_bond() == 4
 
-        cswap = qtn.Circuit(n, gate_opts=dict(contract='swap-split-gate'))
+        cswap = qtn.Circuit(n, gate_opts=dict(contract="swap-split-gate"))
         cswap.apply_gates(ops)
         assert cswap.psi.max_bond() == 4
 
-        cauto = qtn.Circuit(n, gate_opts=dict(contract='auto-split-gate'))
+        cauto = qtn.Circuit(n, gate_opts=dict(contract="auto-split-gate"))
         cauto.apply_gates(ops)
         assert cauto.psi.max_bond() == 2
 
-        assert qu.fidelity(cnorm.psi.to_dense(),
-                           cswap.psi.to_dense()) == pytest.approx(1.0)
-        assert qu.fidelity(cswap.psi.to_dense(),
-                           cauto.psi.to_dense()) == pytest.approx(1.0)
+        assert qu.fidelity(
+            cnorm.psi.to_dense(), cswap.psi.to_dense()
+        ) == pytest.approx(1.0)
+        assert qu.fidelity(
+            cswap.psi.to_dense(), cauto.psi.to_dense()
+        ) == pytest.approx(1.0)
 
-    @pytest.mark.parametrize("gate2", ['cx', 'iswap'])
+    @pytest.mark.parametrize("gate2", ["cx", "iswap"])
     def test_circuit_simplify_tensor_network(self, gate2):
         import random
         import itertools
@@ -258,34 +390,30 @@ class TestCircuit:
 
         def random_single_qubit_layer():
             return [
-                (random.choice(['X_1_2', 'Y_1_2', 'W_1_2']), i)
+                (random.choice(["X_1_2", "Y_1_2", "W_1_2"]), i)
                 for i in range(n)
             ]
 
         def even_two_qubit_layer():
-            return [
-                (gate2, i, i + 1)
-                for i in range(0, n, 2)
-            ]
+            return [(gate2, i, i + 1) for i in range(0, n, 2)]
 
         def odd_two_qubit_layer():
-            return [
-                (gate2, i, i + 1)
-                for i in range(1, n - 1, 2)
-            ]
+            return [(gate2, i, i + 1) for i in range(1, n - 1, 2)]
 
-        layering = itertools.cycle([
-            random_single_qubit_layer,
-            even_two_qubit_layer,
-            random_single_qubit_layer,
-            odd_two_qubit_layer,
-        ])
+        layering = itertools.cycle(
+            [
+                random_single_qubit_layer,
+                even_two_qubit_layer,
+                random_single_qubit_layer,
+                odd_two_qubit_layer,
+            ]
+        )
 
         for i, layer_fn in zip(range(depth), layering):
             for g in layer_fn():
                 circ.apply_gate(*g, gate_round=i)
 
-        psif = qtn.MPS_computational_state('0' * n).squeeze_()
+        psif = qtn.MPS_computational_state("0" * n).squeeze_()
         tn = circ.psi & psif
 
         c = tn.contract(all)
@@ -316,9 +444,11 @@ class TestCircuit:
         psi = circ.to_dense()
         for i in range(L - 1):
             keep = (i, i + 1)
-            assert_allclose(qu.partial_trace(psi, [2] * 5, keep=keep),
-                            circ.partial_trace(keep),
-                            atol=1e-12)
+            assert_allclose(
+                qu.partial_trace(psi, [2] * 5, keep=keep),
+                circ.partial_trace(keep),
+                atol=1e-12,
+            )
 
     @pytest.mark.parametrize("group_size", (1, 2, 6))
     def test_sample(self, group_size):
@@ -330,7 +460,7 @@ class TestCircuit:
         circ = random_a2a_circ(L, 3)
 
         psi = circ.to_dense()
-        p_exp = abs(psi.reshape(-1))**2
+        p_exp = abs(psi.reshape(-1)) ** 2
         f_exp = p_exp * C
 
         counts = collections.Counter(circ.sample(C, group_size=group_size))
@@ -354,7 +484,7 @@ class TestCircuit:
             circ = random_a2a_circ(L, depth)
 
             psi = circ.to_dense()
-            p_exp = abs(psi.reshape(-1))**2
+            p_exp = abs(psi.reshape(-1)) ** 2
             f_exp = p_exp * C
 
             for num_marginal in [3, 4, 5]:
@@ -373,6 +503,7 @@ class TestCircuit:
 
     def test_local_expectation(self):
         import random
+
         L = 5
         depth = 3
         circ = random_a2a_circ(L, depth)
@@ -390,26 +521,35 @@ class TestCircuit:
         circ.h(0)
         circ.cnot(0, 1)
         circ.y(1)
-        Gs = [qu.kronpow(qu.pauli(s), 2) for s in 'xyz']
+        Gs = [qu.kronpow(qu.pauli(s), 2) for s in "xyz"]
         exps = circ.local_expectation(Gs, [0, 1])
         assert exps[0] == pytest.approx(-1)
         assert exps[1] == pytest.approx(-1)
         assert exps[2] == pytest.approx(-1)
 
+    def test_local_expectation_len1(self):
+        circ = qtn.Circuit(1)
+        circ.apply_gate("H", 0, gate_round=0)
+        circ.local_expectation([qu.pauli("X")], (0,))
+
     def test_uni_to_dense(self):
         import cmath
+
         circ = qft_circ(3)
         U = circ.uni.to_dense()
         w = cmath.exp(2j * math.pi / 2**3)
-        ex = 2**(-3 / 2) * np.array(
-            [[w**0, w**0, w**0, w**0, w**0, w**0, w**0, w**0],
-             [w**0, w**1, w**2, w**3, w**4, w**5, w**6, w**7],
-             [w**0, w**2, w**4, w**6, w**0, w**2, w**4, w**6],
-             [w**0, w**3, w**6, w**1, w**4, w**7, w**2, w**5],
-             [w**0, w**4, w**0, w**4, w**0, w**4, w**0, w**4],
-             [w**0, w**5, w**2, w**7, w**4, w**1, w**6, w**3],
-             [w**0, w**6, w**4, w**2, w**0, w**6, w**4, w**2],
-             [w**0, w**7, w**6, w**5, w**4, w**3, w**2, w**1]])
+        ex = 2 ** (-3 / 2) * np.array(
+            [
+                [w**0, w**0, w**0, w**0, w**0, w**0, w**0, w**0],
+                [w**0, w**1, w**2, w**3, w**4, w**5, w**6, w**7],
+                [w**0, w**2, w**4, w**6, w**0, w**2, w**4, w**6],
+                [w**0, w**3, w**6, w**1, w**4, w**7, w**2, w**5],
+                [w**0, w**4, w**0, w**4, w**0, w**4, w**0, w**4],
+                [w**0, w**5, w**2, w**7, w**4, w**1, w**6, w**3],
+                [w**0, w**6, w**4, w**2, w**0, w**6, w**4, w**2],
+                [w**0, w**7, w**6, w**5, w**4, w**3, w**2, w**1],
+            ]
+        )
         assert_allclose(U, ex)
 
     def test_swap_lighcones(self):
@@ -421,7 +561,10 @@ class TestCircuit:
         circ.cx(1, 2)  # 4
         circ.cx(0, 1)  # 5
         assert circ.get_reverse_lightcone_tags((2,)) == (
-            'PSI0', 'GATE_0', 'GATE_2', 'GATE_4'
+            "PSI0",
+            "GATE_0",
+            "GATE_2",
+            "GATE_4",
         )
 
     def test_swappy_local_expecs(self):
@@ -432,8 +575,10 @@ class TestCircuit:
         psi = circ.to_dense()
         dims = [2] * 4
 
-        exs = [qu.expec(qu.ikron(G, dims, pair), psi)
-               for G, pair in zip(Gs, pairs)]
+        exs = [
+            qu.expec(qu.ikron(G, dims, pair), psi)
+            for G, pair in zip(Gs, pairs)
+        ]
         aps = [circ.local_expectation(G, pair) for G, pair in zip(Gs, pairs)]
 
         assert_allclose(exs, aps)
@@ -441,23 +586,23 @@ class TestCircuit:
     @pytest.mark.parametrize(
         "name, densefn, nparam, nqubit",
         [
-            ('rx', qu.Rx, 1, 1),
-            ('ry', qu.Ry, 1, 1),
-            ('rz', qu.Rz, 1, 1),
-            ('u3', qu.U_gate, 3, 1),
-            ('fsim', qu.fsim, 2, 2),
-            ('fsimg', qu.fsimg, 5, 2),
-        ]
+            ("rx", qu.Rx, 1, 1),
+            ("ry", qu.Ry, 1, 1),
+            ("rz", qu.Rz, 1, 1),
+            ("u3", qu.U_gate, 3, 1),
+            ("fsim", qu.fsim, 2, 2),
+            ("fsimg", qu.fsimg, 5, 2),
+        ],
     )
     def test_parametrized_gates_rx(self, name, densefn, nparam, nqubit):
         k0 = qu.rand_ket(2**nqubit)
         params = qu.randn(nparam)
         kf = densefn(*params) @ k0
         k0mps = qtn.MatrixProductState.from_dense(k0, [2] * nqubit)
-        circ = qtn.Circuit(psi0=k0mps, gate_opts={'contract': False})
+        circ = qtn.Circuit(psi0=k0mps, gate_opts={"contract": False})
         getattr(circ, name)(*params, *range(nqubit), parametrize=True)
         tn = circ.psi
-        assert isinstance(tn['GATE_0'], qtn.PTensor)
+        assert isinstance(tn["GATE_0"], qtn.PTensor)
         assert_allclose(circ.to_dense(), kf)
 
     def test_apply_raw_gate(self):
@@ -465,31 +610,98 @@ class TestCircuit:
         psi0 = qtn.MatrixProductState.from_dense(k0, [2] * 2)
         circ = qtn.Circuit(psi0=psi0)
         U = qu.rand_uni(4)
-        circ.apply_gate_raw(U, [0, 1], tags='UCUSTOM')
+        circ.apply_gate_raw(U, [0, 1], tags="UCUSTOM")
         assert len(circ.gates) == 1
-        assert 'UCUSTOM' in circ.psi.tags
+        assert "UCUSTOM" in circ.psi.tags
         assert qu.fidelity(circ.to_dense(), U @ k0) == pytest.approx(1)
+
+    def test_apply_controlled_gate_basic_equiv(self):
+        circ = qtn.Circuit(3)
+        circ.apply_gate("x", qubits=(2,), controls=(0, 1))
+        U = circ.get_uni().to_dense()
+        assert_allclose(U, qu.toffoli())
+
+        circ = qtn.Circuit(3)
+        circ.apply_gate("swap", qubits=(1, 2), controls=(0,))
+        U = circ.get_uni().to_dense()
+        assert_allclose(U, qu.fredkin())
+
+    def test_multi_controlled_circuit(self):
+        import random
+
+        N = 10
+        circ = qtn.Circuit(N)
+        regs = list(range(N))
+        random.shuffle(regs)
+        circ.apply_gate("H", regs[0])
+        for i in range(N - 1):
+            circ.apply_gate("CNOT", regs[i], regs[i + 1])
+        circ.apply_gate("X", N - 1, controls=range(N - 1))
+        circ.apply_gate("SWAP", qubits=(N - 2, N - 1), controls=range(N - 2))
+        (b,) = circ.sample(1, group_size=3)
+        assert b[N - 2] == "0"
+
+    def test_multi_controlled_mps_circuit(self):
+        N = 10
+        rng = np.random.default_rng(42)
+
+        gates = []
+        for i in range(N):
+            gates.append(
+                qtn.Gate(
+                    "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                )
+            )
+        gates.append(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[6, 2],
+                controls=[8, 3, 4, 0],
+            )
+        )
+        for i in range(N):
+            gates.append(
+                qtn.Gate(
+                    "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                )
+            )
+        gates.append(
+            qtn.Gate.from_raw(
+                qu.rand_uni(2**3), qubits=[0, 9, 5], controls=[1, 2, 7]
+            )
+        )
+
+        circ = qtn.Circuit(N=10)
+        circ.apply_gates(gates)
+        psi_lazy = circ.psi
+        circ = qtn.CircuitMPS(N=10)
+        circ.apply_gates(gates)
+        mps = circ.psi
+        assert mps.norm() == pytest.approx(1.0)
+        assert mps.distance_normalized(psi_lazy) < 1e-6
 
 
 class TestCircuitGen:
-
     @pytest.mark.parametrize(
-        "ansatz,cyclic", [
-            ('zigzag', False),
-            ('brickwork', False),
-            ('brickwork', True),
-            ('rand', False),
-            ('rand', True),
-        ])
-    @pytest.mark.parametrize('n', [4, 5])
+        "ansatz,cyclic",
+        [
+            ("zigzag", False),
+            ("brickwork", False),
+            ("brickwork", True),
+            ("rand", False),
+            ("rand", True),
+        ],
+    )
+    @pytest.mark.parametrize("n", [4, 5])
     def test_1D_ansatzes(self, ansatz, cyclic, n):
         depth = 3
         num_pairs = n if cyclic else n - 1
 
         fn = {
-            'zigzag': qtn.circ_ansatz_1D_zigzag,
-            'brickwork': qtn.circ_ansatz_1D_brickwork,
-            'rand': qtn.circ_ansatz_1D_rand,
+            "zigzag": qtn.circ_ansatz_1D_zigzag,
+            "brickwork": qtn.circ_ansatz_1D_brickwork,
+            "rand": qtn.circ_ansatz_1D_rand,
         }[ansatz]
 
         opts = dict(
@@ -498,45 +710,39 @@ class TestCircuitGen:
             gate_opts=dict(contract=False),
         )
         if cyclic:
-            opts['cyclic'] = True
-        if ansatz == 'rand':
-            opts['seed'] = 42
+            opts["cyclic"] = True
+        if ansatz == "rand":
+            opts["seed"] = 42
 
         circ = fn(**opts)
         tn = circ.uni
 
         # total number of entangling gates
-        assert len(tn['CZ']) == num_pairs * depth
+        assert len(tn["CZ"]) == num_pairs * depth
 
         # number of entangling gates per pair
         for i in range(num_pairs):
-            assert len(tn['CZ', f'I{i}', f'I{(i + 1) % n}']) == depth
+            assert len(tn["CZ", f"I{i}", f"I{(i + 1) % n}"]) == depth
 
-        assert all(isinstance(t, qtn.PTensor) for t in tn['U3'])
+        assert all(isinstance(t, qtn.PTensor) for t in tn["U3"])
 
     def test_qaoa(self):
         G = rand_reg_graph(3, 10, seed=666)
-        terms = {(i, j): 1. for i, j in G.edges}
-        ZZ = qu.pauli('Z') & qu.pauli('Z')
+        terms = {(i, j): 1.0 for i, j in G.edges}
+        ZZ = qu.pauli("Z") & qu.pauli("Z")
 
-        gammas = [1.2]
+        gammas = [-0.6]
         betas = [-0.4]
 
         circ1 = qtn.circ_qaoa(terms, 1, gammas, betas)
 
-        energy1 = sum(
-            circ1.local_expectation(ZZ, edge)
-            for edge in terms
-        )
+        energy1 = sum(circ1.local_expectation(ZZ, edge) for edge in terms)
         assert energy1 < -4
 
-        gammas = [0.4]
+        gammas = [-0.4]
         betas = [0.3]
 
         circ2 = qtn.circ_qaoa(terms, 1, gammas, betas)
 
-        energy2 = sum(
-            circ2.local_expectation(ZZ, edge)
-            for edge in terms
-        )
+        energy2 = sum(circ2.local_expectation(ZZ, edge) for edge in terms)
         assert energy2 > 4

@@ -20,13 +20,12 @@ np.random.seed(42)
 
 
 class TestMPOSpectralApprox:
-
     def test_constructing_tridiag_works(self):
         A = MPO_rand_herm(10, 7)
         for _ in construct_lanczos_tridiag_MPO(A, 5):
             pass
 
-    @pytest.mark.parametrize("fn", [abs, np.cos, lambda x: np.sin(x)**2])
+    @pytest.mark.parametrize("fn", [abs, np.cos, lambda x: np.sin(x) ** 2])
     def test_approx_fn(self, fn):
         A = MPO_rand_herm(10, 7, normalize=True)
         xe = sum(fn(eigvalsh(A.to_dense())))
@@ -39,8 +38,9 @@ class TestMPOSpectralApprox:
         dmrg = DMRG2(ham, bond_dims=[2, 4])
         dmrg.solve()
         rho_ab = dmrg.state.ptr(range(6, 14))
-        xf = approx_spectral_function(rho_ab, lambda x: x,
-                                      tol=0.1, verbosity=2)
+        xf = approx_spectral_function(
+            rho_ab, lambda x: x, tol=0.1, verbosity=2
+        )
         assert_allclose(1.0, xf, rtol=0.6, atol=0.001)
 
     def test_realistic_ent(self):
@@ -57,6 +57,7 @@ class TestMPOSpectralApprox:
 
         rho_ab = dmrg.state.ptr(sysab, rescale_sites=True)
         rho_ab_pt = rho_ab.partial_transpose(range(3))
-        lnx = log2(approx_spectral_function(rho_ab_pt, abs,
-                                            tol=0.1, verbosity=2))
+        lnx = log2(
+            approx_spectral_function(rho_ab_pt, abs, tol=0.1, verbosity=2)
+        )
         assert_allclose(lne, lnx, rtol=0.6, atol=0.1)

@@ -1,13 +1,12 @@
+"""Functions relating to tensor network contraction.
+"""
 import functools
+import itertools
 import threading
 import contextlib
 import collections
 
-import opt_einsum as oe
-from opt_einsum.contract import parse_backend
-from autoray import infer_backend
-
-from ..utils import concat
+import  cotengra as ctg
 
 
 _CONTRACT_STRATEGY = 'greedy'
@@ -16,7 +15,7 @@ _TEMP_CONTRACT_STRATEGIES = collections.defaultdict(list)
 
 def get_contract_strategy():
     r"""Get the default contraction strategy - the option supplied as
-    ``optimize`` to ``opt_einsum``.
+    ``optimize`` to ``cotengra``.
     """
     if not _TEMP_CONTRACT_STRATEGIES:
         # shortcut for when no temp strategies are in use
@@ -39,7 +38,7 @@ def get_contract_strategy():
 
 def set_contract_strategy(strategy):
     """Get the default contraction strategy - the option supplied as
-    ``optimize`` to ``opt_einsum``.
+    ``optimize`` to ``cotengra``.
     """
     global _CONTRACT_STRATEGY
     _CONTRACT_STRATEGY = strategy
@@ -48,7 +47,7 @@ def set_contract_strategy(strategy):
 @contextlib.contextmanager
 def contract_strategy(strategy, set_globally=False):
     """A context manager to temporarily set the default contraction strategy
-    supplied as ``optimize`` to ``opt_einsum``. By default, this only sets the
+    supplied as ``optimize`` to ``cotengra``. By default, this only sets the
     contract strategy for the current thread.
 
     Parameters
@@ -75,241 +74,70 @@ def contract_strategy(strategy, set_globally=False):
             temp_strategies.pop()
 
 
-def _get_contract_path(eq, *shapes, **kwargs):
-    """Get the contraction path - sequence of integer pairs.
+get_symbol = ctg.get_symbol
+
+
+def empty_symbol_map():
+    """Get a default dictionary that will populate with symbol entries as they
+    are accessed.
     """
-
-    # construct the internal opt_einsum data
-    lhs, output = eq.split('->')
-    inputs = lhs.split(',')
-
-    # nothing to optimize in this case
-    nterms = len(inputs)
-    if nterms <= 2:
-        return (tuple(range(nterms)),)
-
-    size_dict = {}
-    for ix, d in zip(concat(inputs), concat(shapes)):
-        size_dict[ix] = d
-
-    # get the actual path generating function
-    optimize = kwargs.pop('optimize', get_contract_strategy())
-    if isinstance(optimize, str):
-        optimize = oe.paths.get_path_fn(optimize)
-
-    kwargs.setdefault('memory_limit', None)
-
-    # this way we get to avoid constructing the full PathInfo object
-    path = optimize(inputs, output, size_dict, **kwargs)
-    return tuple(path)
+    return collections.defaultdict(map(get_symbol, itertools.count()).__next__)
 
 
-if parse_backend([0], None) == 'numpy':
-    # new enough version to support backend=None
-
-    def _get_contract_expr(eq, *shapes, **kwargs):
-        """Get the contraction expression - callable taking raw arrays.
-        """
-        return oe.contract_expression(eq, *shapes, **kwargs)
-
-else:
-    # old: wrap expression to always convert backend=None to 'auto'
-
-    class ConvertBackendKwarg:
-
-        __slots__ = ('fn',)
-
-        def __init__(self, fn):
-            self.fn = fn
-
-        def __call__(self, *args, **kwargs):
-            backend = kwargs.pop('backend', 'auto')
-            if backend is None:
-                backend = 'auto'
-            return self.fn(*args, backend=backend, **kwargs)
-
-    def _get_contract_expr(eq, *shapes, **kwargs):
-        return ConvertBackendKwarg(
-            oe.contract_expression(eq, *shapes, **kwargs)
-        )
-
-
-def _get_contract_info(eq, *shapes, **kwargs):
-    """Get the contraction ipath info - object containing various information.
-    """
-    return oe.contract_path(eq, *shapes, shapes=True, **kwargs)[1]
-
-
-_CONTRACT_PATH_CACHE = None
-
-
-_CONTRACT_FNS = {
-    # key: (get, cache)
-    ('path', False): _get_contract_path,
-    ('path', True): functools.lru_cache(2**12)(_get_contract_path),
-    ('expr', False): _get_contract_expr,
-    ('expr', True): functools.lru_cache(2**12)(_get_contract_expr),
-    ('info', False): _get_contract_info,
-    ('info', True): functools.lru_cache(2**12)(_get_contract_info),
-}
-
-
-def set_contract_path_cache(
-    directory=None,
-    in_mem_cache_size=2**12,
-):
-    """Specify an directory to cache all contraction paths to, if a directory
-    is specified ``diskcache`` (https://pypi.org/project/diskcache/) will be
-    used to write all contraction expressions / paths to.
+def inds_to_symbols(inputs):
+    """Map a sequence of inputs terms, containing any hashable indices, to
+    single unicode letters, appropriate for einsum.
 
     Parameters
     ----------
-    directory : None or path, optimize
-        If None (the default), don't use any disk caching. If a path, supply it
-        to ``diskcache.Cache`` to use as the persistent store.
-    in_mem_cache_size_expr : int, optional
-        The size of the in memory cache to use for contraction expressions.
-    in_mem_cache_size_path : int, optional
-        The size of the in memory cache to use for contraction paths.
+    inputs : sequence of sequence of hashable
+        The input indices per tensor.
+
+    Returns
+    -------
+    symbols : dict[hashable, str]
+        The mapping from index to symbol.
     """
-    global _CONTRACT_PATH_CACHE
-
-    if _CONTRACT_PATH_CACHE is not None:
-        _CONTRACT_PATH_CACHE.close()
-
-    if directory is None:
-        _CONTRACT_PATH_CACHE = None
-        path_fn = _get_contract_path
-    else:
-        # for size reasons we only cache actual path to disk
-        import diskcache
-        _CONTRACT_PATH_CACHE = diskcache.Cache(directory)
-        path_fn = _CONTRACT_PATH_CACHE.memoize()(_get_contract_path)
-
-    # second layer of in memory caching applies to all functions
-    _CONTRACT_FNS['path', True] = (
-        functools.lru_cache(in_mem_cache_size)(path_fn))
-    _CONTRACT_FNS['expr', True] = (
-        functools.lru_cache(in_mem_cache_size)(_get_contract_expr))
-    _CONTRACT_FNS['info', True] = (
-        functools.lru_cache(in_mem_cache_size)(_get_contract_info))
+    return ctg.get_symbol_map(inputs)
 
 
-def get_contractor(
-    eq,
-    *shapes,
-    cache=True,
-    get='expr',
-    optimize=None,
-    use_cotengra='auto',
-    **kwargs
-):
-    """Get an callable expression that will evaluate ``eq`` based on
-    ``shapes``. Cache the result if no constant tensors are involved.
+@functools.lru_cache(2**12)
+def inds_to_eq(inputs, output=None):
+    """Turn input and output indices of any sort into a single 'equation'
+    string where each index is a single 'symbol' (unicode character).
 
     Parameters
     ----------
+    inputs : sequence of sequence of hashable
+        The input indices per tensor.
+    output : sequence of hashable
+        The output indices.
+
+    Returns
+    -------
     eq : str
-        The equation to evaluate, for example ``'a,b->ab'``.
-    shapes : tuple of ints
-        The shapes of the tensors to be contracted.
-    cache : bool, optional
-        Whether to cache the contraction, only possible if ``optimize`` is
-        not a ``PathOptimizer`` and no constants are specified.
-    get : {'expr', 'path', 'info'}, optional
-        Whether to return the expression, path, or info.
-    optimize : {None, str, path_like, PathOptimizer}, optional
-        The contraction path optimization strategy to use.
-
-            - None: use the default strategy,
-            - str: use the preset strategy with the given name,
-            - path_like: use this exact path,
-            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
-            - ``cotengra.HyperOptimizer``: find and perform the contraction
-              using ``cotengra.contract_expression``.
-            - ``cotengra.ContractionTree``: use this exact tree and perform
-              contraction using ``cotengra.contract_expression``.
-
-        Contraction with ``cotengra`` might be a bit more efficient but the
-        main reason would be to handle sliced contraction automatically.
+        The string to feed to einsum/contract.
     """
-    if optimize is None:
-        optimize = get_contract_strategy()
-
-    use_cotengra_expression = (
-        (get == 'expr') and
-        (use_cotengra is not False) and
-        (
-            (use_cotengra is True) or
-            (infer_backend(optimize) == 'cotengra')  # 'auto'
+    symbols = empty_symbol_map()
+    in_str = ("".join(symbols[ix] for ix in inds) for inds in inputs)
+    in_str = ",".join(in_str)
+    if output is None:
+        out_str = "".join(
+            ix for ix in symbols.values() if in_str.count(ix) == 1
         )
-    )
-
-    if use_cotengra_expression:
-        # can use more advanced contraction expression with slicing etc.
-        import cotengra as ctg
-        return ctg.contract_expression(
-            eq, *shapes, optimize=optimize, **kwargs)
-
-    # can't cache if using constants
-    if 'constants' in kwargs:
-        expr_fn = _CONTRACT_FNS['expr', False]
-        expr = expr_fn(eq, *shapes, optimize=optimize, **kwargs)
-        return expr
-
-    # else make sure shapes are hashable + concrete python ints
-    if not (
-        isinstance(shapes[0], tuple) and
-        isinstance(next(concat(shapes), 1), int)
-    ):
-        shapes = tuple(tuple(map(int, s)) for s in shapes)
-
-    # and make sure explicit paths are hashable
-    if isinstance(optimize, list):
-        optimize = tuple(optimize)
-
-    # don't cache path if using a 'single-shot' path-optimizer
-    #     (you may want to run these several times, each time improving path)
-    cache_path = cache and not isinstance(optimize, oe.paths.PathOptimizer)
-
-    # get the path, unless explicitly given already, whether we cache this is
-    # separate from the cache for the actual expression
-    if not isinstance(optimize, tuple):
-        path_fn = _CONTRACT_FNS['path', cache_path]
-        path = path_fn(eq, *shapes, optimize=optimize, **kwargs)
     else:
-        path = optimize
-
-    if get == 'expr':
-        expr_fn = _CONTRACT_FNS['expr', cache]
-        expr = expr_fn(eq, *shapes, optimize=path, **kwargs)
-        return expr
-
-    if get == 'path':
-        return path
-
-    if get == 'info':
-        info_fn = _CONTRACT_FNS['info', cache]
-        info = info_fn(eq, *shapes, optimize=path, **kwargs)
-        return info
+        out_str = "".join(symbols[ix] for ix in output)
+    return f"{in_str}->{out_str}"
 
 
-try:
-    from opt_einsum.contract import infer_backend as _oe_infer_backend
-    del _oe_infer_backend
-    _CONTRACT_BACKEND = None
-    _TENSOR_LINOP_BACKEND = None
-except ImportError:
-    _CONTRACT_BACKEND = 'numpy'
-    _TENSOR_LINOP_BACKEND = 'numpy'
-
-
+_CONTRACT_BACKEND = None
+_TENSOR_LINOP_BACKEND = None
 _TEMP_CONTRACT_BACKENDS = collections.defaultdict(list)
 _TEMP_TENSOR_LINOP_BACKENDS = collections.defaultdict(list)
 
 
 def get_contract_backend():
-    """Get the default backend used for tensor contractions, via 'opt_einsum'.
+    """Get the default backend used for tensor contractions, via 'cotengra'.
 
     See Also
     --------
@@ -332,7 +160,7 @@ def get_contract_backend():
 
 
 def set_contract_backend(backend):
-    """Set the default backend used for tensor contractions, via 'opt_einsum'.
+    """Set the default backend used for tensor contractions, via 'cotengra'.
 
     See Also
     --------
@@ -346,7 +174,7 @@ def set_contract_backend(backend):
 @contextlib.contextmanager
 def contract_backend(backend, set_globally=False):
     """A context manager to temporarily set the default backend used for tensor
-    contractions, via 'opt_einsum'. By default, this only sets the contract
+    contractions, via 'cotengra'. By default, this only sets the contract
     backend for the current thread.
 
     Parameters
@@ -375,7 +203,7 @@ def contract_backend(backend, set_globally=False):
 
 def get_tensor_linop_backend():
     """Get the default backend used for tensor network linear operators, via
-    'opt_einsum'. This is different from the default contraction backend as
+    'cotengra'. This is different from the default contraction backend as
     the contractions are likely repeatedly called many times.
 
     See Also
@@ -400,7 +228,7 @@ def get_tensor_linop_backend():
 
 def set_tensor_linop_backend(backend):
     """Set the default backend used for tensor network linear operators, via
-    'opt_einsum'. This is different from the default contraction backend as
+    'cotengra'. This is different from the default contraction backend as
     the contractions are likely repeatedly called many times.
 
     See Also
@@ -415,7 +243,7 @@ def set_tensor_linop_backend(backend):
 @contextlib.contextmanager
 def tensor_linop_backend(backend, set_globally=False):
     """A context manager to temporarily set the default backend used for tensor
-    network linear operators, via 'opt_einsum'. By default, this
+    network linear operators, via 'cotengra'. By default, this
     only sets the contract backend for the current thread.
 
     Parameters
@@ -440,3 +268,69 @@ def tensor_linop_backend(backend, set_globally=False):
             yield
         finally:
             temp_backends.pop()
+
+
+@functools.wraps(ctg.array_contract)
+def array_contract(
+    arrays,
+    inputs,
+    output=None,
+    optimize=None,
+    backend=None,
+    **kwargs,
+):
+    if optimize is None:
+        optimize = get_contract_strategy()
+    if backend is None:
+        backend = get_contract_backend()
+    return ctg.array_contract(
+        arrays, inputs, output, optimize=optimize, backend=backend, **kwargs
+    )
+
+
+@functools.wraps(ctg.array_contract_expression)
+def array_contract_expression(*args, optimize=None, **kwargs):
+    if optimize is None:
+        optimize = get_contract_strategy()
+    return ctg.array_contract_expression(*args, optimize=optimize, **kwargs)
+
+
+@functools.wraps(ctg.array_contract_tree)
+def array_contract_tree(*args, optimize=None, **kwargs):
+    if optimize is None:
+        optimize = get_contract_strategy()
+    return ctg.array_contract_tree(*args, optimize=optimize, **kwargs)
+
+
+@functools.wraps(ctg.array_contract_path)
+def array_contract_path(*args, optimize=None, **kwargs):
+    if optimize is None:
+        optimize = get_contract_strategy()
+    return ctg.array_contract_path(*args, optimize=optimize, **kwargs)
+
+def array_contract_pathinfo(*args, **kwargs):
+
+    import opt_einsum as oe
+
+    tree = array_contract_tree(*args, **kwargs)
+
+    if tree.sliced_inds:
+        import warnings
+
+        warnings.warn(
+            "The contraction tree has sliced indices, which are not "
+            "supported by opt_einsum. Ignoring them for now."
+        )
+
+    shapes = tree.get_shapes()
+    path = tree.get_path()
+    eq = tree.get_eq()
+
+    if (eq == "->") and (len(path) == 0):
+        # XXX: opt_einsum does not support empty paths
+        # https://github.com/jcmgray/quimb/issues/231
+        # https://github.com/dgasmith/opt_einsum/pull/229
+        path = ((0,),)
+
+    return oe.contract_path(eq, *shapes, shapes=True, optimize=path)[1]
+

@@ -1,6 +1,6 @@
 """Decorator for automatically just in time compiling tensor network functions.
 
-TODO:
+TODO::
 
     - [ ] go via an intermediate pytree / array function, that could be shared
           e.g. with the TNOptimizer class.

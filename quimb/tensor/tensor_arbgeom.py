@@ -1,22 +1,22 @@
+"""Classes and algorithms related to arbitrary geometry tensor networks."""
+
+import contextlib
 import functools
 from operator import add
 
-from autoray import do, dag
+from autoray import dag, do, size
 
 from ..utils import check_opt, deprecated, ensure_dict
 from ..utils import progbar as Progbar
-from ..core import prod
+from . import decomp
+from .contraction import get_symbol
 from .tensor_core import (
-    Tensor,
     TensorNetwork,
-    get_symbol,
-    rand_uuid,
-    IsoTensor,
+    group_inds,
     oset,
-    oset_union,
+    rand_uuid,
     tags_to_oset,
 )
-from . import array_ops as ops
 
 
 def get_coordinate_formatter(ndims):
@@ -78,8 +78,10 @@ def tensor_network_align(*tns, ind_ids=None, trace=False, inplace=False):
             elif i == n - 1:
                 tn.site_ind_id = ind_ids[i - 1]
             else:
-                raise ValueError("An TN 'vector' can only be aligned as the "
-                                 "first or last TN in a sequence.")
+                raise ValueError(
+                    "An TN 'vector' can only be aligned as the "
+                    "first or last TN in a sequence."
+                )
 
         elif hasattr(tn, "upper_ind_id") and hasattr(tn, "lower_ind_id"):
             if i != 0:
@@ -97,54 +99,329 @@ def tensor_network_align(*tns, ind_ids=None, trace=False, inplace=False):
 
 
 def tensor_network_apply_op_vec(
-    tn_op,
-    tn_vec,
+    A,
+    x,
+    which_A="lower",
+    contract=False,
+    fuse_multibonds=True,
     compress=False,
-    **compress_opts
+    inplace=False,
+    inplace_A=False,
+    **compress_opts,
 ):
     """Apply a general a general tensor network representing an operator (has
-    ``up_ind_id`` and ``lower_ind_id``) to a tensor network representing a
+    ``upper_ind_id`` and ``lower_ind_id``) to a tensor network representing a
     vector (has ``site_ind_id``), by contracting each pair of tensors at each
     site then compressing the resulting tensor network. How the compression
     takes place is determined by the type of tensor network passed in. The
-    returned tensor network has the same site indices as ``tn_vec``, and it is
-    the ``lower_ind_id`` of ``tn_op`` that is contracted.
+    returned tensor network has the same site indices as ``x``, and it is
+    the ``lower_ind_id`` of ``A`` that is contracted.
+
+    This is like performing ``A.to_dense() @ x.to_dense()``, or the transpose
+    thereof, depending on the value of ``which_A``.
 
     Parameters
     ----------
-    tn_op : TensorNetwork
+    A : TensorNetworkGenOperator
         The tensor network representing the operator.
-    tn_vec : TensorNetwork
+    x : TensorNetworkGenVector
         The tensor network representing the vector.
+    which_A : {"lower", "upper"}, optional
+        Whether to contract the lower or upper indices of ``A`` with the site
+        indices of ``x``.
+    contract : bool
+        Whether to contract the tensors at each site after applying the
+        operator, yielding a single tensor at each site.
+    fuse_multibonds : bool
+        If ``contract=True``, whether to fuse any multibonds after contracting
+        the tensors at each site.
     compress : bool
         Whether to compress the resulting tensor network.
+    inplace : bool
+        Whether to modify ``x``, the input vector tensor network inplace.
+    inplace_A : bool
+        Whether to modify ``A``, the operator tensor network inplace.
     compress_opts
-        Options to pass to ``tn_vec.compress``.
+        Options to pass to ``tn.compress``, where ``tn`` is the resulting
+        tensor network, if ``compress=True``.
 
     Returns
     -------
-    tn_op_vec : TensorNetwork
+    TensorNetworkGenVector
+        The same type as ``x``.
     """
-    A, x = tn_op.copy(), tn_vec.copy()
+    x = x if inplace else x.copy()
+    A = A if inplace_A else A.copy()
 
-    # align the indices
     coordinate_formatter = get_coordinate_formatter(A._NDIMS)
-    A.lower_ind_id = f"__tmp{coordinate_formatter}__"
-    A.upper_ind_id = x.site_ind_id
-    x.reindex_sites_(f"__tmp{coordinate_formatter}__")
+    inner_ind_id = rand_uuid() + f"{coordinate_formatter}"
 
-    # form total network and contract each site
+    if which_A == "lower":
+        # align the indices
+        #
+        #     |       <- upper_ind_id to be site_ind_id (outerid)
+        #    -A- ...
+        #     |       <- lower_ind_id to be innerid
+        #     :
+        #     |       <- site_ind_id to be innerid
+        #    -x- ...
+        #
+        A.lower_ind_id = inner_ind_id
+        A.upper_ind_id = x.site_ind_id
+    elif which_A == "upper":
+        # transposed application
+        A.upper_ind_id = inner_ind_id
+        A.lower_ind_id = x.site_ind_id
+    else:
+        raise ValueError(
+            f"Invalid `which_A`: {which_A}, should be 'lower' or 'upper'."
+        )
+
+    # only want to reindex on sites that being acted on
+    sites_present_in_A = tuple(A.gen_sites_present())
+    x.reindex_sites_(inner_ind_id, where=sites_present_in_A)
+
+    # combine the tensor networks
     x |= A
-    for site in x.gen_sites_present():
-        x ^= site
 
-    x.fuse_multibonds_()
+    if contract:
+        # optionally contract all tensor at each site
+        for site in sites_present_in_A:
+            x ^= site
+
+        if fuse_multibonds:
+            x.fuse_multibonds_()
+
     # optionally compress
     if compress:
         x.compress(**compress_opts)
 
     return x
 
+
+def tensor_network_apply_op_op(
+    A,
+    B,
+    which_A="lower",
+    which_B="upper",
+    contract=False,
+    fuse_multibonds=True,
+    compress=False,
+    inplace=False,
+    inplace_A=False,
+    **compress_opts,
+):
+    """Apply the operator (has upper and lower site inds) represented by tensor
+    network ``A`` to the operator represented by tensor network ``B``. The
+    resulting tensor network has the same upper and lower indices as ``B``.
+    Optionally contract the tensors at each site, fuse any multibonds, and
+    compress the resulting tensor network.
+
+    This is like performing ``A.to_dense() @ B.to_dense()``, or various
+    combinations of tranposes thereof, depending on the values of ``which_A``
+    and ``which_B``.
+
+    Parameters
+    ----------
+    A : TensorNetworkGenOperator
+        The tensor network representing the operator to apply.
+    B : TensorNetworkGenOperator
+        The tensor network representing the target operator.
+    which_A : {"lower", "upper"}, optional
+        Whether to contract the lower or upper indices of ``A``.
+    which_B : {"lower", "upper"}, optional
+        Whether to contract the lower or upper indices of ``B``.
+    contract : bool
+        Whether to contract the tensors at each site after applying the
+        operator, yielding a single tensor at each site.
+    fuse_multibonds : bool
+        If ``contract=True``, whether to fuse any multibonds after contracting
+        the tensors at each site.
+    compress : bool
+        Whether to compress the resulting tensor network.
+    inplace : bool
+        Whether to modify ``B``, the target tensor network inplace.
+    inplace_A : bool
+        Whether to modify ``A``, the applied operator tensor network inplace.
+    compress_opts
+        Options to pass to ``tn.compress``, where ``tn`` is the resulting
+        tensor network, if ``compress=True``.
+
+    Returns
+    -------
+    TensorNetworkGenOperator
+        The same type as ``B``.
+    """
+    B = B if inplace else B.copy()
+    A = A if inplace_A else A.copy()
+
+    coordinate_formatter = get_coordinate_formatter(A._NDIMS)
+    inner_ind_id = rand_uuid() + f"{coordinate_formatter}"
+
+    if (which_A, which_B) == ("lower", "upper"):
+        # align the indices (by default lower of A joined with upper of B
+        # which corresponds to matrix multiplication):
+        #
+        #     |       <- A upper_ind_id to be upper_ind_id
+        #    -A- ...
+        #     |       <- A lower_ind_id to be innerid
+        #     :
+        #     |       <- B upper_ind_id to be innerid
+        #    -B- ...
+        #     |       <- B lower_ind_id to be lower_ind_id
+        #
+        A.lower_ind_id = inner_ind_id
+        A.upper_ind_id = B.upper_ind_id
+        B.reindex_upper_sites_(inner_ind_id)
+    elif (which_A, which_B) == ("lower", "lower"):
+        # rest are just permutations of above ...
+        A.lower_ind_id = inner_ind_id
+        A.upper_ind_id = B.lower_ind_id
+        B.reindex_lower_sites_(inner_ind_id)
+    elif (which_A, which_B) == ("upper", "upper"):
+        A.upper_ind_id = inner_ind_id
+        A.lower_ind_id = B.upper_ind_id
+        B.reindex_upper_sites_(inner_ind_id)
+    elif (which_A, which_B) == ("upper", "lower"):
+        A.upper_ind_id = inner_ind_id
+        A.lower_ind_id = B.lower_ind_id
+        B.reindex_lower_sites_(inner_ind_id)
+    else:
+        raise ValueError("Invalid `which_A` and `which_B` combination.")
+
+    # combine the tensor networks
+    B |= A
+
+    if contract:
+        # optionally contract all tensor at each site
+        for site in B.gen_sites_present():
+            B ^= site
+
+        if fuse_multibonds:
+            B.fuse_multibonds_()
+
+    if compress:
+        B.compress(**compress_opts)
+
+    return B
+
+
+def create_lazy_edge_map(tn, site_tags=None):
+    """Given a tensor network, where each tensor is in exactly one group or
+    'site', compute which sites are connected to each other, without checking
+    each pair.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to analyze.
+    site_tags : None or sequence of str, optional
+        Which tags to consider as 'sites', by default uses ``tn.site_tags``.
+
+    Returns
+    -------
+    edges : dict[tuple[str, str], list[str]]
+        Each key is a sorted pair of tags, which are connected, and the value
+        is a list of the indices connecting them.
+    neighbors : dict[str, list[str]]
+        For each site tag, the other site tags it is connected to.
+    """
+    if site_tags is None:
+        site_tags = set(tn.site_tags)
+    else:
+        site_tags = set(site_tags)
+
+    edges = {}
+    neighbors = {}
+
+    for ix in tn.ind_map:
+        ts = tn._inds_get(ix)
+        tags = {tag for t in ts for tag in t.tags if tag in site_tags}
+        if len(tags) >= 2:
+            # index spans multiple sites
+            i, j = tuple(sorted(tags))
+
+            if (i, j) not in edges:
+                # record indices per edge
+                edges[(i, j)] = [ix]
+
+                # add to neighbor map
+                neighbors.setdefault(i, []).append(j)
+                neighbors.setdefault(j, []).append(i)
+            else:
+                # already processed this edge
+                edges[(i, j)].append(ix)
+
+    return edges, neighbors
+
+
+def tensor_network_ag_sum(
+    tna,
+    tnb,
+    site_tags=None,
+    negate=False,
+    compress=False,
+    inplace=False,
+    **compress_opts,
+):
+    """Add two tensor networks with arbitrary, but matching, geometries. They
+    should have the same site tags, with a single tensor per site and sites
+    connected by a single index only (but the name of this index can differ in
+    the two TNs).
+
+    Parameters
+    ----------
+    tna : TensorNetworkGen
+        The first tensor network to add.
+    tnb : TensorNetworkGen
+        The second tensor network to add.
+    site_tags : None or sequence of str, optional
+        Which tags to consider as 'sites', by default uses ``tna.site_tags``.
+    negate : bool, optional
+        Whether to negate the second tensor network before adding.
+    compress : bool, optional
+        Whether to compress the resulting tensor network, by calling the
+        ``compress`` method with the given options.
+    inplace : bool, optional
+        Whether to modify the first tensor network inplace.
+
+    Returns
+    -------
+    TensorNetworkGen
+        The resulting tensor network.
+    """
+    tna = tna if inplace else tna.copy()
+
+    edges_a, neighbors_a = create_lazy_edge_map(tna, site_tags)
+    edges_b, _ = create_lazy_edge_map(tnb, site_tags)
+
+    reindex_map = {}
+    for (si, sj), inds in edges_a.items():
+        (ixa,) = inds
+        (ixb,) = edges_b.pop((si, sj))
+        reindex_map[ixb] = ixa
+
+    if edges_b:
+        raise ValueError("Not all edges matched.")
+
+    for si in neighbors_a:
+        ta, tb = tna[si], tnb[si]
+
+        # the local outer indices
+        sum_inds = [ix for ix in tb.inds if ix not in reindex_map]
+
+        tb = tb.reindex(reindex_map)
+        if negate:
+            tb.negate_()
+            # only need to negate a single tensor
+            negate = False
+
+        ta.direct_product_(tb, sum_inds)
+
+    if compress:
+        tna.compress(**compress_opts)
+
+    return tna
 
 
 class TensorNetworkGen(TensorNetwork):
@@ -168,41 +445,53 @@ class TensorNetworkGen(TensorNetwork):
             for e in TensorNetworkGen._EXTRA_PROPS
         )
 
-    def __and__(self, other):
-        new = TensorNetwork.__and__(self, other)
-        if self._compatible_arbgeom(other):
-            new.view_as_(TensorNetworkGen, like=self)
-        return new
+    def combine(self, other, *, virtual=False, check_collisions=True):
+        """Combine this tensor network with another, returning a new tensor
+        network. If the two are compatible, cast the resulting tensor network
+        to a :class:`TensorNetworkGen` instance.
 
-    def __or__(self, other):
-        new = TensorNetwork.__or__(self, other)
+        Parameters
+        ----------
+        other : TensorNetworkGen or TensorNetwork
+            The other tensor network to combine with.
+        virtual : bool, optional
+            Whether the new tensor network should copy all the incoming tensors
+            (``False``, the default), or view them as virtual (``True``).
+        check_collisions : bool, optional
+            Whether to check for index collisions between the two tensor
+            networks before combining them. If ``True`` (the default), any
+            inner indices that clash will be mangled.
+
+        Returns
+        -------
+        TensorNetworkGen or TensorNetwork
+        """
+        new = super().combine(
+            other, virtual=virtual, check_collisions=check_collisions
+        )
         if self._compatible_arbgeom(other):
             new.view_as_(TensorNetworkGen, like=self)
         return new
 
     @property
     def nsites(self):
-        """The total number of sites.
-        """
+        """The total number of sites."""
         return len(self._sites)
 
     def gen_site_coos(self):
-        """Generate the coordinates of all sites, same as ``self.sites``.
-        """
+        """Generate the coordinates of all sites, same as ``self.sites``."""
         return self._sites
 
     @property
     def sites(self):
-        """Tuple of the possible sites in this tensor network.
-        """
+        """Tuple of the possible sites in this tensor network."""
         sites = getattr(self, "_sites", None)
         if sites is None:
             sites = tuple(self.gen_site_coos())
         return sites
 
     def _get_site_set(self):
-        """The set of all sites.
-        """
+        """The set of all sites."""
         if getattr(self, "_site_set", None) is None:
             self._site_set = set(self.sites)
         return self._site_set
@@ -221,19 +510,18 @@ class TensorNetworkGen(TensorNetwork):
 
         """
         return (
-            site for site in self.gen_site_coos()
+            site
+            for site in self.gen_site_coos()
             if self.site_tag(site) in self.tag_map
         )
 
     @property
     def site_tag_id(self):
-        """The string specifier for tagging each site of this tensor network.
-        """
+        """The string specifier for tagging each site of this tensor network."""
         return self._site_tag_id
 
     def site_tag(self, site):
-        """The name of the tag specifiying the tensor at ``site``.
-        """
+        """The name of the tag specifiying the tensor at ``site``."""
         return self.site_tag_id.format(site)
 
     def retag_sites(self, new_id, where=None, inplace=False):
@@ -260,16 +548,14 @@ class TensorNetworkGen(TensorNetwork):
 
     @property
     def site_tags(self):
-        """All of the site tags.
-        """
+        """All of the site tags."""
         if getattr(self, "_site_tags", None) is None:
             self._site_tags = tuple(map(self.site_tag, self.gen_site_coos()))
         return self._site_tags
 
     @property
     def site_tags_present(self):
-        """All of the site tags still present in this tensor network.
-        """
+        """All of the site tags still present in this tensor network."""
         return tuple(map(self.site_tag, self.gen_sites_present()))
 
     @site_tag_id.setter
@@ -280,8 +566,7 @@ class TensorNetworkGen(TensorNetwork):
             self._site_tags = None
 
     def retag_all(self, new_id, inplace=False):
-        """Retag all sites and change the ``site_tag_id``.
-        """
+        """Retag all sites and change the ``site_tag_id``."""
         tn = self if inplace else self.copy()
         tn.site_tag_id = new_id
         return tn
@@ -289,15 +574,13 @@ class TensorNetworkGen(TensorNetwork):
     retag_all_ = functools.partialmethod(retag_all, inplace=True)
 
     def _get_site_tag_set(self):
-        """The oset of all site tags.
-        """
+        """The oset of all site tags."""
         if getattr(self, "_site_tag_set", None) is None:
             self._site_tag_set = set(self.site_tags)
         return self._site_tag_set
 
     def filter_valid_site_tags(self, tags):
-        """Get the valid site tags from ``tags``.
-        """
+        """Get the valid site tags from ``tags``."""
         return oset(sorted(self._get_site_tag_set().intersection(tags)))
 
     def maybe_convert_coo(self, x):
@@ -312,8 +595,7 @@ class TensorNetworkGen(TensorNetwork):
         return x
 
     def gen_tags_from_coos(self, coos):
-        """Generate the site tags corresponding to the given coordinates.
-        """
+        """Generate the site tags corresponding to the given coordinates."""
         return map(self.site_tag, coos)
 
     def _get_tids_from_tags(self, tags, which="all"):
@@ -323,11 +605,31 @@ class TensorNetworkGen(TensorNetwork):
         tags = self.maybe_convert_coo(tags)
         return super()._get_tids_from_tags(tags, which=which)
 
+    def reset_cached_properties(self):
+        """Reset any cached properties, one should call this when changing the
+        actual geometry of a TN inplace, for example.
+        """
+        self._site_set = None
+        self._site_tag_set = None
+        self._site_tags = None
+
     @functools.wraps(tensor_network_align)
     def align(self, *args, inplace=False, **kwargs):
         return tensor_network_align(self, *args, inplace=inplace, **kwargs)
 
     align_ = functools.partialmethod(align, inplace=True)
+
+    def __add__(self, other):
+        return tensor_network_ag_sum(self, other)
+
+    def __sub__(self, other):
+        return tensor_network_ag_sum(self, other, negate=True)
+
+    def __iadd__(self, other):
+        return tensor_network_ag_sum(self, other, inplace=True)
+
+    def __isub__(self, other):
+        return tensor_network_ag_sum(self, other, negate=True, inplace=True)
 
 
 def gauge_product_boundary_vector(
@@ -398,8 +700,8 @@ def gauge_product_boundary_vector(
         (ix,) = [i for i in t.inds if i in region_inds]
         _, s, VH = do("linalg.svd", t.data)
         s = s + smudge
-        G = do("reshape", s ** 0.5, (-1, 1)) * VH
-        Ginv = dag(VH) * do("reshape", s ** -0.5, (1, -1))
+        G = do("reshape", s**0.5, (-1, 1)) * VH
+        Ginv = dag(VH) * do("reshape", s**-0.5, (1, -1))
 
         tid_l, tid_r = sorted(tn.ind_map[ix], key=lambda tid: tid in tids)
         tn.tensor_map[tid_l].gate_(Ginv.T, ix)
@@ -408,12 +710,12 @@ def gauge_product_boundary_vector(
     return tn
 
 
-_VALID_GATE_PROPAGATE = {'sites', 'register', False, True}
+_VALID_GATE_PROPAGATE = {"sites", "register", False, True}
 _LAZY_GATE_CONTRACT = {
     False,
-    'split-gate',
-    'swap-split-gate',
-    'auto-split-gate',
+    "split-gate",
+    "swap-split-gate",
+    "auto-split-gate",
 }
 
 
@@ -431,8 +733,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     @property
     def site_ind_id(self):
-        """The string specifier for the physical indices.
-        """
+        """The string specifier for the physical indices."""
         return self._site_ind_id
 
     def site_ind(self, site):
@@ -440,17 +741,22 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     @property
     def site_inds(self):
-        """Return a tuple of all site indices.
-        """
+        """Return a tuple of all site indices."""
         if getattr(self, "_site_inds", None) is None:
             self._site_inds = tuple(map(self.site_ind, self.gen_site_coos()))
         return self._site_inds
 
     @property
     def site_inds_present(self):
-        """All of the site inds still present in this tensor network.
-        """
+        """All of the site inds still present in this tensor network."""
         return tuple(map(self.site_ind, self.gen_sites_present()))
+
+    def reset_cached_properties(self):
+        """Reset any cached properties, one should call this when changing the
+        actual geometry of a TN inplace, for example.
+        """
+        self._site_inds = None
+        return super().reset_cached_properties()
 
     def reindex_sites(self, new_id, where=None, inplace=False):
         """Modify the site indices for all or some tensors in this vector
@@ -474,6 +780,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
             inplace=inplace,
         )
 
+    reindex_sites_ = functools.partialmethod(reindex_sites, inplace=True)
+
     @site_ind_id.setter
     def site_ind_id(self, new_id):
         if self._site_ind_id != new_id:
@@ -482,8 +790,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             self._site_inds = None
 
     def reindex_all(self, new_id, inplace=False):
-        """Reindex all physical sites and change the ``site_ind_id``.
-        """
+        """Reindex all physical sites and change the ``site_ind_id``."""
         tn = self if inplace else self.copy()
         tn.site_ind_id = new_id
         return tn
@@ -491,8 +798,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
     reindex_all_ = functools.partialmethod(reindex_all, inplace=True)
 
     def gen_inds_from_coos(self, coos):
-        """Generate the site inds corresponding to the given coordinates.
-        """
+        """Generate the site inds corresponding to the given coordinates."""
         return map(self.site_ind, coos)
 
     def phys_dim(self, site=None):
@@ -504,11 +810,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         return self.ind_size(self.site_ind(site))
 
     def to_dense(
-        self,
-        *inds_seq,
-        to_qarray=True,
-        to_ket=None,
-        **contract_opts
+        self, *inds_seq, to_qarray=False, to_ket=None, **contract_opts
     ):
         """Contract this tensor network 'vector' into a dense array. By
         default, turn into a 'ket' ``qarray``, i.e. column vector of shape
@@ -541,9 +843,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
                 to_ket = True
 
         x = TensorNetwork.to_dense(
-            self, *inds_seq,
-            to_qarray=to_qarray,
-            **contract_opts
+            self, *inds_seq, to_qarray=to_qarray, **contract_opts
         )
 
         if to_ket:
@@ -551,8 +851,60 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         return x
 
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
+
+    def gate_with_op_lazy(self, A, transpose=False, inplace=False, **kwargs):
+        r"""Act lazily with the operator tensor network ``A``, which should
+        have matching structure, on this vector/state tensor network, like
+        ``A @ x``. The returned tensor network will have the same structure as
+        this one, but with the operator gated in lazily, i.e. uncontracted.
+
+        .. math::
+
+            | x \rangle \rightarrow A | x \rangle
+
+        or (if ``transpose=True``):
+
+        .. math::
+
+            | x \rangle \rightarrow A^T | x \rangle
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        transpose : bool, optional
+            Whether to contract the lower or upper indices of ``A`` with the
+            site indices of ``x``. If ``False`` (the default), the lower
+            indices of ``A`` will be contracted with the site indices of ``x``,
+            if ``True`` the upper indices of ``A`` will be contracted with
+            the site indices of ``x``, which is like applying ``A.T @ x``.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+            network.
+
+        Returns
+        -------
+        TensorNetworkGenVector
+        """
+        return tensor_network_apply_op_vec(
+            A=A,
+            x=self,
+            which_A="upper" if transpose else "lower",
+            contract=False,
+            inplace=inplace,
+            **kwargs
+        )
+
+    gate_with_op_lazy_ = functools.partialmethod(
+        gate_with_op_lazy, inplace=True
+    )
+
     def gate(
-        self, G, where,
+        self,
+        G,
+        where,
         contract=False,
         tags=None,
         propagate_tags=False,
@@ -564,7 +916,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         is essentially a wrapper around
         :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds` apart from
         ``where`` can be specified as a list of sites, and tags can be
-        optionally, intelligently propgated to the new gate tensor.
+        optionally, intelligently propagated to the new gate tensor.
 
         .. math::
 
@@ -611,7 +963,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         --------
         TensorNetwork.gate_inds
         """
-        check_opt('propagate_tags', propagate_tags, _VALID_GATE_PROPAGATE)
+        check_opt("propagate_tags", propagate_tags, _VALID_GATE_PROPAGATE)
 
         tn = self if inplace else self.copy()
 
@@ -621,14 +973,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         # potentially add tags from current tensors to the new ones,
         # only do this if we are lazily adding the gate tensor(s)
-        if (
-            (contract in _LAZY_GATE_CONTRACT) and
-            (propagate_tags in (True, 'sites'))
+        if (contract in _LAZY_GATE_CONTRACT) and (
+            propagate_tags in (True, "sites")
         ):
-            old_tags = oset.union(
-                *(t.tags for t in tn._inds_get(*inds))
-            )
-            if propagate_tags == 'sites':
+            old_tags = oset.union(*(t.tags for t in tn._inds_get(*inds)))
+            if propagate_tags == "sites":
                 old_tags = tn.filter_valid_site_tags(old_tags)
 
             tags = tags_to_oset(tags)
@@ -640,9 +989,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         )
 
         # possibly add tags based on where the gate was applied
-        if propagate_tags == 'register':
+        if propagate_tags == "register":
             for ix, site in zip(inds, where):
-                t, = tn._inds_get(ix)
+                (t,) = tn._inds_get(ix)
                 t.add_tag(tn.site_tag(site))
 
         return tn
@@ -669,6 +1018,13 @@ class TensorNetworkGenVector(TensorNetworkGen):
             Whether to renormalise the singular after the gate is applied,
             before reinserting them into ``gauges``.
         """
+        if isinstance(where, int):
+            where = (where,)
+
+        if len(where) == 1:
+            # single site gate
+            return self.gate_(G, where, contract=True)
+
         gate_opts.setdefault("absorb", None)
         gate_opts.setdefault("contract", "reduce-split")
 
@@ -698,7 +1054,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
     ):
         # select a local neighborhood of tensors
         tids = self._get_tids_from_tags(
-            tuple(map(self.site_tag, where)), 'any'
+            tuple(map(self.site_tag, where)), "any"
         )
         if len(tids) == 2:
             tids = self._get_string_between_tids(*tids)
@@ -801,7 +1157,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         """
         # select a local neighborhood of tensors
         tids = self._get_tids_from_tags(
-            tuple(map(self.site_tag, where)), 'any'
+            tuple(map(self.site_tag, where)), "any"
         )
 
         if len(tids) == 2:
@@ -826,7 +1182,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
                 optimize=optimize,
                 normalized=normalized,
                 rehearse=rehearse,
-                **contract_opts
+                **contract_opts,
             )
 
         return k.local_expectation_exact(
@@ -835,13 +1191,13 @@ class TensorNetworkGenVector(TensorNetworkGen):
             optimize=optimize,
             normalized=normalized,
             rehearse=rehearse,
-            **contract_opts
+            **contract_opts,
         )
 
     local_expectation_simple = deprecated(
         local_expectation_cluster,
-        'local_expectation_simple',
-        'local_expectation_cluster',
+        "local_expectation_simple",
+        "local_expectation_cluster",
     )
 
     def compute_local_expectation_cluster(
@@ -957,8 +1313,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     compute_local_expectation_simple = deprecated(
         compute_local_expectation_cluster,
-        'compute_local_expectation_simple',
-        'compute_local_expectation_cluster',
+        "compute_local_expectation_simple",
+        "compute_local_expectation_cluster",
     )
 
     def local_expectation_exact(
@@ -979,17 +1335,19 @@ class TensorNetworkGenVector(TensorNetworkGen):
         tn = (b | self)
 
         if rehearse:
-            if rehearse == 'tn':
+            if rehearse == "tn":
                 return tn
-            if rehearse == 'tree':
+            if rehearse == "tree":
                 return tn.contraction_tree(
-                    optimize, output_inds=k_inds + b_inds)
+                    optimize, output_inds=k_inds + b_inds
+                )
             if rehearse:
                 return tn.contraction_info(
-                    optimize, output_inds=k_inds + b_inds)
+                    optimize, output_inds=k_inds + b_inds
+                )
 
         rho = tn.to_dense(k_inds, b_inds, optimize=optimize, **contract_opts)
-        expec = do("trace", rho @ G)
+        expec = do("tensordot", rho, G, axes=((0, 1), (1, 0)))
         if normalized:
             expec = expec / do("trace", rho)
 
@@ -1069,9 +1427,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         flatten=True,
         reduce=False,
         normalized=True,
-        symmetrized='auto',
+        symmetrized="auto",
         rehearse=False,
-        method='contract_compressed',
+        method="contract_compressed",
         **contract_compressed_opts,
     ):
         """Partially trace this tensor network state, keeping only the sites in
@@ -1118,7 +1476,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rho : array_like
             The reduce density matrix of sites in ``keep``.
         """
-        if symmetrized == 'auto':
+        if symmetrized == "auto":
             symmetrized = not flatten
 
         # form the partial trace
@@ -1126,7 +1484,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         k = self.copy()
         if reduce:
-            k.reduce_inds_onto_bond(*k_inds, tags='__BOND__', drop_tags=True)
+            k.reduce_inds_onto_bond(*k_inds, tags="__BOND__", drop_tags=True)
 
         b_inds = tuple(map("_bra{}".format, keep))
         b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
@@ -1136,7 +1494,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         if flatten:
             for site in self.gen_site_coos():
-                if (site not in keep) or (flatten == 'all'):
+                if (site not in keep) or (flatten == "all"):
                     # check if site exists still to permit e.g. local methods
                     # to use this same logic
                     tag = tn.site_tag(site)
@@ -1145,21 +1503,22 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         tn.fuse_multibonds_()
 
-        if method == 'contract_compressed':
-
+        if method == "contract_compressed":
             if reduce:
                 output_inds = None
-                tn, tn_reduced = tn.partition('__BOND__', inplace=True)
+                tn, tn_reduced = tn.partition("__BOND__", inplace=True)
 
             if rehearse:
-                if rehearse == 'tn':
+                if rehearse == "tn":
                     return tn
-                if rehearse == 'tree':
+                if rehearse == "tree":
                     return tn.contraction_tree(
-                        optimize, output_inds=output_inds)
+                        optimize, output_inds=output_inds
+                    )
                 if rehearse:
                     return tn.contraction_info(
-                        optimize, output_inds=output_inds)
+                        optimize, output_inds=output_inds
+                    )
 
             t_rho = tn.contract_compressed(
                 optimize,
@@ -1173,25 +1532,30 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
             rho = t_rho.to_dense(k_inds, b_inds)
 
-        elif method == 'contract_around':
+        elif method == "contract_around":
             tn.contract_around_(
-                tuple(map(self.site_tag, keep)), 'any',
+                tuple(map(self.site_tag, keep)),
+                "any",
                 max_bond=max_bond,
-                **contract_compressed_opts
+                **contract_compressed_opts,
             )
 
             if rehearse:
-                if rehearse == 'tn':
+                if rehearse == "tn":
                     return tn
-                if rehearse == 'tree':
+                if rehearse == "tree":
                     return tn.contraction_tree(
-                        optimize, output_inds=output_inds)
+                        optimize, output_inds=output_inds
+                    )
                 if rehearse:
                     return tn.contraction_info(
-                        optimize, output_inds=output_inds)
+                        optimize, output_inds=output_inds
+                    )
 
             rho = tn.to_dense(
-                k_inds, b_inds, optimize=optimize,
+                k_inds,
+                b_inds,
+                optimize=optimize,
             )
 
         else:
@@ -1213,7 +1577,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         optimize,
         flatten=True,
         normalized=True,
-        symmetrized='auto',
+        symmetrized="auto",
         reduce=False,
         rehearse=False,
         **contract_compressed_opts,
@@ -1278,7 +1642,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         if rehearse:
             return rho
 
-        return do("trace", rho @ G)
+        return do("tensordot", rho, G, axes=((0, 1), (1, 0)))
 
     def compute_local_expectation(
         self,
@@ -1288,7 +1652,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         *,
         flatten=True,
         normalized=True,
-        symmetrized='auto',
+        symmetrized="auto",
         reduce=False,
         return_all=False,
         rehearse=False,
@@ -1375,16 +1739,20 @@ class TensorNetworkGenVector(TensorNetworkGen):
         )
 
     compute_local_expectation_rehearse = functools.partialmethod(
-        compute_local_expectation, rehearse=True)
+        compute_local_expectation, rehearse=True
+    )
 
     compute_local_expectation_tn = functools.partialmethod(
-        compute_local_expectation, rehearse='tn')
+        compute_local_expectation, rehearse="tn"
+    )
 
 
 class TensorNetworkGenOperator(TensorNetworkGen):
     """A tensor network which notionally has a single tensor and two outer
     indices per 'site', though these could be labelled arbitrarily and could
-    also be linked in an arbitrary geometry by bonds.
+    also be linked in an arbitrary geometry by bonds. By convention, if
+    converted to a dense matrix, the 'upper' indices would be on the left and
+    the 'lower' indices on the right.
     """
 
     _EXTRA_PROPS = (
@@ -1396,30 +1764,55 @@ class TensorNetworkGenOperator(TensorNetworkGen):
 
     @property
     def upper_ind_id(self):
-        """The string specifier for the upper phyiscal indices.
-        """
+        """The string specifier for the upper phyiscal indices."""
         return self._upper_ind_id
+
+    def upper_ind(self, site):
+        """Get the upper physical index name of ``site``."""
+        return self.upper_ind_id.format(site)
+
+    def reindex_upper_sites(self, new_id, where=None, inplace=False):
+        """Modify the upper site indices for all or some tensors in this
+        operator tensor network (without changing the ``upper_ind_id``).
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept a site, e.g. "up{}".
+        where : None or sequence
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            where = self.gen_sites_present()
+
+        return self.reindex(
+            {self.upper_ind(x): new_id.format(x) for x in where},
+            inplace=inplace,
+        )
+
+    reindex_upper_sites_ = functools.partialmethod(
+        reindex_upper_sites, inplace=True
+    )
 
     @upper_ind_id.setter
     def upper_ind_id(self, new_id):
         if new_id == self._lower_ind_id:
-            raise ValueError("Setting the same upper and upper index ids will"
-                             " make the two ambiguous.")
+            raise ValueError(
+                "Setting the same upper and upper index ids will"
+                " make the two ambiguous."
+            )
 
         if self._upper_ind_id != new_id:
             self.reindex_upper_sites_(new_id)
             self._upper_ind_id = new_id
             self._upper_inds = None
 
-    def upper_ind(self, site):
-        """Get the upper physical index name of ``site``.
-        """
-        return self.upper_ind_id.format(site)
-
     @property
     def upper_inds(self):
-        """Return a tuple of all upper indices.
-        """
+        """Return a tuple of all upper indices."""
         if getattr(self, "_upper_inds", None) is None:
             self._upper_inds = tuple(map(self.upper_ind, self.gen_site_coos()))
         return self._upper_inds
@@ -1433,30 +1826,55 @@ class TensorNetworkGenOperator(TensorNetworkGen):
 
     @property
     def lower_ind_id(self):
-        """The string specifier for the lower phyiscal indices.
-        """
+        """The string specifier for the lower phyiscal indices."""
         return self._lower_ind_id
+
+    def lower_ind(self, site):
+        """Get the lower physical index name of ``site``."""
+        return self.lower_ind_id.format(site)
+
+    def reindex_lower_sites(self, new_id, where=None, inplace=False):
+        """Modify the lower site indices for all or some tensors in this
+        operator tensor network (without changing the ``lower_ind_id``).
+
+        Parameters
+        ----------
+        new_id : str
+            A string with a format placeholder to accept a site, e.g. "up{}".
+        where : None or sequence
+            Which sites to update the index labels on. If ``None`` (default)
+            all sites.
+        inplace : bool
+            Whether to reindex in place.
+        """
+        if where is None:
+            where = self.gen_sites_present()
+
+        return self.reindex(
+            {self.lower_ind(x): new_id.format(x) for x in where},
+            inplace=inplace,
+        )
+
+    reindex_lower_sites_ = functools.partialmethod(
+        reindex_lower_sites, inplace=True
+    )
 
     @lower_ind_id.setter
     def lower_ind_id(self, new_id):
         if new_id == self._upper_ind_id:
-            raise ValueError("Setting the same upper and lower index ids will"
-                             " make the two ambiguous.")
+            raise ValueError(
+                "Setting the same upper and lower index ids will"
+                " make the two ambiguous."
+            )
 
         if self._lower_ind_id != new_id:
             self.reindex_lower_sites_(new_id)
             self._lower_ind_id = new_id
             self._lower_inds = None
 
-    def lower_ind(self, site):
-        """Get the lower physical index name of ``site``.
-        """
-        return self.lower_ind_id.format(site)
-
     @property
     def lower_inds(self):
-        """Return a tuple of all lower indices.
-        """
+        """Return a tuple of all lower indices."""
         if getattr(self, "_lower_inds", None) is None:
             self._lower_inds = tuple(map(self.lower_ind, self.gen_site_coos()))
         return self._lower_inds
@@ -1468,12 +1886,7 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         """
         return tuple(map(self.lower_ind, self.gen_sites_present()))
 
-    def to_dense(
-        self,
-        *inds_seq,
-        to_qarray=True,
-        **contract_opts
-    ):
+    def to_dense(self, *inds_seq, to_qarray=False, **contract_opts):
         """Contract this tensor network 'operator' into a dense array.
 
         Parameters
@@ -1497,22 +1910,162 @@ class TensorNetworkGenOperator(TensorNetworkGen):
             inds_seq = (self.upper_inds_present, self.lower_inds_present)
 
         return TensorNetwork.to_dense(
-            self, *inds_seq,
-            to_qarray=to_qarray,
-            **contract_opts
+            self, *inds_seq, to_qarray=to_qarray, **contract_opts
         )
 
-    def phys_dim(self, site=None, which='upper'):
-        """Get the physical dimension of ``site``.
-        """
+    to_qarray = functools.partialmethod(to_dense, to_qarray=True)
+
+    def phys_dim(self, site=None, which="upper"):
+        """Get the physical dimension of ``site``."""
         if site is None:
             site = next(iter(self.gen_sites_present()))
 
-        if which == 'upper':
+        if which == "upper":
             return self[site].ind_size(self.upper_ind(site))
 
-        if which == 'lower':
+        if which == "lower":
             return self[site].ind_size(self.lower_ind(site))
+
+    def gate_upper_with_op_lazy(
+        self,
+        A,
+        transpose=False,
+        inplace=False,
+    ):
+        r"""Act lazily with the operator tensor network ``A``, which should
+        have matching structure, on this operator tensor network (``B``), like
+        ``A @ B``. The returned tensor network will have the same structure as
+        this one, but with the operator gated in lazily, i.e. uncontracted.
+
+        .. math::
+
+            B \rightarrow A B
+
+        or (if ``transpose=True``):
+
+        .. math::
+
+            B \rightarrow A^T B
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        transpose : bool, optional
+            Whether to contract the lower or upper indices of ``A`` with the
+            upper indices of ``B``. If ``False`` (the default), the lower
+            indices of ``A`` will be contracted with the upper indices of
+            ``B``, if ``True`` the upper indices of ``A`` will be
+            contracted with the upper indices of ``B``, which is like applying
+            the transpose first.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+            network.
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        return tensor_network_apply_op_op(
+            A=A,
+            B=self,
+            which_A="upper" if transpose else "lower",
+            which_B="upper",
+            contract=False,
+            inplace=inplace,
+        )
+
+    gate_upper_with_op_lazy_ = functools.partialmethod(
+        gate_upper_with_op_lazy, inplace=True
+    )
+
+    def gate_lower_with_op_lazy(
+        self,
+        A,
+        transpose=False,
+        inplace=False,
+    ):
+        r"""Act lazily 'from the right' with the operator tensor network ``A``,
+        which should have matching structure, on this operator tensor network
+        (``B``), like ``B @ A``. The returned tensor network will have the same
+        structure as this one, but with the operator gated in lazily, i.e.
+        uncontracted.
+
+        .. math::
+
+            B \rightarrow B A
+
+        or (if ``transpose=True``):
+
+        .. math::
+
+            B \rightarrow B A^T
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        transpose : bool, optional
+            Whether to contract the upper or lower indices of ``A`` with the
+            lower indices of this TN. If ``False`` (the default), the upper
+            indices of ``A`` will be contracted with the lower indices of
+            ``B``, if ``True`` the lower indices of ``A`` will be contracted
+            with the lower indices of this TN, which is like applying the
+            transpose first.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+            network.
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        return tensor_network_apply_op_op(
+            B=self,
+            A=A,
+            which_A="lower" if transpose else "upper",
+            which_B="lower",
+            contract=False,
+            inplace=inplace,
+        )
+
+    gate_lower_with_op_lazy_ = functools.partialmethod(
+        gate_lower_with_op_lazy, inplace=True
+    )
+
+    def gate_sandwich_with_op_lazy(
+        self,
+        A,
+        inplace=False,
+    ):
+        r"""Act lazily with the operator tensor network ``A``, which should
+        have matching structure, on this operator tensor network (``B``), like
+        :math:`B \rightarrow A B A^\dagger`. The returned tensor network will
+        have the same structure as this one, but with the operator gated in
+        lazily, i.e. uncontracted.
+
+        Parameters
+        ----------
+        A : TensorNetworkGenOperator
+            The operator tensor network to gate with, or apply to this tensor
+            network.
+        inplace : bool, optional
+            Whether to perform the gate operation inplace on this tensor
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        B = self if inplace else self.copy()
+        B.gate_upper_with_op_lazy_(A)
+        B.gate_lower_with_op_lazy_(A.conj(), transpose=True)
+        return B
+
+    gate_sandwich_with_op_lazy_ = functools.partialmethod(
+        gate_sandwich_with_op_lazy, inplace=True
+    )
 
 
 def _compute_expecs_maybe_in_parallel(
@@ -1533,7 +2086,7 @@ def _compute_expecs_maybe_in_parallel(
     if executor is None:
         results = (fn(tn, G, where, **kwargs) for where, G in terms.items())
     else:
-        if hasattr(executor, 'scatter'):
+        if hasattr(executor, "scatter"):
             tn = executor.scatter(tn)
 
         futures = [
@@ -1547,26 +2100,22 @@ def _compute_expecs_maybe_in_parallel(
 
     expecs = dict(zip(terms.keys(), results))
 
-    if return_all or kwargs.get('rehearse', False):
+    if return_all or kwargs.get("rehearse", False):
         return expecs
 
     return functools.reduce(add, expecs.values())
 
 
 def _tn_local_expectation(tn, *args, **kwargs):
-    """Define as function for pickleability.
-    """
+    """Define as function for pickleability."""
     return tn.local_expectation(*args, **kwargs)
 
 
 def _tn_local_expectation_cluster(tn, *args, **kwargs):
-    """Define as function for pickleability.
-    """
+    """Define as function for pickleability."""
     return tn.local_expectation_cluster(*args, **kwargs)
 
 
 def _tn_local_expectation_exact(tn, *args, **kwargs):
-    """Define as function for pickleability.
-    """
+    """Define as function for pickleability."""
     return tn.local_expectation_exact(*args, **kwargs)
-

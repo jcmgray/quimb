@@ -20,9 +20,21 @@ def maybe_sort_and_project(lk, vk, P, sort=True):
     return lk, qu.qarray(vk)
 
 
-def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
-               isherm=True, sort=True, P=None, tol=None, backend=None,
-               **eigs_opts):
+def eigs_scipy(
+    A,
+    k,
+    *,
+    B=None,
+    which=None,
+    return_vecs=True,
+    sigma=None,
+    isherm=True,
+    sort=True,
+    P=None,
+    tol=None,
+    backend=None,
+    **eigs_opts,
+):
     """Returns a few eigenpairs from a possibly sparse hermitian operator
 
     Parameters
@@ -76,35 +88,41 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         A = qu.dag(P) @ (A @ P)
 
     # Options that might get passed that scipy doesn't support
-    eigs_opts.pop('EPSType', None)
+    eigs_opts.pop("EPSType", None)
 
     # convert certain options for scipy
     settings = {
-        'k': k,
-        'M': B,
-        'which': ('SA' if (which is None) and (sigma is None) else
-                  'LM' if (which is None) and (sigma is not None) else
-                  # For target using shift-invert scipy requires 'LM' ->
-                  'LM' if ('T' in which.upper()) and (sigma is not None) else
-                  which),
-        'sigma': sigma,
-        'return_eigenvectors': return_vecs,
-        'tol': 0 if tol is None else tol
+        "k": k,
+        "M": B,
+        "which": (
+            "SA"
+            if (which is None) and (sigma is None)
+            else "LM"
+            if (which is None) and (sigma is not None)
+            # For target using shift-invert scipy requires 'LM' ->
+            else "LM"
+            if ("T" in which.upper()) and (sigma is not None)
+            else which
+        ),
+        "sigma": sigma,
+        "return_eigenvectors": return_vecs,
+        "tol": 0 if tol is None else tol,
     }
 
     if backend is None:
         eigs = spla.eigsh if isherm else spla.eigs
-    elif backend == 'primme':
+    elif backend == "primme":
         import primme
+
         if isherm:
             eigs = primme.eigsh
         else:
             raise ValueError("Primme only for hermitian problems.")
 
         # primme requires a N * k initial space even if k == 1
-        v0 = eigs_opts.get('v0', None)
+        v0 = eigs_opts.get("v0", None)
         if (v0 is not None) and (v0.ndim == 1):
-            eigs_opts['v0'] = v0.reshape(-1, 1)
+            eigs_opts["v0"] = v0.reshape(-1, 1)
 
     if return_vecs:
         lk, vk = eigs(A, **settings, **eigs_opts)
@@ -115,8 +133,20 @@ def eigs_scipy(A, k, *, B=None, which=None, return_vecs=True, sigma=None,
         return np.sort(lk) if sort else lk
 
 
-def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
-                sigma=None, isherm=True, P=None, sort=True, **lobpcg_opts):
+def eigs_lobpcg(
+    A,
+    k,
+    *,
+    B=None,
+    v0=None,
+    which=None,
+    return_vecs=True,
+    sigma=None,
+    isherm=True,
+    P=None,
+    sort=True,
+    **lobpcg_opts,
+):
     """Interface to scipy's lobpcg eigensolver, which can be good for
     generalized eigenproblems with matrix-free operators. Seems to a be a bit
     innacurate though (e.g. on the order of ~ 1e-6 for eigenvalues). Also only
@@ -167,14 +197,14 @@ def eigs_lobpcg(A, k, *, B=None, v0=None, which=None, return_vecs=True,
         raise ValueError("lobpcg can only solve extremal eigenvalues.")
 
     # remove invalid options for lobpcg
-    lobpcg_opts.pop('ncv', None)
-    lobpcg_opts.pop('EPSType', None)
+    lobpcg_opts.pop("ncv", None)
+    lobpcg_opts.pop("EPSType", None)
 
     # convert some arguments and defaults
-    lobpcg_opts.setdefault('maxiter', 30)
-    if lobpcg_opts['maxiter'] is None:
-        lobpcg_opts['maxiter'] = 30
-    largest = {'SA': False, 'LA': True}[which]
+    lobpcg_opts.setdefault("maxiter", 30)
+    if lobpcg_opts["maxiter"] is None:
+        lobpcg_opts["maxiter"] = 30
+    largest = {"SA": False, "LA": True}[which]
 
     if isinstance(A, qu.Lazy):
         A = A()
@@ -237,7 +267,7 @@ def svds_scipy(A, k=6, *, return_vecs=True, backend=None, **svds_opts):
     VH : (k, n) array
         Right singular vectors (if ``return_vecs=True``) as rows.
     """
-    settings = {'k': k, 'return_singular_vectors': return_vecs, **svds_opts}
+    settings = {"k": k, "return_singular_vectors": return_vecs, **svds_opts}
 
     # avoid matrix like behaviour
     if isinstance(A, qu.qarray):
@@ -245,8 +275,9 @@ def svds_scipy(A, k=6, *, return_vecs=True, backend=None, **svds_opts):
 
     if backend is None:
         svds = spla.svds
-    elif backend == 'primme':
+    elif backend == "primme":
         import primme
+
         svds = primme.svds
 
     if return_vecs:
@@ -258,5 +289,5 @@ def svds_scipy(A, k=6, *, return_vecs=True, backend=None, **svds_opts):
         return sk[np.argsort(-sk)]
 
 
-eigs_primme = functools.partial(eigs_scipy, backend='primme')
-svds_primme = functools.partial(svds_scipy, backend='primme')
+eigs_primme = functools.partial(eigs_scipy, backend="primme")
+svds_primme = functools.partial(svds_scipy, backend="primme")

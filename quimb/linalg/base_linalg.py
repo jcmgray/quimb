@@ -44,9 +44,9 @@ else:  # pragma: no cover
 #                          Partial eigendecomposition                         #
 # --------------------------------------------------------------------------- #
 
+
 def choose_backend(A, k, int_eps=False, B=None):
-    """Pick a backend automatically for partial decompositions.
-    """
+    """Pick a backend automatically for partial decompositions."""
     # LinOps -> not possible to simply convert to dense or use MPI processes
     A_is_linop = isinstance(A, spla.LinearOperator)
     B_is_linop = isinstance(B, spla.LinearOperator)
@@ -59,29 +59,42 @@ def choose_backend(A, k, int_eps=False, B=None):
 
     # slepc seems faster for sparse, dense and LinearOperators
     if SLEPC4PY_FOUND and not B_is_linop:
-
         # only spool up an mpi pool for big sparse matrices though
         if issparse(A) and A.nnz > 10000:
-            return 'SLEPC'
+            return "SLEPC"
 
-        return 'SLEPC-NOMPI'
+        return "SLEPC-NOMPI"
 
-    return 'SCIPY'
+    return "SCIPY"
 
 
 _EIGS_METHODS = {
-    'NUMPY': eigs_numpy,
-    'SCIPY': eigs_scipy,
-    'PRIMME': eigs_primme,
-    'LOBPCG': eigs_lobpcg,
-    'SLEPC': eigs_slepc_spawn,
-    'SLEPC-NOMPI': eigs_slepc,
+    "NUMPY": eigs_numpy,
+    "SCIPY": eigs_scipy,
+    "PRIMME": eigs_primme,
+    "LOBPCG": eigs_lobpcg,
+    "SLEPC": eigs_slepc_spawn,
+    "SLEPC-NOMPI": eigs_slepc,
 }
 
 
-def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
-                        sigma=None, ncv=None, tol=None, v0=None, sort=True,
-                        backend=None, fallback_to_scipy=False, **backend_opts):
+def eigensystem_partial(
+    A,
+    k,
+    isherm,
+    *,
+    B=None,
+    which=None,
+    return_vecs=True,
+    sigma=None,
+    ncv=None,
+    tol=None,
+    v0=None,
+    sort=True,
+    backend=None,
+    fallback_to_scipy=False,
+    **backend_opts,
+):
     """Return a few eigenpairs from an operator.
 
     Parameters
@@ -125,23 +138,27 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
         Array with ``k`` eigenvectors as columns if ``return_vecs``.
     """
     settings = {
-        'k': k,
-        'B': B,
-        'which': ("SA" if (which is None) and (sigma is None) else
-                  "TR" if (which is None) and (sigma is not None) else
-                  which),
-        'return_vecs': return_vecs,
-        'sigma': sigma,
-        'isherm': isherm,
-        'ncv': ncv,
-        'sort': sort,
-        'tol': tol,
-        'v0': v0,
+        "k": k,
+        "B": B,
+        "which": (
+            "SA"
+            if (which is None) and (sigma is None)
+            else "TR"
+            if (which is None) and (sigma is not None)
+            else which
+        ),
+        "return_vecs": return_vecs,
+        "sigma": sigma,
+        "isherm": isherm,
+        "ncv": ncv,
+        "sort": sort,
+        "tol": tol,
+        "v0": v0,
     }
 
     # Choose backend to perform the decompostion
-    bkd = 'AUTO' if backend is None else backend.upper()
-    if bkd == 'AUTO':
+    bkd = "AUTO" if backend is None else backend.upper()
+    if bkd == "AUTO":
         bkd = choose_backend(A, k, sigma is not None, B=B)
 
     try:
@@ -149,11 +166,12 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
 
     # sometimes e.g. lobpcg fails, worth trying scipy
     except Exception as e:  # pragma: no cover
-        if fallback_to_scipy and (bkd != 'SCIPY'):
+        if fallback_to_scipy and (bkd != "SCIPY"):
             warnings.warn(
                 f"`eigensystem_partial` with backend '{bkd}' failed, trying "
                 "again with scipy. Set ``fallback_to_scipy=False`` to avoid "
-                "this and see the full error.")
+                "this and see the full error."
+            )
 
             return eigs_scipy(A, **settings, **backend_opts)
         else:
@@ -163,6 +181,7 @@ def eigensystem_partial(A, k, isherm, *, B=None, which=None, return_vecs=True,
 # --------------------------------------------------------------------------- #
 #                        Full eigendecomposition                              #
 # --------------------------------------------------------------------------- #
+
 
 def eigensystem(A, isherm, *, k=-1, sort=True, return_vecs=True, **kwargs):
     """Find all or some eigenpairs of an operator.
@@ -191,11 +210,13 @@ def eigensystem(A, isherm, *, k=-1, sort=True, return_vecs=True, **kwargs):
         ``ev @ diag(el) @ ev.H == A``.
     """
     if k < 0:
-        return eig_numpy(A, isherm=isherm, sort=sort,
-                         return_vecs=return_vecs, **kwargs)
+        return eig_numpy(
+            A, isherm=isherm, sort=sort, return_vecs=return_vecs, **kwargs
+        )
 
-    return eigensystem_partial(A, k=k, isherm=isherm, sort=sort,
-                               return_vecs=return_vecs, **kwargs)
+    return eigensystem_partial(
+        A, k=k, isherm=isherm, sort=sort, return_vecs=return_vecs, **kwargs
+    )
 
 
 eig = functools.partial(eigensystem, isherm=False, return_vecs=True)
@@ -214,22 +235,19 @@ eigvecsh = functools.partial(eigenvectors, isherm=True)
 
 
 def groundstate(ham, **kwargs):
-    """Alias for finding lowest eigenvector only.
-    """
-    return eigvecsh(ham, k=1, which='SA', **kwargs)
+    """Alias for finding lowest eigenvector only."""
+    return eigvecsh(ham, k=1, which="SA", **kwargs)
 
 
 def groundenergy(ham, **kwargs):
-    """Alias for finding lowest eigenvalue only.
-    """
-    return eigvalsh(ham, k=1, which='SA', **kwargs)[0]
+    """Alias for finding lowest eigenvalue only."""
+    return eigvalsh(ham, k=1, which="SA", **kwargs)[0]
 
 
-def bound_spectrum(A, backend='auto', **kwargs):
-    """Return the smallest and largest eigenvalue of hermitian operator ``A``.
-    """
-    el_min = eigvalsh(A, k=1, which='SA', backend=backend, **kwargs)[0]
-    el_max = eigvalsh(A, k=1, which='LA', backend=backend, **kwargs)[0]
+def bound_spectrum(A, backend="auto", **kwargs):
+    """Return the smallest and largest eigenvalue of hermitian operator ``A``."""
+    el_min = eigvalsh(A, k=1, which="SA", backend=backend, **kwargs)[0]
+    el_max = eigvalsh(A, k=1, which="LA", backend=backend, **kwargs)[0]
     return el_min, el_max
 
 
@@ -262,9 +280,17 @@ def _rel_window_to_abs_window(el_min, el_max, w_0, w_sz=None):
     return el_w_0
 
 
-def eigh_window(A, w_0, k, w_sz=None, backend='AUTO',
-                return_vecs=True, offset_const=1 / 104729, **kwargs):
-    """ Return mid-spectrum eigenpairs from a hermitian operator.
+def eigh_window(
+    A,
+    w_0,
+    k,
+    w_sz=None,
+    backend="AUTO",
+    return_vecs=True,
+    offset_const=1 / 104729,
+    **kwargs,
+):
+    """Return mid-spectrum eigenpairs from a hermitian operator.
 
     Parameters
     ----------
@@ -292,7 +318,7 @@ def eigh_window(A, w_0, k, w_sz=None, backend='AUTO',
     """
     w_sz = w_sz if w_sz is not None else 1.1
 
-    if isdense(A) or backend.upper() == 'NUMPY':
+    if isdense(A) or backend.upper() == "NUMPY":
         if return_vecs:
             lk, vk = eigh(A.A if issparse(A) else A, **kwargs)
         else:
@@ -321,20 +347,19 @@ def eigh_window(A, w_0, k, w_sz=None, backend='AUTO',
 
 
 def eigvalsh_window(*args, **kwargs):
-    """Alias for only finding the eigenvalues in a relative window.
-    """
+    """Alias for only finding the eigenvalues in a relative window."""
     return eigh_window(*args, return_vecs=False, **kwargs)
 
 
 def eigvecsh_window(*args, **kwargs):
-    """Alias for only finding the eigenvectors in a relative window.
-    """
+    """Alias for only finding the eigenvectors in a relative window."""
     return eigh_window(*args, return_vecs=True, **kwargs)[1]
 
 
 # -------------------------------------------------------------------------- #
 # Partial singular value decomposition                                       #
 # -------------------------------------------------------------------------- #
+
 
 def svd(A, return_vecs=True):
     """Compute full singular value decomposition of an operator, using numpy.
@@ -360,20 +385,24 @@ def svd(A, return_vecs=True):
 
     except np.linalg.linalg.LinAlgError:  # pragma: no cover
         warnings.warn("Numpy SVD failed, trying again with different driver.")
-        return sla.svd(A, full_matrices=False, compute_uv=return_vecs,
-                       lapack_driver='gesvd')
+        return sla.svd(
+            A,
+            full_matrices=False,
+            compute_uv=return_vecs,
+            lapack_driver="gesvd",
+        )
 
 
 _SVDS_METHODS = {
-    'SLEPC': svds_slepc_spawn,
-    'SLEPC-NOMPI': svds_slepc,
-    'NUMPY': svds_numpy,
-    'SCIPY': svds_scipy,
-    'PRIMME': svds_primme,
+    "SLEPC": svds_slepc_spawn,
+    "SLEPC-NOMPI": svds_slepc,
+    "NUMPY": svds_numpy,
+    "SCIPY": svds_scipy,
+    "PRIMME": svds_primme,
 }
 
 
-def svds(A, k, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
+def svds(A, k, ncv=None, return_vecs=True, backend="AUTO", **kwargs):
     """Compute the partial singular value decomposition of an operator.
 
     Parameters
@@ -395,13 +424,13 @@ def svds(A, k, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
         Singular value(s) (and vectors) such that ``Uk @ np.diag(sk) @ VHk``
         approximates ``A``.
     """
-    settings = {
-        'k': k,
-        'ncv': ncv,
-        'return_vecs': return_vecs}
+    settings = {"k": k, "ncv": ncv, "return_vecs": return_vecs}
 
-    bkd = (choose_backend(A, k, False) if backend in {'auto', 'AUTO'} else
-           backend.upper())
+    bkd = (
+        choose_backend(A, k, False)
+        if backend in {"auto", "AUTO"}
+        else backend.upper()
+    )
     svds_func = _SVDS_METHODS[bkd.upper()]
 
     return svds_func(A, **settings, **kwargs)
@@ -411,20 +440,19 @@ def svds(A, k, ncv=None, return_vecs=True, backend='AUTO', **kwargs):
 # Norms and other quantities based on decompositions                         #
 # -------------------------------------------------------------------------- #
 
+
 def norm_2(A, **kwargs):
-    """Return the 2-norm of operator, ``A``, i.e. the largest singular value.
-    """
+    """Return the 2-norm of operator, ``A``, i.e. the largest singular value."""
     return svds(A, k=1, return_vecs=False, **kwargs)[0]
 
 
 def norm_fro_dense(A):
-    """Frobenius norm for dense matrices
-    """
-    return vdot(A, A).real**0.5
+    """Frobenius norm for dense matrices"""
+    return vdot(A, A).real ** 0.5
 
 
 def norm_fro_sparse(A):
-    return vdot(A.data, A.data).real**0.5
+    return vdot(A.data, A.data).real ** 0.5
 
 
 def norm_trace_dense(A, isherm=False):
@@ -456,20 +484,31 @@ def norm(A, ntype=2, **kwargs):
     x : float
         The operator norm.
     """
-    types = {'2': '2', 2: '2', 'spectral': '2',
-             'f': 'f', 'fro': 'f',
-             't': 't', 'trace': 't', 'nuc': 't', 'tr': 't'}
-    methods = {('2', 0): norm_2,
-               ('2', 1): norm_2,
-               ('t', 0): norm_trace_dense,
-               ('f', 0): norm_fro_dense,
-               ('f', 1): norm_fro_sparse}
+    types = {
+        "2": "2",
+        2: "2",
+        "spectral": "2",
+        "f": "f",
+        "fro": "f",
+        "t": "t",
+        "trace": "t",
+        "nuc": "t",
+        "tr": "t",
+    }
+    methods = {
+        ("2", 0): norm_2,
+        ("2", 1): norm_2,
+        ("t", 0): norm_trace_dense,
+        ("f", 0): norm_fro_dense,
+        ("f", 1): norm_fro_sparse,
+    }
     return methods[(types[ntype], issparse(A))](A, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
 #                               Matrix functions                              #
 # --------------------------------------------------------------------------- #
+
 
 def expm(A, herm=False):
     """Matrix exponential, can be accelerated if explicitly hermitian.
@@ -493,13 +532,15 @@ def expm(A, herm=False):
 
 
 _EXPM_MULTIPLY_METHODS = {
-    'SCIPY': spla.expm_multiply,
-    'SLEPC': functools.partial(mfn_multiply_slepc_spawn, fntype='exp'),
-    'SLEPC-KRYLOV': functools.partial(
-        mfn_multiply_slepc_spawn, fntype='exp', MFNType='KRYLOV'),
-    'SLEPC-EXPOKIT': functools.partial(
-        mfn_multiply_slepc_spawn, fntype='exp', MFNType='EXPOKIT'),
-    'SLEPC-NOMPI': functools.partial(mfn_multiply_slepc, fntype='exp'),
+    "SCIPY": spla.expm_multiply,
+    "SLEPC": functools.partial(mfn_multiply_slepc_spawn, fntype="exp"),
+    "SLEPC-KRYLOV": functools.partial(
+        mfn_multiply_slepc_spawn, fntype="exp", MFNType="KRYLOV"
+    ),
+    "SLEPC-EXPOKIT": functools.partial(
+        mfn_multiply_slepc_spawn, fntype="exp", MFNType="EXPOKIT"
+    ),
+    "SLEPC-NOMPI": functools.partial(mfn_multiply_slepc, fntype="exp"),
 }
 
 
@@ -522,11 +563,11 @@ def expm_multiply(mat, vec, backend="AUTO", **kwargs):
     vector
         Result of ``expm(mat) @ vec``.
     """
-    if backend == 'AUTO':
+    if backend == "AUTO":
         if SLEPC4PY_FOUND and vec.size > 2**10:
-            backend = 'SLEPC'
+            backend = "SLEPC"
         else:
-            backend = 'SCIPY'
+            backend = "SCIPY"
 
     return _EXPM_MULTIPLY_METHODS[backend.upper()](mat, vec, **kwargs)
 
@@ -647,8 +688,9 @@ class Lazy:
     def __mul__(self, x):
         if self.factor is not None:
             x = x * self.factor
-        return Lazy(self.fn, *self.args, shape=self.shape,
-                    factor=x, **self.kwargs)
+        return Lazy(
+            self.fn, *self.args, shape=self.shape, factor=x, **self.kwargs
+        )
 
     def __rmul__(self, x):
         return self.__mul__(x)
@@ -671,8 +713,7 @@ class Lazy:
     def __repr__(self):
         s = "<Lazy({}, shape={}{}{})>"
 
-        s_dtype = (f', dtype={self.dtype}' if self.dtype is not None else '')
-        s_factor = (
-            f', factor={self.factor}' if self.factor is not None else '')
+        s_dtype = f", dtype={self.dtype}" if self.dtype is not None else ""
+        s_factor = f", factor={self.factor}" if self.factor is not None else ""
 
         return s.format(self.fn.__name__, self.shape, s_dtype, s_factor)

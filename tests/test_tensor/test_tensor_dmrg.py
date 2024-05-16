@@ -34,7 +34,7 @@ np.random.seed(42)
 class TestMovingEnvironment:
     def test_bsz1_start_left(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, begin='left', bsz=1)
+        env = MovingEnvironment(tn, begin="left", bsz=1)
         assert env.pos == 0
         assert len(env().tensors) == 3
         env.move_right()
@@ -49,7 +49,7 @@ class TestMovingEnvironment:
 
     def test_bsz1_start_right(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, begin='right', bsz=1)
+        env = MovingEnvironment(tn, begin="right", bsz=1)
         assert env.pos == 5
         assert len(env().tensors) == 3
         env.move_left()
@@ -64,7 +64,7 @@ class TestMovingEnvironment:
 
     def test_bsz2_start_left(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, begin='left', bsz=2)
+        env = MovingEnvironment(tn, begin="left", bsz=2)
         assert len(env().tensors) == 4
         env.move_right()
         assert len(env().tensors) == 4
@@ -78,7 +78,7 @@ class TestMovingEnvironment:
 
     def test_bsz2_start_right(self):
         tn = MPS_rand_state(6, bond_dim=7)
-        env = MovingEnvironment(tn, begin='right', bsz=2)
+        env = MovingEnvironment(tn, begin="right", bsz=2)
         assert env.pos == 4
         assert len(env().tensors) == 4
         env.move_left()
@@ -100,8 +100,9 @@ class TestMovingEnvironment:
         nenv = 2
         p = MPS_rand_state(n, 4, cyclic=True)
         norm = p.H & p
-        mes = MovingEnvironment(norm, begin='left', bsz=bsz,
-                                cyclic=True, ssz=ssz)
+        mes = MovingEnvironment(
+            norm, begin="left", bsz=bsz, cyclic=True, ssz=ssz
+        )
         assert len(mes.envs) == n // 2 + n % 2
         assert mes.pos == 0
         assert len(mes.envs[0].tensors) == 2 * bsz + nenv
@@ -122,8 +123,9 @@ class TestMovingEnvironment:
     def test_cyclic_moving_env_init_right(self, n, bsz, ssz):
         p = MPS_rand_state(n, 4, cyclic=True)
         norm = p.H | p
-        mes = MovingEnvironment(norm, begin='right', bsz=bsz,
-                                cyclic=True, ssz=ssz)
+        mes = MovingEnvironment(
+            norm, begin="right", bsz=bsz, cyclic=True, ssz=ssz
+        )
         assert len(mes.envs) == n // 2 + n % 2
         assert mes.pos == n - 1
         assert len(mes.envs[n - 1].tensors) == 2 * bsz + 2
@@ -140,13 +142,12 @@ class TestMovingEnvironment:
 
 
 class TestDMRG1:
-
     def test_single_explicit_sweep(self):
         h = MPO_ham_heis(5)
         dmrg = DMRG1(h, bond_dims=3)
         assert dmrg._k[0].dtype == float
 
-        energy_tn = (dmrg._b | dmrg.ham | dmrg._k)
+        energy_tn = dmrg._b | dmrg.ham | dmrg._k
 
         e0 = energy_tn ^ ...
         assert abs(e0.imag) < 1e-13
@@ -192,17 +193,17 @@ class TestDMRG1:
 
         h = MPO_ham(n, cyclic=cyclic)
         dmrg = DMRG1(h, bond_dims=[4, 8, 12])
-        dmrg.opts['local_eig_ham_dense'] = dense
-        dmrg.opts['periodic_segment_size'] = 1.0
-        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
+        dmrg.opts["local_eig_ham_dense"] = dense
+        dmrg.opts["periodic_segment_size"] = 1.0
+        dmrg.opts["periodic_nullspace_fudge_factor"] = 1e-6
         assert dmrg.solve(tol=tol / 10, verbosity=1)
         assert dmrg.state.cyclic == cyclic
         eff_e, mps_gs = dmrg.energy, dmrg.state
-        mps_gs_dense = mps_gs.to_dense()
+        mps_gs_dense = mps_gs.to_qarray()
 
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0, rtol=tol)
 
-        h_dense = h.to_dense()
+        h_dense = h.to_qarray()
 
         # check against dense form
         actual_e, gs = eigh(h_dense, k=1)
@@ -211,8 +212,9 @@ class TestDMRG1:
 
         # check against actual MPO_ham
         if MPO_ham is MPO_ham_XY:
-            ham_dense = ham_heis(n, cyclic=cyclic,
-                                 j=(1.0, 1.0, 0.0), sparse=True)
+            ham_dense = ham_heis(
+                n, cyclic=cyclic, j=(1.0, 1.0, 0.0), sparse=True
+            )
         elif MPO_ham is MPO_ham_heis:
             ham_dense = ham_heis(n, cyclic=cyclic, sparse=True)
 
@@ -225,11 +227,11 @@ class TestDMRG1:
         dmrg = DMRG1(h, bond_dims=8)
         assert dmrg.solve(verbosity=1)
         eff_e, mps_gs = dmrg.energy, dmrg.state
-        mps_gs_dense = mps_gs.to_dense()
+        mps_gs_dense = mps_gs.to_qarray()
         assert_allclose(mps_gs_dense.H @ mps_gs_dense, 1.0)
 
         # check against dense
-        h_dense = h.to_dense()
+        h_dense = h.to_qarray()
         actual_e, gs = eigh(h_dense, k=1)
         assert_allclose(actual_e, eff_e)
         assert_allclose(abs(expec(mps_gs_dense, gs)), 1.0)
@@ -250,9 +252,9 @@ class TestDMRG2:
 
         dmrg = DMRG2(h, bond_dims=[4, 8, 12])
         assert dmrg._k[0].dtype == float
-        dmrg.opts['local_eig_ham_dense'] = dense
-        dmrg.opts['periodic_segment_size'] = 1.0
-        dmrg.opts['periodic_nullspace_fudge_factor'] = 1e-6
+        dmrg.opts["local_eig_ham_dense"] = dense
+        dmrg.opts["periodic_segment_size"] = 1.0
+        dmrg.opts["periodic_nullspace_fudge_factor"] = 1e-6
 
         assert dmrg.solve(tol=tol / 10, verbosity=1)
 
@@ -260,11 +262,11 @@ class TestDMRG2:
         # assert dmrg._k[0].dtype == float
 
         eff_e, mps_gs = dmrg.energy, dmrg.state
-        mps_gs_dense = mps_gs.to_dense()
+        mps_gs_dense = mps_gs.to_qarray()
 
         assert_allclose(expec(mps_gs_dense, mps_gs_dense), 1.0, rtol=tol)
 
-        h_dense = h.to_dense()
+        h_dense = h.to_qarray()
 
         # check against dense form
         actual_e, gs = eigh(h_dense, k=1)
@@ -285,25 +287,26 @@ class TestDMRG2:
         n = 150
         ham = MPO_ham_heis(n, cyclic=True)
         dmrg = DMRG2(ham, bond_dims=range(10, 30, 2))
-        dmrg.opts['periodic_segment_size'] = 1 / 3
+        dmrg.opts["periodic_segment_size"] = 1 / 3
         assert dmrg.solve(tol=1, verbosity=2)
         assert dmrg.energy == pytest.approx(heisenberg_energy(n), 1e-3)
 
-    @pytest.mark.parametrize("dtype", [np.float32, np.float64,
-                                       np.complex64, np.complex128])
+    @pytest.mark.parametrize(
+        "dtype", [np.float32, np.float64, np.complex64, np.complex128]
+    )
     def test_dtypes(self, dtype):
         H = MPO_ham_heis(8).astype(dtype)
         dmrg = DMRG2(H)
-        dmrg.opts['local_eig_backend'] = 'scipy'
+        dmrg.opts["local_eig_backend"] = "scipy"
         dmrg.solve(max_sweeps=3)
-        res_dtype, = {t.dtype for t in dmrg.state}
+        (res_dtype,) = {t.dtype for t in dmrg.state}
         assert res_dtype == dtype
 
     def test_total_size_2(self):
         N = 2
         builder = SpinHam1D(1 / 2)
         for i in range(N - 1):
-            builder[i, i + 1] += 1.0, 'Z', 'Z'
+            builder[i, i + 1] += 1.0, "Z", "Z"
 
         H = builder.build_mpo(N)
         dmrg = DMRG2(H)
@@ -314,30 +317,29 @@ class TestDMRG2:
         import quimb as qu
 
         HB = SpinHam1D(1 / 2)
-        HB[0, 1] += 0.6, 'Z', 'Z'
-        HB[1, 2] += 0.7, 'Z', 'Z'
-        HB[1, 2] += 0.8, 'X', 'X'
-        HB[2, 3] += 0.9, 'Y', 'Y'
+        HB[0, 1] += 0.6, "Z", "Z"
+        HB[1, 2] += 0.7, "Z", "Z"
+        HB[1, 2] += 0.8, "X", "X"
+        HB[2, 3] += 0.9, "Y", "Y"
 
         H_mpo = HB.build_mpo(4)
         H_sps = HB.build_sparse(4)
 
         assert H_mpo.bond_sizes() == [3, 4, 3]
 
-        Sx, Sy, Sz = map(qu.spin_operator, 'xyz')
+        Sx, Sy, Sz = map(qu.spin_operator, "xyz")
         H_explicit = (
-            qu.ikron(0.6 * Sz & Sz, [2, 2, 2, 2], [0, 1]) +
-            qu.ikron(0.7 * Sz & Sz, [2, 2, 2, 2], [1, 2]) +
-            qu.ikron(0.8 * Sx & Sx, [2, 2, 2, 2], [1, 2]) +
-            qu.ikron(0.9 * Sy & Sy, [2, 2, 2, 2], [2, 3])
+            qu.ikron(0.6 * Sz & Sz, [2, 2, 2, 2], [0, 1])
+            + qu.ikron(0.7 * Sz & Sz, [2, 2, 2, 2], [1, 2])
+            + qu.ikron(0.8 * Sx & Sx, [2, 2, 2, 2], [1, 2])
+            + qu.ikron(0.9 * Sy & Sy, [2, 2, 2, 2], [2, 3])
         )
 
-        assert_allclose(H_explicit, H_mpo.to_dense())
+        assert_allclose(H_explicit, H_mpo.to_qarray())
         assert_allclose(H_explicit, H_sps.A)
 
 
 class TestDMRGX:
-
     def test_explicit_sweeps(self):
         n = 8
         chi = 16
@@ -358,18 +360,18 @@ class TestDMRGX:
         # check normalized
         assert_allclose(dmrgx._k.H @ dmrgx._k, 1.0)
 
-        k = dmrgx._k.to_dense()
-        h = ham.to_dense()
+        k = dmrgx._k.to_qarray()
+        h = ham.to_qarray()
         el, ev = eigh(h)
 
         # check variance very low
-        assert np.abs((k.H @ h @ h @ k) - (k.H @ h @ k)**2) < 1e-12
+        assert np.abs((k.H @ h @ h @ k) - (k.H @ h @ k) ** 2) < 1e-12
 
         # check exactly one eigenvalue matched well
         assert np.sum(np.abs(el - en) < 1e-12) == 1
 
         # check exactly one eigenvector is matched with high fidelity
-        ovlps = (ev.H @ k).A**2
+        ovlps = (ev.H @ k).A ** 2
         big_ovlps = ovlps[ovlps > 1e-12]
         assert_allclose(big_ovlps, [1])
 
@@ -380,7 +382,7 @@ class TestDMRGX:
         n = 14
         chi = 16
         ham = MPO_ham_mbl(n, dh=8, seed=42)
-        p0 = MPS_computational_state('00110111000101')
+        p0 = MPS_computational_state("00110111000101")
         dmrgx = DMRGX(ham, p0, chi)
-        assert dmrgx.solve(tol=1e-5, sweep_sequence='R')
+        assert dmrgx.solve(tol=1e-5, sweep_sequence="R")
         assert dmrgx.state[0].dtype == float

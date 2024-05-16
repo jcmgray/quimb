@@ -2,10 +2,10 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - autoray
+  - autoray>=0.6.7
+  - cotengra>=0.5.6
   - coverage
   - cytoolz
-  - diskcache
   - joblib
   - matplotlib
   - mpi4py>=3.1
@@ -13,13 +13,11 @@ dependencies:
   - numba>=0.56
   - numpy
   - openmpi
-  - opt_einsum>=3.2
   - petsc=*=*complex*
   - petsc4py
   - psutil
   - pytest
   - pytest-cov
-  - randomgen
   - scipy
   - slepc=*=*complex*
   - slepc4py

@@ -1,4 +1,9 @@
+"""Tools for performing TEBD like algorithms in 1D."""
+
+import itertools
+
 import numpy as np
+from autoray import do
 
 from ..utils import ensure_dict, continuous_progbar, deprecated
 from ..utils import progbar as Progbar
@@ -72,7 +77,7 @@ class LocalHam1D(LocalHamGen):
         self.cyclic = cyclic
 
         # parse two site terms
-        if hasattr(H2, 'shape'):
+        if hasattr(H2, "shape"):
             # use as default nearest neighbour term
             H2 = {None: H2}
         else:
@@ -89,18 +94,124 @@ class LocalHam1D(LocalHamGen):
         super().__init__(H2=H2, H1=H1)
 
     def mean_norm(self):
-        """Computes the average frobenius norm of local terms.
+        """Computes the average frobenius norm of local terms."""
+        return sum(norm_fro(h) for h in self.terms.values()) / len(self.terms)
+
+    def build_mpo_propagator_trotterized(
+        self,
+        x,
+        site_tag_id="I{}",
+        tags=None,
+        upper_ind_id="k{}",
+        lower_ind_id="b{}",
+        shape="lrud",
+        contract_sites=True,
+        **split_opts,
+    ):
+        """Build an MPO representation of ``expm(H * x)``, i.e. the imaginary
+        or real time propagator of this local 1D hamiltonian, using a first
+        order trotterized decomposition.
+
+        Parameters
+        ----------
+        x : float
+            The time to evolve for. Note this does **not** include the
+            imaginary prefactor of the Schrodinger equation, so real ``x``
+            corresponds to imaginary time evolution, and vice versa.
+        site_tag_id : str
+            A string specifiying how to tag the tensors at each site. Should
+            contain a ``'{}'`` placeholder. It is used to generate the actual tags
+            like: ``map(site_tag_id.format, range(len(arrays)))``.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
+        upper_ind_id : str
+            A string specifiying how to label the upper physical site indices.
+            Should contain a ``'{}'`` placeholder. It is used to generate the
+            actual indices like:
+            ``map(upper_ind_id.format, range(len(arrays)))``.
+        lower_ind_id : str
+            A string specifiying how to label the lower physical site indices.
+            Should contain a ``'{}'`` placeholder. It is used to generate the
+            actual indices like:
+            ``map(lower_ind_id.format, range(len(arrays)))``.
+        shape : str, optional
+            String specifying layout of the tensors. E.g. 'lrud' (the default)
+            indicates the shape corresponds left-bond, right-bond, 'up'
+            physical index, 'down' physical index.
+            End tensors have either 'l' or 'r' dropped from the string if not
+            periodic.
+        contract_sites : bool, optional
+            Whether to contract all the decomposed factors at each site to
+            yield a single tensor per site, by default True.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
         """
-        return sum(
-            norm_fro(h)
-            for h in self.terms.values()
-        ) / len(self.terms)
+        from .tensor_core import Tensor
+        from .tensor_1d import MatrixProductOperator
+
+        mpo = MatrixProductOperator.new(
+            L=self.L,
+            site_tag_id=site_tag_id,
+            upper_ind_id=upper_ind_id,
+            lower_ind_id=lower_ind_id,
+            cyclic=self.cyclic,
+        )
+        imax = self.L - (not self.cyclic)
+
+        # process even bonds then odd bonds
+        layered_sites = itertools.chain(range(0, imax, 2), range(1, imax, 2))
+
+        # process even bonds
+        for i in layered_sites:
+            j = (i + 1) % self.L
+
+            # get a tensor of the local exponentiated term
+            U = self.get_gate_expm((i, j), x)
+            U = do("reshape", U, (2, 2, 2, 2))
+
+            ki = upper_ind_id.format(i)
+            kj = upper_ind_id.format(j)
+            bi = lower_ind_id.format(i)
+            bj = lower_ind_id.format(j)
+
+            # split spatially
+            tnU = Tensor(
+                data=U,
+                inds=(ki, kj, bi, bj),
+            ).split(
+                left_inds=(ki, bi),
+                ltags=site_tag_id.format(i),
+                rtags=site_tag_id.format(j),
+                **split_opts,
+            )
+            # add tensors to mpo
+            mpo.gate_inds_with_tn_(
+                inds=(ki, kj),
+                gate=tnU,
+                gate_inds_inner=(bi, bj),
+                gate_inds_outer=(ki, kj),
+            )
+
+        if contract_sites:
+            # combine site groups into single tensors
+            for st in mpo.site_tags:
+                mpo ^= st
+
+        if tags is not None:
+            # global tags
+            mpo.add_tag(tags)
+
+        if shape is not None:
+            # enforce a canonical ordering of indices within each tensor
+            mpo.permute_arrays(shape)
+
+        return mpo
 
     def __repr__(self):
         return f"<LocalHam1D(L={self.L}, cyclic={self.cyclic})>"
 
 
-NNI = deprecated(LocalHam1D, 'NNI', 'LocalHam1D')
+NNI = deprecated(LocalHam1D, "NNI", "LocalHam1D")
 
 
 class TEBD:
@@ -136,11 +247,19 @@ class TEBD:
     quimb.Evolution
     """
 
-    def __init__(self, p0, H, dt=None, tol=None, t0=0.0,
-                 split_opts=None, progbar=True, imag=False):
+    def __init__(
+        self,
+        p0,
+        H,
+        dt=None,
+        tol=None,
+        t0=0.0,
+        split_opts=None,
+        progbar=True,
+        imag=False,
+    ):
         # prepare initial state
-        self._pt = p0.copy()
-        self._pt.canonize(0)
+        self._pt = p0.canonicalize(0)
         self.L = self._pt.L
 
         # handle hamiltonian -> convert array to LocalHam1D
@@ -148,12 +267,15 @@ class TEBD:
             H = LocalHam1D(L=self.L, H2=H, cyclic=p0.cyclic)
 
         if not isinstance(H, LocalHam1D):
-            raise TypeError("``H`` should be a ``LocalHam1D`` or 2-site "
-                            "array, not a TensorNetwork of any form.")
+            raise TypeError(
+                "``H`` should be a ``LocalHam1D`` or 2-site "
+                "array, not a TensorNetwork of any form."
+            )
 
         if p0.cyclic != H.cyclic:
-            raise ValueError("Both ``p0`` and ``H`` should have matching OBC "
-                             "or PBC.")
+            raise ValueError(
+                "Both ``p0`` and ``H`` should have matching OBC " "or PBC."
+            )
 
         self.H = H
         self.cyclic = H.cyclic
@@ -174,8 +296,7 @@ class TEBD:
 
     @property
     def pt(self):
-        """The MPS state of the system at the current time.
-        """
+        """The MPS state of the system at the current time."""
         return self._pt.copy()
 
     @property
@@ -212,11 +333,11 @@ class TEBD:
 
         # if custom dt set, scale the dt fraction
         if dt is not None:
-            dt_frac *= (dt / self._dt)
+            dt_frac *= dt / self._dt
 
         # ------ automatically combine consecutive sweeps of same time ------ #
 
-        if not hasattr(self, '_queued_sweep'):
+        if not hasattr(self, "_queued_sweep"):
             self._queued_sweep = None
 
         if queue:
@@ -245,7 +366,7 @@ class TEBD:
 
         # ------------------------------------------------------------------- #
 
-        if direction == 'right':
+        if direction == "right":
             start_site_ind = 0
             final_site_ind = self.L - 1
             # Apply even gates:
@@ -261,25 +382,27 @@ class TEBD:
                 U = self._get_gate_from_ham(dt_frac, sites)
                 self._pt.left_canonize(start=max(0, i - 1), stop=i)
                 self._pt.gate_split_(
-                    U, where=sites, absorb='right', **self.split_opts)
+                    U, where=sites, absorb="right", **self.split_opts
+                )
 
-            if (self.L % 2 == 1):
+            if self.L % 2 == 1:
                 self._pt.left_canonize_site(self.L - 2)
                 if self.cyclic:
                     sites = (self.L - 1, 0)
                     U = self._get_gate_from_ham(dt_frac, sites)
                     self._pt.right_canonize_site(1)
                     self._pt.gate_split_(
-                        U, where=sites, absorb='left', **self.split_opts)
+                        U, where=sites, absorb="left", **self.split_opts
+                    )
 
-        elif direction == 'left':
-
+        elif direction == "left":
             if self.cyclic and (self.L % 2 == 0):
                 sites = (self.L - 1, 0)
                 U = self._get_gate_from_ham(dt_frac, sites)
                 self._pt.right_canonize_site(1)
                 self._pt.gate_split_(
-                    U, where=sites, absorb='left', **self.split_opts)
+                    U, where=sites, absorb="left", **self.split_opts
+                )
 
             final_site_ind = 1
             # Apply odd gates:
@@ -294,9 +417,11 @@ class TEBD:
                 sites = (i, (i + 1) % self.L)
                 U = self._get_gate_from_ham(dt_frac, sites)
                 self._pt.right_canonize(
-                    start=min(self.L - 1, i + 2), stop=i + 1)
+                    start=min(self.L - 1, i + 2), stop=i + 1
+                )
                 self._pt.gate_split_(
-                    U, where=sites, absorb='left', **self.split_opts)
+                    U, where=sites, absorb="left", **self.split_opts
+                )
 
             # one extra canonicalization not included in last split
             self._pt.right_canonize_site(1)
@@ -307,16 +432,14 @@ class TEBD:
             self._pt[final_site_ind] /= factor
 
     def _step_order2(self, tau=1, **sweep_opts):
-        """Perform a single, second order step.
-        """
-        self.sweep('right', tau / 2, **sweep_opts)
-        self.sweep('left', tau, **sweep_opts)
-        self.sweep('right', tau / 2, **sweep_opts)
+        """Perform a single, second order step."""
+        self.sweep("right", tau / 2, **sweep_opts)
+        self.sweep("left", tau, **sweep_opts)
+        self.sweep("right", tau / 2, **sweep_opts)
 
     def _step_order4(self, **sweep_opts):
-        """Perform a single, fourth order step.
-        """
-        tau1 = tau2 = 1 / (4 * 4**(1 / 3))
+        """Perform a single, fourth order step."""
+        tau1 = tau2 = 1 / (4 * 4 ** (1 / 3))
         tau3 = 1 - 2 * tau1 - 2 * tau2
         self._step_order2(tau1, **sweep_opts)
         self._step_order2(tau2, **sweep_opts)
@@ -325,10 +448,10 @@ class TEBD:
         self._step_order2(tau1, **sweep_opts)
 
     def step(self, order=2, dt=None, progbar=None, **sweep_opts):
-        """Perform a single step of time ``self.dt``.
-        """
-        {2: self._step_order2,
-         4: self._step_order4}[order](dt=dt, **sweep_opts)
+        """Perform a single step of time ``self.dt``."""
+        {2: self._step_order2, 4: self._step_order4}[order](
+            dt=dt, **sweep_opts
+        )
 
         dt = self._dt if dt is None else dt
         self.t += dt
@@ -345,7 +468,7 @@ class TEBD:
 
         if not (dt or tol):
             raise ValueError("Must set one of ``dt`` and ``tol``.")
-        if (dt and tol):
+        if dt and tol:
             raise ValueError("Can't set both ``dt`` and ``tol``.")
 
         if dt is None:
@@ -440,9 +563,19 @@ class TEBD:
             yield self.pt
 
 
-def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
-               initial_eigenstate='check', **tebd_opts):
-    """ The out-of-time-ordered correlator (OTOC) generating by two local
+def OTOC_local(
+    psi0,
+    H,
+    H_back,
+    ts,
+    i,
+    A,
+    j=None,
+    B=None,
+    initial_eigenstate="check",
+    **tebd_opts,
+):
+    """The out-of-time-ordered correlator (OTOC) generating by two local
     operator A and B acting on site 'i', note it's a function of time.
 
     Parameters
@@ -475,7 +608,7 @@ def OTOC_local(psi0, H, H_back, ts, i, A, j=None, B=None,
     if j is None:
         j = i
 
-    if initial_eigenstate == 'check':
+    if initial_eigenstate == "check":
         psi = psi0.gate(B, j, contract=True)
         x = psi0.H.expec(psi)
         y = psi.H.expec(psi)

@@ -32,74 +32,100 @@ from quimb import (
     werner_state,
     ghz_state,
     w_state,
-    perm_state
+    perm_state,
 )
 
 
 class TestBasisVec:
     def test_basis_vec(self):
         x = basis_vec(1, 2)
-        assert_allclose(x, [[0.], [1.]])
-        x = basis_vec(1, 2, qtype='b')
-        assert_allclose(x, [[0., 1.]])
+        assert_allclose(x, [[0.0], [1.0]])
+        x = basis_vec(1, 2, qtype="b")
+        assert_allclose(x, [[0.0, 1.0]])
 
 
 class TestBasicStates:
     def test_up(self):
-        p = up(qtype='dop')
-        assert_allclose(tr(p @ pauli('z')), 1.0)
+        p = up(qtype="dop")
+        assert_allclose(tr(p @ pauli("z")), 1.0)
 
     def test_down(self):
-        p = down(qtype='dop')
-        assert_allclose(tr(p @ pauli('z')), -1.0)
+        p = down(qtype="dop")
+        assert_allclose(tr(p @ pauli("z")), -1.0)
 
     def test_plus(self):
-        p = plus(qtype='dop')
-        assert_allclose(tr(p @ pauli('x')), 1.0)
+        p = plus(qtype="dop")
+        assert_allclose(tr(p @ pauli("x")), 1.0)
 
     def test_minus(self):
-        p = minus(qtype='dop')
-        assert_allclose(tr(p @ pauli('x')), -1.0)
+        p = minus(qtype="dop")
+        assert_allclose(tr(p @ pauli("x")), -1.0)
 
     def test_yplus(self):
-        p = yplus(qtype='dop')
-        assert_allclose(tr(p @ pauli('y')), 1.0)
+        p = yplus(qtype="dop")
+        assert_allclose(tr(p @ pauli("y")), 1.0)
 
     def test_yminus(self):
-        p = yminus(qtype='dop')
-        assert_allclose(tr(p @ pauli('y')), -1.0)
+        p = yminus(qtype="dop")
+        assert_allclose(tr(p @ pauli("y")), -1.0)
 
 
 class TestBlochState:
     def test_pure(self):
-        for vec, op, val in zip(((1, 0, 0), (0, 1, 0), (0, 0, 1),
-                                 (-1, 0, 0), (0, -1, 0), (0, 0, -1)),
-                                ("x", "y", "z", "x", "y", "z"),
-                                (1, 1, 1, -1, -1, -1)):
+        for vec, op, val in zip(
+            (
+                (1, 0, 0),
+                (0, 1, 0),
+                (0, 0, 1),
+                (-1, 0, 0),
+                (0, -1, 0),
+                (0, 0, -1),
+            ),
+            ("x", "y", "z", "x", "y", "z"),
+            (1, 1, 1, -1, -1, -1),
+        ):
             x = tr(bloch_state(*vec) @ pauli(op))
             assert_allclose(x, val)
 
     def test_mixed(self):
-        for vec, op, val in zip(((.5, 0, 0), (0, .5, 0), (0, 0, .5),
-                                 (-.5, 0, 0), (0, -.5, 0), (0, 0, -.5)),
-                                ("x", "y", "z", "x", "y", "z"),
-                                (.5, .5, .5, -.5, -.5, -.5)):
+        for vec, op, val in zip(
+            (
+                (0.5, 0, 0),
+                (0, 0.5, 0),
+                (0, 0, 0.5),
+                (-0.5, 0, 0),
+                (0, -0.5, 0),
+                (0, 0, -0.5),
+            ),
+            ("x", "y", "z", "x", "y", "z"),
+            (0.5, 0.5, 0.5, -0.5, -0.5, -0.5),
+        ):
             x = tr(bloch_state(*vec) @ pauli(op))
             assert_allclose(x, val)
 
     def test_purify(self):
-        for vec, op, val in zip(((.5, 0, 0), (0, .5, 0), (0, 0, .5),
-                                 (-.5, 0, 0), (0, -.5, 0), (0, 0, -.5)),
-                                ("x", "y", "z", "x", "y", "z"),
-                                (1, 1, 1, -1, -1, -1)):
+        for vec, op, val in zip(
+            (
+                (0.5, 0, 0),
+                (0, 0.5, 0),
+                (0, 0, 0.5),
+                (-0.5, 0, 0),
+                (0, -0.5, 0),
+                (0, 0, -0.5),
+            ),
+            ("x", "y", "z", "x", "y", "z"),
+            (1, 1, 1, -1, -1, -1),
+        ):
             x = tr(bloch_state(*vec, purified=True) @ pauli(op))
             assert_allclose(x, val)
 
 
 class TestBellStates:
     def test_bell_states(self):
-        for s, dic in zip(("psi-", "psi+", "phi+", "phi-"),
-                          ({"qtype": 'dop'}, {}, {"sparse": True}, {})):
+        for s, dic in zip(
+            ("psi-", "psi+", "phi+", "phi-"),
+            ({"qtype": "dop"}, {}, {"sparse": True}, {}),
+        ):
             p = bell_state(s, **dic)
             assert_allclose(expec(p, p), 1.0)
             pa = ptr(p, [2, 2], 0)
@@ -160,15 +186,15 @@ class TestNeelState:
 class TestSingletPairs:
     def test_n2(self):
         p = singlet_pairs(2)
-        assert_allclose(p, bell_state('psi-'))
+        assert_allclose(p, bell_state("psi-"))
         p = singlet_pairs(4)
-        assert_allclose(p, bell_state('psi-') & bell_state('psi-'))
+        assert_allclose(p, bell_state("psi-") & bell_state("psi-"))
 
 
 class TestWernerState:
     def test_extremes(self):
         p = werner_state(1)
-        assert_allclose(p, bell_state('psi-', qtype='dop'))
+        assert_allclose(p, bell_state("psi-", qtype="dop"))
         p = werner_state(0)
         assert_allclose(p, eye(4) / 4, atol=1e-14)
 
@@ -186,13 +212,13 @@ class TestWernerState:
 class TestGHZState:
     def test_n2(self):
         p = ghz_state(2)
-        assert_allclose(p, bell_state('phi+'))
+        assert_allclose(p, bell_state("phi+"))
 
 
 class TestWState:
     def test_n2(self):
         p = w_state(2)
-        assert_allclose(p, bell_state('psi+'))
+        assert_allclose(p, bell_state("psi+"))
 
 
 class TestLeviCivita:
@@ -218,7 +244,7 @@ class TestLeviCivita:
 class TestPermState:
     def test_n2(self):
         p = perm_state([up(), down()])
-        assert_allclose(p, bell_state('psi-'))
+        assert_allclose(p, bell_state("psi-"))
 
 
 class TestGraphState:
@@ -226,8 +252,10 @@ class TestGraphState:
         n = 5
         p = graph_state_1d(n, cyclic=True)
         for j in range(n):
-            k = ikron([pauli('x'), pauli('z'), pauli('z')],
-                      dims=[2] * n,
-                      inds=(j, (j - 1) % n, (j + 1) % n))
+            k = ikron(
+                [pauli("x"), pauli("z"), pauli("z")],
+                dims=[2] * n,
+                inds=(j, (j - 1) % n, (j + 1) % n),
+            )
             o = p.H @ k @ p
             np.testing.assert_allclose(o, 1)

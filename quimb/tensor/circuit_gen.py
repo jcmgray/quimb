@@ -1,9 +1,11 @@
+"""Functions for generating specific, e.g. ansatz, circuits.
+"""
+
 import math
 import random
 import itertools
 
 from .. import rand, seed_rand
-from . import Circuit
 
 
 def inject_u3s(
@@ -124,6 +126,8 @@ def gates_to_param_circuit(gates, n, parametrize='U3', **circuit_opts):
     -------
     Circuit
     """
+    from .circuit import Circuit
+
     if isinstance(parametrize, str):
         parametrize = (parametrize,)
 
@@ -371,6 +375,8 @@ def circ_qaoa(
         overridden) since the RZZ gate, even though it has a rank-2
         decomposition, is also diagonal.
     """
+    from .circuit import Circuit
+
     circuit_opts.setdefault('gate_opts', {})
     circuit_opts['gate_opts'].setdefault('contract', False)
 

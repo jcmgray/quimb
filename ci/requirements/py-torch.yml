@@ -3,21 +3,19 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - autoray
+  - autoray>=0.6.7
+  - cotengra>=0.5.6
   - coverage
   - cpuonly
   - cytoolz
-  - diskcache
   - joblib
   - matplotlib
   - networkx
   - numba>=0.56
   - numpy
-  - opt_einsum>=3.2
   - psutil
   - pytest
   - pytest-cov
   - pytorch
-  - randomgen
   - scipy
   - tqdm

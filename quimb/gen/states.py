@@ -1,5 +1,4 @@
-"""
-Functions for generating quantum states.
+"""Functions for generating quantum states.
 """
 
 import itertools
@@ -14,7 +13,13 @@ from .operators import pauli, controlled
 
 
 def basis_vec(i, dim, ownership=None, **kwargs):
-    """Constructs a unit vector ket.
+    r"""Constructs a unit vector ket:
+
+    .. math::
+
+        |i\rangle = \begin{pmatrix}
+        0 \\ \vdots \\ 1 \\ \vdots \\ 0
+        \end{pmatrix}
 
     Parameters
     ----------
@@ -27,8 +32,8 @@ def basis_vec(i, dim, ownership=None, **kwargs):
     kwargs
         Supplied to ``qu``.
 
-    Returns:
-    --------
+    Returns
+    -------
     vector
         The basis vector.
     """
@@ -48,7 +53,14 @@ def basis_vec(i, dim, ownership=None, **kwargs):
 
 @functools.lru_cache(8)
 def up(**kwargs):
-    """Returns up-state, aka. ``|0>``, +Z eigenstate.
+    r"""Returns up-state, aka. ``|0>``, +Z eigenstate:
+
+    .. math::
+
+        |0\rangle = \begin{pmatrix}
+        1 \\ 0
+        \end{pmatrix}
+
     """
     u = qu([[1], [0]], **kwargs)
     make_immutable(u)
@@ -60,7 +72,14 @@ zplus = up
 
 @functools.lru_cache(8)
 def down(**kwargs):
-    """Returns down-state, aka. ``|1>``, -Z eigenstate.
+    r"""Returns down-state, aka. ``|1>``, -Z eigenstate:
+
+    .. math::
+
+        |1\rangle = \begin{pmatrix}
+        0 \\ 1
+        \end{pmatrix}
+
     """
     d = qu([[0], [1]], **kwargs)
     make_immutable(d)
@@ -72,7 +91,14 @@ zminus = down
 
 @functools.lru_cache(8)
 def plus(**kwargs):
-    """Returns plus-state, aka. ``|+>``, +X eigenstate.
+    r"""Returns plus-state, aka. ``|+>``, +X eigenstate:
+
+    .. math::
+
+        |+\rangle = \frac{1}{\sqrt{2}} \begin{pmatrix}
+        1 \\ 1
+        \end{pmatrix}
+
     """
     return qu([[2**-0.5], [2**-0.5]], **kwargs)
 
@@ -82,7 +108,14 @@ xplus = plus
 
 @functools.lru_cache(8)
 def minus(**kwargs):
-    """Returns minus-state, aka. ``|->``, -X eigenstate.
+    r"""Returns minus-state, aka. ``|->``, -X eigenstate:
+
+    .. math::
+
+        |-\rangle = \frac{1}{\sqrt{2}} \begin{pmatrix}
+        1 \\ -1
+        \end{pmatrix}
+
     """
     return qu([[2**-0.5], [-2**-0.5]], **kwargs)
 
@@ -92,20 +125,38 @@ xminus = minus
 
 @functools.lru_cache(8)
 def yplus(**kwargs):
-    """Returns yplus-state, aka. ``|y+>``, +Y eigenstate.
+    r"""Returns yplus-state, aka. ``|y+>``, +Y eigenstate:
+
+    .. math::
+
+        |y+\rangle = \frac{1}{\sqrt{2}} \begin{pmatrix}
+        1 \\ i
+        \end{pmatrix}
+
     """
     return qu([[2**-0.5], [1.0j / (2**0.5)]], **kwargs)
 
 
 @functools.lru_cache(8)
 def yminus(**kwargs):
-    """Returns yplus-state, aka. ``|y->``, -Y eigenstate.
+    r"""Returns yplus-state, aka. ``|y->``, -Y eigenstate:
+
+    .. math::
+
+        |y-\rangle = \frac{1}{\sqrt{2}} \begin{pmatrix}
+        1 \\ -i
+        \end{pmatrix}
+
     """
     return qu([[2**-0.5], [-1.0j / (2**0.5)]], **kwargs)
 
 
 def bloch_state(ax, ay, az, purified=False, **kwargs):
-    """Construct qubit density operator from bloch vector.
+    r"""Construct qubit density operator from bloch vector:
+
+    .. math::
+
+        \rho = \frac{1}{2} \left( I + a_x X + a_y Y + a_z Z \right)
 
     Parameters
     ----------

@@ -1,22 +1,43 @@
+"""Functions for decomposing and projecting matrices.
+"""
+
 import functools
+import operator
+import warnings
 
 import numpy as np
-import scipy.sparse.linalg as spla
+import scipy.linalg as scla
 import scipy.linalg.interpolative as sli
+import scipy.sparse.linalg as spla
 from autoray import (
-    do,
-    reshape,
-    dag,
-    infer_backend,
     astype,
-    get_dtype_name,
-    compose,
     backend_like,
+    compose,
+    dag,
+    do,
+    get_dtype_name,
+    get_lib_fn,
+    infer_backend,
+    lazy,
+    reshape,
 )
 
-from ..core import njit, generated_jit
-from ..linalg import base_linalg
-from ..linalg import rand_linalg
+from ..core import njit
+from ..linalg import base_linalg, rand_linalg
+
+_CUTOFF_MODE_MAP = {
+    "abs": 1,
+    "rel": 2,
+    "sum2": 3,
+    "rsum2": 4,
+    "sum1": 5,
+    "rsum1": 6,
+}
+
+
+def map_cutoff_mode(cutoff_mode):
+    """Map mode to an integer for compatibility with numba."""
+    return _CUTOFF_MODE_MAP.get(cutoff_mode, cutoff_mode)
 
 
 # some convenience functions for multiplying diagonals
@@ -76,21 +97,23 @@ def sgn(x):
     """Get the 'sign' of ``x``, such that ``x / sgn(x)`` is real and
     non-negative.
     """
-    return x / (do('abs', x) + (x == 0.0))
+    x0 = x == 0.0
+    return (x + x0) / (do("abs", x) + x0)
 
 
 @sgn.register("numpy")
-@generated_jit
+@njit  # pragma: no cover
 def sgn_numba(x):
-    from numba import types
-    if hasattr(x, "dtype"):
-        dtype = x.dtype
-    else:
-        dtype = x
-    if isinstance(dtype, types.Complex):
-        return lambda x: x / (np.abs(x) + (x == 0.0))
-    else:
-        return lambda x: np.sign(x) + (x == 0.0)
+    x0 = x == 0.0
+    return (x + x0) / (np.abs(x) + x0)
+
+
+@sgn.register("tensorflow")
+def sgn_tf(x):
+    with backend_like(x):
+        x0 = do("cast", do("equal", x, 0.0), x.dtype)
+        xa = do("cast", do("abs", x), x.dtype)
+        return (x + x0) / (xa + x0)
 
 
 def _trim_and_renorm_svd_result(
@@ -166,7 +189,7 @@ def _trim_and_renorm_svd_result(
 def svd_truncated(
     x,
     cutoff=-1.0,
-    cutoff_mode=3,
+    cutoff_mode=4,
     max_bond=-1,
     absorb=0,
     renorm=0,
@@ -176,10 +199,10 @@ def svd_truncated(
 
     Parameters
     ----------
-    cutoff : float
+    cutoff : float, optional
         Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
         ``max_bond`` is used.
-    cutoff_mode : {1, 2, 3, 4, 5, 6}
+    cutoff_mode : {1, 2, 3, 4, 5, 6}, optional
         How to perform the trim:
 
             - 1: ['abs'], trim values below ``cutoff``
@@ -189,12 +212,12 @@ def svd_truncated(
             - 5: ['sum1'], trim s.t. ``sum(s_trim**1) < cutoff``.
             - 6: ['rsum1'], trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
 
-    max_bond : int
+    max_bond : int, optional
         An explicit maximum bond dimension, use -1 for none.
-    absorb : {-1, 0, 1, None}
+    absorb : {-1, 0, 1, None}, optional
         How to absorb the singular values. -1: left, 0: both, 1: right and
         None: don't absorb (return).
-    renorm : {0, 1}
+    renorm : {0, 1}, optional
         Whether to renormalize the singular values (depends on `cutoff_mode`).
     """
     with backend_like(backend):
@@ -298,16 +321,116 @@ def _trim_and_renorm_svd_result_numba(
     return U, None, VH
 
 
-@svd_truncated.register("numpy")
 @njit  # pragma: no cover
 def svd_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
 ):
     """Accelerated version of ``svd_truncated`` for numpy arrays."""
     U, s, VH = np.linalg.svd(x, full_matrices=False)
     return _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
+
+
+@svd_truncated.register("numpy")
+def svd_truncated_numpy(
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+):
+    """Numpy version of ``svd_truncated``, trying the accelerated version
+    first, then falling back to the more stable scipy version.
+    """
+    try:
+        return svd_truncated_numba(
+            x, cutoff, cutoff_mode, max_bond, absorb, renorm
+        )
+    except np.linalg.LinAlgError as e:  # pragma: no cover
+        warnings.warn(f"Got: {e}, falling back to scipy gesvd driver.")
+        U, s, VH = scla.svd(x, full_matrices=False, lapack_driver="gesvd")
+        return _trim_and_renorm_svd_result_numba(
+            U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+        )
+
+
+@svd_truncated.register("autoray.lazy")
+@lazy.core.lazy_cache("svd_truncated")
+def svd_truncated_lazy(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+):
+    if cutoff != 0.0:
+        raise ValueError("Can't handle dynamic cutoffs in lazy mode.")
+
+    m, n = x.shape
+    k = min(m, n)
+    if max_bond > 0:
+        k = min(k, max_bond)
+
+    lsvdt = x.to(
+        fn=get_lib_fn(x.backend, "svd_truncated"),
+        args=(x, cutoff, cutoff_mode, max_bond, absorb, renorm),
+        shape=(3,),
+    )
+
+    U = lsvdt.to(operator.getitem, (lsvdt, 0), shape=(m, k))
+    if absorb is None:
+        s = lsvdt.to(operator.getitem, (lsvdt, 1), shape=(k,))
+    else:
+        s = None
+    VH = lsvdt.to(operator.getitem, (lsvdt, 2), shape=(k, n))
+
+    return U, s, VH
+
+
+@compose
+def lu_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    backend=None,
+):
+    if absorb != 0:
+        raise NotImplementedError(
+            f"Can't handle absorb{absorb} in lu_truncated."
+        )
+    elif renorm != 0:
+        raise NotImplementedError(
+            f"Can't handle renorm={renorm} in lu_truncated."
+        )
+    elif max_bond != -1:
+        # use argsort(sl * su) to handle this?
+        raise NotImplementedError(
+            f"Can't handle max_bond={max_bond} in lu_truncated."
+        )
+
+    with backend_like(backend):
+        PL, U = do("scipy.linalg.lu", x, permute_l=True)
+
+        sl = do("sum", do("abs", PL), axis=0)
+        su = do("sum", do("abs", U), axis=1)
+
+        if cutoff_mode == 2:
+            abs_cutoff_l = cutoff * do("max", sl)
+            abs_cutoff_u = cutoff * do("max", su)
+        elif cutoff_mode == 1:
+            abs_cutoff_l = abs_cutoff_u = cutoff
+        else:
+            raise NotImplementedError(
+                f"Can't handle cutoff_mode={cutoff_mode} in lu_truncated."
+            )
+
+        idx = (sl > abs_cutoff_l) & (su > abs_cutoff_u)
+
+        PL = PL[:, idx]
+        U = U[idx, :]
+
+        return PL, None, U
 
 
 def svdvals(x):
@@ -317,7 +440,7 @@ def svdvals(x):
 
 @njit  # pragma: no cover
 def _svd_via_eig_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
 ):
     """SVD-split via eigen-decomposition."""
     if x.shape[0] > x.shape[1]:
@@ -346,7 +469,7 @@ def _svd_via_eig_truncated_numba(
 
 
 def svd_via_eig_truncated(
-    x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
 ):
     if isinstance(x, np.ndarray):
         return _svd_via_eig_truncated_numba(
@@ -390,14 +513,46 @@ def svdvals_eig(x):  # pragma: no cover
     return s2[::-1] ** 0.5
 
 
+@compose
+def eigh_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    backend=None,
+):
+    with backend_like(backend):
+        s, U = do("linalg.eigh", x)
+
+        # make sure largest singular value first
+        k = do("argsort", -do("abs", s))
+        s, U = s[k], U[:, k]
+
+        # absorb phase into V
+        V = ldmul(sgn(s), dag(U))
+        s = do("abs", s)
+        return _trim_and_renorm_svd_result(
+            U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
+        )
+
+
+@eigh_truncated.register("numpy")
 @njit  # pragma: no cover
-def eigh(x, cutoff=-1.0, cutoff_mode=3, max_bond=-1, absorb=0, renorm=0):
+def eigh_truncated_numba(
+    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
     ``x`` is hermitian.
     """
     s, U = np.linalg.eigh(x)
-    s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
 
+    # make sure largest singular value first
+    k = np.argsort(-np.abs(s))
+    s, U = s[k], U[:, k]
+
+    # absorb phase into V
     V = ldmul_numba(sgn_numba(s), dag_numba(U))
     s = np.abs(s)
     return _trim_and_renorm_svd_result_numba(
@@ -420,7 +575,7 @@ def _choose_k(x, cutoff, max_bond):
     return "full" if k > d // 2 else k
 
 
-def svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def svds(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using iterative methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -439,7 +594,7 @@ def svds(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def isvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using interpolative matrix random methods. Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -459,7 +614,7 @@ def isvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     if max_bond > 0:
         if cutoff > 0.0:
             # adapt and block
@@ -474,7 +629,7 @@ def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def rsvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using randomized methods (due to Halko). Allows the
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
@@ -489,7 +644,7 @@ def rsvd(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     )
 
 
-def eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
+def eigsh(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
     that ``x`` is hermitian. Allows the computation of only a certain number of
     singular values, e.g. max_bond, from the get-go, and is thus more
@@ -500,7 +655,7 @@ def eigsh(x, cutoff=0.0, cutoff_mode=2, max_bond=-1, absorb=0, renorm=0):
     if k == "full":
         if not isinstance(x, np.ndarray):
             x = x.to_dense()
-        return eigh(x, cutoff, cutoff_mode, max_bond, absorb)
+        return eigh_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
 
     s, U = base_linalg.eigh(x, k=k)
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
@@ -519,7 +674,7 @@ def qr_stabilized(x, backend=None):
         # stabilize the diagonal of R
         rd = do("diag", R)
         s = sgn(rd)
-        Q = rdmul(Q, s)
+        Q = rdmul(Q, do("conj", s))
         R = ldmul(s, R)
         return Q, None, R
 
@@ -532,8 +687,23 @@ def qr_stabilized_numba(x):
         rii = R[i, i]
         si = sgn_numba(rii)
         if si != 1.0:
-            Q[:, i] *= si
+            Q[:, i] *= np.conj(si)
             R[i, i:] *= si
+    return Q, None, R
+
+
+@qr_stabilized.register("autoray.lazy")
+@lazy.core.lazy_cache("qr_stabilized")
+def qr_stabilized_lazy(x):
+    m, n = x.shape
+    k = min(m, n)
+    lqrs = x.to(
+        fn=get_lib_fn(x.backend, "qr_stabilized"),
+        args=(x,),
+        shape=(3,),
+    )
+    Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(m, k))
+    R = lqrs.to(operator.getitem, (lqrs, 2), shape=(k, n))
     return Q, None, R
 
 
@@ -551,9 +721,8 @@ def lq_stabilized_numba(x):
     return L.T, None, Q.T
 
 
-
 @njit  # pragma: no cover
-def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def _cholesky_numba(x, cutoff=-1, cutoff_mode=4, max_bond=-1, absorb=0):
     """SVD-decomposition, using cholesky decomposition, only works if
     ``x`` is positive definite.
     """
@@ -561,7 +730,7 @@ def _cholesky_numba(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
     return L, None, dag_numba(L)
 
 
-def cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
+def cholesky(x, cutoff=-1, cutoff_mode=4, max_bond=-1, absorb=0):
     try:
         return _cholesky_numba(x, cutoff, cutoff_mode, max_bond, absorb)
     except np.linalg.LinAlgError as e:
@@ -570,6 +739,42 @@ def cholesky(x, cutoff=-1, cutoff_mode=3, max_bond=-1, absorb=0):
         # try adding cutoff identity - assuming it is approx allowable error
         xi = x + 2 * cutoff * np.eye(x.shape[0])
         return _cholesky_numba(xi, cutoff, cutoff_mode, max_bond, absorb)
+
+
+@compose
+def polar_right(x):
+    """Polar decomposition of ``x``."""
+    W, s, VH = do("linalg.svd", x)
+    U = W @ VH
+    P = dag(VH) @ ldmul(s, VH)
+    return U, None, P
+
+
+@polar_right.register("numpy")
+@njit  # pragma: no cover
+def polar_right_numba(x):
+    W, s, VH = np.linalg.svd(x, full_matrices=0)
+    U = W @ VH
+    P = dag_numba(VH) @ ldmul_numba(s, VH)
+    return U, None, P
+
+
+@compose
+def polar_left(x):
+    """Polar decomposition of ``x``."""
+    W, s, VH = do("linalg.svd", x)
+    U = W @ VH
+    P = rdmul(W, s) @ dag(W)
+    return P, None, U
+
+
+@polar_left.register("numpy")
+@njit  # pragma: no cover
+def polar_left_numba(x):
+    W, s, VH = np.linalg.svd(x, full_matrices=0)
+    U = W @ VH
+    P = rdmul_numba(W, s) @ dag_numba(W)
+    return P, None, U
 
 
 # ------ similarity transforms for compressing effective environments ------- #
@@ -743,7 +948,7 @@ _similarity_compress_fns = {
 }
 
 
-def similarity_compress(X, max_bond, renorm=True, method="eigh"):
+def similarity_compress(X, max_bond, renorm=False, method="eigh"):
     if method == "eig":
         if get_dtype_name(X) == "float64":
             X = astype(X, "complex128")
@@ -759,45 +964,31 @@ def similarity_compress(X, max_bond, renorm=True, method="eigh"):
 
 @compose
 def isometrize_qr(x, backend=None):
-    """Perform isometrization using the QR decomposition.
-    """
+    """Perform isometrization using the QR decomposition."""
     with backend_like(backend):
-        fat = x.shape[0] < x.shape[1]
-        if fat:
-            x = do("transpose", x)
-        Q, R = do('linalg.qr', x)
+        Q, R = do("linalg.qr", x)
         # stabilize qr by fixing diagonal of R in canonical, positive form (we
         # don't actaully do anything to R, just absorb the necessary sign -> Q)
-        rd = do('diag', R)
-        s = do('sign', rd) + (rd == 0)
+        rd = do("diag", R)
+        s = do("sign", rd) + (rd == 0)
         Q = Q * reshape(s, (1, -1))
-        if fat:
-            Q = do("transpose", Q)
         return Q
 
 
 @compose
 def isometrize_svd(x, backend=None):
-    with backend_like(backend):
-        fat = x.shape[0] < x.shape[1]
-        if fat:
-            x = do("transpose", x)
-
-        Q = do('linalg.svd', x)[0]
-        if fat:
-            Q = do("transpose", Q)
-
-        return Q
+    """Perform isometrization using the SVD decomposition."""
+    U, _, VH = do("linalg.svd", x, like=backend)
+    return U @ VH
 
 
 @compose
 def isometrize_exp(x, backend):
-    r"""Perform isometrization using the using anti-symmetric matrix
-    exponentiation.
+    r"""Perform isometrization using anti-symmetric matrix exponentiation.
 
     .. math::
 
-            U_A = \exp{A - A^\dagger}
+            U_A = \exp \left( X - X^\dagger \right)
 
     If ``x`` is rectangular it is completed with zeros first.
     """
@@ -805,60 +996,260 @@ def isometrize_exp(x, backend):
         m, n = x.shape
         d = max(m, n)
         x = do(
-            'pad', x, [[0, d - m], [0, d - n]], 'constant', constant_values=0.0
+            "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
         )
-        expx = do('linalg.expm', x - dag(x))
-        return expx[:m, :n]
+        x = x - dag(x)
+        Q = do("linalg.expm", x)
+        return Q[:m, :n]
+
+
+@compose
+def isometrize_cayley(x, backend):
+    r"""Perform isometrization using an anti-symmetric Cayley transform.
+
+    .. math::
+
+            U_A = (I + \dfrac{A}{2})(I - \dfrac{A}{2})^{-1}
+
+    where :math:`A = X - X^\dagger`. If ``x`` is rectangular it is completed
+    with zeros first.
+    """
+    with backend_like(backend):
+        m, n = x.shape
+        d = max(m, n)
+        x = do(
+            "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
+        )
+        x = x - dag(x)
+        x = x / 2.0
+        Id = do("eye", d, like=x)
+        Q = do("linalg.solve", Id - x, Id + x)
+        return Q[:m, :n]
 
 
 @compose
 def isometrize_modified_gram_schmidt(A, backend=None):
     """Perform isometrization explicitly using the modified Gram Schmidt
-    procedure.
+    procedure (this is slow but a useful reference).
     """
     with backend_like(backend):
-        m, n = A.shape
-
-        thin = m > n
-        if thin:
-            A = do('transpose', A)
-
         Q = []
-        for j in range(0, min(m, n)):
-
-            q = A[j, :]
+        for j in range(A.shape[1]):
+            q = A[:, j]
             for i in range(0, j):
-                rij = do('tensordot', do('conj', Q[i]), q, 1)
+                rij = do("tensordot", do("conj", Q[i]), q, 1)
                 q = q - rij * Q[i]
-
-            Q.append(q / do('linalg.norm', q, 2))
-
-        Q = do('stack', tuple(Q), axis=0, like=A)
-
-        if thin:
-            Q = do('transpose', Q)
-
+            Q.append(q / do("linalg.norm", q))
+        Q = do("stack", tuple(Q), axis=1)
         return Q
 
 
+@compose
+def isometrize_householder(X, backend=None):
+    with backend_like(backend):
+        X = do("tril", X, -1)
+        tau = 2.0 / (1.0 + do("sum", do("conj", X) * X, 0))
+        Q = do("linalg.householder_product", X, tau)
+        return Q
+
+
+def isometrize_torch_householder(x):
+    """Isometrize ``x`` using the Householder reflection method, as implemented
+    by the ``torch_householder`` package.
+    """
+    from torch_householder import torch_householder_orgqr
+
+    return torch_householder_orgqr(x)
+
+
 _ISOMETRIZE_METHODS = {
-    'qr': isometrize_qr,
-    'svd': isometrize_svd,
-    'exp': isometrize_exp,
-    'mgs': isometrize_modified_gram_schmidt,
+    "qr": isometrize_qr,
+    "svd": isometrize_svd,
+    "mgs": isometrize_modified_gram_schmidt,
+    "exp": isometrize_exp,
+    "cayley": isometrize_cayley,
+    "householder": isometrize_householder,
+    "torch_householder": isometrize_torch_householder,
 }
 
 
-def isometrize(x, method='qr'):
-    """Generate a isometric (or unitary if square) matrix from array ``x``.
+def isometrize(x, method="qr"):
+    """Generate an isometric (or unitary if square) / orthogonal matrix from
+    array ``x``.
 
     Parameters
     ----------
     x : array
         The matrix to project into isometrix form.
-    method : {'qr', 'svd', 'exp', 'mgs'}, optional
-        The method used to generate the isometry. Note ``'qr'`` is the fastest
-        and most robust but, for example, some libraries cannot back-propagate
-        through it.
+    method : str, optional
+        The method used to generate the isometry. The options are:
+
+        - "qr": use the Q factor of the QR decomposition of ``x`` with the
+          constraint that the diagonal of ``R`` is positive.
+        - "svd": uses ``U @ VH`` of the SVD decomposition of ``x``. This is
+          useful for finding the 'closest' isometric matrix to ``x``, such as
+          when it has been expanded with noise etc. But is less stable for
+          differentiation / optimization.
+        - "exp": use the matrix exponential of ``x - dag(x)``, first
+          completing ``x`` with zeros if it is rectangular. This is a good
+          parametrization for optimization, but more expensive for non-square
+          ``x``.
+        - "cayley": use the Cayley transform of ``x - dag(x)``, first
+          completing ``x`` with zeros if it is rectangular. This is a good
+          parametrization for optimization (one the few compatible with
+          `HIPS/autograd` e.g.), but more expensive for non-square ``x``.
+        - "householder": use the Householder reflection method directly. This
+          requires that the backend implements "linalg.householder_product".
+        - "torch_householder": use the Householder reflection method directly,
+          using the ``torch_householder`` package. This requires that the
+          package is installed and that the backend is ``"torch"``. This is
+          generally the best parametrizing method for "torch" if available.
+        - "mgs": use a python implementation of the modified Gram Schmidt
+          method directly. This is slow if not compiled but a useful reference.
+
+        Not all backends support all methods or differentiating through all
+        methods.
+
+    Returns
+    -------
+    Q : array
+        The isometrization / orthogonalization of ``x``.
     """
-    return _ISOMETRIZE_METHODS[method](x)
+    m, n = x.shape
+    fat = m < n
+    if fat:
+        x = do("transpose", x)
+    Q = _ISOMETRIZE_METHODS[method](x)
+    if fat:
+        Q = do("transpose", Q)
+    return Q
+
+
+@compose
+def squared_op_to_reduced_factor(x2, dl, dr, right=True):
+    """Given the square, ``x2``, of an operator ``x``, compute either the left
+    or right reduced factor matrix of the unsquared operator ``x`` with
+    original shape ``(dl, dr)``.
+    """
+    s2, W = do("linalg.eigh", x2)
+
+    if right:
+        if dl < dr:
+            # know exactly low-rank, so truncate
+            keep = dl
+        else:
+            keep = None
+    else:
+        if dl > dr:
+            # know exactly low-rank, so truncate
+            keep = dr
+        else:
+            keep = None
+
+    if keep is not None:
+        # outer dimension smaller -> exactly low-rank
+        s2 = s2[-keep:]
+        W = W[:, -keep:]
+
+    # might have negative eigenvalues due to numerical error from squaring
+    s2 = do("clip", s2, s2[-1] * 1e-12, None)
+    s = do("sqrt", s2)
+
+    if right:
+        factor = ldmul(s, dag(W))
+    else:  # 'left'
+        factor = rdmul(W, s)
+
+    return factor
+
+
+@squared_op_to_reduced_factor.register("numpy")
+@njit
+def squared_op_to_reduced_factor_numba(x2, dl, dr, right=True):
+    s2, W = np.linalg.eigh(x2)
+
+    if right:
+        if dl < dr:
+            # know exactly low-rank, so truncate
+            keep = dl
+        else:
+            keep = None
+    else:
+        if dl > dr:
+            # know exactly low-rank, so truncate
+            keep = dr
+        else:
+            keep = None
+
+    if keep is not None:
+        # outer dimension smaller -> exactly low-rank
+        s2 = s2[-keep:]
+        W = W[:, -keep:]
+
+    # might have negative eigenvalues due to numerical error from squaring
+    s2 = np.clip(s2, 0.0, None)
+    s = np.sqrt(s2)
+
+    if right:
+        factor = ldmul_numba(s, dag_numba(W))
+    else:  # 'left'
+        factor = rdmul_numba(W, s)
+
+    return factor
+
+
+def compute_oblique_projectors(
+    Rl, Rr, max_bond, cutoff, absorb="both", cutoff_mode=4, **compress_opts
+):
+    """Compute the oblique projectors for two reduced factor matrices that
+    describe a gauge on a bond. Concretely, assuming that ``Rl`` and ``Rr`` are
+    the reduced factor matrices for local operator ``A``, such that:
+
+    .. math::
+
+        A = Q_L R_L R_R Q_R
+
+    with ``Q_L`` and ``Q_R`` isometric matrices, then the optimal inner
+    truncation is given by:
+
+    .. math::
+
+        A' = Q_L P_L P_R' Q_R
+
+    Parameters
+    ----------
+    Rl : array
+        The left reduced factor matrix.
+    Rr : array
+        The right reduced factor matrix.
+
+    Returns
+    -------
+    Pl : array
+        The left oblique projector.
+    Pr : array
+        The right oblique projector.
+    """
+    if absorb != "both":
+        raise NotImplementedError("only absorb='both' supported")
+
+    if max_bond is None:
+        max_bond = -1
+
+    cutoff_mode = map_cutoff_mode(cutoff_mode)
+
+    Ut, st, VHt = svd_truncated(
+        Rl @ Rr,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        absorb=None,
+        cutoff_mode=cutoff_mode,
+        **compress_opts,
+    )
+    st_sqrt = do("sqrt", st)
+
+    # then form the 'oblique' projectors
+    Pl = Rr @ rddiv(dag(VHt), st_sqrt)
+    Pr = lddiv(st_sqrt, dag(Ut)) @ Rl
+
+    return Pl, Pr

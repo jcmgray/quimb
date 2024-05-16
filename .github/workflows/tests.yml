@@ -1,4 +1,4 @@
-name: tests
+name: Tests
 
 on:
   workflow_dispatch:
@@ -12,64 +12,75 @@ defaults:
 jobs:
   run-tests:
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.flaky }}
     strategy:
       matrix:
         testset: [matrix, tensor]
         env: [base]
         os: [ubuntu-latest]
-        python-version: [3.8, 3.9, '3.10']
+        python-version: [3.9, '3.10', '3.11']
+        flaky: [false]
 
         include:
         - os: macos-latest
           testset: matrix
           env: base
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: true
 
         - os: macos-latest
           testset: tensor
           env: base
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
         - os: windows-latest
           testset: matrix
           env: base
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
         - os: windows-latest
           testset: tensor
           env: base
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
         - env: torch
           testset: tensor
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
         - env: jax
           testset: tensor
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
         - env: tensorflow
           testset: tensor
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
         - env: slepc
           testset: matrix
           os: ubuntu-latest
-          python-version: 3.9
+          python-version: '3.11'
+          flaky: false
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install micromamba
-      uses: mamba-org/provision-with-micromamba@main
+      uses: mamba-org/setup-micromamba@v1
       with:
         environment-file: ci/requirements/py-${{ matrix.env }}.yml
         environment-name: test-env
-        extra-specs: python=${{ matrix.python-version }}
-        cache-env: true
+        create-args: >-
+          python=${{ matrix.python-version }}
+        cache-environment: true
 
     - name: Matrix submodule tests with pytest
       if: ${{ matrix.testset == 'matrix' }}
@@ -80,4 +91,6 @@ jobs:
       run: pytest tests/test_tensor --cov=quimb --cov-report=xml
 
     - name: Report to codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

@@ -45,13 +45,9 @@ from .utils import (
     frequencies,
     int2tup,
     keymap,
-    raise_cant_find_library_function,
 )
 
-try:
-    from opt_einsum import contract
-except ImportError:
-    contract = raise_cant_find_library_function("opt_einsum")
+from .tensor.contraction import array_contract
 
 
 def fidelity(p1, p2, squared=False):
@@ -188,33 +184,24 @@ def kraus_op(rho, Ek, dims=None, where=None, check=False):
         kdims = tuple(dims[i] for i in where)
         Ek = Ek.reshape((-1,) + kdims + kdims)
 
-        rho_inds, out, Ei_inds, Ej_inds = [], [], ["K"], ["K"]
-        for i in range(N):
-            if i in where:
-                xi, xj = f"i{i}k", f"j{i}k"
-                for inds in (rho_inds, Ei_inds):
-                    inds.append(xi)
-                for inds in (rho_inds, Ej_inds):
-                    inds.append(xj)
-                xi, xj = f"i{i}new", f"j{i}new"
-                for inds in (out, Ei_inds):
-                    inds.append(xi)
-                for inds in (out, Ej_inds):
-                    inds.append(xj)
-            else:
-                xi, xj = f"i{i}", f"j{i}"
-                for inds in (rho_inds, out):
-                    inds.append(xi)
-                    inds.append(xj)
-        for inds in (rho_inds, out, Ei_inds, Ej_inds):
-            inds.sort()
+        rho_inds = (
+            *(f"i*{q}" if q in where else f"i{q}" for q in range(N)),
+            *(f"j*{q}" if q in where else f"j{q}" for q in range(N)),
+        )
+        Ei_inds = ("K", *(f"i{q}" for q in where), *(f"i*{q}" for q in where))
+        Ej_inds = ("K", *(f"j{q}" for q in where), *(f"j*{q}" for q in where))
+        out = (*(f"i{q}" for q in range(N)), *(f"j{q}" for q in range(N)))
     else:
-        rho_inds = ["ik", "jk"]
-        out = ["inew", "jnew"]
-        Ei_inds = ["K", "inew", "ik"]
-        Ej_inds = ["K", "jnew", "jk"]
+        Ei_inds = ("K", "i", "i*")
+        rho_inds = ("i*", "j*")
+        Ej_inds = ("K", "j", "j*")
+        out = ("i", "j")
 
-    sigma = contract(Ek, Ei_inds, rho, rho_inds, Ek.conj(), Ej_inds, out)
+    sigma = array_contract(
+        (Ek, rho, Ek.conj()),
+        (Ei_inds, rho_inds, Ej_inds),
+        out,
+    )
 
     if dims:
         sigma = sigma.reshape(prod(dims), prod(dims))
@@ -314,7 +301,11 @@ def measure(p, A, eigenvalue=None, tol=1e-12):
     if isvec(p):
         pj = (abs(ev.H @ p) ** 2).flatten()
     else:
-        pj = contract("jk,kl,lj->j", ev.H, p, ev).real
+        pj = array_contract(
+            (ev.H, p, ev),
+            ("jk", "kl", "lj"),
+            ("j",),
+        ).real
 
     # then choose one
     if eigenvalue is None:
@@ -558,8 +549,8 @@ def check_dims_and_indices(dims, *syss):
 
     if not all(0 <= i < nsys for i in all_sys):
         raise ValueError(
-            f"Indices specified in `sysa` and `sysb` must be "
-            "in range({nsys}) for dims {dims}."
+            "Indices specified in `sysa` and `sysb` must be "
+            f"in range({nsys}) for dims {dims}."
         )
 
 
@@ -958,7 +949,15 @@ def one_way_classical_information(p_ab, prjs, precomp_func=False):
 
 
 @zeroify
-def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
+def quantum_discord(
+    p,
+    dims=(2, 2),
+    sysa=0,
+    sysb=1,
+    method="COBYLA",
+    tol=1e-12,
+    maxiter=2**14,
+):
     """Quantum Discord for two qubit density operator.
 
     If ``len(dims) > 2``, then the non-target dimensions will be traced out
@@ -993,7 +992,14 @@ def quantum_discord(p, dims=(2, 2), sysa=0, sysb=1):
         return iab - owci((prja, prjb))
 
     opt = minimize(
-        trial_qd, (pi / 2, pi), method="SLSQP", bounds=((0, pi), (0, 2 * pi))
+        trial_qd,
+        (pi / 2, pi),
+        method=method,
+        bounds=((0, pi), (0, 2 * pi)),
+        tol=tol,
+        options=dict(
+            maxiter=maxiter,
+        ),
     )
     if opt.success:
         return opt.fun
@@ -1252,7 +1258,6 @@ def pauli_correlations(
             )
 
     if sum_abs:
-
         if precomp_func:
             return lambda p: sum((abs(corr(p)) for corr in gen_corr_list()))
 
@@ -1313,8 +1318,7 @@ def ent_cross_matrix(
                         rhoa = ptr(p, dims, [i + b for b in range(sz_blc)])
                         psiap = purify(rhoa)
                         ent = (
-                            ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc))
-                            / sz_blc
+                            ent_fn(psiap, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
                         )
                     else:
                         ent = np.nan
@@ -1325,9 +1329,7 @@ def ent_cross_matrix(
                         [i + b for b in range(sz_blc)]
                         + [j + b for b in range(sz_blc)],
                     )
-                    ent = (
-                        ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
-                    )
+                    ent = ent_fn(rhoab, dims=(2**sz_blc, 2**sz_blc)) / sz_blc
                 ents[i // sz_blc, j // sz_blc] = ent
                 ents[j // sz_blc, i // sz_blc] = ent
 

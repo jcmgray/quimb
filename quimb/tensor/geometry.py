@@ -1,21 +1,24 @@
+"""Some functions for generating the edges of a lattice.
+"""
+
 import itertools
+import random
 
 
 def sort_unique(edges):
     """Make sure there are no duplicate edges and that for each
     ``coo_a < coo_b``.
     """
-    return tuple(sorted(
-        tuple(sorted(edge))
-        for edge in set(map(frozenset, edges))
-    ))
+    return tuple(
+        sorted(tuple(sorted(edge)) for edge in set(map(frozenset, edges)))
+    )
 
 
 # ----------------------------------- 2D ------------------------------------ #
 
+
 def check_2d(coo, Lx, Ly, cyclic):
-    """Check ``coo`` in inbounds for a maybe cyclic 2D lattice.
-    """
+    """Check ``coo`` in inbounds for a maybe cyclic 2D lattice."""
     x, y = coo
     if (not cyclic) and not ((0 <= x < Lx) and (0 <= y < Ly)):
         return
@@ -82,22 +85,22 @@ def edges_2d_hexagonal(Lx, Ly, cyclic=False, cells=None):
     edges = []
     for i, j in cells:
         for *coob, lbl in [
-            (i, j, 'B'),
-            (i, j - 1, 'B'),
-            (i - 1, j, 'B'),
+            (i, j, "B"),
+            (i, j - 1, "B"),
+            (i - 1, j, "B"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'A'), (*coob, lbl)))
+                edges.append(((i, j, "A"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, 'A'),
-            (i, j + 1, 'A'),
-            (i + 1, j, 'A'),
+            (i, j, "A"),
+            (i, j + 1, "A"),
+            (i + 1, j, "A"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'B'), (*coob, lbl)))
+                edges.append(((i, j, "B"), (*coob, lbl)))
 
     return sort_unique(edges)
 
@@ -165,22 +168,22 @@ def edges_2d_triangular_rectangular(Lx, Ly, cyclic=False, cells=None):
     edges = []
     for i, j in cells:
         for *coob, lbl in [
-            (i, j, 'B'),
-            (i, j - 1, 'B'),
-            (i, j + 1, 'A'),
+            (i, j, "B"),
+            (i, j - 1, "B"),
+            (i, j + 1, "A"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'A'), (*coob, lbl)))
+                edges.append(((i, j, "A"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i + 1, j, 'A'),
-            (i, j + 1, 'B'),
-            (i + 1, j + 1, 'A'),
+            (i + 1, j, "A"),
+            (i, j + 1, "B"),
+            (i + 1, j + 1, "A"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'B'), (*coob, lbl)))
+                edges.append(((i, j, "B"), (*coob, lbl)))
 
     return sort_unique(edges)
 
@@ -212,43 +215,43 @@ def edges_2d_kagome(Lx, Ly, cyclic=False, cells=None):
     edges = []
     for i, j in cells:
         for *coob, lbl in [
-            (i, j, 'B'),
-            (i, j - 1, 'B'),
-            (i, j, 'C'),
-            (i - 1, j, 'C')
+            (i, j, "B"),
+            (i, j - 1, "B"),
+            (i, j, "C"),
+            (i - 1, j, "C"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'A'), (*coob, lbl)))
+                edges.append(((i, j, "A"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, 'C'),
-            (i - 1, j + 1, 'C'),
-            (i, j, 'A'),
-            (i, j + 1, 'A')
+            (i, j, "C"),
+            (i - 1, j + 1, "C"),
+            (i, j, "A"),
+            (i, j + 1, "A"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'B'), (*coob, lbl)))
+                edges.append(((i, j, "B"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, 'A'),
-            (i + 1, j, 'A'),
-            (i, j, 'B'),
-            (i + 1, j - 1, 'B')
+            (i, j, "A"),
+            (i + 1, j, "A"),
+            (i, j, "B"),
+            (i + 1, j - 1, "B"),
         ]:
             coob = check_2d(coob, Lx, Ly, cyclic)
             if coob:
-                edges.append(((i, j, 'C'), (*coob, lbl)))
+                edges.append(((i, j, "C"), (*coob, lbl)))
 
     return sort_unique(edges)
 
 
 # ----------------------------------- 3D ------------------------------------ #
 
+
 def check_3d(coo, Lx, Ly, Lz, cyclic):
-    """Check ``coo`` in inbounds for a maybe cyclic 3D lattice.
-    """
+    """Check ``coo`` in inbounds for a maybe cyclic 3D lattice."""
     x, y, z = coo
     OBC = not cyclic
     inbounds = (0 <= x < Lx) and (0 <= y < Ly) and (0 <= z < Lz)
@@ -321,52 +324,52 @@ def edges_3d_pyrochlore(Lx, Ly, Lz, cyclic=False, cells=None):
     edges = []
     for i, j, k in cells:
         for *coob, lbl in [
-            (i, j, k, 'B'),
-            (i, j - 1, k, 'B'),
-            (i, j, k, 'C'),
-            (i - 1, j, k, 'C'),
-            (i, j, k, 'D'),
-            (i, j, k - 1, 'D'),
+            (i, j, k, "B"),
+            (i, j - 1, k, "B"),
+            (i, j, k, "C"),
+            (i - 1, j, k, "C"),
+            (i, j, k, "D"),
+            (i, j, k - 1, "D"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'A'), (*coob, lbl)))
+                edges.append(((i, j, k, "A"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, k, 'C'),
-            (i - 1, j + 1, k, 'C'),
-            (i, j, k, 'D'),
-            (i, j + 1, k - 1, 'D'),
-            (i, j, k, 'A'),
-            (i, j + 1, k, 'A'),
+            (i, j, k, "C"),
+            (i - 1, j + 1, k, "C"),
+            (i, j, k, "D"),
+            (i, j + 1, k - 1, "D"),
+            (i, j, k, "A"),
+            (i, j + 1, k, "A"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'B'), (*coob, lbl)))
+                edges.append(((i, j, k, "B"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, k, 'D'),
-            (i + 1, j, k - 1, 'D'),
-            (i, j, k, 'A'),
-            (i + 1, j, k, 'A'),
-            (i, j, k, 'B'),
-            (i + 1, j - 1, k, 'B'),
+            (i, j, k, "D"),
+            (i + 1, j, k - 1, "D"),
+            (i, j, k, "A"),
+            (i + 1, j, k, "A"),
+            (i, j, k, "B"),
+            (i + 1, j - 1, k, "B"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'C'), (*coob, lbl)))
+                edges.append(((i, j, k, "C"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, k, 'A'),
-            (i, j, k + 1, 'A'),
-            (i, j, k, 'B'),
-            (i, j - 1, k + 1, 'B'),
-            (i, j, k, 'C'),
-            (i - 1, j, k + 1, 'C'),
+            (i, j, k, "A"),
+            (i, j, k + 1, "A"),
+            (i, j, k, "B"),
+            (i, j - 1, k + 1, "B"),
+            (i, j, k, "C"),
+            (i - 1, j, k + 1, "C"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'D'), (*coob, lbl)))
+                edges.append(((i, j, k, "D"), (*coob, lbl)))
 
     return sort_unique(edges)
 
@@ -400,20 +403,20 @@ def edges_3d_diamond(Lx, Ly, Lz, cyclic=False, cells=None):
     edges = []
     for i, j, k in cells:
         for *coob, lbl in [
-            (i, j, k, 'B'),
+            (i, j, k, "B"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'A'), (*coob, lbl)))
+                edges.append(((i, j, k, "A"), (*coob, lbl)))
 
         for *coob, lbl in [
-                (i, j, k + 1, 'A'),
-                (i, j + 1, k, 'A'),
-                (i + 1, j, k, 'A'),
+            (i, j, k + 1, "A"),
+            (i, j + 1, k, "A"),
+            (i + 1, j, k, "A"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'B'), (*coob, lbl)))
+                edges.append(((i, j, k, "B"), (*coob, lbl)))
 
     return sort_unique(edges)
 
@@ -448,65 +451,109 @@ def edges_3d_diamond_cubic(Lx, Ly, Lz, cyclic=False, cells=None):
     edges = []
     for i, j, k in cells:
         for *coob, lbl in [
-            (i, j, k, 'E'),
+            (i, j, k, "E"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'A'), (*coob, lbl)))
+                edges.append(((i, j, k, "A"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, k, 'E'),
-            (i, j, k, 'F'),
+            (i, j, k, "E"),
+            (i, j, k, "F"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'B'), (*coob, lbl)))
+                edges.append(((i, j, k, "B"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, k, 'E'),
-            (i, j, k, 'G'),
+            (i, j, k, "E"),
+            (i, j, k, "G"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'C'), (*coob, lbl)))
+                edges.append(((i, j, k, "C"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j, k, 'E'),
-            (i, j, k, 'H'),
+            (i, j, k, "E"),
+            (i, j, k, "H"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'D'), (*coob, lbl)))
+                edges.append(((i, j, k, "D"), (*coob, lbl)))
 
         for *coob, lbl in []:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'E'), (*coob, lbl)))
+                edges.append(((i, j, k, "E"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j + 1, k, 'C'),
-            (i + 1, j, k, 'D'),
+            (i, j + 1, k, "C"),
+            (i + 1, j, k, "D"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'F'), (*coob, lbl)))
+                edges.append(((i, j, k, "F"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i + 1, j, k + 1, 'A'),
-            (i, j, k + 1, 'B'),
-            (i + 1, j, k, 'D'),
+            (i + 1, j, k + 1, "A"),
+            (i, j, k + 1, "B"),
+            (i + 1, j, k, "D"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'G'), (*coob, lbl)))
+                edges.append(((i, j, k, "G"), (*coob, lbl)))
 
         for *coob, lbl in [
-            (i, j + 1, k + 1, 'A'),
-            (i, j, k + 1, 'B'),
-            (i, j + 1, k, 'C'),
+            (i, j + 1, k + 1, "A"),
+            (i, j, k + 1, "B"),
+            (i, j + 1, k, "C"),
         ]:
             coob = check_3d(coob, Lx, Ly, Lz, cyclic)
             if coob:
-                edges.append(((i, j, k, 'H'), (*coob, lbl)))
+                edges.append(((i, j, k, "H"), (*coob, lbl)))
 
     return sort_unique(edges)
+
+
+def edges_tree_rand(n, max_degree=None, seed=None):
+    """Return a random tree with ``n`` nodes. This a convenience function for
+    testing purposes and the trees generated are not guaranteed to be uniformly
+    random (for that see ``networkx.random_tree``).
+
+    Parameters
+    ----------
+    n : int
+        The number of nodes.
+    max_degree : int, optional
+        The maximum degree of the nodes. For example ``max_degree=3`` means
+        generate a binary tree.
+    seed : int, optional
+        The random seed.
+
+    Returns
+    -------
+    edges : list[(int, int)]
+    """
+    rng = random.Random(seed)
+    edges = []
+
+    if max_degree is None:
+        nodes = [0]
+        for i in range(1, n):
+            ib = rng.choice(nodes)
+            nodes.append(i)
+            edges.append((ib, i))
+    else:
+        degrees = {0: 0}
+        for i in range(1, n):
+            ib = rng.choice(list(degrees))
+            edges.append((ib, i))
+
+            degrees[i] = 1
+            if degrees[ib] + 1 == max_degree:
+                # node is finished
+                degrees.pop(ib)
+            else:
+                degrees[ib] += 1
+
+    return edges

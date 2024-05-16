@@ -5,22 +5,25 @@ import quimb as qu
 
 
 @pytest.mark.parametrize("sparse", [False, True])
-@pytest.mark.parametrize("stype", ['csr', 'csc'])
-@pytest.mark.parametrize("dtype", [
-    "don't pass", None, np.float64, np.complex128])
+@pytest.mark.parametrize("stype", ["csr", "csc"])
+@pytest.mark.parametrize(
+    "dtype", ["don't pass", None, np.float64, np.complex128]
+)
 def test_hamiltonian_builder(sparse, stype, dtype):
     from quimb.gen.operators import hamiltonian_builder
 
     @hamiltonian_builder
     def simple_ham(sparse=None, stype=None, dtype=None):
-        H = qu.qu([[0.0, 1.0],
-                   [1.0, 0.0]], sparse=True, stype='csr', dtype=dtype)
+        H = qu.qu(
+            [[0.0, 1.0], [1.0, 0.0]], sparse=True, stype="csr", dtype=dtype
+        )
         return H
 
     @hamiltonian_builder
     def simple_ham_complex(sparse=None, stype=None, dtype=None):
-        H = qu.qu([[0.0, 1.0j],
-                   [-1.0j, 0.0]], sparse=True, stype='csr', dtype=dtype)
+        H = qu.qu(
+            [[0.0, 1.0j], [-1.0j, 0.0]], sparse=True, stype="csr", dtype=dtype
+        )
         return H
 
     if dtype == "don't pass":
@@ -68,25 +71,25 @@ def test_hamiltonian_builder(sparse, stype, dtype):
 
 class TestSpinOperator:
     def test_spin_half(self):
-        Sx = qu.spin_operator('x', 1 / 2)
+        Sx = qu.spin_operator("x", 1 / 2)
         assert_allclose(Sx, [[0.0, 0.5], [0.5, 0.0]])
 
-        Sy = qu.spin_operator('y', 1 / 2)
+        Sy = qu.spin_operator("y", 1 / 2)
         assert_allclose(Sy, [[0.0, -0.5j], [0.5j, 0.0]])
 
-        Sz = qu.spin_operator('z', 1 / 2)
+        Sz = qu.spin_operator("z", 1 / 2)
         assert_allclose(Sz, [[0.5, 0.0], [0.0, -0.5]])
 
-        Sp = qu.spin_operator('+', 1 / 2)
+        Sp = qu.spin_operator("+", 1 / 2)
         assert_allclose(Sp, [[0.0, 1.0], [0.0, 0.0]])
 
-        Sm = qu.spin_operator('-', 1 / 2)
+        Sm = qu.spin_operator("-", 1 / 2)
         assert_allclose(Sm, [[0.0, 0.0], [1.0, 0.0]])
 
-        SI = qu.spin_operator('I', 1 / 2)
+        SI = qu.spin_operator("I", 1 / 2)
         assert_allclose(SI, [[1.0, 0.0], [0.0, 1.0]])
 
-    @pytest.mark.parametrize("label", ('x', 'y', 'z'))
+    @pytest.mark.parametrize("label", ("x", "y", "z"))
     @pytest.mark.parametrize("S", [1, 3 / 2, 2, 5 / 2])
     def test_spin_high(self, label, S):
         D = int(2 * S + 1)
@@ -96,57 +99,68 @@ class TestSpinOperator:
 
 class TestPauli:
     def test_pauli_dim2(self):
-        for dir in (1, 'x', 'X',
-                    2, 'y', 'Y',
-                    3, 'z', 'Z'):
+        for dir in (1, "x", "X", 2, "y", "Y", 3, "z", "Z"):
             x = qu.pauli(dir)
             assert_allclose(qu.eigvalsh(x), [-1, 1])
 
     def test_pauli_dim3(self):
-        for dir in (1, 'x', 'X',
-                    2, 'y', 'Y',
-                    3, 'z', 'Z'):
+        for dir in (1, "x", "X", 2, "y", "Y", 3, "z", "Z"):
             x = qu.pauli(dir, dim=3)
-            assert_allclose(qu.eigvalsh(x), [-1, 0, 1],
-                            atol=1e-15)
+            assert_allclose(qu.eigvalsh(x), [-1, 0, 1], atol=1e-15)
 
     def test_pauli_bad_dim(self):
         with pytest.raises(KeyError):
-            qu.pauli('x', 4)
+            qu.pauli("x", 4)
 
     def test_pauli_bad_dir(self):
         with pytest.raises(KeyError):
-            qu.pauli('w', 2)
+            qu.pauli("w", 2)
 
 
 class TestControlledZ:
     def test_controlled_z_dense(self):
-        cz = qu.controlled('z')
+        cz = qu.controlled("z")
         assert_allclose(cz, np.diag([1, 1, 1, -1]))
 
     def test_controlled_z_sparse(self):
-        cz = qu.controlled('z', sparse=True)
-        assert(qu.issparse(cz))
+        cz = qu.controlled("z", sparse=True)
+        assert qu.issparse(cz)
         assert_allclose(cz.A, np.diag([1, 1, 1, -1]))
 
 
 class TestGates:
-
-    @pytest.mark.parametrize("gate", ['Rx', 'Ry', 'Rz', 'T_gate', 'S_gate',
-                                      'CNOT', 'cX', 'cY', 'cZ', 'hadamard',
-                                      'phase_gate', 'iswap', 'swap', 'U_gate',
-                                      'fsim', 'fsimg'])
-    @pytest.mark.parametrize('dtype', [np.complex64, np.complex128])
-    @pytest.mark.parametrize('sparse', [False, True])
+    @pytest.mark.parametrize(
+        "gate",
+        [
+            "Rx",
+            "Ry",
+            "Rz",
+            "T_gate",
+            "S_gate",
+            "CNOT",
+            "cX",
+            "cY",
+            "cZ",
+            "hadamard",
+            "phase_gate",
+            "iswap",
+            "swap",
+            "U_gate",
+            "fsim",
+            "fsimg",
+        ],
+    )
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    @pytest.mark.parametrize("sparse", [False, True])
     def test_construct(self, gate, dtype, sparse):
-        if gate in {'Rx', 'Ry', 'Rz', 'phase_gate'}:
+        if gate in {"Rx", "Ry", "Rz", "phase_gate"}:
             args = (0.43827,)
-        elif gate in {'U_gate'}:
+        elif gate in {"U_gate"}:
             args = (0.1, 0.2, 0.3)
-        elif gate in {'fsim'}:
+        elif gate in {"fsim"}:
             args = (-1.3, 5.4)
-        elif gate in {'fsimg'}:
-            args = (-1.3, 5.4, 2., 3., 4.)
+        elif gate in {"fsimg"}:
+            args = (-1.3, 5.4, 2.0, 3.0, 4.0)
         else:
             args = ()
         G = getattr(qu, gate)(*args, dtype=dtype, sparse=sparse)
@@ -158,15 +172,15 @@ class TestGates:
 
     def test_gates_import(self):
         from quimb.gates import Z
+
         assert_allclose(Z, [[1, 0], [0, -1]])
 
     def test_fsim(self):
-        assert_allclose(qu.fsim(- qu.pi / 2, 0.0), qu.iswap(), atol=1e-12)
+        assert_allclose(qu.fsim(-qu.pi / 2, 0.0), qu.iswap(), atol=1e-12)
 
     def test_fsimg(self):
         assert_allclose(
-            qu.fsimg(- qu.pi / 2, 0.0, 0.0, 0.0, 0.0),
-            qu.iswap(), atol=1e-12
+            qu.fsimg(-qu.pi / 2, 0.0, 0.0, 0.0, 0.0), qu.iswap(), atol=1e-12
         )
 
 
@@ -176,7 +190,7 @@ class TestHamHeis:
         evals = qu.eigvalsh(h)
         assert_allclose(evals, [-0.75, 0.25, 0.25, 0.25])
         gs = qu.groundstate(h)
-        assert_allclose(qu.expec(gs, qu.singlet()), 1.)
+        assert_allclose(qu.expec(gs, qu.singlet()), 1.0)
 
     @pytest.mark.parametrize("parallel", [False, True])
     def test_ham_heis_sparse_cyclic_4(self, parallel):
@@ -209,27 +223,49 @@ class TestHamJ1J2:
     def test_ham_j1j2_4_bz(self):
         h = qu.ham_j1j2(4, j2=0.5, cyclic=True, bz=0)
         lk = qu.eigvalsh(h, k=11)
-        assert_allclose(lk, [-1.5, -1.5, -0.5, -0.5, -0.5, -0.5,
-                             -0.5, -0.5, -0.5, -0.5, -0.5])
+        assert_allclose(
+            lk,
+            [-1.5, -1.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5],
+        )
         h = qu.ham_j1j2(4, j2=0.5, cyclic=True, bz=0.05)
         lk = qu.eigvalsh(h, k=11)
-        assert_allclose(lk, [-1.5, -1.5, -0.55, -0.55, -0.55,
-                             -0.5, -0.5, -0.5, -0.45, -0.45, -0.45])
+        assert_allclose(
+            lk,
+            [
+                -1.5,
+                -1.5,
+                -0.55,
+                -0.55,
+                -0.55,
+                -0.5,
+                -0.5,
+                -0.5,
+                -0.45,
+                -0.45,
+                -0.45,
+            ],
+        )
 
 
 class TestHamMBL:
     @pytest.mark.parametrize("cyclic", [False, True])
     @pytest.mark.parametrize("sparse", [False, True])
-    @pytest.mark.parametrize("dh_dim", [1, 2, 3, 'y', 'xz'])
-    @pytest.mark.parametrize("dh_dist", ['s', 'g'])
+    @pytest.mark.parametrize("dh_dim", [1, 2, 3, "y", "xz"])
+    @pytest.mark.parametrize("dh_dist", ["s", "g"])
     def test_construct(self, cyclic, sparse, dh_dim, dh_dist):
-        qu.ham_mbl(n=3, dh=3, cyclic=cyclic, sparse=sparse, dh_dim=dh_dim,
-                   dh_dist=dh_dist)
+        qu.ham_mbl(
+            n=3,
+            dh=3,
+            cyclic=cyclic,
+            sparse=sparse,
+            dh_dim=dh_dim,
+            dh_dist=dh_dist,
+        )
 
     @pytest.mark.parametrize("cyclic", [False, True])
     @pytest.mark.parametrize("sparse", [False, True])
     def test_construct_qp(self, cyclic, sparse):
-        qu.ham_mbl(n=3, dh=3, cyclic=cyclic, sparse=sparse, dh_dist='qp')
+        qu.ham_mbl(n=3, dh=3, cyclic=cyclic, sparse=sparse, dh_dist="qp")
 
 
 class TestHamHeis2D:
@@ -238,8 +274,9 @@ class TestHamHeis2D:
     @pytest.mark.parametrize("parallel", [False, True])
     @pytest.mark.parametrize("bz", [0.0, 0.7])
     def test_construct(self, cyclic, sparse, parallel, bz):
-        qu.ham_heis_2D(2, 3, cyclic=cyclic, sparse=sparse,
-                       parallel=parallel, bz=bz)
+        qu.ham_heis_2D(
+            2, 3, cyclic=cyclic, sparse=sparse, parallel=parallel, bz=bz
+        )
 
 
 class TestSpinZProjector:
@@ -313,7 +350,6 @@ def test_3qubit_gates(sparse):
 
 
 class TestHubbardSpinless:
-
     def test_half_filling_groundstate(self):
         H = qu.ham_hubbard_hardcore(8, t=0.5, V=1.0, mu=1.0, cyclic=True)
         gs = qu.groundstate(H)

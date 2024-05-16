@@ -1,6 +1,6 @@
 """Tools for constructing MERA for arbitrary geometry.
 
-TODO:
+TODO::
 
     - [ ] 2D, 3D MERA classes
     - [ ] general strategies for arbitrary geometries
@@ -8,7 +8,7 @@ TODO:
     - [ ] handle dangling case
     - [ ] invariant generators?
 
- DONE:
+ DONE::
 
     - [x] layer_gate methods for arbitrary geometry
     - [x] 1D: generic way to handle finite and open boundary conditions
@@ -16,17 +16,18 @@ TODO:
 
 """
 import itertools
+import functools
+from quimb.tensor.tensor_core import (
+    Tensor,
+    IsoTensor,
+    oset_union,
+    prod,
+)
 from quimb.tensor.tensor_arbgeom import (
     TensorNetworkGenVector,
-    functools,
     oset,
     tags_to_oset,
     rand_uuid,
-    oset_union,
-    IsoTensor,
-    check_opt,
-    prod,
-    do,
     _compute_expecs_maybe_in_parallel,
     _tn_local_expectation,
 )
@@ -45,10 +46,10 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
     """
 
     _EXTRA_PROPS = (
-        '_site_tag_id',
-        '_sites',
-        '_site_ind_id',
-        '_layer_ind_id',
+        "_site_tag_id",
+        "_sites",
+        "_site_ind_id",
+        "_layer_ind_id",
     )
 
     @classmethod
@@ -156,7 +157,7 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         # want to propagate just site tags from tensors below
         old_tags = oset_union(t.tags for t in self._inds_get(*reindex_map))
 
-        if iso and 'TREE' in old_tags:
+        if iso and "TREE" in old_tags:
             raise ValueError(
                 "You can't place isometric tensors above tree tensors."
             )
@@ -164,23 +165,24 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         if not iso:
             # tensor is in lightcone of all sites
             tags |= all_site_tags
-            tags.add('TREE')
+            tags.add("TREE")
             left_inds = None
             if nabove > 1:
                 import warnings
+
                 warnings.warn(
                     "You are placing a tensor which is neither "
                     "isometric/unitary or a tree. Some methods might break."
                 )
         else:
             # just want site tags present on tensors below
-            tags |= (old_tags & all_site_tags)
+            tags |= old_tags & all_site_tags
             if nbelow == nabove:
-                tags.add('UNI')
+                tags.add("UNI")
             else:
-                tags.add('ISO')
+                tags.add("ISO")
             if nabove == 0:
-                tags.add('CAP')
+                tags.add("CAP")
             left_inds = below_ix
 
         # rewire and add tensor
@@ -210,7 +212,7 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         ----------
         fill_fn : callable
             A function with signature ``fill_fn(shape) -> array_like``.
-        operation : {"iso", "uni", "tree"}
+        operation : {"iso", "uni", "cap", "tree", "treecap"}
             The type of tensor to place.
         where : sequence of hashable
             The sites to layer the tensor above.
@@ -231,8 +233,6 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         --------
         layer_gate_raw
         """
-        check_opt("operation", operation, ("iso", "uni", "tree", "cap"))
-
         shape = []
         for site in where:
             if site in self._open_lower_sites:
@@ -247,8 +247,14 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
             current_size = prod(shape)
             new_size = min(current_size, max_bond)
             shape = (*shape, new_size)
-        else:  # "cap"
+        elif operation in ("cap", "treecap"):
+            # no new sitess
             shape = tuple(shape)
+        else:
+            raise ValueError(
+                f"Unknown operation: '{operation}'. Should be one of: "
+                "'uni', 'iso', 'cap', 'tree', or 'treecap'."
+            )
 
         G = fill_fn(shape)
         self.layer_gate_raw(
@@ -257,14 +263,15 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
             new_sites=new_sites,
             tags=tags,
             all_site_tags=all_site_tags,
-            iso=operation != "tree",
+            iso="tree" not in operation,
         )
 
     def partial_trace(
         self,
         keep,
-        optimize='auto-hq',
+        optimize="auto-hq",
         rehearse=False,
+        preserve_tensor=False,
         **contract_opts,
     ):
         """Partial trace out all sites except those in ``keep``, making use of
@@ -298,31 +305,29 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         k = self.select_any(tags, virtual=False)
 
         kix = tuple(map(self.site_ind, keep))
-        bix = tuple(f'b{site}' for site in keep)
+        bix = tuple(f"b{site}" for site in keep)
         b = k.reindex(dict(zip(kix, bix))).conj_()
         tn = b | k
 
-        if rehearse == 'tn':
+        if rehearse == "tn":
             return tn
 
-        if rehearse == 'tree':
-            return tn.contraction_tree(
-                output_inds=bix + kix,
-                optimize=optimize,
-                **contract_opts
-            )
+        contract_opts["optimize"] = optimize
 
-        return tn.to_dense(
-            bix, kix,
-            optimize=optimize,
-            **contract_opts,
-        )
+        if rehearse == "tree":
+            return tn.contraction_tree(output_inds=bix + kix, **contract_opts)
+
+        t = tn.contract(output_inds=bix + kix, **contract_opts)
+        if preserve_tensor:
+            return t
+
+        return t.to_dense(bix, kix)
 
     def local_expectation(
         self,
         G,
         where,
-        optimize='auto-hq',
+        optimize="auto-hq",
         rehearse=False,
         **contract_opts,
     ):
@@ -355,22 +360,34 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
         --------
         partial_trace
         """
-        rho = self.partial_trace(
+        t_rho = self.partial_trace(
             keep=where,
             optimize=optimize,
             rehearse=rehearse,
+            preserve_tensor=True,
             **contract_opts,
         )
 
         if rehearse:
-            return rho
+            # returned t_rho is the tree or whole TN etc.
+            return t_rho
 
-        return do("tensordot", rho, G, axes=((0, 1), (1, 0)))
+        # make sure G is compatible shape (could be supplied in 'matrix' form)
+        if G.shape != t_rho.shape:
+            # n.b. both are hermitian so no 'transpose' needed here
+            G = G.reshape(t_rho.shape)
+
+        # make gate tensor
+        nphys = t_rho.ndim // 2
+        bix, kix = t_rho.inds[:nphys], t_rho.inds[nphys:]
+        t_G = Tensor(G, inds=kix + bix)
+
+        return t_rho @ t_G
 
     def compute_local_expectation(
         self,
         terms,
-        optimize='auto-hq',
+        optimize="auto-hq",
         return_all=False,
         rehearse=False,
         executor=None,
@@ -450,13 +467,14 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
                 new_bond_dim=new_bond_dim,
                 rand_strength=rand_strength,
                 inds_to_expand=inds_to_expand,
-                inplace=inplace)
+                inplace=inplace,
+            )
 
         tn = self if inplace else self.copy()
 
         tids_done = oset()
         inds_done = oset(tn.site_inds)
-        tids_todo = tn._get_tids_from_inds(inds_done, 'any')
+        tids_todo = tn._get_tids_from_inds(inds_done, "any")
 
         # XXX: switch this logic to get_tree_span('CAP')? to
         # ensure topologically sorted order?
@@ -478,7 +496,7 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
 
             elif len(above_inds) == 1:
                 # isometry, bond can expand
-                ix, = above_inds
+                (ix,) = above_inds
                 cur_sz = t.ind_size(ix)
                 rem_inds_sz = t.size // cur_sz
 
@@ -488,7 +506,8 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
                     tn.expand_bond_dimension_(
                         new_bond_dim=new_sz,
                         rand_strength=rand_strength,
-                        inds_to_expand=ix)
+                        inds_to_expand=ix,
+                    )
 
             elif len(above_inds) == len(below_inds):
                 # unitary gate, maintain bond sizes
@@ -496,7 +515,7 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
                     tn.expand_bond_dimension_(
                         new_bond_dim=t.ind_size(bix),
                         rand_strength=rand_strength,
-                        inds_to_expand=aix
+                        inds_to_expand=aix,
                     )
 
             else:
@@ -504,14 +523,15 @@ class TensorNetworkGenIso(TensorNetworkGenVector):
 
             tids_done.add(tid)
             inds_done.update(above_inds)
-            for tid_above in tn._get_tids_from_inds(above_inds, 'any'):
+            for tid_above in tn._get_tids_from_inds(above_inds, "any"):
                 if tid_above not in tids_done:
                     tids_todo.add(tid_above)
 
         return tn
 
     expand_bond_dimension_ = functools.partialmethod(
-        expand_bond_dimension, inplace=True)
+        expand_bond_dimension, inplace=True
+    )
 
 
 def calc_1d_unis_isos(sites, block_size, cyclic, group_from_right):
@@ -544,9 +564,9 @@ def calc_1d_unis_isos(sites, block_size, cyclic, group_from_right):
         always form a tree such a bipartition is natural.
     group_from_right : bool
         Wether to group the sites starting from the left or right. This only
-        matters if ``block_size`` does not divide the number of sites. Alternating
-        between left and right more evenly tiles the unitaries and isometries,
-        especially at lower layers.
+        matters if ``block_size`` does not divide the number of sites.
+        Alternating between left and right more evenly tiles the unitaries and
+        isometries, especially at lower layers.
 
     Returns
     -------
@@ -610,10 +630,12 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
     thus has methods like ``compute_local_expectation``.
     """
 
-    _EXTRA_PROPS = tuple(sorted(
-        set(TensorNetwork1DVector._EXTRA_PROPS) |
-        set(TensorNetworkGenIso._EXTRA_PROPS)
-    ))
+    _EXTRA_PROPS = tuple(
+        sorted(
+            set(TensorNetwork1DVector._EXTRA_PROPS)
+            | set(TensorNetworkGenIso._EXTRA_PROPS)
+        )
+    )
     _CONTRACT_STRUCTURED = False
 
     def __init__(self, *args, **kwargs):
@@ -632,7 +654,7 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
         uni_fill_fn=None,
         iso_fill_fn=None,
         cap_fill_fn=None,
-        **kwargs
+        **kwargs,
     ):
         """Create a 1D MERA using ``fill_fn(shape) -> array_like`` to fill the
         tensors.
@@ -688,21 +710,36 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
             if len(remaining_sites) <= block_size + 1:
                 # can terminate with a 'cap'
                 mera.layer_gate_fill_fn(
-                    cap_fill_fn, "cap", remaining_sites, D, tags=f'LAYER{lyr}',
+                    cap_fill_fn,
+                    "cap",
+                    remaining_sites,
+                    D,
+                    tags=f"LAYER{lyr}",
                 )
                 break
 
             # else add a disentangling and grouping layer
             uni_groups, iso_groups = calc_1d_unis_isos(
-                remaining_sites, block_size, cyclic, group_from_right=lyr % 2,
+                remaining_sites,
+                block_size,
+                cyclic,
+                group_from_right=lyr % 2,
             )
             for uni_sites in uni_groups:
                 mera.layer_gate_fill_fn(
-                    uni_fill_fn, "uni", uni_sites, D, tags=f'LAYER{lyr}',
+                    uni_fill_fn,
+                    "uni",
+                    uni_sites,
+                    D,
+                    tags=f"LAYER{lyr}",
                 )
             for iso_sites in iso_groups:
                 mera.layer_gate_fill_fn(
-                    iso_fill_fn, "iso", iso_sites, D, tags=f'LAYER{lyr}',
+                    iso_fill_fn,
+                    "iso",
+                    iso_sites,
+                    D,
+                    tags=f"LAYER{lyr}",
                 )
 
         mera._num_layers = lyr + 1
@@ -718,8 +755,8 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
         block_size=2,
         phys_dim=2,
         cyclic=True,
-        isometrize_method="qr",
-        **kwargs
+        isometrize_method="svd",
+        **kwargs,
     ):
         """Return a random (optionally isometrized) MERA.
 
@@ -745,10 +782,16 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
             then the MERA is not isometrized.
         """
         import numpy as np
+
         rng = np.random.default_rng(seed)
         mera = cls.from_fill_fn(
             lambda shape: rng.normal(size=shape),
-            L, D, block_size, phys_dim, cyclic, **kwargs,
+            L,
+            D,
+            block_size,
+            phys_dim,
+            cyclic,
+            **kwargs,
         )
         if isometrize_method is not None:
             mera.isometrize_(isometrize_method)
@@ -757,3 +800,66 @@ class MERA(TensorNetwork1DVector, TensorNetworkGenIso):
     @property
     def num_layers(self):
         return self._num_layers
+
+
+def TTN_randtree_rand(
+    sites,
+    D,
+    phys_dim=2,
+    group_size=2,
+    iso=False,
+    seed=None,
+    **kwargs,
+):
+    """Return a randomly constructed tree tensor network.
+
+    Parameters
+    ----------
+    sites : list of hashable
+        The sites of the tensor network.
+    D : int
+        The maximum bond dimension.
+    phys_dim : int, optional
+        The dimension of the physical indices.
+    group_size : int, optional
+        How many sites to group together in each tensor.
+    iso : bool, optional
+        Whether to build the tree with an isometric flow towards the top.
+    seed : int, optional
+        A random seed.
+    kwargs
+        Supplied to ``TensorNetworkGenIso.empty``.
+
+    Returns
+    -------
+    ttn : TensorNetworkGenIso
+        The tree tensor network.
+    """
+    import numpy as np
+
+    sites = list(sites)
+
+    rng = np.random.default_rng(seed)
+    tn = TensorNetworkGenIso.empty(sites, phys_dim=phys_dim, **kwargs)
+
+    while len(sites) > group_size + 1:
+        # randomly pick two sites to merge
+        merge = sorted(
+            sites.pop(rng.integers(len(sites))) for _ in range(group_size)
+        )
+        tn.layer_gate_fill_fn(
+            lambda shape: rng.normal(size=shape),
+            "iso" if iso else "tree",
+            merge,
+            max_bond=D,
+        )
+        sites.append(merge[0])
+
+    tn.layer_gate_fill_fn(
+        lambda shape: rng.normal(size=shape),
+        "cap" if iso else "treecap",
+        sites,
+        max_bond=D,
+    )
+
+    return tn

@@ -1,7 +1,31 @@
 [build-system]
+build-backend = "setuptools.build_meta"
 requires = [
     "setuptools>=45",
     "setuptools_scm[toml]>=6.2"
 ]
 
 [tool.setuptools_scm]
+write_to = "quimb/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = "tests"
+addopts = "--cov=quimb --cov-report term-missing --cov-report xml:coverage.xml --verbose --durations=10"
+filterwarnings = "once"
+
+[tool.coverage.run]
+omit = ["*/quimb/experimental/*"]
+source = ["quimb"]
+
+[tool.pylama]
+ignore = "C901"
+max_line_length = 79
+
+[tool.ruff]
+line-length = 79
+target-version = "py38"
+ignore = ["E741"]
+
+[tool.black]
+line-length = 79
+target-version = ['py38']

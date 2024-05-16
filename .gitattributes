@@ -16,3 +16,6 @@
 *.rtf	 diff=astextplain
 *.RTF	 diff=astextplain
 quimb/_version.py export-subst
+
+# ensure quimb appears as a python project on github
+*.ipynb linguist-language=Python

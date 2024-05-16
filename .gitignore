@@ -116,6 +116,7 @@ $RECYCLE.BIN/
 *.lnk
 
 docs/_autosummary/
+docs/autoapi
 
 .fuse_hidden*
 
@@ -128,3 +129,4 @@ docs/_autosummary/
 
 # quimb specific
 ctg_cache
+quimb/_version.py
