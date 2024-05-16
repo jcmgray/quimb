@@ -411,6 +411,7 @@ def _check_left_right_isom(method, absorb):
     return left_isom, right_isom
 
 
+@functools.singledispatch
 def tensor_split(
     T,
     left_inds,
@@ -596,6 +597,7 @@ def tensor_split(
     return TensorNetwork(tensors, virtual=True)
 
 
+@functools.singledispatch
 def tensor_canonize_bond(
     T1, T2, absorb="right", gauges=None, gauge_smudge=1e-6, **split_opts
 ):
@@ -699,6 +701,7 @@ def choose_local_compress_gauge_settings(
     return canonize_distance, canonize_after_distance, mode
 
 
+@functools.singledispatch
 def tensor_compress_bond(
     T1,
     T2,
@@ -858,6 +861,7 @@ def tensor_compress_bond(
         T2 *= fact_1_2
 
 
+@functools.singledispatch
 def tensor_balance_bond(t1, t2, smudge=1e-6):
     """Gauge the bond between two tensors such that the norm of the 'columns'
     of the tensors on each side is the same for each index of the bond.
