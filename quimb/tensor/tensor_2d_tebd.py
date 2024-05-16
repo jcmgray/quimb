@@ -5,23 +5,24 @@ from itertools import starmap
 
 import numpy as np
 import scipy.sparse.linalg as spla
-from autoray import do, dag, conj, reshape
+from autoray import conj, dag, do, reshape
 
-from ..utils import pairwise, default_to_neutral_style
+from ..utils import default_to_neutral_style, pairwise
+from .contraction import contract_strategy
 from .drawing import get_colors
-from .tensor_core import Tensor, contract_strategy
 from .optimize import TNOptimizer
 from .tensor_2d import (
-    gen_2d_bonds,
-    calc_plaquette_sizes,
     calc_plaquette_map,
-    plaquette_to_sites,
+    calc_plaquette_sizes,
+    gen_2d_bonds,
     gen_long_range_path,
     gen_long_range_swap_path,
-    swap_path_to_long_range_path,
     nearest_neighbors,
+    plaquette_to_sites,
+    swap_path_to_long_range_path,
 )
 from .tensor_arbgeom_tebd import LocalHamGen, TEBDGen
+from .tensor_core import Tensor
 
 
 class LocalHam2D(LocalHamGen):
