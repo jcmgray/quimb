@@ -9,7 +9,7 @@ dependencies:
   - joblib
   - matplotlib
   - networkx
-  - numba!=0.59.1
+  - numba>=0.56
   - numpy
   - psutil
   - pytest
