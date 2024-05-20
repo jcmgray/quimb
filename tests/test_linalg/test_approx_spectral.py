@@ -307,6 +307,9 @@ class TestLanczosApprox:
         assert_allclose(actual_Z, approx_Z, rtol=3e-2)
 
     def test_approx_spectral_plot(self):
+        import matplotlib
+
+        matplotlib.use("Template")
         X = rand_herm(1000, sparse=True)
         approx_spectral_function(X, lambda x: abs(x), plot=True)
 
