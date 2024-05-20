@@ -1,61 +1,38 @@
 """Core tensor network tools."""
 
+import contextlib
 import copy
 import functools
-from operator import add
-import contextlib
-import numpy as np
-import scipy.sparse.linalg as spla
-import opt_einsum as oe
-from opt_einsum.contract import parse_backend, _tensordot, _transpose
-from autoray import conj
-
-from ...utils import oset, valmap, check_opt
-from .block_tools import sqrt, inv_with_smudge
-from .block_interface import Constructor
-
-from ..tensor_core import (
-    TensorNetwork,
-    rand_uuid,
-    tags_to_oset,
-    group_inds,
-    tensor_contract,
-    get_tensor_linop_backend,
-)
-from .tensor_block import tensor_split as _tensor_split
-from .tensor_block import (
-    tensor_canonize_bond,
-    tensor_compress_bond,
-    BlockTensor,
-    BlockTensorNetwork,
-    tensor_balance_bond,
-)
 from functools import wraps
 
+import numpy as np
+import opt_einsum as oe
+import scipy.sparse.linalg as spla
+from autoray import conj
+from opt_einsum.contract import _tensordot, _transpose, parse_backend
 
-def compress_decorator(fn):
-    @wraps(fn)
-    def wrapper(T1, T2, *args, **kwargs):
-        site1 = T1.get_fermion_info()[1]
-        site2 = T2.get_fermion_info()[1]
-        if site1 < site2:
-            fn(T1, T2, *args, **kwargs)
-        else:
-            absorb = kwargs.pop("absorb")
-            kwargs["absorb"] = {
-                "left": "right",
-                "right": "left",
-                "both": "both",
-                None: None,
-            }[absorb]
-            fn(T2, T1, *args, **kwargs)
-        return T1, T2
-
-    return wrapper
-
-
-tensor_compress_bond = compress_decorator(tensor_compress_bond)
-tensor_canonize_bond = compress_decorator(tensor_canonize_bond)
+from ...utils import check_opt, oset, valmap
+from ..tensor_core import (
+    TensorNetwork,
+    get_tensor_linop_backend,
+    group_inds,
+    rand_uuid,
+    tags_to_oset,
+    tensor_canonize_bond,
+    tensor_compress_bond,
+    tensor_contract,
+    tensor_split,
+)
+from .block_interface import Constructor
+from .block_tools import inv_with_smudge, sqrt
+from .tensor_block import (
+    BlockTensor,
+    BlockTensorNetwork,
+    tensor_balance_bond_block_tensor,
+    tensor_canonize_bond_block_tensor,
+    tensor_compress_bond_block_tensor,
+    tensor_split_block_tensor,
+)
 
 
 class FermionSpace:
@@ -568,62 +545,6 @@ def _launch_fermion_expression(
     return tensors[0]
 
 
-def tensor_split(
-    T,
-    left_inds,
-    method="svd",
-    get=None,
-    absorb="both",
-    max_bond=None,
-    cutoff=1e-10,
-    cutoff_mode="rel",
-    renorm=None,
-    ltags=None,
-    rtags=None,
-    stags=None,
-    bond_ind=None,
-    right_inds=None,
-    qpn_info=None,
-):
-    if get is not None:
-        return _tensor_split(
-            T,
-            left_inds,
-            method=method,
-            get=get,
-            absorb=absorb,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            renorm=renorm,
-            ltags=ltags,
-            rtags=rtags,
-            stags=stags,
-            bond_ind=bond_ind,
-            right_inds=right_inds,
-            qpn_info=qpn_info,
-        )
-    else:
-        tensors = _tensor_split(
-            T,
-            left_inds,
-            method=method,
-            get="tensors",
-            absorb=absorb,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            renorm=renorm,
-            ltags=ltags,
-            rtags=rtags,
-            stags=stags,
-            bond_ind=bond_ind,
-            right_inds=right_inds,
-            qpn_info=qpn_info,
-        )
-        return FermionTensorNetwork(tensors[::-1], check_collisions=False)
-
-
 def is_mergeable(*ts_or_tsn):
     """Check if all FermionTensor or FermionTensorNetwork objects
     are part of the same FermionSpace
@@ -701,15 +622,6 @@ def _dispatch_fermion_space(*tensors, inplace=True):
     return fs, tid_lst
 
 
-FERMION_FUNCS = {
-    "expression_launcher": _launch_fermion_expression,
-    "tensor_split": tensor_split,
-    "tensor_compress_bond": tensor_compress_bond,
-    "tensor_canonize_bond": tensor_canonize_bond,
-    "tensor_balance_bond": tensor_balance_bond,
-}
-
-
 def _split_and_replace_in_fs(T, insert_gauge=False, **compress_opts):
     compress_opts["get"] = "tensors"
     tensors = T.split(**compress_opts)
@@ -771,10 +683,6 @@ class FermionTensor(BlockTensor):
         else:
             self._avoid_phase = False
             self._phase = dict()
-
-    @property
-    def custom_funcs(self):
-        return FERMION_FUNCS
 
     @property
     def avoid_phase(self):
@@ -905,6 +813,95 @@ class FermionTensor(BlockTensor):
         ``TensorNetwork`` into a new ``TensorNetwork``.
         """
         return FermionTensorNetwork((self, other), virtual=True)
+
+
+@tensor_split.register(FermionTensor)
+def tensor_split_fermion_tensor(
+    T,
+    left_inds,
+    method="svd",
+    get=None,
+    absorb="both",
+    max_bond=None,
+    cutoff=1e-10,
+    cutoff_mode="rel",
+    renorm=None,
+    ltags=None,
+    rtags=None,
+    stags=None,
+    bond_ind=None,
+    right_inds=None,
+    qpn_info=None,
+):
+    if get is not None:
+        return tensor_split_block_tensor(
+            T,
+            left_inds,
+            method=method,
+            get=get,
+            absorb=absorb,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            renorm=renorm,
+            ltags=ltags,
+            rtags=rtags,
+            stags=stags,
+            bond_ind=bond_ind,
+            right_inds=right_inds,
+            qpn_info=qpn_info,
+        )
+    else:
+        tensors = tensor_split_block_tensor(
+            T,
+            left_inds,
+            method=method,
+            get="tensors",
+            absorb=absorb,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            renorm=renorm,
+            ltags=ltags,
+            rtags=rtags,
+            stags=stags,
+            bond_ind=bond_ind,
+            right_inds=right_inds,
+            qpn_info=qpn_info,
+        )
+        return FermionTensorNetwork(tensors[::-1], check_collisions=False)
+
+
+def compress_decorator(fn):
+    @wraps(fn)
+    def wrapper(T1, T2, *args, **kwargs):
+        site1 = T1.get_fermion_info()[1]
+        site2 = T2.get_fermion_info()[1]
+        if site1 < site2:
+            fn(T1, T2, *args, **kwargs)
+        else:
+            absorb = kwargs.pop("absorb")
+            kwargs["absorb"] = {
+                "left": "right",
+                "right": "left",
+                "both": "both",
+                None: None,
+            }[absorb]
+            fn(T2, T1, *args, **kwargs)
+        return T1, T2
+
+    return wrapper
+
+
+tensor_compress_bond_fermion = compress_decorator(
+    tensor_compress_bond_block_tensor
+)
+tensor_compress_bond.register(FermionTensor, tensor_compress_bond_fermion)
+
+tensor_canonize_bond_fermion = compress_decorator(
+    tensor_canonize_bond_block_tensor
+)
+tensor_canonize_bond.register(FermionTensor, tensor_canonize_bond_fermion)
 
 
 # --------------------------------------------------------------------------- #
@@ -1047,11 +1044,6 @@ class FermionTensorNetwork(BlockTensorNetwork):
             other_tids = tags_to_oset(self.tensor_map.keys()) - tids
             gtid = list(other_tids)[0]
             self.tensor_map[gtid].flip_(global_flip=True)
-
-    def __setitem__(self, tags, tensor):
-        raise NotImplementedError(
-            "__setitem__ depreciated in Fermion Tensor Network to avoid ambiguity in FermionSpace"
-        )
 
     def copy(self, full=False, force=False):
         """For full copy, the tensors and underlying FermionSpace(all tensors in it) will

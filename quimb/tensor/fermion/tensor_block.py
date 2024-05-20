@@ -6,20 +6,22 @@ import numpy as np
 from opt_einsum.contract import _tensordot, _transpose, parse_backend
 
 from ...utils import check_opt, oset
-
 from ..tensor_core import (
     Tensor,
     TensorNetwork,
-    tags_to_oset,
-    rand_uuid,
     _parse_split_opts,
+    rand_uuid,
+    tags_to_oset,
+    tensor_balance_bond,
+    tensor_canonize_bond,
+    tensor_compress_bond,
     tensor_contract,
+    tensor_split,
 )
 from .block_tools import (
-    get_smudge_balance,
-    sqrt,
-    inv_with_smudge,
     add_with_smudge,
+    get_smudge_balance,
+    inv_with_smudge,
 )
 
 # --------------------------------------------------------------------------- #
@@ -101,201 +103,6 @@ def flip_pattern(pattern):
     return "".join([string_inv[ix] for ix in pattern])
 
 
-def tensor_split(
-    T,
-    left_inds,
-    method="svd",
-    get=None,
-    absorb="both",
-    max_bond=None,
-    cutoff=1e-10,
-    cutoff_mode="rel",
-    renorm=None,
-    ltags=None,
-    rtags=None,
-    stags=None,
-    bond_ind=None,
-    right_inds=None,
-    qpn_info=None,
-):
-    if left_inds is None:
-        left_inds = oset(T.inds) - oset(right_inds)
-    else:
-        left_inds = tags_to_oset(left_inds)
-
-    if right_inds is None:
-        right_inds = oset(T.inds) - oset(left_inds)
-
-    _left_inds = [T.inds.index(ind) for ind in left_inds]
-    _right_inds = [T.inds.index(ind) for ind in right_inds]
-
-    if get == "values":
-        raise NotImplementedError
-
-    opts = _parse_split_opts(
-        method, cutoff, absorb, max_bond, cutoff_mode, renorm
-    )
-
-    # ``s`` itself will be None unless ``absorb=None`` is specified
-    if method == "svd":
-        left, s, right = T.data.tensor_svd(
-            _left_inds, right_idx=_right_inds, **opts
-        )
-    elif method == "qr":
-        if absorb == "left":
-            mod = "lq"
-        else:
-            mod = "qr"
-        s = None
-        left, right = T.data.tensor_qr(
-            _left_inds, right_idx=_right_inds, mod=mod
-        )
-    else:
-        raise NotImplementedError
-
-    if get == "arrays":
-        if absorb is None:
-            return left, s, right
-        return left, right
-
-    if bond_ind is None:
-        if absorb is None:
-            bond_ind = (rand_uuid(), rand_uuid())
-        else:
-            bond_ind = (rand_uuid(),)
-    else:
-        if absorb is None:
-            if isinstance(bond_ind, str):
-                bond_ind = (bond_ind, rand_uuid())
-            else:
-                if len(bond_ind) != 2:
-                    raise ValueError(
-                        "for absorb=None, bond_ind must be a tuple/list of two strings"
-                    )
-        else:
-            if isinstance(bond_ind, str):
-                bond_ind = (bond_ind,)
-
-    ltags = T.tags | tags_to_oset(ltags)
-    rtags = T.tags | tags_to_oset(rtags)
-
-    Tl = T.__class__(data=left, inds=(*left_inds, bond_ind[0]), tags=ltags)
-    Tr = T.__class__(data=right, inds=(bond_ind[-1], *right_inds), tags=rtags)
-
-    if absorb is None:
-        stags = T.tags | tags_to_oset(stags)
-        Ts = T.__class__(data=s, inds=bond_ind, tags=stags)
-        tensors = (Tl, Ts, Tr)
-    else:
-        tensors = (Tl, Tr)
-
-    if get == "tensors":
-        return tensors
-
-    return BlockTensorNetwork(tensors, check_collisions=False)
-
-
-def tensor_canonize_bond(T1, T2, absorb="right", **split_opts):
-    check_opt("absorb", absorb, ("left", "both", "right"))
-
-    if absorb == "both":
-        split_opts.setdefault("cutoff", 0.0)
-        return tensor_compress_bond(T1, T2, **split_opts)
-
-    split_opts.setdefault("method", "qr")
-    shared_ix, left_env_ix = T1.filter_bonds(T2)
-
-    if absorb == "right":
-        new_T1, tRfact = T1.split(
-            left_env_ix, get="tensors", absorb=absorb, **split_opts
-        )
-        new_T2 = tRfact.contract(T2)
-    else:
-        tLfact, new_T2 = T2.split(
-            shared_ix, get="tensors", absorb=absorb, **split_opts
-        )
-        new_T1 = T1.contract(tLfact)
-
-    T1.modify(data=new_T1.data, inds=new_T1.inds)
-    T2.modify(data=new_T2.data, inds=new_T2.inds)
-
-
-def tensor_compress_bond(
-    T1, T2, reduced=True, absorb="both", info=None, **compress_opts
-):
-    shared_ix, left_env_ix = T1.filter_bonds(T2)
-    if not shared_ix:
-        raise ValueError("The tensors specified don't share an bond.")
-
-    if reduced:
-        # a) -> b)
-        T1_L, T1_R = T1.split(
-            left_inds=left_env_ix,
-            right_inds=shared_ix,
-            absorb="right",
-            get="tensors",
-            method="qr",
-        )
-        T2_L, T2_R = T2.split(
-            left_inds=shared_ix, absorb="left", get="tensors", method="qr"
-        )
-        # b) -> c)
-        M = T1_R @ T2_L
-        M.drop_tags()
-        # c) -> d)
-        M_L, *s, M_R = M.split(
-            left_inds=T1_L.bonds(M),
-            get="tensors",
-            absorb=absorb,
-            **compress_opts,
-        )
-
-        # make sure old bond being used
-        (ns_ix,) = M_L.bonds(M_R)
-        M_L.reindex_({ns_ix: shared_ix[0]})
-        M_R.reindex_({ns_ix: shared_ix[0]})
-
-        # d) -> e)
-        T1C = T1_L.contract(M_L)
-        T2C = M_R.contract(T2_R)
-    else:
-        T12 = T1 @ T2
-        T1C, *s, T2C = T12.split(
-            left_inds=left_env_ix,
-            get="tensors",
-            absorb=absorb,
-            **compress_opts,
-        )
-        T1C.transpose_like_(T1)
-        T2C.transpose_like_(T2)
-
-    # update with the new compressed data
-    T1.modify(data=T1C.data, inds=T1C.inds)
-    T2.modify(data=T2C.data, inds=T2C.inds)
-
-    if s and info is not None:
-        (info["singular_values"],) = s
-
-
-def tensor_balance_bond(t1, t2, smudge=1e-6):
-    (ix,) = t1.bonds(t2)
-    t1H = t1.H.reindex_({ix: ix + "*"})
-    t2H = t2.H.reindex_({ix: ix + "*"})
-    out1 = tensor_contract(t1H, t1.copy(), inplace=False)
-    out2 = tensor_contract(t2H, t2.copy(), inplace=False)
-    s1, s2 = get_smudge_balance(out1, out2, ix, smudge)
-    t1.multiply_index_diagonal_(ix, s1, location="back")
-    t2.multiply_index_diagonal_(ix, s2, location="front")
-
-
-BLOCK_FUNCS = {
-    "expression_launcher": _launch_block_expression,
-    "tensor_split": tensor_split,
-    "tensor_compress_bond": tensor_compress_bond,
-    "tensor_canonize_bond": tensor_canonize_bond,
-    "tensor_balance_bond": tensor_balance_bond,
-}
-
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -309,10 +116,6 @@ class BlockTensor(Tensor):
 
     def new_ind(self, name, size=1, axis=0):
         raise NotImplementedError
-
-    @property
-    def custom_funcs(self):
-        return BLOCK_FUNCS
 
     @property
     def symmetry(self):
@@ -466,6 +269,197 @@ class BlockTensor(Tensor):
         return BlockTensorNetwork((self, other), virtual=True)
 
     _EXTRA_PROPS = ()
+
+
+@tensor_split.register(BlockTensor)
+def tensor_split_block_tensor(
+    T,
+    left_inds,
+    method="svd",
+    get=None,
+    absorb="both",
+    max_bond=None,
+    cutoff=1e-10,
+    cutoff_mode="rel",
+    renorm=None,
+    ltags=None,
+    rtags=None,
+    stags=None,
+    bond_ind=None,
+    right_inds=None,
+    qpn_info=None,
+):
+    if left_inds is None:
+        left_inds = oset(T.inds) - oset(right_inds)
+    else:
+        left_inds = tags_to_oset(left_inds)
+
+    if right_inds is None:
+        right_inds = oset(T.inds) - oset(left_inds)
+
+    _left_inds = [T.inds.index(ind) for ind in left_inds]
+    _right_inds = [T.inds.index(ind) for ind in right_inds]
+
+    if get == "values":
+        raise NotImplementedError
+
+    opts = _parse_split_opts(
+        method, cutoff, absorb, max_bond, cutoff_mode, renorm
+    )
+
+    # ``s`` itself will be None unless ``absorb=None`` is specified
+    if method == "svd":
+        left, s, right = T.data.tensor_svd(
+            _left_inds, right_idx=_right_inds, **opts
+        )
+    elif method == "qr":
+        if absorb == "left":
+            mod = "lq"
+        else:
+            mod = "qr"
+        s = None
+        left, right = T.data.tensor_qr(
+            _left_inds, right_idx=_right_inds, mod=mod
+        )
+    else:
+        raise NotImplementedError
+
+    if get == "arrays":
+        if absorb is None:
+            return left, s, right
+        return left, right
+
+    if bond_ind is None:
+        if absorb is None:
+            bond_ind = (rand_uuid(), rand_uuid())
+        else:
+            bond_ind = (rand_uuid(),)
+    else:
+        if absorb is None:
+            if isinstance(bond_ind, str):
+                bond_ind = (bond_ind, rand_uuid())
+            else:
+                if len(bond_ind) != 2:
+                    raise ValueError(
+                        "for absorb=None, bond_ind must be a tuple/list of two strings"
+                    )
+        else:
+            if isinstance(bond_ind, str):
+                bond_ind = (bond_ind,)
+
+    ltags = T.tags | tags_to_oset(ltags)
+    rtags = T.tags | tags_to_oset(rtags)
+
+    Tl = T.__class__(data=left, inds=(*left_inds, bond_ind[0]), tags=ltags)
+    Tr = T.__class__(data=right, inds=(bond_ind[-1], *right_inds), tags=rtags)
+
+    if absorb is None:
+        stags = T.tags | tags_to_oset(stags)
+        Ts = T.__class__(data=s, inds=bond_ind, tags=stags)
+        tensors = (Tl, Ts, Tr)
+    else:
+        tensors = (Tl, Tr)
+
+    if get == "tensors":
+        return tensors
+
+    return BlockTensorNetwork(tensors, check_collisions=False)
+
+
+@tensor_canonize_bond.register(BlockTensor)
+def tensor_canonize_bond_block_tensor(T1, T2, absorb="right", **split_opts):
+    check_opt("absorb", absorb, ("left", "both", "right"))
+
+    if absorb == "both":
+        split_opts.setdefault("cutoff", 0.0)
+        return tensor_compress_bond(T1, T2, **split_opts)
+
+    split_opts.setdefault("method", "qr")
+    shared_ix, left_env_ix = T1.filter_bonds(T2)
+
+    if absorb == "right":
+        new_T1, tRfact = T1.split(
+            left_env_ix, get="tensors", absorb=absorb, **split_opts
+        )
+        new_T2 = tRfact.contract(T2)
+    else:
+        tLfact, new_T2 = T2.split(
+            shared_ix, get="tensors", absorb=absorb, **split_opts
+        )
+        new_T1 = T1.contract(tLfact)
+
+    T1.modify(data=new_T1.data, inds=new_T1.inds)
+    T2.modify(data=new_T2.data, inds=new_T2.inds)
+
+
+@tensor_compress_bond.register(BlockTensor)
+def tensor_compress_bond_block_tensor(
+    T1, T2, reduced=True, absorb="both", info=None, **compress_opts
+):
+    shared_ix, left_env_ix = T1.filter_bonds(T2)
+    if not shared_ix:
+        raise ValueError("The tensors specified don't share an bond.")
+
+    if reduced:
+        # a) -> b)
+        T1_L, T1_R = T1.split(
+            left_inds=left_env_ix,
+            right_inds=shared_ix,
+            absorb="right",
+            get="tensors",
+            method="qr",
+        )
+        T2_L, T2_R = T2.split(
+            left_inds=shared_ix, absorb="left", get="tensors", method="qr"
+        )
+        # b) -> c)
+        M = T1_R @ T2_L
+        M.drop_tags()
+        # c) -> d)
+        M_L, *s, M_R = M.split(
+            left_inds=T1_L.bonds(M),
+            get="tensors",
+            absorb=absorb,
+            **compress_opts,
+        )
+
+        # make sure old bond being used
+        (ns_ix,) = M_L.bonds(M_R)
+        M_L.reindex_({ns_ix: shared_ix[0]})
+        M_R.reindex_({ns_ix: shared_ix[0]})
+
+        # d) -> e)
+        T1C = T1_L.contract(M_L)
+        T2C = M_R.contract(T2_R)
+    else:
+        T12 = T1 @ T2
+        T1C, *s, T2C = T12.split(
+            left_inds=left_env_ix,
+            get="tensors",
+            absorb=absorb,
+            **compress_opts,
+        )
+        T1C.transpose_like_(T1)
+        T2C.transpose_like_(T2)
+
+    # update with the new compressed data
+    T1.modify(data=T1C.data, inds=T1C.inds)
+    T2.modify(data=T2C.data, inds=T2C.inds)
+
+    if s and info is not None:
+        (info["singular_values"],) = s
+
+
+@tensor_balance_bond.register(BlockTensor)
+def tensor_balance_bond_block_tensor(t1, t2, smudge=1e-6):
+    (ix,) = t1.bonds(t2)
+    t1H = t1.H.reindex_({ix: ix + "*"})
+    t2H = t2.H.reindex_({ix: ix + "*"})
+    out1 = tensor_contract(t1H, t1.copy(), inplace=False)
+    out2 = tensor_contract(t2H, t2.copy(), inplace=False)
+    s1, s2 = get_smudge_balance(out1, out2, ix, smudge)
+    t1.multiply_index_diagonal_(ix, s1, location="back")
+    t2.multiply_index_diagonal_(ix, s2, location="front")
 
 
 # --------------------------------------------------------------------------- #
