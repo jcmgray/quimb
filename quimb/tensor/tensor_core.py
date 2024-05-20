@@ -183,6 +183,7 @@ def maybe_realify_scalar(data):
     return data
 
 
+@functools.singledispatch
 def tensor_contract(
     *tensors,
     output_inds=None,
