@@ -706,10 +706,9 @@ class FermionTensor(BlockTensor):
 def _tensor_contract_fermion_expression(
     expr,
     tensors,
-    inplace=False,
-    backend="auto",
     preserve_tensor=False,
     drop_tags=False,
+    inplace=False,
     **kwargs,
 ):
     evaluate_constants = kwargs.pop("evaluate_constants", False)
@@ -793,9 +792,9 @@ def tensor_contract_fermion(
     output_inds=None,
     optimize=None,
     get=None,
-    backend=None,
     preserve_tensor=False,
     drop_tags=False,
+    inplace=False,
     **contract_opts,
 ):
     expr = tensor_contract.dispatch(Tensor)(
@@ -805,7 +804,6 @@ def tensor_contract_fermion(
         get="expression",
         **contract_opts,
     )
-
     if get == "expression":
         return expr
 
@@ -815,10 +813,9 @@ def tensor_contract_fermion(
     return _tensor_contract_fermion_expression(
         expr,
         tensors,
-        inplace=False,
-        backend=backend,
         preserve_tensor=preserve_tensor,
         drop_tags=drop_tags,
+        inplace=inplace,
         **contract_opts,
     )
 
