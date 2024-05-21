@@ -6,13 +6,12 @@ import functools
 from functools import wraps
 
 import numpy as np
-import opt_einsum as oe
 import scipy.sparse.linalg as spla
 from autoray import conj
-from opt_einsum.contract import _tensordot, _transpose, parse_backend
 
 from ...utils import check_opt, oset, valmap
 from ..tensor_core import (
+    Tensor,
     TensorNetwork,
     get_tensor_linop_backend,
     group_inds,
@@ -28,10 +27,9 @@ from .block_tools import inv_with_smudge, sqrt
 from .tensor_block import (
     BlockTensor,
     BlockTensorNetwork,
-    tensor_balance_bond_block_tensor,
-    tensor_canonize_bond_block_tensor,
-    tensor_compress_bond_block_tensor,
-    tensor_split_block_tensor,
+    tensor_canonize_bond_block,
+    tensor_compress_bond_block,
+    tensor_split_block,
 )
 
 
@@ -433,116 +431,6 @@ class FermionSpace:
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
-def _launch_fermion_expression(
-    expr,
-    tensors,
-    inplace=False,
-    backend="auto",
-    preserve_tensor=False,
-    **kwargs,
-):
-    if len(tensors) == 1:
-        return tensors[0]
-    evaluate_constants = kwargs.pop("evaluate_constants", False)
-    if evaluate_constants:
-        raise NotImplementedError
-
-    if hasattr(expr, "contraction_list"):
-        contraction_list = expr.contraction_list
-    else:
-        contraction_list = expr.fn.contraction_list
-    fs, tid_lst = _dispatch_fermion_space(*tensors, inplace=inplace)
-    if inplace:
-        tensors = list(tensors)
-    else:
-        tensors = [fs.tensor_order[tid][0] for tid in tid_lst]
-
-    operands = [Ta.data for Ta in tensors]
-    global_phase = 0
-    _local_inds = []
-    backend = parse_backend(operands, backend)
-    # Start contraction loop
-    for num, contraction in enumerate(contraction_list):
-        inds, idx_rm, einsum_str, _, _ = contraction
-        tmp_operands = [tensors.pop(x) for x in inds]
-        # Call tensordot (check if should prefer einsum, but only if available)
-        input_str, results_index = einsum_str.split("->")
-        input_left, input_right = input_str.split(",")
-        contract_out = (oset(input_left) | oset(input_right)) - (
-            oset(input_left) & oset(input_right)
-        )
-        if contract_out == oset(results_index):
-            Ta, Tb = tmp_operands
-            input_str, results_index = einsum_str.split("->")
-            tid1, site1 = Ta.get_fermion_info()
-            tid2, site2 = Tb.get_fermion_info()
-            if site1 < site2:
-                fs.move(tid2, site1 + 1)
-                input_right, input_left = input_left, input_right
-                Ta, Tb = Tb, Ta
-            else:
-                fs.move(tid1, site2 + 1)
-            tensor_result = "".join(
-                s for s in input_left + input_right if s not in idx_rm
-            )
-            # Find indices to contract over
-            left_pos, right_pos = [], []
-            for s in idx_rm:
-                left_pos.append(input_left.find(s))
-                right_pos.append(input_right.find(s))
-
-            # Contract!
-            new_view = _tensordot(
-                Ta.data,
-                Tb.data,
-                axes=(tuple(left_pos), tuple(right_pos)),
-                backend=backend,
-            )
-
-            global_phase += Ta.phase.get("global_flip", False) + Tb.phase.get(
-                "global_flip", False
-            )
-            _local_inds.extend(Ta.phase.get("local_inds", []))
-            _local_inds.extend(Tb.phase.get("local_inds", []))
-
-            o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + [
-                ind for ind in Tb.inds if ind not in Ta.inds
-            ]
-
-            # Build a new view if needed
-            if tensor_result != results_index:
-                transpose = tuple(map(tensor_result.index, results_index))
-                new_view = _transpose(
-                    new_view, axes=transpose, backend=backend
-                )
-                o_ix = [o_ix[ix] for ix in transpose]
-
-            o_tags = oset.union(Ta.tags, Tb.tags)
-            if len(o_ix) != 0 or preserve_tensor:
-                new_view = Ta.__class__(data=new_view, inds=o_ix, tags=o_tags)
-                fs.replace_tensor(min(site1, site2), new_view, virtual=True)
-                fs.remove_tensor(min(site1, site2) + 1)
-        # Call einsum
-        else:
-            raise NotImplementedError(
-                "Generic Einsum Operations not supported"
-            )
-        # Append new items and dereference what we can
-        tensors.append(new_view)
-        del tmp_operands, new_view
-
-    if isinstance(tensors[0], FermionTensor):
-        local_inds = []
-        for ind in tensors[0].inds:
-            if _local_inds.count(ind) == 1:
-                local_inds.append(ind)
-        global_phase = (global_phase % 2) == 1
-        tensors[0].phase = {
-            "global_flip": global_phase,
-            "local_inds": local_inds,
-        }
-
-    return tensors[0]
 
 
 def is_mergeable(*ts_or_tsn):
@@ -815,8 +703,128 @@ class FermionTensor(BlockTensor):
         return FermionTensorNetwork((self, other), virtual=True)
 
 
+def _tensor_contract_fermion_expression(
+    expr,
+    tensors,
+    inplace=False,
+    backend="auto",
+    preserve_tensor=False,
+    drop_tags=False,
+    **kwargs,
+):
+    evaluate_constants = kwargs.pop("evaluate_constants", False)
+    if evaluate_constants:
+        raise NotImplementedError
+
+    fs, tid_lst = _dispatch_fermion_space(*tensors, inplace=inplace)
+    if not inplace:
+        tensors = [fs.tensor_order[tid][0] for tid in tid_lst]
+
+    # this is the form specifies intermediates as
+    cls = tensors[0].__class__
+    tensors = {frozenset([i]): t for i, t in enumerate(tensors)}
+
+    global_phase = 0
+    _local_inds = []
+    # Start contraction loop
+    for p, l, r, tdot, arg, perm in expr.contractions:
+        if not tdot:
+            raise NotImplementedError(
+                f"Generic Einsum Operations not supported: {arg}."
+            )
+
+        Ta = tensors.pop(l)
+        Tb = tensors.pop(r)
+
+        tid1, site1 = Ta.get_fermion_info()
+        tid2, site2 = Tb.get_fermion_info()
+        if site1 < site2:
+            fs.move(tid2, site1 + 1)
+            Ta, Tb = Tb, Ta
+        else:
+            fs.move(tid1, site2 + 1)
+
+        # Contract!
+        new_view = np.tensordot(Ta.data, Tb.data, axes=arg)
+
+        global_phase += Ta.phase.get("global_flip", False) + Tb.phase.get(
+            "global_flip", False
+        )
+        _local_inds.extend(Ta.phase.get("local_inds", []))
+        _local_inds.extend(Tb.phase.get("local_inds", []))
+
+        o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + [
+            ind for ind in Tb.inds if ind not in Ta.inds
+        ]
+
+        if perm is not None:
+            new_view = np.transpose(new_view, axes=perm)
+            o_ix = [o_ix[ix] for ix in perm]
+
+        if not drop_tags:
+            o_tags = oset.union(Ta.tags, Tb.tags)
+        else:
+            o_tags = None
+
+        if len(o_ix) != 0 or preserve_tensor:
+            new_view = cls(data=new_view, inds=o_ix, tags=o_tags)
+            fs.replace_tensor(min(site1, site2), new_view, virtual=True)
+            fs.remove_tensor(min(site1, site2) + 1)
+
+        tensors[p] = new_view
+
+    if isinstance(new_view, FermionTensor):
+        local_inds = []
+        for ind in new_view.inds:
+            if _local_inds.count(ind) == 1:
+                local_inds.append(ind)
+        global_phase = (global_phase % 2) == 1
+        new_view.phase = {
+            "global_flip": global_phase,
+            "local_inds": local_inds,
+        }
+
+    return new_view
+
+
+@tensor_contract.register(FermionTensor)
+def tensor_contract_fermion(
+    *tensors,
+    output_inds=None,
+    optimize=None,
+    get=None,
+    backend=None,
+    preserve_tensor=False,
+    drop_tags=False,
+    **contract_opts,
+):
+    expr = tensor_contract.dispatch(Tensor)(
+        *tensors,
+        output_inds=output_inds,
+        optimize=optimize,
+        get="expression",
+        **contract_opts,
+    )
+
+    if get == "expression":
+        return expr
+
+    if get is not None:
+        raise NotImplementedError
+
+    return _tensor_contract_fermion_expression(
+        expr,
+        tensors,
+        inplace=False,
+        backend=backend,
+        preserve_tensor=preserve_tensor,
+        drop_tags=drop_tags,
+        **contract_opts,
+    )
+
+
 @tensor_split.register(FermionTensor)
-def tensor_split_fermion_tensor(
+def tensor_split_fermion(
     T,
     left_inds,
     method="svd",
@@ -834,7 +842,7 @@ def tensor_split_fermion_tensor(
     qpn_info=None,
 ):
     if get is not None:
-        return tensor_split_block_tensor(
+        return tensor_split_block(
             T,
             left_inds,
             method=method,
@@ -852,7 +860,7 @@ def tensor_split_fermion_tensor(
             qpn_info=qpn_info,
         )
     else:
-        tensors = tensor_split_block_tensor(
+        tensors = tensor_split_block(
             T,
             left_inds,
             method=method,
@@ -893,14 +901,10 @@ def compress_decorator(fn):
     return wrapper
 
 
-tensor_compress_bond_fermion = compress_decorator(
-    tensor_compress_bond_block_tensor
-)
+tensor_compress_bond_fermion = compress_decorator(tensor_compress_bond_block)
 tensor_compress_bond.register(FermionTensor, tensor_compress_bond_fermion)
 
-tensor_canonize_bond_fermion = compress_decorator(
-    tensor_canonize_bond_block_tensor
-)
+tensor_canonize_bond_fermion = compress_decorator(tensor_canonize_bond_block)
 tensor_canonize_bond.register(FermionTensor, tensor_canonize_bond_fermion)
 
 
@@ -1768,8 +1772,7 @@ class FTNLinearOperator(spla.LinearOperator):
         self._kws = {"get": "expression"}
 
         # if recent opt_einsum specify constant tensors
-        if hasattr(oe.backends, "evaluate_constants"):
-            self._kws["constants"] = range(len(self._tensors))
+        self._kws["constants"] = range(len(self._tensors))
 
         # conjugate inputs/ouputs rather all tensors if necessary
         self.is_conj = is_conj
@@ -1833,7 +1836,7 @@ class FTNLinearOperator(spla.LinearOperator):
             )
 
         expr = self._contractors["matvec"]
-        out_data = _launch_fermion_expression(
+        out_data = _tensor_contract_fermion_expression(
             expr, tensors, backend=self.backend, inplace=True
         )
         out_data = out_data.data

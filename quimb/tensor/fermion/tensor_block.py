@@ -3,7 +3,6 @@
 import functools
 
 import numpy as np
-from opt_einsum.contract import _tensordot, _transpose, parse_backend
 
 from ...utils import check_opt, oset
 from ..tensor_core import (
@@ -27,75 +26,6 @@ from .block_tools import (
 # --------------------------------------------------------------------------- #
 #                                Tensor Funcs                                 #
 # --------------------------------------------------------------------------- #
-
-
-def _launch_block_expression(
-    expr, tensors, backend="auto", preserve_tensor=False, **kwargs
-):
-    if len(tensors) == 1:
-        return tensors[0]
-    evaluate_constants = kwargs.pop("evaluate_constants", False)
-    if evaluate_constants:
-        raise NotImplementedError
-
-    contraction_list = expr.contraction_list
-    tensors = list(tensors)
-    operands = [Ta.data for Ta in tensors]
-    backend = parse_backend(operands, backend)
-    # Start contraction loop
-    for _, contraction in enumerate(contraction_list):
-        inds, idx_rm, einsum_str, _, _ = contraction
-        tmp_operands = [tensors.pop(x) for x in inds]
-        # Call tensordot (check if should prefer einsum, but only if available)
-        input_str, results_index = einsum_str.split("->")
-        input_left, input_right = input_str.split(",")
-        contract_out = (oset(input_left) | oset(input_right)) - (
-            oset(input_left) & oset(input_right)
-        )
-
-        if contract_out == oset(results_index):
-            Ta, Tb = tmp_operands
-            tensor_result = "".join(
-                s for s in input_left + input_right if s not in idx_rm
-            )
-            # Find indices to contract over
-            left_pos, right_pos = [], []
-            for s in idx_rm:
-                left_pos.append(input_left.find(s))
-                right_pos.append(input_right.find(s))
-
-            # Contract!
-            new_view = _tensordot(
-                Ta.data,
-                Tb.data,
-                axes=(tuple(left_pos), tuple(right_pos)),
-                backend=backend,
-            )
-
-            o_ix = [ind for ind in Ta.inds if ind not in Tb.inds] + [
-                ind for ind in Tb.inds if ind not in Ta.inds
-            ]
-
-            # Build a new view if needed
-            if tensor_result != results_index:
-                transpose = tuple(map(tensor_result.index, results_index))
-                new_view = _transpose(
-                    new_view, axes=transpose, backend=backend
-                )
-                o_ix = [o_ix[ix] for ix in transpose]
-
-            o_tags = oset.union(Ta.tags, Tb.tags)
-            if len(o_ix) != 0 or preserve_tensor:
-                new_view = Ta.__class__(data=new_view, inds=o_ix, tags=o_tags)
-        # Call einsum
-        else:
-            raise NotImplementedError(
-                "Generic Einsum Operations not supported"
-            )
-        # Append new items and dereference what we can
-        tensors.append(new_view)
-        del tmp_operands, new_view
-    return tensors[0]
 
 
 def flip_pattern(pattern):
@@ -272,7 +202,7 @@ class BlockTensor(Tensor):
 
 
 @tensor_split.register(BlockTensor)
-def tensor_split_block_tensor(
+def tensor_split_block(
     T,
     left_inds,
     method="svd",
@@ -367,7 +297,7 @@ def tensor_split_block_tensor(
 
 
 @tensor_canonize_bond.register(BlockTensor)
-def tensor_canonize_bond_block_tensor(T1, T2, absorb="right", **split_opts):
+def tensor_canonize_bond_block(T1, T2, absorb="right", **split_opts):
     check_opt("absorb", absorb, ("left", "both", "right"))
 
     if absorb == "both":
@@ -393,7 +323,7 @@ def tensor_canonize_bond_block_tensor(T1, T2, absorb="right", **split_opts):
 
 
 @tensor_compress_bond.register(BlockTensor)
-def tensor_compress_bond_block_tensor(
+def tensor_compress_bond_block(
     T1, T2, reduced=True, absorb="both", info=None, **compress_opts
 ):
     shared_ix, left_env_ix = T1.filter_bonds(T2)
@@ -451,7 +381,7 @@ def tensor_compress_bond_block_tensor(
 
 
 @tensor_balance_bond.register(BlockTensor)
-def tensor_balance_bond_block_tensor(t1, t2, smudge=1e-6):
+def tensor_balance_bond_block(t1, t2, smudge=1e-6):
     (ix,) = t1.bonds(t2)
     t1H = t1.H.reindex_({ix: ix + "*"})
     t2H = t2.H.reindex_({ix: ix + "*"})
