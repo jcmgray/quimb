@@ -702,6 +702,9 @@ class FermionTensor(BlockTensor):
         """
         return FermionTensorNetwork((self, other), virtual=True)
 
+    def __matmul__(self, other):
+        return tensor_contract_fermion(self, other)
+
 
 def _tensor_contract_fermion_expression(
     expr,
@@ -737,11 +740,18 @@ def _tensor_contract_fermion_expression(
 
         tid1, site1 = Ta.get_fermion_info()
         tid2, site2 = Tb.get_fermion_info()
+
         if site1 < site2:
             fs.move(tid2, site1 + 1)
-            Ta, Tb = Tb, Ta
+            sitel = site1
+            siter = site1 + 1
         else:
-            fs.move(tid1, site2 + 1)
+            fs.move(tid2, site1)
+            sitel = site1 - 1
+            siter = site1
+
+        if {frozenset([Ta.data.pattern[axa], Tb.data.pattern[axb]]) for axa, axb in zip(*arg)} != {frozenset(["+", "-"])}:
+            raise RuntimeError("Invalid Fermion contraction")
 
         # Contract!
         new_view = np.tensordot(Ta.data, Tb.data, axes=arg)
@@ -767,8 +777,8 @@ def _tensor_contract_fermion_expression(
 
         if len(o_ix) != 0 or preserve_tensor:
             new_view = cls(data=new_view, inds=o_ix, tags=o_tags)
-            fs.replace_tensor(min(site1, site2), new_view, virtual=True)
-            fs.remove_tensor(min(site1, site2) + 1)
+            fs.replace_tensor(sitel, new_view, virtual=True)
+            fs.remove_tensor(siter)
 
         tensors[p] = new_view
 

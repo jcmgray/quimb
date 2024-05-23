@@ -297,8 +297,18 @@ def tensor_split_block(
 
 
 @tensor_canonize_bond.register(BlockTensor)
-def tensor_canonize_bond_block(T1, T2, absorb="right", **split_opts):
+def tensor_canonize_bond_block(
+    T1,
+    T2,
+    absorb="right",
+    gauges=None,
+    gauge_smudge=1e-6,
+    **split_opts,
+):
     check_opt("absorb", absorb, ("left", "both", "right"))
+
+    if gauges is not None:
+        raise NotImplementedError("gauges not yet implemented for BlockTensor")
 
     if absorb == "both":
         split_opts.setdefault("cutoff", 0.0)

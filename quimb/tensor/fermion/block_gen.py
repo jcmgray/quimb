@@ -32,7 +32,7 @@ def _dispatch_dq(dq, symmetry):
     """
     if dq is None:
         dq = (0,)
-    elif isinstance(dq, (int, np.integer, np.float)):
+    elif isinstance(dq, (int, float)):
         dq = (int(dq),)
     dq = symmetry(*dq)
     return dq
