@@ -477,7 +477,6 @@ class TEBDGen:
 
         # parse energy computation options
         self.compute_energy_opts = ensure_dict(compute_energy_opts)
-        self.compute_energy_opts.setdefault('normalized', True)
 
         self.compute_energy_every = compute_energy_every
         self.compute_energy_final = compute_energy_final
