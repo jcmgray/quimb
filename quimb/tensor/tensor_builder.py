@@ -2100,8 +2100,9 @@ def HTN2D_classical_ising_partition_function(
     beta,
     h=0.0,
     j=1.0,
-    ind_id="s{},{}",
     cyclic=False,
+    ind_id="s{},{}",
+    site_tag_id="I{},{}",
 ):
     """Hyper tensor network representation of the 2D classical ising model
     partition function. The indices will be shared by 4 or 5 tensors depending
@@ -2129,6 +2130,10 @@ def HTN2D_classical_ising_partition_function(
     ind_id : str, optional
         How to label the indices i.e. ``ind_id.format(i, j)``, each of which
         corresponds to a single classical spin.
+    site_tag_id : str, optional
+        How to label the site tags, note that in the hyper tensor network
+        representation each tensor will have two site tags for the two sites it
+        connects.
 
     Returns
     -------
@@ -2145,7 +2150,8 @@ def HTN2D_classical_ising_partition_function(
 
     j_factory = parse_j_coupling_to_function(j)
 
-    ts = []
+    tn = TensorNetwork()
+
     for ni, nj in itertools.product(range(Lx), range(Ly)):
         if ni < Lx - 1 or cyclic_x:
             node_a, node_b = (ni, nj), ((ni + 1) % Lx, nj)
@@ -2153,7 +2159,8 @@ def HTN2D_classical_ising_partition_function(
             data = classical_ising_S_matrix(
                 beta=beta, j=j_factory(node_a, node_b)
             )
-            ts.append(Tensor(data, inds=inds))
+            tags = (site_tag_id.format(*node_a), site_tag_id.format(*node_b))
+            tn |= Tensor(data, inds=inds, tags=tags)
 
         if nj < Ly - 1 or cyclic_y:
             node_a, node_b = (ni, nj), (ni, (nj + 1) % Ly)
@@ -2161,13 +2168,16 @@ def HTN2D_classical_ising_partition_function(
             data = classical_ising_S_matrix(
                 beta=beta, j=j_factory(node_a, node_b)
             )
-            ts.append(Tensor(data, inds=inds))
+            tags = (site_tag_id.format(*node_a), site_tag_id.format(*node_b))
+            tn |= Tensor(data, inds=inds, tags=tags)
 
         if h != 0.0:
+            inds = (ind_id.format(ni, nj),)
             data = classical_ising_H_matrix(beta=beta, h=float(h))
-            ts.append(Tensor(data, inds=(ind_id.format(ni, nj),)))
+            tags = (site_tag_id.format(ni, nj),)
+            tn |= Tensor(data, inds=inds)
 
-    return TensorNetwork(ts)
+    return tn
 
 
 def HTN3D_classical_ising_partition_function(
@@ -2179,6 +2189,7 @@ def HTN3D_classical_ising_partition_function(
     h=0.0,
     cyclic=False,
     ind_id="s{},{},{}",
+    site_tag_id="I{},{},{}",
 ):
     """Hyper tensor network representation of the 3D classical ising model
     partition function. The indices will be shared by 6 or 7 tensors depending
@@ -2208,6 +2219,10 @@ def HTN3D_classical_ising_partition_function(
     ind_id : str, optional
         How to label the indices i.e. ``ind_id.format(i, j, k)``, each of which
         corresponds to a single classical spin.
+    site_tag_id : str, optional
+        How to label the site tags, note that in the hyper tensor network
+        representation each tensor will have two site tags for the two sites it
+        connects.
 
     Returns
     -------
@@ -2224,7 +2239,8 @@ def HTN3D_classical_ising_partition_function(
 
     j_factory = parse_j_coupling_to_function(j)
 
-    ts = []
+    tn = TensorNetwork()
+
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
         if ni < Lx - 1 or cyclic_x:
             node_a, node_b = (ni, nj, nk), ((ni + 1) % Lx, nj, nk)
@@ -2232,7 +2248,8 @@ def HTN3D_classical_ising_partition_function(
             data = classical_ising_S_matrix(
                 beta=beta, j=j_factory(node_a, node_b)
             )
-            ts.append(Tensor(data, inds=inds))
+            tags = (site_tag_id.format(*node_a), site_tag_id.format(*node_b))
+            tn |= Tensor(data, inds=inds, tags=tags)
 
         if nj < Ly - 1 or cyclic_y:
             node_a, node_b = (ni, nj, nk), (ni, (nj + 1) % Ly, nk)
@@ -2240,7 +2257,8 @@ def HTN3D_classical_ising_partition_function(
             data = classical_ising_S_matrix(
                 beta=beta, j=j_factory(node_a, node_b)
             )
-            ts.append(Tensor(data, inds=inds))
+            tags = (site_tag_id.format(*node_a), site_tag_id.format(*node_b))
+            tn |= Tensor(data, inds=inds, tags=tags)
 
         if nk < Lz - 1 or cyclic_z:
             node_a, node_b = (ni, nj, nk), (ni, nj, (nk + 1) % Lz)
@@ -2248,13 +2266,16 @@ def HTN3D_classical_ising_partition_function(
             data = classical_ising_S_matrix(
                 beta=beta, j=j_factory(node_a, node_b)
             )
-            ts.append(Tensor(data, inds=inds))
+            tags = (site_tag_id.format(*node_a), site_tag_id.format(*node_b))
+            tn |= Tensor(data, inds=inds, tags=tags)
 
         if h != 0.0:
+            inds = (ind_id.format(ni, nj, nk),)
             data = classical_ising_H_matrix(beta=beta, h=float(h))
-            ts.append(Tensor(data, inds=(ind_id.format(ni, nj, nk),)))
+            tags = (site_tag_id.format(ni, nj, nk),)
+            tn |= Tensor(data, inds=inds, tags=tags)
 
-    return TensorNetwork(ts)
+    return tn
 
 
 def TN2D_classical_ising_partition_function(
