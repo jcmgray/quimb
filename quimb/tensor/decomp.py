@@ -343,7 +343,7 @@ def svd_truncated_numpy(
         return svd_truncated_numba(
             x, cutoff, cutoff_mode, max_bond, absorb, renorm
         )
-    except np.linalg.LinAlgError as e:  # pragma: no cover
+    except ValueError as e:  # pragma: no cover
         warnings.warn(f"Got: {e}, falling back to scipy gesvd driver.")
         U, s, VH = scla.svd(x, full_matrices=False, lapack_driver="gesvd")
         return _trim_and_renorm_svd_result_numba(
