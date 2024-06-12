@@ -192,7 +192,7 @@ class LocalHamGen:
         cache = self._op_cache["expm"]
         key = (id(x), y)
         if key not in cache:
-            cache[key] = do("scipy.linalg.expm", x * y)
+            cache[key] = do("linalg.expm", x * y)
             # el, ev = do("linalg.eigh", x)
             # cache[key] = ev @ do("diag", do("exp", el * y)) @ dag(ev)
         return cache[key]
