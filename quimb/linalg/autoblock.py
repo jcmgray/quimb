@@ -210,7 +210,7 @@ def _eigvalsh_autoblocked(A, sort=True):  # pragma: no cover
     gs = compute_blocks(ix, jx, d)
     gs = [np.array(g) for g in gs]
 
-    for i, g in enumerate(gs):
+    for _, g in enumerate(gs):
         if len(g) == 1:
             el[g[0]] = A[g[0], g[0]]
             continue
@@ -218,7 +218,7 @@ def _eigvalsh_autoblocked(A, sort=True):  # pragma: no cover
         el[g] = np.linalg.eigvalsh(subselect(A, g))
 
     if sort:
-        el[:] = np.sort(el)
+        return np.sort(el)
 
     return el
 
