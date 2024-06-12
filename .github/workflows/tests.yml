@@ -36,7 +36,7 @@ jobs:
 
         - os: windows-latest
           testset: matrix
-          conda-env: base
+          conda-env: openblas
           python-version: '3.11'
           flaky: false
           env:
@@ -44,7 +44,7 @@ jobs:
 
         - os: windows-latest
           testset: tensor
-          conda-env: base
+          conda-env: openblas
           python-version: '3.11'
           flaky: false
           env:

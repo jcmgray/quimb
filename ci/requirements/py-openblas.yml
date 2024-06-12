@@ -1,0 +1,19 @@
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - autoray>=0.6.12
+  - cotengra>=0.6.1
+  - coverage
+  - cytoolz
+  - joblib
+  - matplotlib
+  - networkx
+  - numba>=0.56
+  - numpy
+  - openblas
+  - psutil
+  - pytest
+  - pytest-cov
+  - scipy
+  - tqdm
