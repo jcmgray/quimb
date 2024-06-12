@@ -1038,7 +1038,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             # inner ungauging is performed by tracking the new singular values
             (((_, ix), s),) = info.items()
             if renorm:
-                s = s / s[0]
+                s = s / do("max", s)
             gauges[ix] = s
 
         return self

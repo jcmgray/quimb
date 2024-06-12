@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 (whats-new-1-8-2)=
-## v1.8.2 (unreleased)
+## v1.8.2 (2024-06-12)
 
 **Enhancements:**
 
@@ -13,7 +13,10 @@ Release notes for `quimb`.
 - Update generic TN optimizer docs.
 - add [`tn.gen_inds_loops`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_loops) for generating all loops of indices in a TN.
 - add [`tn.gen_inds_connected`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_connected) for generating all connected sets of indices in a TN.
-
+- make SVD fallback error catching more generic ({pull}`#238`)
+- fix some windows + numba CI issues.
+- [`approx_spectral_function`](quimb.linalg.approx_spectral.approx_spectral_function) add plotting and tracking
+- add dispatching to various tensor primitives to allow overriding
 
 (whats-new-1-8-1)=
 ## v1.8.1 (2024-05-06)

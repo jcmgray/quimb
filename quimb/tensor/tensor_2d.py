@@ -8,7 +8,7 @@ from itertools import chain, combinations, count, cycle, product
 from numbers import Integral
 from operator import add
 
-from autoray import do, get_dtype_name, infer_backend
+import autoray as ar
 
 from ..gen.operators import swap
 from ..gen.rand import randn, seed_rand
@@ -3992,6 +3992,140 @@ def gate_string_reduce_split_(
         to.modify(data=t.data)
 
 
+def gate_2d_long_range(
+    self,
+    G,
+    where,
+    contract=False,
+    tags=None,
+    inplace=False,
+    info=None,
+    long_range_use_swaps=False,
+    long_range_path_sequence=None,
+    **compress_opts,
+):
+    psi = self if inplace else self.copy()
+
+    ng = len(where)
+
+    dp = psi.phys_dim(*where[0])
+    tags = tags_to_oset(tags)
+
+    # allow a matrix to be reshaped into a tensor if it factorizes
+    #     i.e. (4, 4) assumed to be two qubit gate -> (2, 2, 2, 2)
+    G = maybe_factor_gate_into_tensor(G, dp, ng, where)
+
+    site_ix = [psi.site_ind(i, j) for i, j in where]
+    # new indices to join old physical sites to new gate
+    bnds = [rand_uuid() for _ in range(ng)]
+    reindex_map = dict(zip(site_ix, bnds))
+
+    TG = Tensor(G, inds=site_ix + bnds, tags=tags, left_inds=bnds)
+
+    # following are all based on splitting tensors to maintain structure
+    ij_a, ij_b = where
+
+    # parse the argument specifying how to find the path between
+    # non-nearest neighbours
+    if long_range_path_sequence is not None:
+        # make sure we can index
+        long_range_path_sequence = tuple(long_range_path_sequence)
+        # if the first element is a str specifying move sequence, e.g.
+        #     ('v', 'h')
+        #     ('av', 'bv', 'ah', 'bh')  # using swaps
+        manual_lr_path = not isinstance(long_range_path_sequence[0], str)
+        # otherwise assume a path has been manually specified, e.g.
+        #     ((1, 2), (2, 2), (2, 3), ... )
+        #     (((1, 1), (1, 2)), ((4, 3), (3, 3)), ...)  # using swaps
+    else:
+        manual_lr_path = False
+
+    # check if we are not nearest neighbour and need to swap first
+    if long_range_use_swaps:
+        if manual_lr_path:
+            *swaps, final = long_range_path_sequence
+        else:
+            # find a swap path
+            *swaps, final = gen_long_range_swap_path(
+                ij_a, ij_b, sequence=long_range_path_sequence
+            )
+
+        # move the sites together
+        SWAP = get_swap(
+            dp, dtype=ar.get_dtype_name(G), backend=ar.infer_backend(G)
+        )
+        for pair in swaps:
+            psi.gate_(SWAP, pair, contract=contract, absorb="right")
+
+        compress_opts["info"] = info
+        compress_opts["contract"] = contract
+
+        # perform actual gate also compressing etc on 'way back'
+        psi.gate_(G, final, **compress_opts)
+
+        compress_opts.setdefault("absorb", "both")
+        for pair in reversed(swaps):
+            psi.gate_(SWAP, pair, **compress_opts)
+
+        return psi
+
+    if manual_lr_path:
+        string = long_range_path_sequence
+    else:
+        string = tuple(
+            gen_long_range_path(*where, sequence=long_range_path_sequence)
+        )
+
+    # the tensors along this string, which will be updated
+    original_ts = [psi[coo] for coo in string]
+
+    # the len(string) - 1 indices connecting the string
+    bonds_along = [
+        next(iter(bonds(t1, t2))) for t1, t2 in pairwise(original_ts)
+    ]
+
+    if contract == "split":
+        #
+        #       │╱  │╱          │╱  │╱
+        #     ──GGGGG──  ==>  ──G┄┄┄G──
+        #      ╱   ╱           ╱   ╱
+        #
+        gate_string_split_(
+            TG,
+            where,
+            string,
+            original_ts,
+            bonds_along,
+            reindex_map,
+            site_ix,
+            info,
+            **compress_opts,
+        )
+
+    elif contract == "reduce-split":
+        #
+        #       │   │             │ │
+        #       GGGGG             GGG               │ │
+        #       │╱  │╱   ==>     ╱│ │  ╱   ==>     ╱│ │  ╱          │╱  │╱
+        #     ──●───●──       ──>─●─●─<──       ──>─GGG─<──  ==>  ──G┄┄┄G──
+        #      ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
+        #    <QR> <LQ>                            <SVD>
+        #
+        gate_string_reduce_split_(
+            TG,
+            where,
+            string,
+            original_ts,
+            bonds_along,
+            reindex_map,
+            site_ix,
+            info,
+            **compress_opts,
+        )
+
+    return psi
+
+
 class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
     """Mixin class  for a 2D square lattice vector TN, i.e. one with a single
     physical index per site.
@@ -4147,178 +4281,42 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         For one site gates when one of the 'split' methods is supplied
         ``contract=True`` is assumed.
         """
-        check_opt("contract", contract, (False, True, "split", "reduce-split"))
-
-        psi = self if inplace else self.copy()
-
         if is_lone_coo(where):
             where = (where,)
         else:
             where = tuple(where)
-        ng = len(where)
 
-        dp = psi.phys_dim(*where[0])
-        tags = tags_to_oset(tags)
+        use_2d_long_range = (
+            (len(where) == 2)
+            and (contract in {"split", "reduce-split"})
+            and (manhattan_distance(*where) > 1)
+        )
 
-        # allow a matrix to be reshaped into a tensor if it factorizes
-        #     i.e. (4, 4) assumed to be two qubit gate -> (2, 2, 2, 2)
-        G = maybe_factor_gate_into_tensor(G, dp, ng, where)
-
-        site_ix = [psi.site_ind(i, j) for i, j in where]
-        # new indices to join old physical sites to new gate
-        bnds = [rand_uuid() for _ in range(ng)]
-        reindex_map = dict(zip(site_ix, bnds))
-
-        TG = Tensor(G, inds=site_ix + bnds, tags=tags, left_inds=bnds)
-
-        if contract is False:
-            #
-            #       │   │      <- site_ix
-            #       GGGGG
-            #       │╱  │╱     <- bnds
-            #     ──●───●──
-            #      ╱   ╱
-            #
-            if propagate_tags:
-                if propagate_tags == "register":
-                    old_tags = oset(map(psi.site_tag, where))
-                else:
-                    old_tags = oset_union(
-                        psi.tensor_map[tid].tags
-                        for ind in site_ix
-                        for tid in psi.ind_map[ind]
-                    )
-
-                if propagate_tags == "sites":
-                    # use regex to take tags only matching e.g. 'I4,3'
-                    rex = re.compile(psi.site_tag_id.format(r"\d+", r"\d+"))
-                    old_tags = oset(filter(rex.match, old_tags))
-
-                TG.modify(tags=TG.tags | old_tags)
-
-            psi.reindex_(reindex_map)
-            psi |= TG
-            return psi
-
-        if (contract is True) or (ng == 1):
-            #
-            #       │╱  │╱
-            #     ──GGGGG──
-            #      ╱   ╱
-            #
-            psi.reindex_(reindex_map)
-
-            # get the sites that used to have the physical indices
-            site_tids = psi._get_tids_from_inds(bnds, which="any")
-
-            # pop the sites, contract, then re-add
-            pts = [psi.pop_tensor(tid) for tid in site_tids]
-            psi |= tensor_contract(*pts, TG)
-
-            return psi
-
-        # following are all based on splitting tensors to maintain structure
-        ij_a, ij_b = where
-
-        # parse the argument specifying how to find the path between
-        # non-nearest neighbours
-        if long_range_path_sequence is not None:
-            # make sure we can index
-            long_range_path_sequence = tuple(long_range_path_sequence)
-            # if the first element is a str specifying move sequence, e.g.
-            #     ('v', 'h')
-            #     ('av', 'bv', 'ah', 'bh')  # using swaps
-            manual_lr_path = not isinstance(long_range_path_sequence[0], str)
-            # otherwise assume a path has been manually specified, e.g.
-            #     ((1, 2), (2, 2), (2, 3), ... )
-            #     (((1, 1), (1, 2)), ((4, 3), (3, 3)), ...)  # using swaps
-        else:
-            manual_lr_path = False
-
-        # check if we are not nearest neighbour and need to swap first
-        if long_range_use_swaps:
-            if manual_lr_path:
-                *swaps, final = long_range_path_sequence
-            else:
-                # find a swap path
-                *swaps, final = gen_long_range_swap_path(
-                    ij_a, ij_b, sequence=long_range_path_sequence
-                )
-
-            # move the sites together
-            SWAP = get_swap(
-                dp, dtype=get_dtype_name(G), backend=infer_backend(G)
-            )
-            for pair in swaps:
-                psi.gate_(SWAP, pair, contract=contract, absorb="right")
-
-            compress_opts["info"] = info
-            compress_opts["contract"] = contract
-
-            # perform actual gate also compressing etc on 'way back'
-            psi.gate_(G, final, **compress_opts)
-
-            compress_opts.setdefault("absorb", "both")
-            for pair in reversed(swaps):
-                psi.gate_(SWAP, pair, **compress_opts)
-
-            return psi
-
-        if manual_lr_path:
-            string = long_range_path_sequence
-        else:
-            string = tuple(
-                gen_long_range_path(*where, sequence=long_range_path_sequence)
-            )
-
-        # the tensors along this string, which will be updated
-        original_ts = [psi[coo] for coo in string]
-
-        # the len(string) - 1 indices connecting the string
-        bonds_along = [
-            next(iter(bonds(t1, t2))) for t1, t2 in pairwise(original_ts)
-        ]
-
-        if contract == "split":
-            #
-            #       │╱  │╱          │╱  │╱
-            #     ──GGGGG──  ==>  ──G┄┄┄G──
-            #      ╱   ╱           ╱   ╱
-            #
-            gate_string_split_(
-                TG,
-                where,
-                string,
-                original_ts,
-                bonds_along,
-                reindex_map,
-                site_ix,
-                info,
+        if use_2d_long_range:
+            return gate_2d_long_range(
+                self,
+                G=G,
+                where=where,
+                contract=contract,
+                tags=tags,
+                inplace=inplace,
+                info=info,
+                long_range_use_swaps=long_range_use_swaps,
+                long_range_path_sequence=long_range_path_sequence,
                 **compress_opts,
             )
-
-        elif contract == "reduce-split":
-            #
-            #       │   │             │ │
-            #       GGGGG             GGG               │ │
-            #       │╱  │╱   ==>     ╱│ │  ╱   ==>     ╱│ │  ╱          │╱  │╱
-            #     ──●───●──       ──>─●─●─<──       ──>─GGG─<──  ==>  ──G┄┄┄G──
-            #      ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
-            #    <QR> <LQ>                            <SVD>
-            #
-            gate_string_reduce_split_(
-                TG,
-                where,
-                string,
-                original_ts,
-                bonds_along,
-                reindex_map,
-                site_ix,
-                info,
+        else:
+            # can just use generic arbgeom methods
+            return super().gate(
+                G=G,
+                where=where,
+                contract=contract,
+                tags=tags,
+                propagate_tags=propagate_tags,
+                inplace=inplace,
+                info=info,
                 **compress_opts,
             )
-
-        return psi
 
     gate_ = functools.partialmethod(gate, inplace=True)
 
@@ -4808,8 +4806,8 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         self._Lx = len(arrays)
         self._Ly = len(arrays[0])
 
-        cyclicx = sum(d > 1 for d in arrays[0][1].shape) == 5
-        cyclicy = sum(d > 1 for d in arrays[1][0].shape) == 5
+        cyclicx = sum(d > 1 for d in ar.shape(arrays[0][1])) == 5
+        cyclicy = sum(d > 1 for d in ar.shape(arrays[1][0])) == 5
 
         # cache for both creating and retrieving indices
         ix = defaultdict(rand_uuid)
@@ -4831,14 +4829,14 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
                 array_order = array_order.replace("l", "")
 
             # allow convention of missing bonds to be singlet dimensions
-            if len(array.shape) != len(array_order):
-                array = do("squeeze", array)
+            if ar.ndim(array) != len(array_order):
+                array = ar.do("squeeze", array)
 
             transpose_order = tuple(
                 array_order.find(x) for x in "urdlp" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
-                array = do("transpose", array, transpose_order)
+                array = ar.do("transpose", array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
@@ -4958,7 +4956,7 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         PEPS.from_fill_fn
         """
         return cls.from_fill_fn(
-            lambda shape: do("zeros", shape, like=like),
+            lambda shape: ar.do("zeros", shape, like=like),
             Lx,
             Ly,
             bond_dim,
@@ -4992,7 +4990,7 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         PEPS.from_fill_fn
         """
         return cls.from_fill_fn(
-            lambda shape: do("ones", shape, like=like),
+            lambda shape: ar.do("ones", shape, like=like),
             Lx,
             Ly,
             bond_dim,
@@ -5151,8 +5149,8 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         ix = defaultdict(rand_uuid)
         tensors = []
 
-        cyclicx = sum(d > 1 for d in arrays[0][1].shape) == 6
-        cyclicy = sum(d > 1 for d in arrays[1][0].shape) == 6
+        cyclicx = sum(d > 1 for d in ar.shape(arrays[0][1])) == 6
+        cyclicy = sum(d > 1 for d in ar.shape(arrays[1][0])) == 6
 
         for i, j in product(range(self.Lx), range(self.Ly)):
             array = arrays[i][j]
@@ -5170,14 +5168,14 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
                 array_order = array_order.replace("l", "")
 
             # allow convention of missing bonds to be singlet dimensions
-            if len(array.shape) != len(array_order):
-                array = do("squeeze", array)
+            if ar.ndim(array) != len(array_order):
+                array = ar.do("squeeze", array)
 
             transpose_order = tuple(
                 array_order.find(x) for x in "urdlbk" if x in array_order
             )
             if transpose_order != tuple(range(len(array_order))):
-                array = do("transpose", array, transpose_order)
+                array = ar.do("transpose", array, transpose_order)
 
             # get the relevant indices corresponding to neighbours
             inds = []
@@ -5318,7 +5316,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             if herm:
                 new_order = list(range(len(shape)))
                 new_order[-2], new_order[-1] = new_order[-1], new_order[-2]
-                X = (do("conj", X) + do("transpose", X, new_order)) / 2
+                X = (ar.do("conj", X) + ar.do("transpose", X, new_order)) / 2
             return X
 
         return cls.from_fill_fn(
@@ -5364,7 +5362,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         """
 
         def fill_fn(shape):
-            return do("zeros", shape, dtype=dtype, like=backend)
+            return ar.do("zeros", shape, dtype=dtype, like=backend)
 
         return cls.from_fill_fn(
             fill_fn,
@@ -5764,4 +5762,5 @@ def swap_path_to_long_range_path(swap_path, ij_a):
 @functools.lru_cache(8)
 def get_swap(dp, dtype, backend):
     SWAP = swap(dp, dtype=dtype)
-    return do("array", SWAP, like=backend)
+    return ar.do("array", SWAP, like=backend)
+

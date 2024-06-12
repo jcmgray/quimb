@@ -561,10 +561,11 @@ def tensor_split(
 
     # ``s`` itself will be None unless ``absorb=None`` is specified
     left, s, right = _SPLIT_FNS[method](array, **opts)
+
     if len(left_dims) != 1:
-        left = do("reshape", left, (*left_dims, -1))
+        left = do("reshape", left, (*left_dims, shape(left)[-1]))
     if len(right_dims) != 1:
-        right = do("reshape", right, (-1, *right_dims))
+        right = do("reshape", right, (shape(right)[0], *right_dims))
 
     if get == "arrays":
         if absorb is None:
@@ -2789,10 +2790,8 @@ class Tensor:
         tensor being contracted into index ``ind``.
         """
         t = self if inplace else self.copy()
-        x_broadcast = do(
-            "reshape", x, tuple((-1 if i == ind else 1) for i in t.inds)
-        )
-        t.modify(data=t.data * x_broadcast)
+        ax = t.inds.index(ind)
+        t.modify(data=do("multiply_diagonal", t.data, x, axis=ax))
         return t
 
     multiply_index_diagonal_ = functools.partialmethod(
@@ -6966,7 +6965,7 @@ class TensorNetwork(object):
                 )
 
                 s = info["singular_values"]
-                smax = s[0]
+                smax = do("max", s)
                 new_gauge = s / smax
                 nfact = do("log10", smax) + nfact
 
@@ -7193,7 +7192,12 @@ class TensorNetwork(object):
             g = _get(ix, None)
             if g is None:
                 continue
-            g = (g + smudge * g[0]) ** power
+
+            if smudge != 0.0:
+                g = g + smudge * do("max", g)
+            if power != 1.0:
+                g = g**power
+
             (t,) = self._inds_get(ix)
             t.multiply_index_diagonal_(ix, g)
             outer.append((t, ix, g))

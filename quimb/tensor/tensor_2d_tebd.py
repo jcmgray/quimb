@@ -604,10 +604,10 @@ class SimpleUpdate(TEBD2D):
         # set the new singualar values all along the chain
         for site_a, site_b in pairwise(string):
             bond_pair = tuple(sorted((site_a, site_b)))
-            s = info['singular_values', bond_pair]
+            s, = info.values()
             if self.gauge_renorm:
                 # keep the singular values from blowing up
-                s = s / s[0]
+                s = s / do("max", s)
             Tsval = self.gauges[bond_pair]
             Tsval.modify(data=s)
 

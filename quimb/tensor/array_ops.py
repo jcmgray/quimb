@@ -165,6 +165,25 @@ def ndim(array):
         return len(array.shape)
 
 
+@compose
+def multiply_diagonal(x, v, axis, backend=None):
+    """Multiply v into x as if contracting in a diagonal matrix."""
+    newshape = tuple((-1 if i == axis else 1) for i in range(ndim(x)))
+    v_broadcast = do("reshape", v, newshape, like=backend)
+    return x * v_broadcast
+
+
+@compose
+def align_axes(*arrays, axes, backend=None):
+    """Prepare a set of arrays that should be contractible along ``axes``.
+
+    For example, block symmetric arrays need to have aligned sectors prior to
+    fusing.
+    """
+    # default implementation is nothing
+    return arrays
+
+
 # ------------- miscelleneous other backend agnostic functions -------------- #
 
 
@@ -281,7 +300,11 @@ def find_diag_axes(x, atol=1e-12):
         if shape[i] != shape[j]:
             continue
         if do(
-            "allclose", x[indxrs[i] != indxrs[j]], zero, atol=atol, like=backend
+            "allclose",
+            x[indxrs[i] != indxrs[j]],
+            zero,
+            atol=atol,
+            like=backend,
         ):
             return (i, j)
     return None
