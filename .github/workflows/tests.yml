@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         testset: [matrix, tensor]
-        env: [base]
+        conda-env: [base]
         os: [ubuntu-latest]
         python-version: ['3.9', '3.10', '3.11', '3.12']
         flaky: [false]
@@ -24,47 +24,51 @@ jobs:
         include:
         - os: macos-latest
           testset: matrix
-          env: base
+          conda-env: base
           python-version: '3.11'
           flaky: true
 
         - os: macos-latest
           testset: tensor
-          env: base
+          conda-env: base
           python-version: '3.11'
           flaky: false
 
         - os: windows-latest
           testset: matrix
-          env: base
+          conda-env: base
           python-version: '3.11'
           flaky: false
+          env:
+            KMP_DUPLICATE_LIB_OK: "True"
 
         - os: windows-latest
           testset: tensor
-          env: base
+          conda-env: base
           python-version: '3.11'
           flaky: false
+          env:
+            KMP_DUPLICATE_LIB_OK: "True"
 
-        - env: torch
+        - conda-env: torch
           testset: tensor
           os: ubuntu-latest
           python-version: '3.11'
           flaky: false
 
-        - env: jax
+        - conda-env: jax
           testset: tensor
           os: ubuntu-latest
           python-version: '3.11'
           flaky: false
 
-        - env: tensorflow
+        - conda-env: tensorflow
           testset: tensor
           os: ubuntu-latest
           python-version: '3.11'
           flaky: false
 
-        - env: slepc
+        - conda-env: slepc
           testset: matrix
           os: ubuntu-latest
           python-version: '3.11'
@@ -76,7 +80,7 @@ jobs:
     - name: Install micromamba
       uses: mamba-org/setup-micromamba@v1
       with:
-        environment-file: ci/requirements/py-${{ matrix.env }}.yml
+        environment-file: ci/requirements/py-${{ matrix.conda-env }}.yml
         environment-name: test-env
         create-args: >-
           python=${{ matrix.python-version }}
