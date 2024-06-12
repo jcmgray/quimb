@@ -3,6 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - autoray>=0.6.12
+  - blas=*=openblas
   - cotengra>=0.6.1
   - coverage
   - cytoolz
@@ -11,7 +12,6 @@ dependencies:
   - networkx
   - numba>=0.56
   - numpy
-  - openblas
   - psutil
   - pytest
   - pytest-cov
