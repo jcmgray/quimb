@@ -1,4 +1,4 @@
-from operatorbuilder import (
+from .operatorbuilder import (
     fermi_hubbard_from_edges,
     fermi_hubbard_spinless_from_edges,
     heisenberg_from_edges,

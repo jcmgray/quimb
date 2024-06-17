@@ -851,7 +851,7 @@ class SparseOperatorBuilder:
     ):
         import math
         from matplotlib import pyplot as plt
-        from quimb.tensor.drawing import auto_colors
+        from quimb.schematic import auto_colors
 
         if method == "greedy":
             G = self.build_state_machine_greedy()
@@ -1514,16 +1514,16 @@ def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
         for cooa, coob in edges:
             # hopping
             for s in "↑↓":
-                H += -t, ("+", (s, *cooa)), ("-", (s, *coob))
-                H += -t, ("+", (s, *coob)), ("-", (s, *cooa))
+                H += -t, ("+", (s, cooa)), ("-", (s, coob))
+                H += -t, ("+", (s, coob)), ("-", (s, cooa))
 
     for coo in sites:
         # interaction
-        H += U, ("n", ("↑", *coo)), ("n", ("↓", *coo))
+        H += U, ("n", ("↑", coo)), ("n", ("↓", coo))
 
         # chemical potential
-        H += mu, ("n", ("↑", *coo))
-        H += mu, ("n", ("↓", *coo))
+        H += -mu, ("n", ("↑", coo))
+        H += -mu, ("n", ("↓", coo))
 
     H.jordan_wigner_transform()
     return H
@@ -1541,7 +1541,7 @@ def fermi_hubbard_spinless_from_edges(edges, t=1.0, mu=0.0):
 
     # chemical potential
     for coo in sites:
-        H += mu, ("n", coo)
+        H += -mu, ("n", coo)
 
     H.jordan_wigner_transform()
     return H
