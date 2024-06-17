@@ -83,7 +83,7 @@ def get_slepc(comm=None):
 class PetscLinearOperatorContext:
     def __init__(self, lo):
         self.lo = lo
-        self.real = lo.dtype in (float, np.float_)
+        self.real = lo.dtype in (float, np.float64)
 
     def mult(self, _, x, y):
         y[:] = self.lo.matvec(x)

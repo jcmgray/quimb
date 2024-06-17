@@ -613,7 +613,7 @@ class TestTensorFunctions:
 
     @pytest.mark.parametrize(
         "dtype",
-        [float, complex, np.complex128, np.float_, np.float32, "raise"],
+        [float, complex, np.complex128, np.float64, np.float32, "raise"],
     )
     def test_rand_tensor(self, dtype):
         if dtype == "raise":

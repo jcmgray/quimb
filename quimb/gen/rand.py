@@ -283,11 +283,11 @@ def rand_rademacher(shape, scale=1, loc=0.0, dtype=float):
     """ """
     if np.issubdtype(dtype, np.floating):
         entries = loc + np.array([1.0, -1.0]) * scale
-        need2convert = dtype not in (float, np.float_)
+        need2convert = dtype not in (float, np.float64)
 
     elif np.issubdtype(dtype, np.complexfloating):
         entries = loc + np.array([1.0, -1.0, 1.0j, -1.0j]) * scale
-        need2convert = dtype not in (complex, np.complex_)
+        need2convert = dtype not in (complex, np.complex128)
 
     else:
         raise TypeError(

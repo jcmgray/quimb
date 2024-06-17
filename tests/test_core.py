@@ -109,7 +109,7 @@ class TestQuimbify:
     )
     @mark.parametrize("format_in", stypes)
     @mark.parametrize("format_out", (None,) + stypes)
-    @mark.parametrize("dtype", [float, complex, np.float_, np.complex_])
+    @mark.parametrize("dtype", [float, complex, np.float64, np.complex128])
     def test_reshape_sparse(
         self, qtype, shape, out, format_in, format_out, dtype
     ):
