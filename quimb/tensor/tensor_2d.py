@@ -2,7 +2,6 @@
 
 import functools
 import random
-import re
 from collections import defaultdict
 from itertools import chain, combinations, count, cycle, product
 from numbers import Integral
@@ -36,7 +35,6 @@ from .tensor_core import (
     bonds,
     bonds_size,
     oset,
-    oset_union,
     rand_uuid,
     tags_to_oset,
     tensor_contract,

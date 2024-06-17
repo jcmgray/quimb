@@ -1112,8 +1112,8 @@ def infer_size(p, base=2):
 
     if sz % 1 > 1e-13:
         raise ValueError(
-            f"This state does not seem to be composed of sites"
-            "of equal size {base}."
+            "This state does not seem to be composed "
+            f"of sites of equal size {base}."
         )
 
     return int(sz)
