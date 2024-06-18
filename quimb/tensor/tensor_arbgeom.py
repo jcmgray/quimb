@@ -804,8 +804,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
             tuple(map(self.site_tag, where)), 'any'
         )
 
-        if len(tids) == 2:
-            tids = self._get_string_between_tids(*tids)
+        # if len(tids) == 2:
+        #     tids = self._get_string_between_tids(*tids)
 
         k = self._select_local_tids(
             tids,

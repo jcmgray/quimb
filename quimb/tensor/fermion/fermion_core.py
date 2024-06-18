@@ -2,12 +2,11 @@
 """
 import copy
 import functools
-from operator import add
 import contextlib
 import numpy as np
 import scipy.sparse.linalg as spla
 import opt_einsum as oe
-from opt_einsum.contract import parse_backend, _tensordot, _transpose
+from opt_einsum.contract import parse_backend
 from autoray import conj
 
 from ...utils import (oset, valmap, check_opt)
@@ -467,7 +466,7 @@ def _launch_fermion_expression(
                 right_pos.append(input_right.find(s))
 
             # Contract!
-            new_view = _tensordot(Ta.data, Tb.data, axes=(tuple(left_pos), tuple(right_pos)), backend=backend)
+            new_view = np.tensordot(Ta.data, Tb.data, axes=(tuple(left_pos), tuple(right_pos)))
 
             global_phase += Ta.phase.get("global_flip", False) \
                           + Tb.phase.get("global_flip", False)
@@ -480,7 +479,7 @@ def _launch_fermion_expression(
             # Build a new view if needed
             if (tensor_result != results_index):
                 transpose = tuple(map(tensor_result.index, results_index))
-                new_view = _transpose(new_view, axes=transpose, backend=backend)
+                new_view = np.transpose(new_view, axes=transpose)
                 o_ix = [o_ix[ix] for ix in transpose]
 
             o_tags = oset.union(Ta.tags, Tb.tags)
