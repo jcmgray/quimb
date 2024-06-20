@@ -745,10 +745,18 @@ class SparseOperatorBuilder:
         # count how many rails are at each register
         num_rails = [1] + [0] * self.nsites
 
+        # track which terms pass through each edge and vice versa
+        edges_to_terms = {}
+        terms_to_edges = {}
+        # so that we can place all the coefficients at the end
+        coeffs_to_place = {}
+
         def new_edge(a, b):
             # need to track which terms pass through this edge so we can
             # place the coefficient somewhere unique at the end
-            G.add_edge(a, b, op=op, weight=1, unique_term=t)
+            G.add_edge(a, b, op=op, weight=1, coeff=None)
+            edges_to_terms.setdefault((a, b), set()).add(t)
+            terms_to_edges.setdefault(t, []).append((a, b))
 
         def check_right():
             # check if can **right share**
@@ -772,7 +780,8 @@ class SparseOperatorBuilder:
                     if G.edges[e]["op"] != op:
                         continue
                     G.edges[e]["weight"] += 1
-                    G.edges[e]["unique_term"] = None
+                    edges_to_terms.setdefault(e, set()).add(t)
+                    terms_to_edges.setdefault(t, []).append(e)
                     return cand_node
 
                 # XXX: if we can right share, don't need to do anything
@@ -788,7 +797,8 @@ class SparseOperatorBuilder:
                 if G.in_degree(cand_node) <= 1:
                     if G.edges[e]["op"] == op:
                         G.edges[e]["weight"] += 1
-                        G.edges[e]["unique_term"] = None
+                        edges_to_terms.setdefault(e, set()).add(t)
+                        terms_to_edges.setdefault(t, []).append(e)
                         return cand_node
 
         def create_new():
@@ -797,10 +807,6 @@ class SparseOperatorBuilder:
             num_rails[reg + 1] += 1
             new_edge(current_node, next_node)
             return next_node
-
-        # each term guaranteed has a unique edge somewhere, which we can place
-        # the coefficient on later
-        coeffs_to_place = {}
 
         for t, (term, coeff) in enumerate(self._term_store.items()):
             # build full string for this term including identity ops
@@ -828,19 +834,41 @@ class SparseOperatorBuilder:
                 else:
                     G.nodes[current_node]["out_string"] = None
 
-            if coeff != 1:
+            if coeff != 1.0:
                 # record that we still need to place coeff somewhere
                 coeffs_to_place[t] = coeff
-
-        for _, _, data in G.edges(data=True):
-            data["coeff"] = coeffs_to_place.pop(data["unique_term"], None)
-
-        if coeffs_to_place:
-            raise ValueError("Failed to place all coefficients.")
 
         G.graph["nsites"] = self.nsites
         G.graph["num_rails"] = tuple(num_rails)
         G.graph["max_num_rails"] = max(num_rails)
+
+        # how many terms pass through each edge
+        edge_scores = {e: len(ts) for e, ts in edges_to_terms.items()}
+
+        # the least congested edge a term passes through
+        term_scores = {
+            t: min(edge_scores[e] for e in es)
+            for t, es in terms_to_edges.items()
+        }
+
+        def place_coeff(edge, coeff):
+            G.edges[edge]["coeff"] = coeff
+            edge_scores.pop(edge)
+            # every term passing through this edge is multiplied by this coeff
+            for t in edges_to_terms[edge]:
+                new_coeff = coeffs_to_place.pop(t, 1.0) / coeff
+                if new_coeff != 1.0:
+                    # if another term doesn't have matching coeff, still need
+                    # to place the updated coeff
+                    coeffs_to_place[t] = new_coeff
+
+        while coeffs_to_place:
+            # get the remaining term with the maximum congestion
+            t = max(coeffs_to_place, key=term_scores.get)
+            # get the least conjested edge it passes through
+            best = min(terms_to_edges[t], key=edge_scores.get)
+            # place it and update everything
+            place_coeff(best, coeffs_to_place[t])
 
         return G
 
@@ -908,7 +936,7 @@ class SparseOperatorBuilder:
             color = colors[data["op"]]
             width = math.log2(1 + data["weight"])
             label = data["op"]
-            if data["coeff"] is not None:
+            if data.get("coeff", None) is not None:
                 label += f" * {data['coeff']}"
             label += "\n"
             labelled_arrow(ax, n1, n2, label, color, width)
@@ -945,7 +973,7 @@ class SparseOperatorBuilder:
 
         for node_a, node_b, data in G.edges(data=True):
             op = data["op"]
-            coeff = data["coeff"]
+            coeff = data.get("coeff", None)
             if coeff is not None:
                 mat = coeff * get_mat(op)
             else:
@@ -1008,8 +1036,7 @@ def comb(n, k):
 
 @njit
 def get_all_equal_weight_bits(n, k, dtype=np.int64):
-    """Get an array of all 'bits' (integers), with n bits, and k of them set.
-    """
+    """Get an array of all 'bits' (integers), with n bits, and k of them set."""
     if k == 0:
         return np.array([0], dtype=dtype)
 
@@ -1462,7 +1489,7 @@ def build_coo_numba(bits, coupling_map, parallel=False):
 
     from quimb import get_thread_pool
 
-    if (parallel is True):
+    if parallel is True:
         n_thread_workers = None
     elif isinstance(parallel, int):
         n_thread_workers = parallel
