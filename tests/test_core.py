@@ -129,9 +129,9 @@ class TestQuimbify:
         assert y.format == format_out
 
         if np.issubdtype(dtype, np.floating):
-            assert_allclose(y.A, np.real(out), atol=1e-12)
+            assert_allclose(y.toarray(), np.real(out), atol=1e-12)
         else:
-            assert_allclose(y.A, out)
+            assert_allclose(y.toarray(), out)
 
     @mark.parametrize(
         "qtype, shape, out",
@@ -154,7 +154,7 @@ class TestQuimbify:
         if format_out is None:
             format_out = "csr"
         assert y.format == format_out
-        assert_allclose(y.A, out)
+        assert_allclose(y.toarray(), out)
 
     @mark.parametrize(
         "qtype, shape", (["bra", (1, 4)], ["ket", (4, 1)], ["dop", (4, 4)])
@@ -355,7 +355,7 @@ class TestKron:
         ops = [qu.rand_matrix(d, sparse=sparse) for d in dims]
         X1 = qu.kron(*ops)[ri:rf, :]
         X2 = qu.kron(*ops, ownership=(ri, rf))
-        assert_allclose(X1.A, X2.A)
+        assert_allclose(X1.toarray(), X2.toarray())
 
 
 class Testikron:
@@ -439,11 +439,11 @@ class Testikron:
         a = qu.qu(qu.rand_matrix(2), sparse=True)
         b = qu.ikron(a, [2, 2, 2], 1)  # infer sparse
         assert qu.issparse(b)
-        assert_allclose(b.A, (i & a & i).A)
+        assert_allclose(b.toarray(), (i & a & i).toarray())
         a = qu.rand_matrix(2)
         b = qu.ikron(a, [2, 2, 2], 1, sparse=True)  # explicit sparse
         assert qu.issparse(b)
-        assert_allclose(b.A, (i & a & i).A)
+        assert_allclose(b.toarray(), (i & a & i).toarray())
 
     def test_2d_simple(self):
         a = (qu.rand_matrix(2), qu.rand_matrix(2))
@@ -487,7 +487,7 @@ class Testikron:
         Y = qu.rand_matrix(3, sparse=sparse)
         X1 = qu.ikron((X, Y), dims, (1, 3))[ri:rf, :]
         X2 = qu.ikron((X, Y), dims, (1, 3), ownership=(ri, rf))
-        assert_allclose(X1.A, X2.A)
+        assert_allclose(X1.toarray(), X2.toarray())
 
 
 class TestPermikron:
@@ -496,7 +496,7 @@ class TestPermikron:
         b = qu.pkron(a, [2, 2, 2], [0, 2])
         c = (
             (a & qu.eye(2))
-            .A.reshape([2, 2, 2, 2, 2, 2])
+            .toarray().reshape([2, 2, 2, 2, 2, 2])
             .transpose([0, 2, 1, 3, 5, 4])
             .reshape([8, 8])
         )
@@ -507,7 +507,7 @@ class TestPermikron:
         b = qu.pkron(a, np.array([2, 2, 2]), [2, 0])
         c = (
             (a & qu.eye(2))
-            .A.reshape([2, 2, 2, 2, 2, 2])
+            .toarray().reshape([2, 2, 2, 2, 2, 2])
             .transpose([1, 2, 0, 4, 5, 3])
             .reshape([8, 8])
         )
@@ -518,11 +518,11 @@ class TestPermikron:
         b = qu.pkron(a, np.array([2, 2, 2]), [2, 0])
         c = (
             (a & qu.eye(2))
-            .A.reshape([2, 2, 2, 2, 2, 2])
+            .toarray().reshape([2, 2, 2, 2, 2, 2])
             .transpose([1, 2, 0, 4, 5, 3])
             .reshape([8, 8])
         )
-        assert_allclose(b.A, c)
+        assert_allclose(b.toarray(), c)
 
 
 class TestPermute:
@@ -548,15 +548,15 @@ class TestPermute:
         dims = [3, 2, 5, 4]
         a = qu.rand_ket(qu.prod(dims), sparse=True, density=0.5)
         b = qu.permute(a, dims, [3, 1, 2, 0])
-        c = qu.permute(a.A, dims, [3, 1, 2, 0])
-        assert_allclose(b.A, c)
+        c = qu.permute(a.toarray(), dims, [3, 1, 2, 0])
+        assert_allclose(b.toarray(), c)
 
     def test_permute_sparse_op(self):
         dims = [3, 2, 5, 4]
         a = qu.rand_rho(qu.prod(dims), sparse=True, density=0.5)
         b = qu.permute(a, dims, [3, 1, 2, 0])
-        c = qu.permute(a.A, dims, [3, 1, 2, 0])
-        assert_allclose(b.A, c)
+        c = qu.permute(a.toarray(), dims, [3, 1, 2, 0])
+        assert_allclose(b.toarray(), c)
 
 
 class TestPartialTraceDense:
@@ -570,10 +570,10 @@ class TestPartialTraceDense:
     def test_ptr_compare_to_manual(self):
         a = qu.rand_rho(2**2)
         b = qu.partial_trace(a, [2, 2], 0)
-        c = a.A.reshape([2, 2, 2, 2]).trace(axis1=1, axis2=3)
+        c = a.toarray().reshape([2, 2, 2, 2]).trace(axis1=1, axis2=3)
         assert_allclose(b, c)
         b = qu.partial_trace(a, [2, 2], 1)
-        c = a.A.reshape([2, 2, 2, 2]).trace(axis1=0, axis2=2)
+        c = a.toarray().reshape([2, 2, 2, 2]).trace(axis1=0, axis2=2)
         assert_allclose(b, c)
 
     def test_partial_trace_early_return(self):
@@ -644,11 +644,11 @@ class TestTraceLose:
         )
         abc = a & b & c
         pab = qu.core._trace_lose(abc, [2, 3, 2], 2)
-        assert_allclose(pab, (a & b).A)
+        assert_allclose(pab, (a & b).toarray())
         pac = qu.core._trace_lose(abc, [2, 3, 2], 1)
-        assert_allclose(pac, (a & c).A)
+        assert_allclose(pac, (a & c).toarray())
         pbc = qu.core._trace_lose(abc, [2, 3, 2], 0)
-        assert_allclose(pbc, (b & c).A)
+        assert_allclose(pbc, (b & c).toarray())
 
     def test_bell_state(self):
         a = qu.bell_state("psi-", sparse=True)
@@ -660,19 +660,19 @@ class TestTraceLose:
     def test_vs_ptr(self):
         a = qu.rand_rho(6, sparse=True, density=0.5)
         b = qu.core._trace_lose(a, [2, 3], 1)
-        c = qu.partial_trace(a.A, [2, 3], 0)
+        c = qu.partial_trace(a.toarray(), [2, 3], 0)
         assert_allclose(b, c)
         b = qu.core._trace_lose(a, [2, 3], 0)
-        c = qu.partial_trace(a.A, [2, 3], 1)
+        c = qu.partial_trace(a.toarray(), [2, 3], 1)
         assert_allclose(b, c)
 
     def test_vec_dense(self):
         a = qu.rand_ket(4)
         b = qu.core._trace_lose(a, [2, 2], 1)
-        c = qu.partial_trace(a.A, [2, 2], 0)
+        c = qu.partial_trace(a.toarray(), [2, 2], 0)
         assert_allclose(b, c)
         b = qu.core._trace_lose(a, [2, 2], 0)
-        c = qu.partial_trace(a.A, [2, 2], 1)
+        c = qu.partial_trace(a.toarray(), [2, 2], 1)
         assert_allclose(b, c)
 
 
@@ -685,11 +685,11 @@ class TestTraceKeep:
         )
         abc = a & b & c
         pc = qu.core._trace_keep(abc, [2, 3, 2], 2)
-        assert_allclose(pc, c.A)
+        assert_allclose(pc, c.toarray())
         pb = qu.core._trace_keep(abc, [2, 3, 2], 1)
-        assert_allclose(pb, b.A)
+        assert_allclose(pb, b.toarray())
         pa = qu.core._trace_keep(abc, [2, 3, 2], 0)
-        assert_allclose(pa, a.A)
+        assert_allclose(pa, a.toarray())
 
     def test_bell_state(self):
         a = qu.bell_state("psi-", sparse=True)
@@ -701,19 +701,19 @@ class TestTraceKeep:
     def test_vs_ptr(self):
         a = qu.rand_rho(6, sparse=True, density=0.5)
         b = qu.core._trace_keep(a, [2, 3], 0)
-        c = qu.partial_trace(a.A, [2, 3], 0)
+        c = qu.partial_trace(a.toarray(), [2, 3], 0)
         assert_allclose(b, c)
         b = qu.core._trace_keep(a, [2, 3], 1)
-        c = qu.partial_trace(a.A, [2, 3], 1)
+        c = qu.partial_trace(a.toarray(), [2, 3], 1)
         assert_allclose(b, c)
 
     def test_vec_dense(self):
         a = qu.rand_ket(4)
         b = qu.core._trace_keep(a, [2, 2], 0)
-        c = qu.partial_trace(a.A, [2, 2], 0)
+        c = qu.partial_trace(a.toarray(), [2, 2], 0)
         assert_allclose(b, c)
         b = qu.core._trace_keep(a, [2, 2], 1)
-        c = qu.partial_trace(a.A, [2, 2], 1)
+        c = qu.partial_trace(a.toarray(), [2, 2], 1)
         assert_allclose(b, c)
 
 
@@ -730,7 +730,7 @@ class TestPartialTraceSparse:
         dims = [2, 3, 2]
         b = qu.partial_trace(a, dims, 1)
         c = (
-            a.A.reshape([*dims, *dims])
+            a.toarray().reshape([*dims, *dims])
             .trace(axis1=2, axis2=5)
             .trace(axis1=0, axis2=2)
         )
@@ -740,17 +740,17 @@ class TestPartialTraceSparse:
         a = qu.rand_rho(12, sparse=True, density=0.5)
         dims = [2, 3, 2]
         b = qu.partial_trace(a, dims, [0, 2])
-        c = qu.partial_trace(a.A, dims, [0, 2])
+        c = qu.partial_trace(a.toarray(), dims, [0, 2])
         assert_allclose(b, c)
         b = qu.partial_trace(a, dims, [1, 2])
-        c = qu.partial_trace(a.A, dims, [1, 2])
+        c = qu.partial_trace(a.toarray(), dims, [1, 2])
         assert_allclose(b, c)
 
     def test_partial_trace_simple_ket(self):
         a = qu.rand_ket(12, sparse=True, density=0.5)
         dims = [2, 3, 2]
         b = qu.partial_trace(a, dims, [0, 1])
-        c = qu.partial_trace(a.A, dims, [0, 1])
+        c = qu.partial_trace(a.toarray(), dims, [0, 1])
         assert_allclose(b, c)
 
 

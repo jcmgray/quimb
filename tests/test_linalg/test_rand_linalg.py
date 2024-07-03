@@ -68,8 +68,8 @@ class TestRSVD:
         assert_allclose(V @ V.conj().T, np.eye(k), rtol=1e-5, atol=1e-5)
 
         Ue, se, Ve = qu.svds(X, k)
-        opt_err = qu.norm(X.A - usv2dense(Ue, se, Ve), "fro")
-        act_err = qu.norm(X.A - usv2dense(U, s, V), "fro")
+        opt_err = qu.norm(X.toarray() - usv2dense(Ue, se, Ve), "fro")
+        act_err = qu.norm(X.toarray() - usv2dense(U, s, V), "fro")
 
         assert act_err < 1.2 * opt_err
 
@@ -123,7 +123,7 @@ class TestRSVD:
     def test_estimate_rank_lo(self, dtype, k_start, use_qb):
         X = rand_tn1d_sect(30, 10, dtype=dtype)
 
-        Ue, se, VHe = qu.svd(X.A)
+        Ue, se, VHe = qu.svd(X.toarray())
         actual_rank = sum(se > se[0] * 1e-3)
 
         k = qu.estimate_rank(

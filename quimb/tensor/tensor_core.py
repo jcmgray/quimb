@@ -1399,7 +1399,7 @@ class Tensor:
 
         if isinstance(params, qarray):
             # some optimizers don't like ndarray subclasses such as qarray
-            params = params.A
+            params = params.toarray()
 
         return params
 
@@ -11079,6 +11079,7 @@ class TNLinearOperator(spla.LinearOperator):
             to_qarray=to_qarray,
         )
 
+    toarray = to_dense
     to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
     @functools.wraps(tensor_split)

@@ -204,6 +204,9 @@ class qarray(np.ndarray):
         else:
             return self.transpose()
 
+    def toarray(self):
+        return np.asarray(self)
+
     @property
     def A(self):
         return np.asarray(self)
@@ -1040,7 +1043,7 @@ def quimbify(
 
     if qtype is not None:
         # Must be dense to reshape
-        data = qarray(data.A if sparse_input else data)
+        data = qarray(data.toarray() if sparse_input else data)
         if qtype in ("k", "ket"):
             data = data.reshape((prod(data.shape), 1))
         elif qtype in ("b", "bra"):
@@ -1051,7 +1054,7 @@ def quimbify(
 
     # Just cast as qarray
     elif not sparse_output:
-        data = qarray(data.A if sparse_input else data, dtype=dtype)
+        data = qarray(data.toarray() if sparse_input else data, dtype=dtype)
 
     # Check if already sparse matrix, or wanted to be one
     if sparse_output:
@@ -1828,7 +1831,7 @@ def permute(p, dims, perm):
 
     >>> IX = speye(2) & pauli('X', sparse=True)
     >>> XI = permute(IX, dims=[2, 2], perm=[1, 0])
-    >>> np.allclose(XI.A, pauli('X') & eye(2))
+    >>> np.allclose(XI.toarray(), pauli('X') & eye(2))
     True
     """
     if issparse(p):
@@ -2150,6 +2153,18 @@ sp.csr_matrix.__and__ = kron_dispatch
 sp.bsr_matrix.__and__ = kron_dispatch
 sp.csc_matrix.__and__ = kron_dispatch
 sp.coo_matrix.__and__ = kron_dispatch
+
+
+if not hasattr(sp.csr_matrix, "H"):
+    # scipy >=1.14 removed the .H attribute
+
+    def sparse_hermitian_conjugate(self):
+        return self.conjugate().transpose()
+
+    sp.csr_matrix.H = property(sparse_hermitian_conjugate)
+    sp.csc_matrix.H = property(sparse_hermitian_conjugate)
+    sp.coo_matrix.H = property(sparse_hermitian_conjugate)
+    sp.bsr_matrix.H = property(sparse_hermitian_conjugate)
 
 
 def csr_mulvec_wrap(fn):

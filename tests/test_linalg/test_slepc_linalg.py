@@ -148,7 +148,7 @@ class TestSlepcMfnMultiply:
 
         out = mfn_multiply_slepc(a, k)
 
-        al, av = eigh(a.A)
+        al, av = eigh(a.toarray())
         expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
 
         assert_allclose(out, expected)
@@ -162,7 +162,7 @@ class TestSlepcMfnMultiply:
 
         out = mfn_multiply_slepc(a, k, fntype="sqrt", isherm=True)
 
-        al, av = eigh(a.A)
+        al, av = eigh(a.toarray())
         al[al < 0] = 0.0  # very small neg values spoil sqrt
         expected = av @ np.diag(np.sqrt(al)) @ av.conj().T @ k
 
@@ -261,7 +261,7 @@ class TestShellMatrix:
 class TestCISS:
     def test_1(self):
         a = rand_herm(100, sparse=True)
-        el, ev = eigh(a.A)
+        el, ev = eigh(a.toarray())
         which = abs(el) < 0.2
         el, ev = el[which], ev[:, which]
 

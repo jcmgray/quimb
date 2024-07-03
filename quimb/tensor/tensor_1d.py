@@ -4287,6 +4287,9 @@ class TNLinearOperator1D(spla.LinearOperator):
 
         return T.to_dense(self.left_inds, self.right_inds)
 
+    def toarray(self):
+        return self.to_dense()
+
     @property
     def A(self):
         return self.to_dense()

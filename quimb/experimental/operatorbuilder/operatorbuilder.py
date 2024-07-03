@@ -669,7 +669,7 @@ class SparseOperatorBuilder:
         operator.
         """
         A = self.build_sparse_matrix(stype="coo")
-        return A.A
+        return A.toarray()
 
     def build_local_terms(self):
         """Get a dictionary of local terms, where each key is a sorted tuple

@@ -313,7 +313,7 @@ class TestExpm:
     @pytest.mark.parametrize("herm", [True, False])
     def test_eye(self, sparse, herm):
         p = qu.expm(qu.eye(2, sparse=sparse), herm=herm)
-        assert_allclose((p.A if sparse else p) / np.e, qu.eye(2))
+        assert_allclose((p.toarray() if sparse else p) / np.e, qu.eye(2))
         if sparse:
             assert isinstance(p, sp.csr_matrix)
 
@@ -338,7 +338,7 @@ class TestLazy:
         print(hl)
         h = 1 * hl(ownership=ownership)
         h_ex = qu.ham_heis(n=4, sparse=sparse)[slice(*ownership), :]
-        assert_allclose(h.A, h_ex.A)
+        assert_allclose(h.toarray(), h_ex.toarray())
 
     @pytest.mark.parametrize("backend", ["scipy", "lobpcg"])
     def test_project_eig(self, backend):

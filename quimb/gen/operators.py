@@ -555,7 +555,7 @@ def hamiltonian_builder(fn):
             H = H.real
 
         if not sparse:
-            H = qarray(H.A)
+            H = qarray(H.toarray())
         elif H.format != stype:
             H = H.asformat(stype)
 
@@ -1021,7 +1021,7 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
 
     Examples
     --------
-    >>> zspin_projector(n=2, sz=0).A
+    >>> zspin_projector(n=2, sz=0).toarray()
     array([[0., 0.],
            [1., 0.],
            [0., 1.],

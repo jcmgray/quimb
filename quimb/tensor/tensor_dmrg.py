@@ -785,7 +785,7 @@ class DMRG:
         loc_en, loc_gs = self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
 
         # insert back into state and all tensor networks viewing it
-        loc_gs = loc_gs.A.reshape(dims)
+        loc_gs = loc_gs.toarray().reshape(dims)
         self._k[i].modify(data=loc_gs)
         self._b[i].modify(data=loc_gs.conj())
 
@@ -839,7 +839,7 @@ class DMRG:
         loc_en, loc_gs = self.post_check(i, Neff, loc_gs, loc_en, loc_gs_old)
 
         # split the two site local groundstate
-        T_AB = Tensor(loc_gs.A.reshape(dims), uix)
+        T_AB = Tensor(loc_gs.toarray().reshape(dims), uix)
         L, R = T_AB.split(
             left_inds=uix_L,
             get="arrays",

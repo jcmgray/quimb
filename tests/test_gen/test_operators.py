@@ -125,7 +125,7 @@ class TestControlledZ:
     def test_controlled_z_sparse(self):
         cz = qu.controlled("z", sparse=True)
         assert qu.issparse(cz)
-        assert_allclose(cz.A, np.diag([1, 1, 1, -1]))
+        assert_allclose(cz.toarray(), np.diag([1, 1, 1, -1]))
 
 
 class TestGates:

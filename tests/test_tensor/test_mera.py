@@ -25,7 +25,7 @@ class TestMERA:
         X = qu.spin_operator("X", sparse=True)
 
         mera = qt.MERA.rand(16)
-        meraX = mera.gate(X.A, 7)
+        meraX = mera.gate(X.toarray(), 7)
         assert mera is not meraX
         x1 = mera.H @ meraX
 

@@ -81,7 +81,7 @@ def eigs_scipy(
 
     # avoid matrix like behaviour
     if isinstance(A, qu.qarray):
-        A = A.A
+        A = A.toarray()
 
     # project into subspace
     if P is not None:
@@ -219,7 +219,7 @@ def eigs_lobpcg(
 
     # avoid matrix like behaviour
     if isinstance(A, qu.qarray):
-        A = A.A
+        A = A.toarray()
 
     d = A.shape[0]
 
@@ -271,7 +271,7 @@ def svds_scipy(A, k=6, *, return_vecs=True, backend=None, **svds_opts):
 
     # avoid matrix like behaviour
     if isinstance(A, qu.qarray):
-        A = A.A
+        A = A.toarray()
 
     if backend is None:
         svds = spla.svds

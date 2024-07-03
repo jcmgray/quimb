@@ -85,7 +85,7 @@ class TestSLEPcMPI:
 
         else:
             out = mfn_multiply_slepc_spawn(a, k, num_workers=num_workers)
-            al, av = eigh(a.A)
+            al, av = eigh(a.toarray())
             expected = av @ np.diag(np.exp(al)) @ av.conj().T @ k
             assert_allclose(out, expected)
 

@@ -255,7 +255,7 @@ class TestLanczosApprox:
         actual_x = sum(fn(eigvalsh(a)))
         # check un-normalized state work properly
         v0 = neel_state(7) + neel_state(7, down_first=True)
-        v0 = v0.A.reshape(-1)
+        v0 = v0.toarray().reshape(-1)
         pos = fn == np.sqrt
         v0_opts = {"dist": dist, "orthog": True}
         approx_x = approx_spectral_function(
@@ -302,7 +302,7 @@ class TestLanczosApprox:
     def test_approx_spectral_subspaces_with_heis_partition(self, bsz):
         h = ham_heis(10, sparse=True)
         beta = 0.01
-        actual_Z = sum(np.exp(-beta * eigvalsh(h.A)))
+        actual_Z = sum(np.exp(-beta * eigvalsh(h.toarray())))
         approx_Z = tr_exp_approx(-beta * h, bsz=bsz)
         assert_allclose(actual_Z, approx_Z, rtol=3e-2)
 

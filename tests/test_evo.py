@@ -95,7 +95,7 @@ class TestSchrodingerEqKet:
     def test_ket_1darray(self, psi_dot):
         psi, ham, psid = psi_dot
         foo = schrodinger_eq_ket(ham)
-        psid2 = foo(None, psi.A.reshape(-1)).reshape(-1, 1)
+        psid2 = foo(None, psi.toarray().reshape(-1)).reshape(-1, 1)
         assert_allclose(psid, psid2)
 
     def test_ket_matrix_sparse(self, spsi_dot):
@@ -107,7 +107,7 @@ class TestSchrodingerEqKet:
     def test_ket_1darray_sparse(self, spsi_dot):
         psi, ham, psid = spsi_dot
         foo = schrodinger_eq_ket(ham)
-        psid2 = foo(None, psi.A.reshape(-1)).reshape(-1, 1)
+        psid2 = foo(None, psi.toarray().reshape(-1)).reshape(-1, 1)
         assert_allclose(psid, psid2)
 
 
@@ -115,25 +115,25 @@ class TestSchrodingerEqDop:
     def test_dop_matrix(self, rho_dot):
         rho, ham, rhod = rho_dot
         foo = schrodinger_eq_dop(ham)
-        rhod2 = foo(None, rho.A).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray()).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_dop_1darray(self, rho_dot):
         rho, ham, rhod = rho_dot
         foo = schrodinger_eq_dop(ham)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_dop_matrix_sparse(self, srho_dot):
         rho, ham, rhod = srho_dot
         foo = schrodinger_eq_dop(ham)
-        rhod2 = foo(None, rho.A).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray()).reshape(3, 3)
         assert_allclose(rhod, rhod2, atol=1e-12)
 
     def test_dop_1darray_sparse(self, srho_dot):
         rho, ham, rhod = srho_dot
         foo = schrodinger_eq_dop(ham)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2, atol=1e-12)
 
 
@@ -141,13 +141,13 @@ class TestSchrodingerEqDopVec:
     def test_dop_1darray(self, rho_dot):
         rho, ham, rhod = rho_dot
         foo = schrodinger_eq_dop_vectorized(ham)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_dop_1darray_sparse(self, srho_dot):
         rho, ham, rhod = srho_dot
         foo = schrodinger_eq_dop_vectorized(ham)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2, atol=1e-12)
 
 
@@ -161,7 +161,7 @@ class TestLindbladEq:
     def test_1darray(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
         foo = lindblad_eq(ham, ls, gamma)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_matrix_sparse(self, srho_dot_ls):
@@ -173,7 +173,7 @@ class TestLindbladEq:
     def test_1darray_sparse(self, srho_dot_ls):
         rho, ham, gamma, ls, rhod = srho_dot_ls
         foo = lindblad_eq(ham, ls, gamma)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
 
@@ -181,13 +181,13 @@ class TestLindbladEqVec:
     def test_1darray(self, rho_dot_ls):
         rho, ham, gamma, ls, rhod = rho_dot_ls
         foo = lindblad_eq_vectorized(ham, ls, gamma)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
     def test_1darray_sparse(self, srho_dot_ls):
         rho, ham, gamma, ls, rhod = srho_dot_ls
         foo = lindblad_eq_vectorized(ham, ls, gamma)
-        rhod2 = foo(None, rho.A.reshape(-1)).reshape(3, 3)
+        rhod2 = foo(None, rho.toarray().reshape(-1)).reshape(3, 3)
         assert_allclose(rhod, rhod2)
 
 

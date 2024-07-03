@@ -138,7 +138,7 @@ class LocalHamGen:
         cache = self._op_cache["convert_from_qarray"]
         key = id(x)
         if key not in cache:
-            cache[key] = x.A
+            cache[key] = x.toarray()
         return cache[key]
 
     def _flip_cached(self, x):

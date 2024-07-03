@@ -532,7 +532,7 @@ class Evolution(object):
             evals, evecs = self._ham
             self._method = "solve"
         except ValueError:
-            evals, evecs = eigh(self._ham.A)
+            evals, evecs = eigh(self._ham.toarray())
             self._ham = (evals, evecs)
 
         # Find initial state in energy eigenbasis at t0
@@ -578,7 +578,9 @@ class Evolution(object):
 
             self._stepper.set_solout(solout)
 
-        self._stepper.set_initial_value(self._p0.A.reshape(-1), self.t0)
+        self._stepper.set_initial_value(
+            self._p0.toarray().reshape(-1), self.t0
+        )
 
         # assign the correct update_to method
         self._update_method = self._update_to_integrate

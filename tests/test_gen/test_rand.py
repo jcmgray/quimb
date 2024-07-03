@@ -142,7 +142,7 @@ class TestRandHerm:
         assert type(a) == sp.csr_matrix
         assert qu.isherm(a)
         assert a.dtype == dtype
-        evals = qu.eigvalsh(a.A)
+        evals = qu.eigvalsh(a.toarray())
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-14)
 
 
@@ -163,7 +163,7 @@ class TestRandPos:
         assert a.shape == (3, 3)
         assert type(a) == sp.csr_matrix
         assert a.dtype == dtype
-        evals = qu.eigvalsh(a.A)
+        evals = qu.eigvalsh(a.toarray())
         assert_allclose(evals.imag, [0, 0, 0], atol=1e-7)
         assert np.all(evals.real >= -1e-15)
 

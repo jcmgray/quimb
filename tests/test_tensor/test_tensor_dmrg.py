@@ -336,7 +336,7 @@ class TestDMRG2:
         )
 
         assert_allclose(H_explicit, H_mpo.to_qarray())
-        assert_allclose(H_explicit, H_sps.A)
+        assert_allclose(H_explicit, H_sps.toarray())
 
 
 class TestDMRGX:
@@ -371,7 +371,7 @@ class TestDMRGX:
         assert np.sum(np.abs(el - en) < 1e-12) == 1
 
         # check exactly one eigenvector is matched with high fidelity
-        ovlps = (ev.H @ k).A ** 2
+        ovlps = (ev.H @ k).toarray() ** 2
         big_ovlps = ovlps[ovlps > 1e-12]
         assert_allclose(big_ovlps, [1])
 

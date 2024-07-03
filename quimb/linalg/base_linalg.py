@@ -320,9 +320,9 @@ def eigh_window(
 
     if isdense(A) or backend.upper() == "NUMPY":
         if return_vecs:
-            lk, vk = eigh(A.A if issparse(A) else A, **kwargs)
+            lk, vk = eigh(A.toarray() if issparse(A) else A, **kwargs)
         else:
-            lk = eigvalsh(A.A if issparse(A) else A, **kwargs)
+            lk = eigvalsh(A.toarray() if issparse(A) else A, **kwargs)
 
         lmin, lmax = lk[0], lk[-1]
         l_w0, l_wmin, l_wmax = _rel_window_to_abs_window(lmin, lmax, w_0, w_sz)

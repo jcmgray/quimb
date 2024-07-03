@@ -225,21 +225,21 @@ class TestMul:
 
     def test_mul_sparse(self, mat_s, mat_s2):
         cq = mul(mat_s, mat_s2)
-        cn = mat_s.A * mat_s2.A
+        cn = mat_s.toarray() * mat_s2.toarray()
         assert issparse(cq)
-        assert_allclose(cq.A, cn)
-        cq = mul(mat_s2.A, mat_s)
-        cn = mat_s2.A * mat_s.A
+        assert_allclose(cq.toarray(), cn)
+        cq = mul(mat_s2.toarray(), mat_s)
+        cn = mat_s2.toarray() * mat_s.toarray()
         assert issparse(cq)
-        assert_allclose(cq.A, cn)
+        assert_allclose(cq.toarray(), cn)
 
     def test_mul_sparse_broadcast(self, mat_s, ket_d):
         ca = mul(mat_s, ket_d)
-        cn = np.multiply(mat_s.A, ket_d)
-        assert_allclose(ca.A, cn)
+        cn = np.multiply(mat_s.toarray(), ket_d)
+        assert_allclose(ca.toarray(), cn)
         ca = mul(mat_s.H, ket_d)
-        cn = np.multiply(mat_s.H.A, ket_d)
-        assert_allclose(ca.A, cn)
+        cn = np.multiply(mat_s.H.toarray(), ket_d)
+        assert_allclose(ca.toarray(), cn)
 
 
 class TestDot:
@@ -259,7 +259,7 @@ class TestDot:
         cq = dot(mat_s, mat_s2)
         cn = mat_s @ mat_s2
         assert issparse(cq)
-        assert_allclose(cq.A, cn.A)
+        assert_allclose(cq.toarray(), cn.toarray())
 
     def test_dot_sparse_dense(self, mat_s, ket_d):
         cq = dot(mat_s, ket_d)
@@ -272,7 +272,7 @@ class TestDot:
             cn = mat_s._mul_vector(ket_d)
         assert not issparse(cq)
         assert isdense(cq)
-        assert_allclose(cq.A.ravel(), cn)
+        assert_allclose(cq.toarray().ravel(), cn)
 
     def test_dot_sparse_dense_ket(self, mat_s, ket_d):
         cq = dot(mat_s, ket_d)
@@ -280,7 +280,7 @@ class TestDot:
         assert not issparse(cq)
         assert isdense(cq)
         assert isket(cq)
-        assert_allclose(cq.A, cn)
+        assert_allclose(cq.toarray(), cn)
 
     def test_par_dot_csr_matvec(self, mat_s, ket_d):
         x = par_dot_csr_matvec(mat_s, ket_d)
@@ -330,9 +330,9 @@ class TestFastDiagMul:
     def test_ldmul_sparse(self, mat_s, l1d):
         assert issparse(mat_s)
         a = ldmul(l1d, mat_s)
-        b = np.diag(l1d) @ mat_s.A
+        b = np.diag(l1d) @ mat_s.toarray()
         assert issparse(a)
-        assert_allclose(a.A, b)
+        assert_allclose(a.toarray(), b)
 
     def test_rdmul_small(self, mat_d, l1d):
         a = rdmul(mat_d, l1d)
@@ -350,9 +350,9 @@ class TestFastDiagMul:
 
     def test_rdmul_sparse(self, mat_s, l1d):
         a = rdmul(mat_s, l1d)
-        b = mat_s.A @ np.diag(l1d)
+        b = mat_s.toarray() @ np.diag(l1d)
         assert issparse(a)
-        assert_allclose(a.A, b)
+        assert_allclose(a.toarray(), b)
 
 
 class TestOuter:
@@ -412,8 +412,14 @@ class TestKron:
         )
 
     def test_kron_mixed_types(self, mat_d, mat_s):
-        assert_allclose(kron(mat_d, mat_s).A, (sp.kron(mat_d, mat_s, "csr")).A)
-        assert_allclose(kron(mat_s, mat_s).A, (sp.kron(mat_s, mat_s, "csr")).A)
+        assert_allclose(
+            kron(mat_d, mat_s).toarray(),
+            (sp.kron(mat_d, mat_s, "csr")).toarray(),
+        )
+        assert_allclose(
+            kron(mat_s, mat_s).toarray(),
+            (sp.kron(mat_s, mat_s, "csr")).toarray(),
+        )
 
 
 class TestKronSparseFormats:
@@ -476,14 +482,14 @@ class TestKronPow:
     def test_sparse(self, mat_s):
         x = mat_s & mat_s & mat_s
         y = kronpow(mat_s, 3)
-        assert_allclose(x.A, y.A)
+        assert_allclose(x.toarray(), y.toarray())
 
     @mark.parametrize("stype", _SPARSE_FORMATS)
     def test_sparse_formats(self, stype, mat_s):
         x = mat_s & mat_s & mat_s
         y = kronpow(mat_s, 3, stype=stype)
         assert y.format == stype
-        assert_allclose(x.A, y.A)
+        assert_allclose(x.toarray(), y.toarray())
 
     @mark.parametrize("sformat_in", _SPARSE_FORMATS)
     @mark.parametrize("stype", (None,) + _SPARSE_FORMATS)
@@ -492,4 +498,4 @@ class TestKronPow:
         x = mat_s & mat_s & mat_s
         y = kronpow(mat_s, 3, stype=stype, coo_build=True)
         assert y.format == stype if stype is not None else "sformat_in"
-        assert_allclose(x.A, y.A)
+        assert_allclose(x.toarray(), y.toarray())

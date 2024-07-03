@@ -73,7 +73,7 @@ class TestSpinHam1D:
         H_mpo = HB.build_mpo(n)
         H_sps = HB.build_sparse(n)
 
-        assert_allclose(H_mpo.to_dense(), H_sps.A)
+        assert_allclose(H_mpo.to_dense(), H_sps.toarray())
 
     def test_no_default_term(self):
         N = 10
