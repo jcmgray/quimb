@@ -1350,7 +1350,7 @@ def rehearsal_dict(tn, tree):
         "tn": tn,
         "tree": tree,
         "W": tree.contraction_width(),
-        "C": math.log10(tree.contraction_cost()),
+        "C": math.log10(max(tree.contraction_cost(), 1)),
     }
 
 
