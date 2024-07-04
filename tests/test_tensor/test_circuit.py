@@ -151,13 +151,6 @@ class TestCircuit:
         qc = qtn.Circuit.from_qsim_str(qsim)
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
-    def test_from_qsim_mps_swapsplit(self):
-        G = rand_reg_graph(reg=3, n=18, seed=42)
-        qsim = graph_to_qsim(G)
-        qc = qtn.CircuitMPS.from_qsim_str(qsim)
-        assert len(qc.psi.tensors) == 18
-        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
-
     def test_from_openqasm2(self):
         qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
@@ -641,6 +634,15 @@ class TestCircuit:
         (b,) = circ.sample(1, group_size=3)
         assert b[N - 2] == "0"
 
+
+class TestCircuitMPS:
+    def test_from_qsim_mps_swapsplit(self):
+        G = rand_reg_graph(reg=3, n=18, seed=42)
+        qsim = graph_to_qsim(G)
+        qc = qtn.CircuitMPS.from_qsim_str(qsim)
+        assert len(qc.psi.tensors) == 18
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
     def test_multi_controlled_mps_circuit(self):
         N = 10
         rng = np.random.default_rng(42)
@@ -680,6 +682,33 @@ class TestCircuit:
         mps = circ.psi
         assert mps.norm() == pytest.approx(1.0)
         assert mps.distance_normalized(psi_lazy) < 1e-6
+
+    def test_mps_sampling(self):
+        N = 6
+        circ = qtn.CircuitMPS(N)
+        circ.h(3)
+        circ.cx(3, 2)
+        circ.cx(2, 1)
+        circ.cx(1, 0)
+        circ.cx(0, 5)
+        circ.cx(5, 4)
+        circ.x(4)
+        for x in circ.sample(10):
+            assert x in {"000010", "111101"}
+
+    def test_permmps_sampling(self):
+        N = 6
+        circ = qtn.CircuitPermMPS(N)
+        circ.h(3)
+        circ.cx(3, 2)
+        circ.cx(2, 1)
+        circ.cx(1, 0)
+        circ.cx(0, 5)
+        circ.cx(5, 4)
+        circ.x(4)
+        assert circ.qubits != tuple(range(N))
+        for x in circ.sample(10):
+            assert x in {"000010", "111101"}
 
 
 class TestCircuitGen:

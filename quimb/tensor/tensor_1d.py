@@ -3191,6 +3191,83 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
     measure_ = functools.partialmethod(measure, inplace=True)
 
+    def sample_configuration(self, seed=None, info=None):
+        """Sample a configuration from this MPS.
+
+        Parameters
+        ----------
+        seed : None, int, or np.random.Generator, optional
+            A random seed or generator to use.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
+        """
+        import numpy as np
+
+        # if seed is already a generator this simply returns it
+        rng = np.random.default_rng(seed)
+
+        # right canonicalize
+        psi = self.canonicalize(0, info=info)
+
+        config = []
+        omega = 1.0
+        for i in range(psi.L):
+
+            # form local density matrix
+            ki = psi[i]
+            bi = ki.H
+            ix = psi.site_ind(i)
+            # contract diagonal to get probabilities
+            pi = (ki & bi).contract(output_inds=[ix]).data
+
+            # sample outcome using numpy
+            pi = do("to_numpy", pi).real
+            pi /= pi.sum()
+            xi = rng.choice(pi.size, p=pi)
+            config.append(xi)
+            # track local probability
+            omega *= pi[xi]
+
+            # project outcome
+            psi.isel_({ix: xi})
+            if i < psi.L - 1:
+                # and absorb projected site into next site
+                psi.contract_tags_([psi.site_tag(i), psi.site_tag(i + 1)])
+
+        return config, omega
+
+    def sample(self, C, seed=None, info=None):
+        """Generate ``C`` samples rom this MPS, along with their probabilities.
+
+        Parameters
+        ----------
+        C : int
+            The number of samples to generate.
+        seed : None, int, or np.random.Generator, optional
+            A random seed or generator to use.
+        info : dict, optional
+            If given, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center.
+
+        Yields
+        ------
+        config : sequence of int
+            The sample configuration.
+        omega : float
+            The probability of this configuration.
+        """
+
+        if info is None:
+            info = {}
+
+        # do right canonicalization once (supplying info avoids re-performing)
+        psi0 = self.canonicalize(0, info=info)
+
+        for _ in range(C):
+            yield psi0.sample_configuration(seed=seed, info=info)
 
 class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
     """Initialise a matrix product operator, with auto labelling and tagging.

@@ -757,6 +757,16 @@ class TestMatrixProductState:
             psi.gate(G, where, contract=False)
         ) == pytest.approx(0.0, abs=1e-6)
 
+    def test_sample_configuration(self):
+        psi = qtn.MPS_rand_state(10, 7)
+        config, omega = psi.sample_configuration()
+        assert len(config) == 10
+        assert abs(
+            psi.isel(
+                {psi.site_ind(i): xi for i, xi in enumerate(config)}
+            ).contract()
+        ) ** 2 == pytest.approx(omega)
+
 
 class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", [False, True])

@@ -4008,7 +4008,7 @@ class CircuitMPS(Circuit):
     @property
     def psi(self):
         # no squeeze so that bond dims of 1 preserved
-        return self._psi
+        return self._psi.copy()
 
     @property
     def uni(self):
@@ -4028,6 +4028,23 @@ class CircuitMPS(Circuit):
         is not meaningful.
         """
         return self.psi
+
+    def sample(
+        self,
+        C,
+        seed=None,
+    ):
+        """Sample the MPS circuit ``C`` times.
+
+        Parameters
+        ----------
+        C : int
+            The number of samples to generate.
+        seed : None, int, or generator, optional
+            A random seed or generator to use for reproducibility.
+        """
+        for config, _ in self._psi.sample(C, seed=seed):
+            yield "".join(map(str, config))
 
     def fidelity_estimate(self):
         r"""Estimate the fidelity of the current state based on its norm, which
@@ -4121,6 +4138,26 @@ class CircuitPermMPS(CircuitMPS):
         sites.
         """
         return self._psi.copy()
+
+    def sample(self, C, seed=None):
+        """Sample the PermMPS circuit ``C`` times.
+
+        Parameters
+        ----------
+        C : int
+            The number of samples to generate.
+        seed : None, int, or generator, optional
+            A random seed or generator to use for reproducibility.
+
+        Yields
+        ------
+        str
+            The next sample bitstring.
+        """
+        # configuring is in physical order, so need to reorder for sampling
+        ordering = self.calc_qubit_ordering()
+        for config, _ in self._psi.sample(C, seed=seed):
+            yield "".join(str(config[i]) for i in ordering)
 
     @property
     def psi(self):
