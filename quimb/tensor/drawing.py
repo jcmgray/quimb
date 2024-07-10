@@ -1331,7 +1331,7 @@ def get_positions(
     iterations="auto",
     k=None,
 ):
-    if (tn.num_tensors == 1) and (fix is None):
+    if (tn is not None) and (tn.num_tensors == 1) and (fix is None):
         # single tensor, layout manually
         return layout_single_tensor(tn, dim=dim)
 
