@@ -3,6 +3,18 @@
 Release notes for `quimb`.
 
 (whats-new-1-8-2)=
+## v1.8.3 (2024-07-10)
+
+**Enhancements:**
+
+- support for numpy v2.0 and scipy v1.14
+- add MPS sampling: [`MatrixProductState.sample_configuration`](quimb.tensor.tensor_1d.MatrixProductState.sample_configuration) and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample) (generating multiple samples) and use these for [`CircuitMPS.sample`](quimb.tensor.circuit.CircuitMPS.sample) and [`CircuitPermMPS.sample`](quimb.tensor.circuit.CircuitPermMPS.sample).
+- add basic plot method for SimpleUpdate classes
+- add [`edges_1d_chain`](qumib.tensor.geometry.edges_1d_chain) for generating 1D chain edges
+- [operatorbuilder](quimb.experimental.operatorbuilder): better coefficient placement for long range MPO building
+
+
+(whats-new-1-8-2)=
 ## v1.8.2 (2024-06-12)
 
 **Enhancements:**
