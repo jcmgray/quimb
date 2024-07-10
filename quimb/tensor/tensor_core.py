@@ -1408,12 +1408,19 @@ class Tensor:
         data array. This is mainly for providing an interface for 'structured'
         arrays e.g. with block sparsity to interact with optimization.
         """
-        if hasattr(self.data, "set_params"):
-            self.data.set_params(params)
-        elif hasattr(self.data, "params"):
-            self.data.params = params
+        data = self.data
+        if hasattr(data, "set_params"):
+            # Tensor don't modify their data inplace
+            data = data.copy()
+            data.set_params(params)
+        elif hasattr(data, "params"):
+            # Tensor don't modify their data inplace
+            data = data.copy()
+            data.params = params
         else:
-            self._set_data(params)
+            data = params
+
+        self._set_data(data)
 
     def copy(self, deep=False, virtual=False):
         """Copy this tensor.
