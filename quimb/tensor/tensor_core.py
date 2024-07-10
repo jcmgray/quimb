@@ -4261,14 +4261,15 @@ class TensorNetwork(object):
             x_sign = 1.0
             x_spread = x
         else:
-            # take care of sign of real scalars so as to keep real
             if iscomplex(x):
                 x_sign = 1.0
+                x_abs = x
             else:
-                x_sign = do("sign", x)
-                x = abs(x)
+                # take care of sign of real scalars so as to keep real
+                x_abs = abs(x)
+                x_sign = x / x_abs
 
-            x_spread = x ** (1 / spread_over)
+            x_spread = x_abs ** (1 / spread_over)
 
         tensors = iter(multiplied)
         for i in range(spread_over):

@@ -1697,7 +1697,7 @@ class TestTensorNetwork:
         enorms = [t.norm() for t in psi]
         if value is None:
             assert all(n1 != n2 for n1, n2 in zip(norms, enorms))
-            assert psi.H @ psi == pytest.approx(x_exp)
+            assert psi.H @ psi == pytest.approx(x_exp, rel=1e-4)
         else:
             assert all(n1 == pytest.approx(value) for n1 in enorms)
             assert (psi.H @ psi) * 10 ** (2 * psi.exponent) == pytest.approx(

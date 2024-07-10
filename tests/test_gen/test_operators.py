@@ -1,6 +1,7 @@
-import pytest
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
+
 import quimb as qu
 
 
@@ -48,7 +49,7 @@ def test_hamiltonian_builder(sparse, stype, dtype):
     if dtype == "don't pass":
         H = simple_ham_complex(sparse=sparse, stype=stype)
     elif dtype is np.float64:
-        with pytest.warns(np.ComplexWarning):
+        with pytest.warns(np.exceptions.ComplexWarning):
             H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)
     else:
         H = simple_ham_complex(sparse=sparse, stype=stype, dtype=dtype)

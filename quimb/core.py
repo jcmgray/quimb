@@ -1,15 +1,15 @@
-"""Core functions for manipulating quantum objects.
-"""
+"""Core functions for manipulating quantum objects."""
 
-import os
-import math
 import cmath
-import itertools
 import functools
+import itertools
+import math
+import os
 from numbers import Integral
 
 import numpy as np
 import scipy.sparse as sp
+
 from .utils import partition_all
 
 try:
@@ -187,6 +187,38 @@ def make_immutable(mat):
         mat.flags.writeable = False
 
 
+def isclose_qarray(a, b, **kwargs):
+    """Check if two qarrays are close. This is a simple wrapper around the
+    base numpy function, but ensures that the arrays are converted to standard
+    numpy arrays first, to avoid a call to the overridden `__and__` method.
+
+    Parameters
+    ----------
+    a : qarray
+        First array.
+    b : qarray
+        Second array.
+    rtol : array_like
+        The relative tolerance parameter.
+    atol : array_like
+        The absolute tolerance parameter (see Notes).
+    equal_nan: bool
+        Whether to compare NaN's as equal. If True, NaN's in a will be
+        considered equal to NaN's in b in the output array.
+
+    Returns
+    -------
+    bool
+    """
+    # numpy 2+ uses `&` so we convert arrays to standard ndarray first
+    return np.allclose(np.asarray(a), np.asarray(b), **kwargs)
+
+
+_numpy_qarray_overrides = {
+    np.isclose: isclose_qarray,
+}
+
+
 class qarray(np.ndarray):
     """Thin subclass of :class:`numpy.ndarray` with some convenient quantum
     linear algebra related methods and attributes (``.H``, ``&``, etc.), and
@@ -234,6 +266,13 @@ class qarray(np.ndarray):
 
     def ptr(self, dims, keep):
         return partial_trace(self, dims, keep)
+
+    def __array_function__(self, func, types, args, kwargs):
+        if func not in _numpy_qarray_overrides:
+            # avoid infinite recursion
+            return super().__array_function__(func, types, args, kwargs)
+
+        return _numpy_qarray_overrides[func](*args, **kwargs)
 
     def __str__(self):
         current_printopts = np.get_printoptions()
@@ -2200,15 +2239,25 @@ def sp_mulvec_wrap(fn):
 
 try:
     # scipy>=1.13
-    sp.csr_matrix._matmul_vector = csr_mulvec_wrap(sp.csr_matrix._matmul_vector)
+    sp.csr_matrix._matmul_vector = csr_mulvec_wrap(
+        sp.csr_matrix._matmul_vector
+    )
     sp.csc_matrix._matmul_vector = sp_mulvec_wrap(sp.csc_matrix._matmul_vector)
     sp.coo_matrix._matmul_vector = sp_mulvec_wrap(sp.coo_matrix._matmul_vector)
     sp.bsr_matrix._matmul_vector = sp_mulvec_wrap(sp.bsr_matrix._matmul_vector)
 
-    sp.csr_matrix._matmul_multivector = sp_mulvec_wrap(sp.csr_matrix._matmul_multivector)
-    sp.csc_matrix._matmul_multivector = sp_mulvec_wrap(sp.csc_matrix._matmul_multivector)
-    sp.coo_matrix._matmul_multivector = sp_mulvec_wrap(sp.coo_matrix._matmul_multivector)
-    sp.bsr_matrix._matmul_multivector = sp_mulvec_wrap(sp.bsr_matrix._matmul_multivector)
+    sp.csr_matrix._matmul_multivector = sp_mulvec_wrap(
+        sp.csr_matrix._matmul_multivector
+    )
+    sp.csc_matrix._matmul_multivector = sp_mulvec_wrap(
+        sp.csc_matrix._matmul_multivector
+    )
+    sp.coo_matrix._matmul_multivector = sp_mulvec_wrap(
+        sp.coo_matrix._matmul_multivector
+    )
+    sp.bsr_matrix._matmul_multivector = sp_mulvec_wrap(
+        sp.bsr_matrix._matmul_multivector
+    )
 except AttributeError:
     # scipy <=1.12"
     sp.csr_matrix._mul_vector = csr_mulvec_wrap(sp.csr_matrix._mul_vector)
@@ -2216,7 +2265,15 @@ except AttributeError:
     sp.coo_matrix._mul_vector = sp_mulvec_wrap(sp.coo_matrix._mul_vector)
     sp.bsr_matrix._mul_vector = sp_mulvec_wrap(sp.bsr_matrix._mul_vector)
 
-    sp.csr_matrix._mul_multivector = sp_mulvec_wrap(sp.csr_matrix._mul_multivector)
-    sp.csc_matrix._mul_multivector = sp_mulvec_wrap(sp.csc_matrix._mul_multivector)
-    sp.coo_matrix._mul_multivector = sp_mulvec_wrap(sp.coo_matrix._mul_multivector)
-    sp.bsr_matrix._mul_multivector = sp_mulvec_wrap(sp.bsr_matrix._mul_multivector)
+    sp.csr_matrix._mul_multivector = sp_mulvec_wrap(
+        sp.csr_matrix._mul_multivector
+    )
+    sp.csc_matrix._mul_multivector = sp_mulvec_wrap(
+        sp.csc_matrix._mul_multivector
+    )
+    sp.coo_matrix._mul_multivector = sp_mulvec_wrap(
+        sp.coo_matrix._mul_multivector
+    )
+    sp.bsr_matrix._mul_multivector = sp_mulvec_wrap(
+        sp.bsr_matrix._mul_multivector
+    )
