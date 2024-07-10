@@ -29,6 +29,7 @@ from .contraction import (
     tensor_linop_backend,
 )
 from .geometry import (
+    edges_1d_chain,
     edges_2d_hexagonal,
     edges_2d_kagome,
     edges_2d_square,
@@ -241,6 +242,7 @@ __all__ = (
     "DMRG1",
     "DMRG2",
     "DMRGX",
+    "edges_1d_chain",
     "edges_2d_hexagonal",
     "edges_2d_kagome",
     "edges_2d_square",

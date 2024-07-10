@@ -1,5 +1,4 @@
-"""Some functions for generating the edges of a lattice.
-"""
+"""Some functions for generating the edges of a lattice."""
 
 import itertools
 import random
@@ -12,6 +11,31 @@ def sort_unique(edges):
     return tuple(
         sorted(tuple(sorted(edge)) for edge in set(map(frozenset, edges)))
     )
+
+
+# ----------------------------------- 1D ------------------------------------ #
+
+
+def edges_1d_chain(L, cyclic=False):
+    """Return the graph edges of a finite 1D chain lattice.
+
+    Parameters
+    ----------
+    L : int
+        The number of cells.
+    cyclic : bool, optional
+        Whether to use periodic boundary conditions.
+
+    Returns
+    -------
+    edges : list[(int, int)]
+    """
+    edges = []
+    for i in range(L):
+        if i < L - 1 or cyclic:
+            edges.append((i, (i + 1) % L))
+
+    return sort_unique(edges)
 
 
 # ----------------------------------- 2D ------------------------------------ #
