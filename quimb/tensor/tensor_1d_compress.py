@@ -1488,7 +1488,7 @@ def mps_gate_with_mpo_lazy(mps, mpo, inplace=False):
     TN object has the same outer indices as the original MPS.
     """
     return tensor_network_apply_op_vec(
-        tn_op=mpo, tn_vec=mps, contract=False, inplace=inplace
+        A=mpo, x=mps, contract=False, inplace=inplace
     )
 
 
