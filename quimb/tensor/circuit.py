@@ -4043,8 +4043,7 @@ class CircuitMPS(Circuit):
         seed : None, int, or generator, optional
             A random seed or generator to use for reproducibility.
         """
-        rng = np.random.default_rng(seed)
-        for config, _ in self._psi.sample(C, seed=rng):
+        for config, _ in self._psi.sample(C, seed=seed):
             yield "".join(map(str, config))
 
     def fidelity_estimate(self):
@@ -4155,10 +4154,9 @@ class CircuitPermMPS(CircuitMPS):
         str
             The next sample bitstring.
         """
-        rng = np.random.default_rng(seed)
         # configuring is in physical order, so need to reorder for sampling
         ordering = self.calc_qubit_ordering()
-        for config, _ in self._psi.sample(C, seed=rng):
+        for config, _ in self._psi.sample(C, seed=seed):
             yield "".join(str(config[i]) for i in ordering)
 
     @property
