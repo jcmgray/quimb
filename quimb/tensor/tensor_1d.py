@@ -6,6 +6,7 @@ import operator
 from math import log, log2
 from numbers import Integral
 
+import numpy as np
 import scipy.sparse.linalg as spla
 from autoray import conj, dag, do, get_dtype_name, reshape, size, transpose
 
@@ -3266,8 +3267,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         # do right canonicalization once (supplying info avoids re-performing)
         psi0 = self.canonicalize(0, info=info)
 
+        rng = np.random.default_rng(seed)
         for _ in range(C):
-            yield psi0.sample_configuration(seed=seed, info=info)
+            yield psi0.sample_configuration(seed=rng, info=info)
 
 class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
     """Initialise a matrix product operator, with auto labelling and tagging.

@@ -696,6 +696,13 @@ class TestCircuitMPS:
         for x in circ.sample(10):
             assert x in {"000010", "111101"}
 
+    def test_mps_sampling_seed(self):
+        N = 1
+        circ = qtn.CircuitMPS(N)
+        circ.h(0)
+        samples = list(circ.sample(10, seed=1234))
+        assert len(set(samples)) == 2
+
     def test_permmps_sampling(self):
         N = 6
         circ = qtn.CircuitPermMPS(N)
@@ -709,6 +716,13 @@ class TestCircuitMPS:
         assert circ.qubits != tuple(range(N))
         for x in circ.sample(10):
             assert x in {"000010", "111101"}
+
+    def test_permmps_sampling_seed(self):
+        N = 1
+        circ = qtn.CircuitPermMPS(N)
+        circ.h(0)
+        samples = list(circ.sample(10, seed=1234))
+        assert len(set(samples)) == 2
 
 
 class TestCircuitGen:

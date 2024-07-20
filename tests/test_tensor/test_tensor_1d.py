@@ -767,6 +767,14 @@ class TestMatrixProductState:
             ).contract()
         ) ** 2 == pytest.approx(omega)
 
+    def test_sample_seed(self):
+        psi = qtn.MPS_rand_state(10, 7)
+        configs = [
+            "".join(map(str, config))
+            for config, _ in psi.sample(10, seed=1234)
+        ]
+        assert len(set(configs)) > 1
+
 
 class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", [False, True])
