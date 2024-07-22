@@ -631,6 +631,30 @@ class TensorNetworkGen(TensorNetwork):
     def __isub__(self, other):
         return tensor_network_ag_sum(self, other, negate=True, inplace=True)
 
+    def normalize_simple(self, gauges, **contract_opts):
+        """Normalize this network using simple local gauges. After calling
+        this, any tree-like sub network gauged with ``gauges`` will have
+        2-norm 1. Inplace operation on both the tensor network and ``gauges``.
+
+        Parameters
+        ----------
+        gauges : dict[str, array_like]
+            The gauges to normalize with.
+        """
+        # normalize gauges
+        for ix, g in gauges.items():
+            gauges[ix] = g / do("linalg.norm", g)
+
+        # normalize sites
+        for site in self.sites:
+            tn_site = self.select(site)
+            tn_site_gauged = tn_site.copy()
+            tn_site_gauged.gauge_simple_insert(gauges)
+            lnorm = (tn_site_gauged.H | tn_site_gauged).contract(
+                all, **contract_opts
+            ) ** 0.5
+            tn_site /= lnorm
+
 
 def gauge_product_boundary_vector(
     tn,
@@ -894,7 +918,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             which_A="upper" if transpose else "lower",
             contract=False,
             inplace=inplace,
-            **kwargs
+            **kwargs,
         )
 
     gate_with_op_lazy_ = functools.partialmethod(

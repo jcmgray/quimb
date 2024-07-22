@@ -116,3 +116,21 @@ def test_gate_sandwich_with_op():
     y = A.to_dense() @ B.to_dense() @ A.to_dense().conj().T
     B.gate_sandwich_with_op_lazy_(A)
     assert_allclose(B.to_dense(), y)
+
+
+def test_normalize_simple():
+    psi = qtn.PEPS.rand(3, 3, 2, dtype=complex)
+    gauges = {}
+    psi.gauge_all_simple_(100, 5e-6, gauges=gauges)
+    psi.normalize_simple(gauges)
+
+    for where in [
+        [(0, 0)],
+        [(1, 1), (1, 2)],
+        [(0, 0), (0, 1), (0, 2), (1, 2), (2, 2), (2, 1)],
+    ]:
+        tags = [psi.site_tag(w) for w in where]
+        k = psi.select_any(tags, virtual=False)
+        k.gauge_simple_insert(gauges)
+
+        assert k.H @ k == pytest.approx(1.0)
