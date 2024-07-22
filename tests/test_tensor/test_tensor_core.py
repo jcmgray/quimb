@@ -1876,6 +1876,20 @@ class TestTensorNetwork:
         loops = tuple(tn.gen_inds_loops())
         assert len(loops) == 6
 
+    def test_gen_inds_loops_intersect(self):
+        tn = qtn.TN2D_empty(5, 4, 2)
+        loops = tuple(tn.gen_inds_loops(8, False))
+        na = len(loops)
+        assert na == len(frozenset(loops))
+        assert na == len(frozenset(map(frozenset, loops)))
+
+        loops = tuple(tn.gen_inds_loops(8, True))
+        nb = len(loops)
+        assert nb == len(frozenset(loops))
+        assert nb == len(frozenset(map(frozenset, loops)))
+
+        assert nb > na
+
     def test_gen_inds_connected(self):
         tn = qtn.TN2D_rand(3, 4, 2)
         patches = tuple(tn.gen_inds_connected(2))
