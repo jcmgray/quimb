@@ -743,6 +743,11 @@ class SimpleUpdateGen(TEBDGen):
             U, where, gauges=self.gauges, **self.gate_opts
         )
 
+    def normalize(self):
+        """Normalize the state and simple gauges.
+        """
+        self._psi.normalize_simple(self.gauges)
+
     def compute_energy(self):
         return self._psi.compute_local_expectation_cluster(
             terms=self.ham.terms,

@@ -1022,7 +1022,16 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     gate_ = functools.partialmethod(gate, inplace=True)
 
-    def gate_simple_(self, G, where, gauges, renorm=True, **gate_opts):
+    def gate_simple_(
+        self,
+        G,
+        where,
+        gauges,
+        renorm=True,
+        smudge=1e-12,
+        power=1.0,
+        **gate_opts
+    ):
         """Apply a gate to this vector tensor network at sites ``where``, using
         simple update style gauging of the tensors first, as supplied in
         ``gauges``. The new singular values for the bond are reinserted into
@@ -1041,6 +1050,15 @@ class TensorNetworkGenVector(TensorNetworkGen):
         renorm : bool, optional
             Whether to renormalise the singular after the gate is applied,
             before reinserting them into ``gauges``.
+        smudge : float, optional
+            A small value to add to the gauges before multiplying them in and
+            inverting them to avoid numerical issues.
+        power : float, optional
+            The power to raise the singular values to before multiplying them
+            in and inverting them.
+        gate_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
         """
         if isinstance(where, int):
             where = (where,)
@@ -1055,7 +1073,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         site_tags = tuple(map(self.site_tag, where))
         tn_where = self.select_any(site_tags)
 
-        with tn_where.gauge_simple_temp(gauges, ungauge_inner=False):
+        with tn_where.gauge_simple_temp(
+            gauges,
+            smudge=smudge,
+            power=power,
+            ungauge_inner=False,
+        ):
             info = {}
             tn_where.gate_(G, where, info=info, **gate_opts)
 
