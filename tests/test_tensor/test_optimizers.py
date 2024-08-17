@@ -242,6 +242,7 @@ def test_every_parametrized_gate(backend):
     circ.fsim(*qu.randn(2), 0, 1, parametrize=True, tags=["OPTIMIZE"])
     circ.fsimg(*qu.randn(5), 1, 0, parametrize=True, tags=["OPTIMIZE"])
     circ.givens(*qu.randn(1), 0, 1, parametrize=True, tags=["OPTIMIZE"])
+    circ.givens2(*qu.randn(2), 0, 1, parametrize=True, tags=["OPTIMIZE"])
     circ.su4(*qu.randn(15), 0, 1, parametrize=True, tags=["OPTIMIZE"])
     psi = circ.psi
 
