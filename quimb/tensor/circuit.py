@@ -31,7 +31,7 @@ from ..utils import (
 from ..utils import progbar as _progbar
 from . import array_ops as ops
 from .tensor_1d import Dense1D, MatrixProductOperator
-from .tensor_arbgeom import TensorNetworkGenVector, TensorNetworkGenOperator
+from .tensor_arbgeom import TensorNetworkGenOperator, TensorNetworkGenVector
 from .tensor_builder import (
     HTN_CP_operator_from_products,
     MPO_identity_like,
@@ -807,6 +807,36 @@ def givens_param_gen(params):
 
 
 register_param_gate("GIVENS", givens_param_gen, num_qubits=2)
+
+
+def givens2_param_gen(params):
+    theta, phi = params[0], params[1]
+
+    with backend_like(theta):
+        # get a real backend zero
+        zero = 0.0 * theta
+
+        a = do("complex", do("cos", theta), zero)
+        b = do("exp", do("complex", zero, phi)) * do(
+            "complex", do("sin", theta), zero
+        )
+        b_conj = do("exp", do("complex", zero, -phi)) * do(
+            "complex", do("sin", theta), zero
+        )
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
+
+        data = (
+            (((one, zero), (zero, zero)), ((zero, a), (-b, zero))),
+            (((zero, b_conj), (a, zero)), ((zero, zero), (zero, one))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("GIVENS2", givens2_param_gen, num_qubits=2)
 
 
 def rxx_param_gen(params):
@@ -2160,6 +2190,20 @@ class Circuit:
         self.apply_gate(
             "GIVENS",
             theta,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
+        )
+
+    def givens2(
+        self, theta, phi, i, j, gate_round=None, parametrize=False, **kwargs
+    ):
+        self.apply_gate(
+            "GIVENS2",
+            theta,
+            phi,
             i,
             j,
             gate_round=gate_round,
