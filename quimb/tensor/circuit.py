@@ -556,6 +556,7 @@ def u1_gate_param_gen(params):
 
 
 register_param_gate("U1", u1_gate_param_gen, 1)
+register_param_gate("PHASE", u1_gate_param_gen, 1)
 
 
 # two qubit parametrizable gates
@@ -629,6 +630,7 @@ def cu1_param_gen(params):
 
 
 register_param_gate("CU1", cu1_param_gen, 2)
+register_param_gate("CPHASE", cu1_param_gen, 2)
 
 
 def crx_param_gen(params):
@@ -2095,6 +2097,16 @@ class Circuit:
             **kwargs,
         )
 
+    def phase(self, lamda, i, gate_round=None, parametrize=False, **kwargs):
+        self.apply_gate(
+            "PHASE",
+            lamda,
+            i,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
+        )
+
     def cu3(
         self,
         theta,
@@ -2135,6 +2147,19 @@ class Circuit:
     def cu1(self, lamda, i, j, gate_round=None, parametrize=False, **kwargs):
         self.apply_gate(
             "CU1",
+            lamda,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
+        )
+
+    def cphase(
+        self, lamda, i, j, gate_round=None, parametrize=False, **kwargs
+    ):
+        self.apply_gate(
+            "CPHASE",
             lamda,
             i,
             j,
