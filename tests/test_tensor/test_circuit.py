@@ -250,6 +250,7 @@ class TestCircuit:
             ("u3", 1, 3),
             ("u2", 1, 2),
             ("u1", 1, 1),
+            ("phase", 1, 1),
             # two qubit
             ("cx", 2, 0),
             ("cy", 2, 0),
@@ -267,6 +268,7 @@ class TestCircuit:
             ("cu3", 2, 3),
             ("cu2", 2, 2),
             ("cu1", 2, 1),
+            ("cphase", 2, 1),
             ("fsim", 2, 2),
             ("fsimg", 2, 5),
             ("givens", 2, 1),
