@@ -4185,7 +4185,7 @@ class TensorNetwork(object):
             append = None if mangle_inner is True else str(mangle_inner)
             tn.mangle_inner_(append)
 
-        if hasattr(next(iter(tn.tensor_map.values())), "phase_flip"):
+        if hasattr(next(iter(tn.tensor_map.values())).data, "phase_flip"):
             # need to phase dual outer indices
             outer_inds = tn.outer_inds()
             for t in tn:
