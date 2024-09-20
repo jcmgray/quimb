@@ -99,6 +99,7 @@ from .tensor_arbgeom_tebd import (
     LocalHamGen,
     SimpleUpdateGen,
     TEBDGen,
+    edge_coloring,
 )
 from .tensor_builder import (
     MPS_COPY,
@@ -242,6 +243,7 @@ __all__ = (
     "DMRG1",
     "DMRG2",
     "DMRGX",
+    "edge_coloring",
     "edges_1d_chain",
     "edges_2d_hexagonal",
     "edges_2d_kagome",

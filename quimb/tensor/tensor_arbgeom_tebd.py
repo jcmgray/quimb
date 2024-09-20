@@ -1,5 +1,4 @@
-"""Tools for performing TEBD like algorithms on arbitrary lattices.
-"""
+"""Tools for performing TEBD like algorithms on arbitrary lattices."""
 
 import random
 import itertools
@@ -12,6 +11,55 @@ from ..utils import ensure_dict
 from ..utils import progbar as Progbar, default_to_neutral_style
 from .tensor_core import Tensor
 from .drawing import get_colors, get_positions
+
+
+def edge_coloring(
+    edges,
+    strategy="smallest_last",
+    interchange=True,
+    group=True,
+):
+    """Generate an edge coloring for the graph given by ``edges``, using
+    ``networkx.coloring.greedy_color``.
+
+    Parameters
+    ----------
+    edges : sequence[tuple[hashable, hashable]]
+        The edges of the graph.
+    strategy : str or callable, optional
+        The strategy to use for coloring the edges. Can be:
+
+            - 'largest_first'
+            - 'smallest_last'
+            - 'random_sequential'
+            ...
+
+    interchange : bool, optional
+        Whether to use the interchange heuristic. Usually generates better
+        colorings but can be slower.
+    group : bool, optional
+        Whether to group the edges by color or return a flat list.
+    """
+    import networkx as nx
+
+    # find vertex coloring of line graph
+    G = nx.Graph(tuple(edges))
+    edge_colors = nx.coloring.greedy_color(
+        nx.line_graph(G), strategy, interchange=interchange
+    )
+
+    # group the edges by color
+    coloring = {}
+    for edge, color in edge_colors.items():
+        coloring.setdefault(color, []).append(edge)
+
+    if group:
+        return tuple(tuple(coloring[color]) for color in sorted(coloring))
+    else:
+        # flatten sorted groups
+        return tuple(
+            edge for color in sorted(coloring) for edge in coloring[color]
+        )
 
 
 class LocalHamGen:
@@ -104,7 +152,6 @@ class LocalHamGen:
 
         # now absorb the single site terms evenly into the two site terms
         for site, H in H1s.items():
-
             # get interacting terms which cover the site
             pairs = self._sites_to_covering_terms[site]
             num_pairs = len(pairs)
@@ -124,8 +171,7 @@ class LocalHamGen:
 
     @property
     def nsites(self):
-        """The number of sites in the system.
-        """
+        """The number of sites in the system."""
         return len(self.sites)
 
     def items(self):
@@ -171,7 +217,7 @@ class LocalHamGen:
         key = id(x)
         if key not in cache:
             xn = to_numpy(x)
-            d = int(xn.size ** 0.5)
+            d = int(xn.size**0.5)
             Id = eye(d, dtype=xn.dtype)
             XI = do("array", kron(xn, Id), like=x)
             cache[key] = XI
@@ -182,7 +228,7 @@ class LocalHamGen:
         key = id(x)
         if key not in cache:
             xn = to_numpy(x)
-            d = int(xn.size ** 0.5)
+            d = int(xn.size**0.5)
             Id = eye(d, dtype=xn.dtype)
             IX = do("array", kron(Id, xn), like=x)
             cache[key] = IX
@@ -198,8 +244,7 @@ class LocalHamGen:
         return cache[key]
 
     def get_gate(self, where):
-        """Get the local term for pair ``where``, cached.
-        """
+        """Get the local term for pair ``where``, cached."""
         return self.terms[tuple(sorted(where))]
 
     def get_gate_expm(self, where, x):
@@ -209,32 +254,9 @@ class LocalHamGen:
         return self._expm_cached(self.get_gate(where), x)
 
     def apply_to_arrays(self, fn):
-        """Apply the function ``fn`` to all the arrays representing terms.
-        """
+        """Apply the function ``fn`` to all the arrays representing terms."""
         for k, x in self.terms.items():
             self.terms[k] = fn(x)
-
-    def _nx_color_ordering(self, strategy="smallest_first", interchange=True):
-        """Generate a term ordering based on a coloring on the line graph.
-        """
-        import networkx as nx
-
-        G = nx.Graph(tuple(self.terms))
-
-        coloring = list(
-            nx.coloring.greedy_color(
-                nx.line_graph(G), strategy, interchange=interchange
-            ).items()
-        )
-
-        # sort into color groups
-        coloring.sort(key=lambda coo_color: coo_color[1])
-
-        return [
-            # networkx doesn't preserve node order of edge spec
-            tuple(sorted(coo)) for
-            coo, _ in coloring
-        ]
 
     def get_auto_ordering(self, order="sort", **kwargs):
         """Get an ordering of the terms to use with TEBD, for example. The
@@ -278,7 +300,7 @@ class LocalHamGen:
             random.shuffle(pairs)
             return pairs
         else:
-            return self._nx_color_ordering(order, **kwargs)
+            return edge_coloring(self.terms, order, group=False, **kwargs)
 
         pairs = {x: None for x in pairs}
 
@@ -334,7 +356,7 @@ class LocalHamGen:
         import matplotlib.pyplot as plt
 
         if figsize is None:
-            L = self.nsites ** 0.5 + 1
+            L = self.nsites**0.5 + 1
             figsize = (L, L)
 
         ax_supplied = ax is not None
@@ -472,9 +494,9 @@ class TEBDGen:
         if D is None:
             D = self._psi.max_bond()
         self.gate_opts = ensure_dict(gate_opts)
-        self.gate_opts['max_bond'] = D
-        self.gate_opts.setdefault('cutoff', 0.0)
-        self.gate_opts.setdefault('contract', 'reduce-split')
+        self.gate_opts["max_bond"] = D
+        self.gate_opts.setdefault("cutoff", 0.0)
+        self.gate_opts.setdefault("contract", "reduce-split")
 
         # parse energy computation options
         self.compute_energy_opts = ensure_dict(compute_energy_opts)
@@ -487,7 +509,7 @@ class TEBDGen:
         if ordering is None:
 
             def dynamic_random():
-                return self.ham.get_auto_ordering('random_sequential')
+                return self.ham.get_auto_ordering("random_sequential")
 
             self.ordering = dynamic_random
         elif isinstance(ordering, str):
@@ -506,7 +528,7 @@ class TEBDGen:
         self.energies = []
 
         self.keep_best = bool(keep_best)
-        self.best = dict(energy=float('inf'), state=None, it=None)
+        self.best = dict(energy=float("inf"), state=None, it=None)
 
     def sweep(self, tau):
         r"""Perform a full sweep of gates at every pair.
@@ -555,7 +577,7 @@ class TEBDGen:
         if progbar is None:
             progbar = self.progbar
 
-        pbar = Progbar(total=steps, disable=self.progbar is not True)
+        pbar = Progbar(total=steps, disable=progbar is not True)
 
         try:
             for i in range(steps):
@@ -563,9 +585,9 @@ class TEBDGen:
                 self.presweep(i)
 
                 # possibly compute the energy
-                should_compute_energy = (
-                    bool(self.compute_energy_every) and
-                    (i % self.compute_energy_every == 0))
+                should_compute_energy = bool(self.compute_energy_every) and (
+                    i % self.compute_energy_every == 0
+                )
                 if should_compute_energy:
                     self._check_energy()
                     self._update_progbar(pbar)
@@ -592,8 +614,7 @@ class TEBDGen:
 
     @property
     def state(self):
-        """Return a copy of the current state.
-        """
+        """Return a copy of the current state."""
         return self.get_state()
 
     @state.setter
@@ -602,25 +623,21 @@ class TEBDGen:
 
     @property
     def n(self):
-        """The number of sweeps performed.
-        """
+        """The number of sweeps performed."""
         return self._n
 
     @property
     def D(self):
-        """The maximum bond dimension.
-        """
-        return self.gate_opts['max_bond']
+        """The maximum bond dimension."""
+        return self.gate_opts["max_bond"]
 
     @D.setter
     def D(self, value):
-        """The maximum bond dimension.
-        """
-        self.gate_opts['max_bond'] = round(value)
+        """The maximum bond dimension."""
+        self.gate_opts["max_bond"] = round(value)
 
     def _check_energy(self):
-        """Logic for maybe computing the energy if needed.
-        """
+        """Logic for maybe computing the energy if needed."""
         if self.its and (self._n == self.its[-1]):
             # only compute if haven't already
             return self.energies[-1]
@@ -637,17 +654,17 @@ class TEBDGen:
         self.taus.append(float(self.last_tau))
         self.its.append(self._n)
 
-        if self.keep_best and en < self.best['energy']:
-            self.best['energy'] = en
-            self.best['state'] = self.state
-            self.best['it'] = self._n
+        if self.keep_best and en < self.best["energy"]:
+            self.best["energy"] = en
+            self.best["state"] = self.state
+            self.best["gauges"] = self.gauges.copy()
+            self.best["it"] = self._n
 
         return self.energies[-1]
 
     @property
     def energy(self):
-        """Return the energy of current state, computing it only if necessary.
-        """
+        """Return the energy of current state, computing it only if necessary."""
         return self._check_energy()
 
     # ------- abstract methods that subclasses might want to override ------- #
@@ -681,17 +698,12 @@ class TEBDGen:
         override this with a custom method to compute the energy.
         """
         return self._psi.compute_local_expectation_cluster(
-            terms=self.ham.terms,
-            **self.compute_energy_opts
+            terms=self.ham.terms, **self.compute_energy_opts
         )
 
     @default_to_neutral_style
     def plot(
-        self,
-        zoom="auto",
-        xscale="symlog",
-        xscale_linthresh=20,
-        hlines=()
+        self, zoom="auto", xscale="symlog", xscale_linthresh=20, hlines=()
     ):
         import numpy as np
         import matplotlib.pyplot as plt
@@ -702,13 +714,13 @@ class TEBDGen:
         xs = np.array(self.its)
         ys = np.array(self.energies)
 
-        ax.plot(xs, ys, '.-')
+        ax.plot(xs, ys, ".-")
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Energy")
 
         if xscale == "symlog":
             ax.set_xscale(xscale, linthresh=xscale_linthresh)
-            ax.axvline(xscale_linthresh, color=(.5, .5, .5), ls="-", lw=0.5)
+            ax.axvline(xscale_linthresh, color=(0.5, 0.5, 0.5), ls="-", lw=0.5)
         else:
             ax.set_xscale(xscale)
 
@@ -730,22 +742,17 @@ class TEBDGen:
 
     def __repr__(self):
         s = "<{}(n={}, tau={}, D={})>"
-        return s.format(
-            self.__class__.__name__, self.n, self.tau, self.D)
+        return s.format(self.__class__.__name__, self.n, self.tau, self.D)
 
 
 class SimpleUpdateGen(TEBDGen):
-    """Simple update for arbitrary geometry hamiltonians.
-    """
+    """Simple update for arbitrary geometry hamiltonians."""
 
     def gate(self, U, where):
-        self._psi.gate_simple_(
-            U, where, gauges=self.gauges, **self.gate_opts
-        )
+        self._psi.gate_simple_(U, where, gauges=self.gauges, **self.gate_opts)
 
     def normalize(self):
-        """Normalize the state and simple gauges.
-        """
+        """Normalize the state and simple gauges."""
         self._psi.normalize_simple(self.gauges)
 
     def compute_energy(self):
@@ -773,5 +780,3 @@ class SimpleUpdateGen(TEBDGen):
             self._psi.gauge_all_simple_(gauges=self.gauges)
         else:
             self.gauges = dict(gauges)
-
-

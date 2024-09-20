@@ -2,6 +2,15 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-8-5)=
+## v1.8.5 (unreleased)
+
+**Enhancements:**
+
+- expose [`qtn.edge_coloring`](quimb.tensor.tensor_arbgeom_tebd.edge_coloring)
+  as top level function and allow layers to be returned grouped.
+
+
 (whats-new-1-8-4)=
 ## v1.8.4 (2024-07-20)
 
