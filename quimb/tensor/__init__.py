@@ -1,5 +1,4 @@
-"""Tensor and tensor network functionality.
-"""
+"""Tensor and tensor network functionality."""
 
 from .circuit import (
     Circuit,

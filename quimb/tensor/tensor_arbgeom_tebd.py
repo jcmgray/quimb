@@ -4,7 +4,7 @@ import random
 import itertools
 import collections
 
-from autoray import do, to_numpy, dag
+from autoray import do, to_numpy
 
 from ..core import eye, kron, qarray
 from ..utils import ensure_dict
@@ -54,11 +54,16 @@ def edge_coloring(
         coloring.setdefault(color, []).append(edge)
 
     if group:
-        return tuple(tuple(coloring[color]) for color in sorted(coloring))
+        return tuple(
+            tuple(tuple(tuple(sorted(edge)) for edge in coloring[color]))
+            for color in sorted(coloring)
+        )
     else:
         # flatten sorted groups
         return tuple(
-            edge for color in sorted(coloring) for edge in coloring[color]
+            tuple(sorted(edge))
+            for color in sorted(coloring)
+            for edge in coloring[color]
         )
 
 
@@ -657,7 +662,6 @@ class TEBDGen:
         if self.keep_best and en < self.best["energy"]:
             self.best["energy"] = en
             self.best["state"] = self.state
-            self.best["gauges"] = self.gauges.copy()
             self.best["it"] = self._n
 
         return self.energies[-1]

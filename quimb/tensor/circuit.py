@@ -1373,7 +1373,7 @@ def sample_bitstring_from_prob_ndarray(p):
         >>> sample_bitstring_from_prob_ndarray(p)
         '01011'
     """
-    b = np.random.choice(np.arange(p.size), p=p.flat)
+    b = np.random.choice(p.size, p=p.flat)
     return f"{b:0>{p.ndim}b}"
 
 
