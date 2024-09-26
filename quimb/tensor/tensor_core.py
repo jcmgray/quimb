@@ -208,17 +208,16 @@ def tensor_contract(
         only once in the input indices, and ordered as they appear in the
         inputs. For hyper indices or a specific ordering, these must be
         supplied.
-    optimize : {None, str, path_like, PathOptimizer}, optional
+    optimize : str, PathOptimizer, ContractionTree or path_like, optional
         The contraction path optimization strategy to use.
 
-            - ``None``: use the default strategy,
-            - str: use the preset strategy with the given name,
-            - path_like: use this exact path,
-            - ``cotengra.HyperOptimizer``: find the contraction using this
-              optimizer, supports slicing,
-            - ``cotengra.ContractionTree``: use this exact tree, supports
-              slicing,
-            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+        - ``None``: use the default strategy,
+        - ``str``: use the preset strategy with the given name,
+        - ``cotengra.HyperOptimizer``: find the contraction using this
+          optimizer, supports slicing,
+        - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+        - ``cotengra.ContractionTree``: use this exact tree, supports slicing,
+        - ``path_like``: use this exact path.
 
         Contraction with ``cotengra`` might be a bit more efficient but the
         main reason would be to handle sliced contraction automatically, as
@@ -226,17 +225,17 @@ def tensor_contract(
     get : str, optional
         What to return. If:
 
-            * ``None`` (the default) - return the resulting scalar or Tensor.
-            * ``'expression'`` - return a callbable expression that performs
-              the contraction and operates on the raw arrays.
-            * ``'tree'`` - return the ``cotengra.ContractionTree`` describing
-              the contraction.
-            * ``'path'`` - return the raw 'path' as a list of tuples.
-            * ``'symbol-map'`` - return the dict mapping indices to 'symbols'
-              (single unicode letters) used internally by ``cotengra``
-            * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path
-              object with detailed information such as flop cost. The
-              symbol-map is also added to the ``quimb_symbol_map`` attribute.
+        - ``None`` (the default) - return the resulting scalar or Tensor.
+        - ``'expression'`` - return a callbable expression that performs the
+          contraction and operates on the raw arrays.
+        - ``'tree'`` - return the ``cotengra.ContractionTree`` describing the
+          contraction.
+        - ``'path'`` - return the raw 'path' as a list of tuples.
+        - ``'symbol-map'`` - return the dict mapping indices to 'symbols'
+          (single unicode letters) used internally by ``cotengra``
+        - ``'path-info'`` - return the ``opt_einsum.PathInfo`` path object
+          with detailed information such as flop cost. The symbol-map is also
+          added to the ``quimb_symbol_map`` attribute.
 
     backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
         Which backend to use to perform the contraction. Supplied to
@@ -7784,13 +7783,14 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        optimize : str, sequence, PathOptimizer, ContractionTree
+        optimize : str, sequence, HyperCompressedOptimizer, ContractionTreeCompressed
             The contraction strategy to use. The options are:
 
-            - a string specifying a preset strategy
-            - an explicit sequence of tuples specifying the contraction path
-            - a PathOptimizer object from cotengra
-            - an explicit ContractionTree object from cotengra
+            - str: use the preset strategy with the given name,
+            - path_like: use this exact path,
+            - ``cotengra.HyperCompressedOptimizer``: find the contraction using
+              this optimizer
+            - ``cotengra.ContractionTreeCompressed``: use this exact tree
 
             Note that the strategy should be one that specifically targets
             compressed contraction, paths for exact contraction will likely
@@ -8308,38 +8308,34 @@ class TensorNetwork(object):
             The indices to specify as outputs of the contraction. If not given,
             and the tensor network has no hyper-indices, these are computed
             automatically as every index appearing once.
-        optimize : {None, str, path_like, PathOptimizer}, optional
+        optimize : str, PathOptimizer, ContractionTree or path_like, optional
             The contraction path optimization strategy to use.
 
-                - ``None``: use the default strategy,
-                - str: use the preset strategy with the given name,
-                - path_like: use this exact path,
-                - ``cotengra.HyperOptimizer``: find the contraction using this
-                  optimizer, supports slicing,
-                - ``cotengra.ContractionTree``: use this exact tree, supports
-                slicing,
-                - ``opt_einsum.PathOptimizer``: find the path using this
-                  optimizer.
+            - ``None``: use the default strategy,
+            - ``str``: use the preset strategy with the given name,
+            - ``cotengra.HyperOptimizer``: find the contraction using this
+              optimizer, supports slicing,
+            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+            - ``cotengra.ContractionTree``: use this exact tree, supports
+              slicing,
+            - ``path_like``: use this exact path.
 
             Contraction with ``cotengra`` might be a bit more efficient but the
             main reason would be to handle sliced contraction automatically.
         get : str, optional
             What to return. If:
 
-                * ``None`` (the default) - return the resulting scalar or
-                  Tensor.
-                * ``'expression'`` - return a callbable expression that
-                  performs the contraction and operates on the raw arrays.
-                * ``'tree'`` - return the ``cotengra.ContractionTree``
-                  describing the contraction.
-                * ``'path'`` - return the raw 'path' as a list of tuples.
-                * ``'symbol-map'`` - return the dict mapping indices to
-                  'symbols' (single unicode letters) used internally by
-                  ``cotengra``
-                * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path
-                  object with detailed information such as flop cost. The
-                  symbol-map is also added to the ``quimb_symbol_map``
-                  attribute.
+            * ``None`` (the default) - return the resulting scalar or Tensor.
+            * ``'expression'`` - return a callbable expression that performs
+              the contraction and operates on the raw arrays.
+            * ``'tree'`` - return the ``cotengra.ContractionTree`` describing
+              the contraction in detail.
+            * ``'path'`` - return the raw 'path' as a list of tuples.
+            * ``'symbol-map'`` - return the dict mapping indices to 'symbols'
+              (single unicode letters) used internally by ``cotengra``
+            * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path object
+              with detailed information such as flop cost. The symbol-map is
+              also added to the ``quimb_symbol_map`` attribute.
 
         backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
             Which backend to use to perform the contraction. Supplied to
@@ -8423,38 +8419,34 @@ class TensorNetwork(object):
             The indices to specify as outputs of the contraction. If not given,
             and the tensor network has no hyper-indices, these are computed
             automatically as every index appearing once.
-        optimize : {None, str, path_like, PathOptimizer}, optional
+        optimize : str, PathOptimizer, ContractionTree or path_like, optional
             The contraction path optimization strategy to use.
 
-                - ``None``: use the default strategy,
-                - str: use the preset strategy with the given name,
-                - path_like: use this exact path,
-                - ``cotengra.HyperOptimizer``: find the contraction using this
-                  optimizer, supports slicing,
-                - ``cotengra.ContractionTree``: use this exact tree, supports
-                  slicing,
-                - ``opt_einsum.PathOptimizer``: find the path using this
-                  optimizer.
+            - ``None``: use the default strategy,
+            - ``str``: use the preset strategy with the given name,
+            - ``cotengra.HyperOptimizer``: find the contraction using this
+              optimizer, supports slicing,
+            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+            - ``cotengra.ContractionTree``: use this exact tree, supports
+              slicing,
+            - ``path_like``: use this exact path.
 
             Contraction with ``cotengra`` might be a bit more efficient but the
             main reason would be to handle sliced contraction automatically.
         get : str, optional
             What to return. If:
 
-                * ``None`` (the default) - return the resulting scalar or
-                  Tensor.
-                * ``'expression'`` - return a callbable expression that
-                  performs the contraction and operates on the raw arrays.
-                * ``'tree'`` - return the ``cotengra.ContractionTree``
-                  describing the contraction.
-                * ``'path'`` - return the raw 'path' as a list of tuples.
-                * ``'symbol-map'`` - return the dict mapping indices to
-                  'symbols' (single unicode letters) used internally by
-                  ``cotengra``
-                * ``'path-info'`` - return the ``opt_einsum.PathInfo`` path
-                  object with detailed information such as flop cost. The
-                  symbol-map is also added to the ``quimb_symbol_map``
-                  attribute.
+            - ``None`` (the default) - return the resulting scalar or Tensor.
+            - ``'expression'`` - return a callbable expression that performs
+              the contraction and operates on the raw arrays.
+            - ``'tree'`` - return the ``cotengra.ContractionTree`` describing
+              the contraction in detail.
+            - ``'path'`` - return the raw 'path' as a list of tuples.
+            - ``'symbol-map'`` - return the dict mapping indices to 'symbols'
+              (single unicode letters) used internally by ``cotengra``
+            - ``'path-info'`` - return the ``opt_einsum.PathInfo`` path object
+              with detailed information such as flop cost. The symbol-map is
+              also added to the ``quimb_symbol_map`` attribute.
 
         backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
             Which backend to use to perform the contraction. Supplied to
@@ -8577,29 +8569,92 @@ class TensorNetwork(object):
             output_inds=output_inds,
         )
 
-    def contraction_path(self, optimize=None, **contract_opts):
+    def contraction_path(
+        self,
+        optimize=None,
+        output_inds=None,
+        **kwargs,
+    ):
         """Compute the contraction path, a sequence of (int, int), for
-        the contraction of this entire tensor network using path optimizer
+        the contraction of this entire tensor network using strategy
         ``optimize``.
+
+        Parameters
+        ----------
+        optimize : str, PathOptimizer, ContractionTree or path_like, optional
+            The contraction path optimization strategy to use.
+
+            - ``None``: use the default strategy,
+            - ``str``: use the preset strategy with the given name,
+            - ``cotengra.HyperOptimizer``: find the contraction using this
+              optimizer, supports slicing,
+            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+            - ``cotengra.ContractionTree``: use this exact tree, supports
+              slicing,
+            - ``path_like``: use this exact path.
+
+        output_inds : sequence of str, optional
+            The indices to specify as outputs of the contraction. If not given,
+            and the tensor network has no hyper-indices, these are computed
+            automatically as every index appearing once.
+        kwargs : dict, optional
+            Passed to :func:`cotengra.array_contract_path`.
+
+        Returns
+        -------
+        list[tuple[int, int]]
         """
-        if optimize is None:
-            optimize = get_contract_strategy()
-
-        # XXX: short circuit to handle explicit path or tree
-
-        return self.contract(
-            all, optimize=optimize, get="path", **contract_opts
+        inputs, shapes = zip(*((t.inds, t.shape) for t in self))
+        return array_contract_path(
+            inputs,
+            output=output_inds,
+            shapes=shapes,
+            optimize=optimize,
+            **kwargs,
         )
 
-    def contraction_info(self, optimize=None, **contract_opts):
-        """Compute the ``opt_einsum.PathInfo`` object decsribing the
-        contraction of this entire tensor network using path optimizer
-        ``optimize``.
+    def contraction_info(
+        self,
+        optimize=None,
+        output_inds=None,
+        **kwargs,
+    ):
+        """Compute the ``opt_einsum.PathInfo`` object describing the
+        contraction of this entire tensor network using strategy ``optimize``.
+        Note any sliced indices will be ignored.
+
+        Parameters
+        ----------
+        optimize : str, PathOptimizer, ContractionTree or path_like, optional
+            The contraction path optimization strategy to use.
+
+            - ``None``: use the default strategy,
+            - ``str``: use the preset strategy with the given name,
+            - ``cotengra.HyperOptimizer``: find the contraction using this
+              optimizer, supports slicing,
+            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+            - ``cotengra.ContractionTree``: use this exact tree, supports
+              slicing,
+            - ``path_like``: use this exact path.
+
+        output_inds : sequence of str, optional
+            The indices to specify as outputs of the contraction. If not given,
+            and the tensor network has no hyper-indices, these are computed
+            automatically as every index appearing once.
+        kwargs : dict, optional
+            Passed to :func:`cotengra.array_contract_tree`.
+
+        Returns
+        -------
+        opt_einsum.PathInfo
         """
-        if optimize is None:
-            optimize = get_contract_strategy()
-        return self.contract(
-            all, optimize=optimize, get="path-info", **contract_opts
+        inputs, shapes = zip(*((t.inds, t.shape) for t in self))
+        return array_contract_pathinfo(
+            inputs,
+            output=output_inds,
+            shapes=shapes,
+            optimize=optimize,
+            **kwargs,
         )
 
     def contraction_tree(
@@ -8609,14 +8664,34 @@ class TensorNetwork(object):
         **kwargs,
     ):
         """Return the :class:`cotengra.ContractionTree` corresponding to
-        contracting this entire tensor network with path finder ``optimize``.
-        """
-        shapes = []
-        inputs = []
-        for t in self:
-            shapes.append(t.shape)
-            inputs.append(t.inds)
+        contracting this entire tensor network with strategy ``optimize``.
 
+        Parameters
+        ----------
+        optimize : str, PathOptimizer, ContractionTree or path_like, optional
+            The contraction path optimization strategy to use.
+
+            - ``None``: use the default strategy,
+            - ``str``: use the preset strategy with the given name,
+            - ``cotengra.HyperOptimizer``: find the contraction using this
+              optimizer, supports slicing,
+            - ``opt_einsum.PathOptimizer``: find the path using this optimizer.
+            - ``cotengra.ContractionTree``: use this exact tree, supports
+              slicing,
+            - ``path_like``: use this exact path.
+
+        output_inds : sequence of str, optional
+            The indices to specify as outputs of the contraction. If not given,
+            and the tensor network has no hyper-indices, these are computed
+            automatically as every index appearing once.
+        kwargs : dict, optional
+            Passed to :func:`cotengra.array_contract_tree`.
+
+        Returns
+        -------
+        cotengra.ContractionTree
+        """
+        inputs, shapes = zip(*((t.inds, t.shape) for t in self))
         return array_contract_tree(
             inputs,
             output=output_inds,
