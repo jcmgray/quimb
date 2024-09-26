@@ -7,8 +7,8 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- expose [`qtn.edge_coloring`](quimb.tensor.tensor_arbgeom_tebd.edge_coloring)
-  as top level function and allow layers to be returned grouped.
+- expose [`qtn.edge_coloring`](quimb.tensor.tensor_arbgeom_tebd.edge_coloring) as top level function and allow layers to be returned grouped.
+- add docstring for [`tn.contract_compressed`](quimb.tensor.tensor_core.TensorNetwork.contract_compressed)
 
 
 (whats-new-1-8-4)=

@@ -7326,22 +7326,23 @@ class TensorNetwork(object):
     def _contract_compressed_tid_sequence(
         self,
         seq,
+        *,
+        output_inds=None,
         max_bond=None,
         cutoff=1e-10,
-        output_inds=None,
         tree_gauge_distance=1,
         canonize_distance=None,
         canonize_opts=None,
         canonize_after_distance=None,
         canonize_after_opts=None,
         gauge_boundary_only=True,
-        compress_opts=None,
         compress_late=True,
         compress_mode="auto",
         compress_min_size=None,
         compress_span=False,
         compress_matrices=True,
         compress_exclude=None,
+        compress_opts=None,
         equalize_norms=False,
         gauges=None,
         gauge_smudge=1e-6,
@@ -7354,6 +7355,8 @@ class TensorNetwork(object):
         progbar=False,
         inplace=False,
     ):
+        """Core routine for performing compressed contraction.
+        """
         tn = self if inplace else self.copy()
 
         # options relating to the compression itself
@@ -7744,6 +7747,7 @@ class TensorNetwork(object):
     def contract_compressed(
         self,
         optimize,
+        *,
         output_inds=None,
         max_bond=None,
         cutoff=1e-10,
@@ -7753,12 +7757,13 @@ class TensorNetwork(object):
         canonize_after_distance=None,
         canonize_after_opts=None,
         gauge_boundary_only=True,
-        compress_late=True,
+        compress_late=False,
+        compress_mode="auto",
         compress_min_size=None,
-        compress_opts=None,
         compress_span=True,
         compress_matrices=True,
         compress_exclude=None,
+        compress_opts=None,
         equalize_norms=False,
         gauges=None,
         gauge_smudge=1e-6,
@@ -7767,9 +7772,124 @@ class TensorNetwork(object):
         callback_pre_compress=None,
         callback_post_compress=None,
         callback=None,
+        preserve_tensor=False,
         progbar=False,
+        inplace=False,
         **kwargs,
     ):
+        """Contract this tensor network using the hyperoptimized approximate
+        contraction method introduced in https://arxiv.org/abs/2206.07044.
+
+        Only supports non-hyper tensor networks.
+
+        Parameters
+        ----------
+        optimize : str, sequence, PathOptimizer, ContractionTree
+            The contraction strategy to use. The options are:
+
+            - a string specifying a preset strategy
+            - an explicit sequence of tuples specifying the contraction path
+            - a PathOptimizer object from cotengra
+            - an explicit ContractionTree object from cotengra
+
+            Note that the strategy should be one that specifically targets
+            compressed contraction, paths for exact contraction will likely
+            perform badly. See the cotengra documentation for more details.
+        output_inds : sequence of str, optional
+            Output indices. Note that hyper indices are not supported and this
+            is just for specifying the output order.
+        max_bond : int, optional
+            The maximum bond dimension to allow during compression.
+        cutoff : float, optional
+            The singular value cutoff to use during compression.
+        tree_gauge_distance : int, optional
+            The distance to 'tree gauge' around a pair of tensors before
+            compressing. Depending on if `compress_mode="basic"` this sets
+            `canonize_distance` and `canonize_after_distance`.
+        canonize_distance : int, optional
+            The distance to canonize around a pair of tensors before
+            compressing.
+        canonize_opts : dict, optional
+            Additional keyword arguments to pass to the canonize routine.
+        canonize_after_distance : int, optional
+            The distance to canonize around a pair of tensors after
+            compressing.
+        canonize_after_opts : dict, optional
+            Additional keyword arguments to pass to the canonize routine after
+            compressing.
+        gauge_boundary_only : bool, optional
+            Whether to only gauge the 'boundary' tensors, that is, intermediate
+            tensors.
+        compress_late : bool, optional
+            Whether to compress just before contracting the tensors involved or
+            immediately after. Early compression is cheaper and a better
+            default especially for contractions beyond planar. Late compression
+            leaves more information in the tensors for possibly better quality
+            gauging and compression. Whilst the largest tensor ('contraction
+            width') is typically unchanged, the total memory and cost can be
+            quite a lot higher.
+        compress_mode : {'auto', 'basic', 'virtual-tree', ...}, optional
+            How to compress a pair of tensors. If 'auto', then 'basic' is used
+            if `tree_gauge_distance=0` or `gauges` are supplied, otherwise
+            'virtual-tree' is used. See `_compress_between_tids` for other
+            valid options.
+        compress_min_size : int, optional
+            Skip compressing a pair of tensors if their contraction would yield
+            a tensor smaller than this size.
+        compress_opts : dict, optional
+            Additional keyword arguments to pass to the core pariwise
+            compression routine.
+        compress_span : bool or int, optional
+            Whether to compress between tensors that are going to be
+            contracted. If an `int`, this specifies that if two tensors will be
+            contracted in the next `compress_span` contractions, then their
+            bonds should be compressed.
+        compress_matrices : bool, optional
+            Whether to compress pairs of tensors that are effectively matrices.
+        compress_exclude : set[int], optional
+            An explicit set of tensor ids to exclude from compression.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the tensors after each operation.
+            The overall scaling is accumulated, log10, into `tn.exponent`. If
+            `True`, at the end this exponent is redistributed. If a float,
+            this is the target norm to equalize tensors to, e.g. `1.0`, and the
+            exponent is *not* redistributed, which is useful in the case that
+            the non-log value is beyond standard precision.
+        gauges : dict[str, array_like], optional
+            If supplied, use simple update style gauges during the contraction.
+            The keys should be indices and the values singular value vectors.
+            Only bonds present in this dictionary will be gauged.
+        gauge_smudge : float, optional
+            If using simple update style gauging, add a small value to the
+            singular values to avoid singularities.
+        callback_pre_contract : callable, optional
+            A function to call before contracting a pair of tensors. It should
+            have signature `fn(tn, (tid1, tid2))`.
+        callback_post_contract : callable, optional
+            A function to call after contracting a pair of tensors. It should
+            have signature `fn(tn, tid)`.
+        callback_pre_compress : callable, optional
+            A function to call before compressing a pair of tensors. It should
+            have signature `fn(tn, (tid1, tid2))`.
+        callback_post_compress : callable, optional
+            A function to call after compressing a pair of tensors. It should
+            have signature `fn(tn, (tid1, tid2))`.
+        callback : callable, optional
+            A function to call after each full step of contraction and
+            compressions. It should have signature `fn(tn, tid)`.
+        preserve_tensor : bool, optional
+            If `True`, return a Tensor object even if it represents a scalar.
+            Ignore if `inplace=True`, in which case a TensorNetwork is always
+            returned.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        inplace : bool, optional
+            Whether to perform the contraction inplace.
+        kwargs : dict, optional
+            Additional keyword passed to `_contract_compressed_tid_sequence`.
+        """
+        # XXX: pick up max_bond, compress_late from ContractionTree
+
         path = self.contraction_path(optimize, output_inds=output_inds)
 
         # generate the list of merges (tid1 -> tid2)
@@ -7797,6 +7917,7 @@ class TensorNetwork(object):
             canonize_after_opts=canonize_after_opts,
             gauge_boundary_only=gauge_boundary_only,
             compress_late=compress_late,
+            compress_mode=compress_mode,
             compress_min_size=compress_min_size,
             compress_opts=compress_opts,
             compress_span=compress_span,
@@ -7810,7 +7931,9 @@ class TensorNetwork(object):
             callback_pre_compress=callback_pre_compress,
             callback_post_compress=callback_post_compress,
             callback=callback,
+            preserve_tensor=preserve_tensor,
             progbar=progbar,
+            inplace=inplace,
             **kwargs,
         )
 
@@ -8461,6 +8584,9 @@ class TensorNetwork(object):
         """
         if optimize is None:
             optimize = get_contract_strategy()
+
+        # XXX: short circuit to handle explicit path or tree
+
         return self.contract(
             all, optimize=optimize, get="path", **contract_opts
         )
