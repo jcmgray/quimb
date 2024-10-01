@@ -582,7 +582,7 @@ class TEBDGen:
         if progbar is None:
             progbar = self.progbar
 
-        pbar = Progbar(total=steps, disable=progbar is not True)
+        pbar = Progbar(total=steps, disable=not progbar)
 
         try:
             for i in range(steps):

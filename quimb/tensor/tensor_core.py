@@ -3277,8 +3277,9 @@ def _tensor_network_gate_inds_basic(
     tl, tr = tn._inds_get(ixl, ixr)
     bnds_l, (bix,), bnds_r = group_inds(tl, tr)
 
-    if len(bnds_l) <= 2 and len(bnds_r) <= 2:
-        # reduce split is likely redundant
+    if (len(bnds_l) <= 2) or (len(bnds_r) <= 2):
+        # reduce split is likely redundant (i.e. contracting pair and splitting
+        # just as cheap as performing QR reductions)
         contract = "split"
 
     if contract == "split":
@@ -6801,6 +6802,13 @@ class TensorNetwork(object):
         if not gauges_supplied:
             gauges = {}
 
+        _sval_mapper = {
+            (True, True): lambda s: s,
+            (True, False): lambda s: s + smudge,
+            (False, True): lambda s: s**power,
+            (False, False): lambda s: (s + smudge) ** power,
+        }[(power == 1.0, smudge == 0.0)]
+
         # for retrieving singular values
         info = {}
 
@@ -6837,7 +6845,7 @@ class TensorNetwork(object):
                 for t, ixs in ((t1, lix), (t2, rix)):
                     for ix in ixs:
                         try:
-                            s = (gauges[ix] + smudge)**power
+                            s = _sval_mapper(gauges[ix])
                         except KeyError:
                             continue
                         t.multiply_index_diagonal_(ix, s)
@@ -6854,7 +6862,7 @@ class TensorNetwork(object):
                 )
 
                 s = info["singular_values"]
-                smax = do("max", s)
+                smax = do("linalg.norm", s)
                 new_gauge = s / smax
                 nfact = do("log10", smax) + nfact
 

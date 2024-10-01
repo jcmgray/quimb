@@ -645,6 +645,8 @@ class TensorNetworkGen(TensorNetwork):
         for ix, g in gauges.items():
             gauges[ix] = g / do("linalg.norm", g)
 
+        nfactor = 1.0
+
         # normalize sites
         for site in self.sites:
             tn_site = self.select(site)
@@ -654,6 +656,9 @@ class TensorNetworkGen(TensorNetwork):
                 all, **contract_opts
             ) ** 0.5
             tn_site /= lnorm
+            nfactor *= lnorm
+
+        return nfactor
 
 
 def gauge_product_boundary_vector(
@@ -1030,7 +1035,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         renorm=True,
         smudge=1e-12,
         power=1.0,
-        **gate_opts
+        **gate_opts,
     ):
         """Apply a gate to this vector tensor network at sites ``where``, using
         simple update style gauging of the tensors first, as supplied in
@@ -1063,15 +1068,16 @@ class TensorNetworkGenVector(TensorNetworkGen):
         if isinstance(where, int):
             where = (where,)
 
-        if len(where) == 1:
-            # single site gate
+        site_tags = tuple(map(self.site_tag, where))
+        tids = self._get_tids_from_tags(site_tags, "any")
+
+        if len(tids) == 1:
+            # gate acts on a single tensor
             return self.gate_(G, where, contract=True)
 
         gate_opts.setdefault("absorb", None)
         gate_opts.setdefault("contract", "reduce-split")
-
-        site_tags = tuple(map(self.site_tag, where))
-        tn_where = self.select_any(site_tags)
+        tn_where = self._select_tids(tids)
 
         with tn_where.gauge_simple_temp(
             gauges,
@@ -1085,7 +1091,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             # inner ungauging is performed by tracking the new singular values
             (((_, ix), s),) = info.items()
             if renorm:
-                s = s / do("max", s)
+                s = s / do("linalg.norm", s)
             gauges[ix] = s
 
         return self
@@ -1104,7 +1110,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             tuple(map(self.site_tag, where)), "any"
         )
         if len(tids) == 2:
-            tids = self._get_string_between_tids(*tids)
+            tids = self.get_path_between_tids(*tids).tids
 
         k = self._select_local_tids(
             tids,
@@ -1133,6 +1139,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
         max_distance=0,
         fillin=False,
         gauges=None,
+        smudge=0.0,
+        power=1.0,
         optimize="auto",
         max_bond=None,
         rehearse=False,
@@ -1208,7 +1216,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         )
 
         if len(tids) == 2:
-            tids = self._get_string_between_tids(*tids)
+            tids = self.get_path_between_tids(*tids).tids
 
         k = self._select_local_tids(
             tids,
@@ -1219,7 +1227,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         if gauges is not None:
             # gauge the region with simple update style bond gauges
-            k.gauge_simple_insert(gauges)
+            k.gauge_simple_insert(gauges, smudge=smudge, power=power)
 
         if max_bond is not None:
             return k.local_expectation(
