@@ -1781,9 +1781,12 @@ class TestTensorNetwork:
         assert not tn.isconnected()
         assert not (Tensor() | Tensor()).isconnected()
 
-    def test_get_string_between_tids(self):
+    def test_get_path_between_tids(self):
         tn = MPS_rand_state(5, 3)
-        assert tn._get_string_between_tids(0, 4) == (0, 1, 2, 3, 4)
+        path = tn.get_path_between_tids(0, 4)
+        assert path.tids == (0, 1, 2, 3, 4)
+        path = tn.get_path_between_tids(3, 0)
+        assert path.tids == (3, 2, 1, 0)
 
     @pytest.mark.parametrize(
         "contract",
@@ -1871,19 +1874,30 @@ class TestTensorNetwork:
         assert tn.num_tensors == 4
         assert tn.num_indices == 9
 
-    def test_gen_inds_loops(self):
+    def test_gen_paths_loops(self):
         tn = qtn.TN2D_rand(3, 4, 2)
-        loops = tuple(tn.gen_inds_loops())
+        loops = tuple(tn.gen_paths_loops())
         assert len(loops) == 6
+        assert all(len(loop) == 4 for loop in loops)
 
-    def test_gen_inds_loops_intersect(self):
+    def test_select_loop(self):
+        tn = qtn.TN2D_rand(2, 3, 2)
+        loop6 = next(
+            loop
+            for loop in tn.gen_paths_loops(max_loop_length=6)
+            if len(loop) == 6
+        )
+        tnl = tn.select_path(loop6)
+        assert len(tnl.inner_inds()) == 6
+
+    def test_gen_paths_loops_intersect(self):
         tn = qtn.TN2D_empty(5, 4, 2)
-        loops = tuple(tn.gen_inds_loops(8, False))
+        loops = tuple(tn.gen_paths_loops(8, False))
         na = len(loops)
         assert na == len(frozenset(loops))
         assert na == len(frozenset(map(frozenset, loops)))
 
-        loops = tuple(tn.gen_inds_loops(8, True))
+        loops = tuple(tn.gen_paths_loops(8, True))
         nb = len(loops)
         assert nb == len(frozenset(loops))
         assert nb == len(frozenset(map(frozenset, loops)))
