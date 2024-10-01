@@ -7266,6 +7266,7 @@ class TensorNetwork(object):
         self,
         gauges,
         smudge=1e-12,
+        power=1.0,
         ungauge_outer=True,
         ungauge_inner=True,
     ):
@@ -7317,7 +7318,9 @@ class TensorNetwork(object):
             28702551.67376789
 
         """
-        outer, inner = self.gauge_simple_insert(gauges, smudge=smudge)
+        outer, inner = self.gauge_simple_insert(
+            gauges, smudge=smudge, power=power
+        )
         try:
             yield outer, inner
         finally:
