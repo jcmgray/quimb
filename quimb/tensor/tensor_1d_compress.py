@@ -13,6 +13,7 @@ network can locally have arbitrary structure and outer indices.
 """
 
 import collections
+import functools
 import itertools
 import warnings
 
@@ -1216,13 +1217,17 @@ def tensor_network_1d_compress_fit(
     if bsz == "auto":
         if max_bond is not None:
             if (cutoff is None) or (cutoff == 0.0):
+                # max_bond specified, no cutoff -> 1-site
                 bsz = 1
             else:
+                # max_bond and cutoff specified -> 2-site
                 bsz = 2
         else:
             if cutoff == 0.0:
+                # no max_bond or cutoff -> 1-site
                 bsz = 1
             else:
+                # no max_bond, but cutoff -> 2-site
                 bsz = 2
     f_sweep = {
         1: _tn1d_fit_sum_sweep_1site,
@@ -1263,14 +1268,16 @@ def tensor_network_1d_compress_fit(
             tn_fit.setdefault("site_tags", site_tags)
             tn_fit.setdefault("optimize", optimize)
             tn_fit = tensor_network_1d_compress(tns[0], **tn_fit)
+            inplace_fit = True
     else:
         # a guess was supplied
-        tn_fit = tn_fit.conj(inplace=inplace_fit)
         current_bond_dim = tn_fit.max_bond()
         if max_bond is None:
             # assume we want to limit bond dimension to the initial guess
             max_bond = current_bond_dim
 
+    # choose to conjugte the smaller fitting network
+    tn_fit = tn_fit.conj(inplace=inplace_fit)
     tn_fit.add_tag("__FIT__")
     # note these are all views of `tn_fit` and thus will update as it does
     tn_overlaps = [(tn_fit | tn) for tn in tns]
@@ -1366,12 +1373,58 @@ def tensor_network_1d_compress_fit(
     return tn_fit
 
 
+def tensor_network_1d_compress_fit_guess(
+    tn,
+    guess,
+    max_bond=None,
+    cutoff=1e-10,
+    cutoff_fit=0.0,
+    bsz=1,
+    max_iterations=8,
+    canonize=True,
+    **kwargs,
+):
+    """Compress any 1D-like (can have multiple tensors per site) tensor network
+    to an exactly 1D (one tensor per site) tensor network of bond dimension
+    `max_bond` using by default 1-site variational fitting (or 'DMRG-style')
+    method starting with a non-random guess tensor network, e.g. from the cheap
+    zip-up or projector methods.
+    """
+    tn_fit = {
+        "method": guess,
+        # use cutoff in guess, but not in fitting
+        "cutoff": cutoff,
+        "canonize": canonize,
+    }
+
+    return tensor_network_1d_compress_fit(
+        tn,
+        max_bond=max_bond,
+        cutoff=cutoff_fit,
+        tn_fit=tn_fit,
+        bsz=bsz,
+        max_iterations=max_iterations,
+        inplace_fit=True,
+        **kwargs,
+    )
+
+
+tensor_network_1d_compress_fit_zipup = functools.partial(
+    tensor_network_1d_compress_fit_guess, guess="zipup"
+)
+tensor_network_1d_compress_fit_projector = functools.partial(
+    tensor_network_1d_compress_fit_guess, guess="projector"
+)
+
+
 _TN1D_COMPRESS_METHODS = {
     "direct": tensor_network_1d_compress_direct,
     "dm": tensor_network_1d_compress_dm,
     "zipup": tensor_network_1d_compress_zipup,
     "zipup-first": tensor_network_1d_compress_zipup_first,
     "fit": tensor_network_1d_compress_fit,
+    "fit-zipup": tensor_network_1d_compress_fit_zipup,
+    "fit-projector": tensor_network_1d_compress_fit_projector,
 }
 
 
@@ -1401,7 +1454,7 @@ def tensor_network_1d_compress(
         The maximum bond dimension to compress to.
     cutoff : float, optional
         A dynamic threshold for discarding singular values when compressing.
-    method : {"direct", "dm", "zipup", "zipup-first", "fit", "projector"}
+    method : {"direct", "dm", "zipup", "zipup-first", "fit", "projector", ...}
         The compression method to use.
     site_tags : sequence of str, optional
         The tags to use to group and order the tensors from ``tn``. If not
