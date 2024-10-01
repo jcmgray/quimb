@@ -79,6 +79,12 @@ class Drawing:
         self.presets = {} if presets is None else dict(presets)
         self.presets.setdefault(None, {})
 
+        self._2d_project = functools.partial(
+            simple_scale,
+            xscale=xscale,
+            yscale=yscale,
+        )
+
         self._3d_project = functools.partial(
             axonometric_project,
             a=a,
@@ -145,7 +151,7 @@ class Drawing:
         style.setdefault("clip_on", False)
 
         if len(coo) == 2:
-            x, y = coo
+            x, y = self._2d_project(*coo)
             style.setdefault("zorder", +0.02)
         else:
             x, y = self._3d_project(*coo)
@@ -181,8 +187,8 @@ class Drawing:
         center = style.pop("center", 0.5)
 
         if len(cooa) == 2:
-            xa, ya = cooa
-            xb, yb = coob
+            xa, ya = self._2d_project(*cooa)
+            xb, yb = self._2d_project(*coob)
             style.setdefault("zorder", +0.02)
         else:
             style.setdefault(
@@ -263,7 +269,7 @@ class Drawing:
         style.setdefault("radius", 0.25)
 
         if len(coo) == 2:
-            x, y = coo
+            x, y = self._2d_project(*coo)
             style.setdefault("zorder", +0.01)
         else:
             x, y = self._3d_project(*coo)
@@ -493,7 +499,7 @@ class Drawing:
         text = style.pop("text")
 
         if len(cooa) == 2:
-            xs, ys = zip(*(cooa, coob))
+            xs, ys = zip(*[self._2d_project(*coo) for coo in [cooa, coob]])
             style.setdefault("zorder", +0.0)
         else:
             style.setdefault(
@@ -576,7 +582,7 @@ class Drawing:
         text = style.pop("text")
 
         if len(cooa) == 2:
-            xs, ys = zip(*(cooa, coob))
+            xs, ys = zip(*[self._2d_project(*coo) for coo in [cooa, coob]])
             style.setdefault("zorder", +0.0)
         else:
             style.setdefault(
@@ -672,6 +678,9 @@ class Drawing:
             )
             cooa = self._3d_project(*cooa)
             coob = self._3d_project(*coob)
+        else:
+            cooa = self._2d_project(*cooa)
+            coob = self._2d_project(*coob)
 
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         rb = forward(*coob)
@@ -729,6 +738,8 @@ class Drawing:
                 "zorder", mean(self._coo_to_zorder(*coo) for coo in coos)
             )
             coos = [self._3d_project(*coo) for coo in coos]
+        else:
+            coos = [self._2d_project(*coo) for coo in coos]
 
         N = len(coos)
 
@@ -797,6 +808,8 @@ class Drawing:
                 "zorder", mean(self._coo_to_zorder(*coo) for coo in coos)
             )
             coos = [self._3d_project(*coo) for coo in coos]
+        else:
+            coos = [self._2d_project(*coo) for coo in coos]
 
         path = [coos[0]]
         moves = [Path.MOVETO]
@@ -850,6 +863,7 @@ class Drawing:
             coos = [self._3d_project(*coo) for coo in coos]
         else:
             style.setdefault("zorder", -0.01)
+            coos = [self._2d_project(*coo) for coo in coos]
 
         N = len(coos)
 
@@ -881,9 +895,7 @@ class Drawing:
         for coo in control_pts.values():
             self._adjust_lims(*coo)
 
-    def patch_around(
-        self, coos, radius=0.0, resolution=12, preset=None, **kwargs
-    ):
+    def patch_around(self, coos, *, preset=None, **kwargs):
         """Draw a patch around the given coordinates, by contructing a convex
         hull around the points, optionally including an extra uniform or per
         coordinate radius.
@@ -908,6 +920,8 @@ class Drawing:
         from scipy.spatial import ConvexHull
 
         style = parse_style_preset(self.presets, preset, **kwargs)
+        radius = style.pop("radius", 0.0)
+        resolution = style.pop("resolution", 12)
 
         if isinstance(radius, (int, float)):
             radius = [radius] * len(coos)
@@ -937,7 +951,7 @@ class Drawing:
             hull = ConvexHull(expanded_pts)
             boundary_pts = expanded_pts[hull.vertices]
 
-        self.patch(boundary_pts, preset=preset, **style)
+        self.patch(boundary_pts, **style)
 
     def patch_around_circles(
         self,
@@ -995,6 +1009,8 @@ class Drawing:
             coob = self._3d_project(*coob)
         else:
             style.setdefault("zorder", -0.01)
+            cooa = self._2d_project(*cooa)
+            coob = self._2d_project(*coob)
 
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         xb = forward(*coob)[0]
@@ -1021,6 +1037,9 @@ class Drawing:
 
         pcoos = [inverse(*rcoo) for rcoo in rcoos]
         self.patch(pcoos, preset=preset, **style)
+
+    def savefig(self, fname, dpi=300, bbox_inches="tight"):
+        self.fig.savefig(fname, dpi=dpi, bbox_inches=bbox_inches)
 
 
 def parse_style_preset(presets, preset, **kwargs):
@@ -1052,6 +1071,10 @@ def parse_style_preset(presets, preset, **kwargs):
             style.update(presets[p])
     style.update(kwargs)
     return style
+
+
+def simple_scale(i, j, xscale=1, yscale=1):
+    return i * xscale, j * yscale
 
 
 def axonometric_project(
