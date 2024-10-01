@@ -3250,6 +3250,10 @@ def _tensor_network_gate_inds_basic(
     tl, tr = tn._inds_get(ixl, ixr)
     bnds_l, (bix,), bnds_r = group_inds(tl, tr)
 
+    if len(bnds_l) <= 2 and len(bnds_r) <= 2:
+        # reduce split is likely redundant
+        contract = "split"
+
     if contract == "split":
         #
         #       │╱  │╱         │╱  │╱
