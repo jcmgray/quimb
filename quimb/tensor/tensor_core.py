@@ -7605,7 +7605,7 @@ class TensorNetwork(object):
         optimize,
         *,
         output_inds=None,
-        max_bond=None,
+        max_bond="auto",
         cutoff=1e-10,
         tree_gauge_distance=1,
         canonize_distance=None,
@@ -7613,7 +7613,7 @@ class TensorNetwork(object):
         canonize_after_distance=None,
         canonize_after_opts=None,
         gauge_boundary_only=True,
-        compress_late=False,
+        compress_late=None,
         compress_mode="auto",
         compress_min_size=None,
         compress_span=True,
@@ -7652,11 +7652,20 @@ class TensorNetwork(object):
             Note that the strategy should be one that specifically targets
             compressed contraction, paths for exact contraction will likely
             perform badly. See the cotengra documentation for more details.
+            Values for ``max_bond`` and ``compress_late`` are inherited from
+            the optimizer if possible (and not specified).
         output_inds : sequence of str, optional
             Output indices. Note that hyper indices are not supported and this
             is just for specifying the output order.
-        max_bond : int, optional
+        max_bond : "auto", int or None, optional
             The maximum bond dimension to allow during compression.
+
+            - ``"auto"``: try and inherit value from the optimizer, or use
+              the current maximum bond dimension squared if not available.
+            - int: a specific maximum bond dimension to use.
+            - ``None``: no maximum bond dimension (compression still possible
+              via cutoff) - not recommended.
+
         cutoff : float, optional
             The singular value cutoff to use during compression.
         tree_gauge_distance : int, optional
@@ -7677,14 +7686,15 @@ class TensorNetwork(object):
         gauge_boundary_only : bool, optional
             Whether to only gauge the 'boundary' tensors, that is, intermediate
             tensors.
-        compress_late : bool, optional
+        compress_late : None or bool, optional
             Whether to compress just before contracting the tensors involved or
             immediately after. Early compression is cheaper and a better
             default especially for contractions beyond planar. Late compression
             leaves more information in the tensors for possibly better quality
             gauging and compression. Whilst the largest tensor ('contraction
             width') is typically unchanged, the total memory and cost can be
-            quite a lot higher.
+            quite a lot higher. By default, this is `None`, which will try and
+            inherit the value from the optimizer, else default to False.
         compress_mode : {'auto', 'basic', 'virtual-tree', ...}, optional
             How to compress a pair of tensors. If 'auto', then 'basic' is used
             if `tree_gauge_distance=0` or `gauges` are supplied, otherwise
@@ -7745,9 +7755,35 @@ class TensorNetwork(object):
         kwargs : dict, optional
             Additional keyword passed to `_contract_compressed_tid_sequence`.
         """
-        # XXX: pick up max_bond, compress_late from ContractionTree
+        import cotengra as ctg
 
-        path = self.contraction_path(optimize, output_inds=output_inds)
+        if isinstance(optimize, (str, ctg.PathOptimizer, ctg.ContractionTree)):
+            tree = self.contraction_tree(optimize, output_inds=output_inds)
+
+            if not isinstance(tree, ctg.ContractionTreeCompressed):
+                import warnings
+
+                warnings.warn(
+                    "The contraction tree is not a compressed one, "
+                    "this may be very inefficient."
+                )
+
+            # try and get the settings the tree was optimized with respect to
+            minimize = tree.get_default_objective()
+            if max_bond == "auto":
+                max_bond = getattr(minimize, "chi", "auto")
+            if compress_late is None:
+                compress_late = getattr(minimize, "compress_late", None)
+
+            path = tree.get_path()
+        else:
+            # assume explicit path
+            path = self.contraction_path(optimize, output_inds=output_inds)
+
+        if max_bond == "auto":
+            max_bond = self.max_bond() ** 2
+        if compress_late is None:
+            compress_late = False
 
         # generate the list of merges (tid1 -> tid2)
         tids = list(self.tensor_map)
