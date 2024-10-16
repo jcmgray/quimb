@@ -9,6 +9,9 @@ Release notes for `quimb`.
 
 - expose [`qtn.edge_coloring`](quimb.tensor.tensor_arbgeom_tebd.edge_coloring) as top level function and allow layers to be returned grouped.
 - add docstring for [`tn.contract_compressed`](quimb.tensor.tensor_core.TensorNetwork.contract_compressed)
+- add [`Tensor.rand_reduce`](quimb.tensor.tensor_core.Tensor.rand_reduce) for randomly removing a tensor index by contracting a random vector into it. One can also supply the value `"r"` to `isel` selectors to use this.
+
+---
 
 
 (whats-new-1-8-4)=
@@ -18,6 +21,8 @@ Release notes for `quimb`.
 
 - fix for MPS sampling with fixed seed ({issue}`247` and {pull}`248`)
 - fix for `mps_gate_with_mpo_lazy` ({issue}`246`).
+
+---
 
 
 (whats-new-1-8-3)=
@@ -30,6 +35,8 @@ Release notes for `quimb`.
 - add basic [`.plot()`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen.plot) method for SimpleUpdate classes
 - add [`edges_1d_chain`](quimb.tensor.geometry.edges_1d_chain) for generating 1D chain edges
 - [operatorbuilder](quimb.experimental.operatorbuilder): better coefficient placement for long range MPO building
+
+---
 
 
 (whats-new-1-8-2)=
@@ -47,6 +54,9 @@ Release notes for `quimb`.
 - fix some windows + numba CI issues.
 - [`approx_spectral_function`](quimb.linalg.approx_spectral.approx_spectral_function) add plotting and tracking
 - add dispatching to various tensor primitives to allow overriding
+
+---
+
 
 (whats-new-1-8-1)=
 ## v1.8.1 (2024-05-06)
@@ -74,6 +84,9 @@ Release notes for `quimb`.
 
 - [`Circuit.apply_gate_raw`](quimb.tensor.circuit.Circuit.apply_gate_raw): fix kwarg bug ({pull}`226`)
 - fix for retrieving `opt_einsum.PathInfo` for single scalar contraction ({issue}`231`)
+
+
+---
 
 
 (whats-new-1-8-0)=
@@ -160,6 +173,9 @@ Release notes for `quimb`.
 - fix autoblock bug where connected sectors were not being merged ({issue}`223`)
 
 
+---
+
+
 (whats-new-1-7-3)=
 ## v1.7.3 (2024-02-08)
 
@@ -173,6 +189,9 @@ Release notes for `quimb`.
 - restore fallback (to `scipy.linalg.svd` with driver='gesvd') behavior for truncated SVD with numpy backend.
 
 
+---
+
+
 (whats-new-1-7-2)=
 ## v1.7.2 (2024-01-30)
 
@@ -184,6 +203,9 @@ Release notes for `quimb`.
 **Bug fixes:**
 
 - removed import of deprecated `numba.generated_jit` decorator.
+
+
+---
 
 
 (whats-new-1-7-1)=
@@ -217,6 +239,9 @@ Release notes for `quimb`.
 - fix bug in [`qr_stabilized`](quimb.tensor.decomp.qr_stabilized) when the
   diagonal of `R` has significant imaginary parts.
 - fix bug in quantum discord computation when the state was diagonal ({issue}`217`)
+
+
+---
 
 
 (whats-new-1-7-0)=
@@ -269,6 +294,9 @@ Release notes for `quimb`.
   performing tensor network simplifications.
 
 
+---
+
+
 (whats-new-1-6-0)=
 ## v1.6.0 (2023-09-10)
 
@@ -293,6 +321,9 @@ Release notes for `quimb`.
 
 - fix gauge size check for some backends
 
+---
+
+
 (whats-new-1-5-1)=
 ## v1.5.1 (2023-07-28)
 
@@ -312,6 +343,9 @@ Release notes for `quimb`.
 - {class}`Circuit`: use stack for more robust parametrized gate generation
 - fix for {meth}`gate_with_auto_swap` for `i > j`.
 - fix bug where calling `tn.norm()` would mangle indices.
+
+---
+
 
 (whats-new-1-5-0)=
 ## v1.5.0 (2023-05-03)
@@ -377,6 +411,9 @@ Release notes for `quimb`.
 - fix {func}`~quimb.tensor.decomp.qr_stabilized` bug for strictly upper
   triangular R factors.
 
+---
+
+
 (whats-new-1-4-2)=
 ## v1.4.2 (2022-11-28)
 
@@ -384,6 +421,9 @@ Release notes for `quimb`.
 
 - move from versioneer to to
   [setuptools_scm](https://pypi.org/project/setuptools-scm/) for versioning
+
+---
+
 
 (whats-new-1-4-1)=
 ## v1.4.1 (2022-11-28)
@@ -418,6 +458,9 @@ Release notes for `quimb`.
 > - fix force atlas 2 and `weight_attr` bug ({issue}`126`)
 > - allow unpickling of `PTensor` objects ({issue}`128`, {pull}`131`)
 
+---
+
+
 (whats-new-1-4-0)=
 ## v1.4.0 (2022-06-14)
 
@@ -436,6 +479,9 @@ Release notes for `quimb`.
   {meth}`~quimb.tensor.tensor_core.TensorNetwork.fit`
 - Various memory and performance improvements
 - Various graph generators and TN builders
+
+---
+
 
 (whats-new-1-3-0)=
 ## v1.3.0 (2020-02-18)
@@ -472,6 +518,9 @@ Release notes for `quimb`.
 - Fix a bug in the 2D system example for when `j != 1.0`
 - Add environment variable `QUIMB_NUMBA_PAR` to set whether numba should use automatic parallelization - mainly to fix travis segfaults.
 - Make cache import and initilization of `petsc4py` and `slepc4py` more robust.
+
+---
+
 
 (whats-new-1-2-0)=
 ## v1.2.0 (2019-06-06)
