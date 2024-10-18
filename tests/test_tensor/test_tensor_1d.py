@@ -383,7 +383,9 @@ class TestMatrixProductState:
     def test_partial_trace(self, rescale, keep):
         n = 10
         p = qtn.MPS_rand_state(n, 7)
-        r = p.ptr(keep=keep, upper_ind_id="u{}", rescale_sites=rescale)
+        r = p.partial_trace_to_mpo(
+            keep=keep, upper_ind_id="u{}", rescale_sites=rescale
+        )
         rd = r.to_qarray()
         if isinstance(keep, slice):
             keep = p.slice2sites(keep)
@@ -775,6 +777,16 @@ class TestMatrixProductState:
         ]
         assert len(set(configs)) > 1
 
+    def test_compute_local_expectation(self):
+        psi = qtn.MPS_rand_state(10, 7, dtype="complex128")
+        terms = {(i, i + 1): qu.rand_herm(4) for i in range(9)}
+
+        ex = psi.compute_local_expectation_exact(terms)
+        xa = psi.compute_local_expectation(terms, method="canonical")
+        assert xa == pytest.approx(ex)
+        xb = psi.compute_local_expectation(terms, method="envs")
+        assert xb == pytest.approx(ex)
+
 
 class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", [False, True])
@@ -911,7 +923,7 @@ class TestMatrixProductOperator:
 
     def test_partial_transpose(self):
         p = qtn.MPS_rand_state(8, 10)
-        r = p.ptr([2, 3, 4, 5, 6, 7])
+        r = p.partial_trace_to_mpo([2, 3, 4, 5, 6, 7])
         rd = r.to_qarray()
 
         assert qu.isherm(rd)

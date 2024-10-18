@@ -548,6 +548,56 @@ class TensorNetwork1D(TensorNetworkGen):
         # contract each block of sites cumulatively
         return self.contract_cumulative(tags_seq, inplace=inplace, **opts)
 
+    def compute_left_environments(self, **contract_opts):
+        """Compute the left environments of this 1D tensor network.
+
+        Parameters
+        ----------
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        dict[int, Tensor]
+            Environments indexed by the site they are to the left of, so keys
+            run from (1, ... L - 1).
+        """
+        left_envs = {1: self.select(0).contract(all, **contract_opts)}
+        for i in range(2, self.L):
+            tll = left_envs[i - 1]
+            tll.drop_tags()
+            tnl = self.select(i - 1) | tll
+            left_envs[i] = tnl.contract(all, **contract_opts)
+
+        return left_envs
+
+    def compute_right_environments(self, **contract_opts):
+        """Compute the right environments of this 1D tensor network.
+
+        Parameters
+        ----------
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        dict[int, Tensor]
+            Environments indexed by the site they are to the right of, so keys
+            run from (0, ... L - 2).
+        """
+        right_envs = {
+            self.L - 2: self.select(-1).contract(all, **contract_opts)
+        }
+        for i in range(self.L - 3, -1, -1):
+            trr = right_envs[i + 1]
+            trr.drop_tags()
+            tnr = self.select(i + 1) | trr
+            right_envs[i] = tnr.contract()
+
+        return right_envs
+
     def _repr_info(self):
         info = super()._repr_info()
         info["L"] = self.L
@@ -2431,7 +2481,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         return S[0] - S[1]
 
-    def partial_trace(self, keep, upper_ind_id="b{}", rescale_sites=True):
+    def partial_trace_to_mpo(
+        self, keep, upper_ind_id="b{}", rescale_sites=True
+    ):
         r"""Partially trace this matrix product state, producing a matrix
         product operator.
 
@@ -2516,11 +2568,355 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         rho.fuse_multibonds_()
         return rho
 
-    def ptr(self, keep, upper_ind_id="b{}", rescale_sites=True):
-        """Alias of :meth:`~quimb.tensor.MatrixProductState.partial_trace`."""
-        return self.partial_trace(
-            keep, upper_ind_id, rescale_sites=rescale_sites
+    def partial_trace(self, *_, **__):
+        raise AttributeError(
+            "`mps.partial_trace` has been renamed to "
+            "`mps.partial_trace_to_mpo`. Soon `mps.partial_trace` "
+            "will produce (dense) local reduced density matrices to match "
+            "methods elsewhere in quimb."
         )
+
+    def ptr(self, *_, **__):
+        raise AttributeError(
+            "`mps.ptr` has been renamed " "to `mps.partial_trace_to_mpo`."
+        )
+
+    def partial_trace_to_dense_canonical(
+        self, where, normalized=True, info=None, **contract_opts
+    ):
+        """Compute the dense local reduced density matrix by canonicalizing
+        around the target sites and then contracting the local tensors. Note
+        this moves the orthogonality around inplace, and records it in `info`.
+
+        Parameters
+        ----------
+        where : int or tuple[int]
+            The site or sites to compute the reduced density matrix for.
+        normalized : bool, optional
+            Explicitly normalize the local reduced density matrix.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
+        contract_opts
+            Passed to `tensor_contract` when computing the reduced local
+            density matrix.
+
+        Returns
+        -------
+        array_like
+        """
+        if self.cyclic:
+            raise NotImplementedError("Only supports OBC.")
+
+        if isinstance(where, Integral):
+            where = (where,)
+
+        # canonicalize around our sites
+        self.canonicalize_(where, info=info)
+
+        # form the local reduced density matrix tn
+        kix = [self.site_ind(i) for i in where]
+        bix = [f"__b{i}__" for i in where]
+        k = self[min(where) : max(where) + 1]
+        b = k.reindex(dict(zip(kix, bix))).conj_()
+        rho_tn = k | b
+
+        # contract down to a matrix
+        rho = rho_tn.to_dense(kix, bix, **contract_opts)
+
+        if normalized:
+            # locally normalize, usually unnecessary for an MPS but cheap
+            rho = rho / do("trace", rho)
+
+        return rho
+
+    def local_expectation_canonical(
+        self, G, where, normalized=True, info=None, **contract_opts
+    ):
+        """Compute a local expectation value (via forming the reduced density
+        matrix). Note this moves the orthogonality around inplace, and records
+        it in `info`.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator to compute the expectation of.
+        where : int or tuple[int]
+            The site or sites to compute the expectation at.
+        normalized : bool, optional
+            Explicitly normalize the local reduced density matrix.
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
+        contract_opts
+            Passed to `tensor_contract` when computing the reduced local
+            density matrix.
+
+        Returns
+        -------
+        float
+        """
+        rho = self.partial_trace_to_dense_canonical(
+            where, normalized=normalized, info=info, **contract_opts
+        )
+        return do("trace", G @ rho)
+
+    def compute_local_expectation_canonical(
+        self,
+        terms,
+        normalized=True,
+        return_all=False,
+        info=None,
+        inplace=False,
+        **contract_opts,
+    ):
+        """Compute many local expectations at once, via forming the relevant
+        reduced density matrices via canonicalization. This moves the
+        orthogonality around inplace, and records it in `info`.
+
+        Parameters
+        ----------
+        terms : dict[int or tuple[int], array_like]
+            The local terms to compute values for.
+        normalized : bool, optional
+            Explicitly normalize each local reduced density matrix.
+        return_all : bool, optional
+            Whether to return each expectation in `terms` separately
+            or sum them all together (the default).
+        info : dict, optional
+            If supplied, will be used to infer and store various extra
+            information. Currently, the key "cur_orthog" is used to store the
+            current orthogonality center. Its input value can be ``"calc"``, a
+            single site, or a pair of sites representing the min/max range,
+            inclusive. It will be updated to the actual range after.
+        inplace : bool, optional
+            Whether to perform the required canonicalizations inplace.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`
+            when contracting the local density matrices.
+
+        Returns
+        -------
+        float or dict[in or tuple[int], float]
+            The expecetation value(s), either summed or for each term if
+            `return_all=True`.
+
+        See Also
+        --------
+        compute_local_expectation_via_envs, local_expectation_canonical
+        partial_trace_to_dense_canonical
+        """
+        if info is None:
+            # this is used to keep track of canonical center
+            info = {}
+
+        if inplace:
+            mps = self
+        else:
+            mps = self.copy()
+            info = info.copy()
+
+        cur_orthog = info.get("cur_orthog", "calc")
+        if isinstance(cur_orthog, tuple):
+            # have a canonical center already -> start close to it
+            terms = sorted(
+                terms.items(), key=lambda kv: abs(min(kv[0]) - cur_orthog[0])
+            )
+        else:
+            # sort by the smallest site so we sweep in one direction
+            terms = sorted(terms.items(), key=lambda kv: min(kv[0]))
+
+        expecs = {
+            where: mps.local_expectation_canonical(
+                G,
+                where,
+                normalized=normalized,
+                info=info,
+                **contract_opts,
+            )
+            for where, G in terms
+        }
+
+        if return_all:
+            return expecs
+
+        return functools.reduce(operator.add, expecs.values())
+
+    def compute_local_expectation_via_envs(
+        self,
+        terms,
+        normalized=True,
+        return_all=False,
+        **contract_opts,
+    ):
+        """Compute many local expectations at once, via forming the relevant
+        local overlaps using left and right environments formed via
+        contraction. This does not require any canonicalization and can be
+        quicker if the canonical center is not already aligned.
+
+        Parameters
+        ----------
+        terms : dict[int or tuple[int], array_like]
+            The local terms to compute values for.
+        normalized : bool, optional
+            Explicitly normalize each local reduced density matrix.
+        return_all : bool, optional
+            Whether to return each expectation in `terms` separately
+            or sum them all together (the default).
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`
+            when contracting the local overlaps.
+
+        Returns
+        -------
+        float or dict[int or tuple[int], float]
+            The expecetation value(s), either summed or for each term if
+            `return_all=True`.
+
+        See Also
+        --------
+        compute_local_expectation_canonical, compute_left_environments,
+        compute_right_environments
+        """
+        norm, ket, bra = self.make_norm(return_all=True)
+
+        left_envs = norm.compute_left_environments(**contract_opts)
+        right_envs = norm.compute_right_environments(**contract_opts)
+
+        expecs = {}
+
+        if normalized:
+            nfactor = (norm.select(0) | right_envs[0]).contract(
+                all, **contract_opts
+            )
+        else:
+            nfactor = None
+
+        for where, G in terms.items():
+            sitemin = min(where)
+            sitemax = max(where)
+            tags = [ket.site_tag(i) for i in range(sitemin, sitemax + 1)]
+            # form:
+            #     sitemin sitemax
+            #          :   :
+            #         ┌─┐ ┌─┐
+            #      ┌──┤k├─┤k├──┐
+            #      │  └┬┘ └┬┘  │
+            #      │   │   │   │
+            #     ┌┴┐ ┌┴───┴┐ ┌┴┐
+            #     │l│ │  G  │ │r│
+            #     └┬┘ └┬───┬┘ └┬┘
+            #      │   │   │   │
+            #      │  ┌┴┐ ┌┴┐  │
+            #      └──┤b├─┤b├──┘
+            #         └─┘ └─┘
+            # (n.b. might be non-gated sites in between as well)
+            k = ket.select_any(tags, virtual=False)
+            b = bra.select_any(tags, virtual=False)
+            k.gate_(G, where, contract=False)
+
+            tn_local_overlap = k | b
+            if sitemin in left_envs:
+                tn_local_overlap |= left_envs[sitemin]
+            if sitemax in right_envs:
+                tn_local_overlap |= right_envs[sitemax]
+
+            x = tn_local_overlap.contract(all, **contract_opts)
+            if normalized:
+                x = x / nfactor
+
+            expecs[where] = x
+
+        if return_all:
+            return expecs
+
+        return functools.reduce(operator.add, expecs.values())
+
+    def compute_local_expectation(
+        self,
+        terms,
+        normalized=True,
+        return_all=False,
+        method="canonical",
+        info=None,
+        inplace=False,
+        **contract_opts,
+    ):
+        """Compute many local expectations at once.
+
+        Parameters
+        ----------
+        terms : dict[int or tuple[int], array_like]
+            The local terms to compute values for.
+        normalized : bool, optional
+            Explicitly normalize each local term.
+        return_all : bool, optional
+            Whether to return each expectation in `terms` separately
+            or sum them all together (the default).
+        method : {'canonical', 'envs'}, optional
+            The method to use to compute the local expectations.
+
+            - 'canonical': canonicalize around the sites of interest and
+              contract the local reduced density matrices, moving the canonical
+              center around as needed.
+            - 'envs': form the local overlaps using left and right environments
+              and contract these directly. This can be quicker if the canonical
+              center is not already aligned.
+
+        info : dict, optional
+            If supplied, and `method=="canonical"`, will be used to infer and
+            store various extra information. Currently the key "cur_orthog" is
+            used to store the current orthogonality center. Its input value can
+            be ``"calc"``, a single site, or a pair of sites representing the
+            min/max range, inclusive. It will be updated to the actual range
+            after.
+        inplace : bool, optional
+            If `method=="canonical"`, whether to perform the required
+            canonicalizations inplace or on a copy of the state.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`
+            when contracting the local overlaps or density matrices.
+
+        Returns
+        -------
+        float or dict[int or tuple[int], float]
+            The expecetation value(s), either summed or for each term if
+            `return_all=True`.
+
+        See Also
+        --------
+        compute_local_expectation_canonical, compute_local_expectation_via_envs
+        """
+        if method == "canonical":
+            return self.compute_local_expectation_canonical(
+                terms,
+                normalized=normalized,
+                return_all=return_all,
+                info=info,
+                inplace=inplace,
+                **contract_opts,
+            )
+        elif method == "envs":
+            return self.compute_local_expectation_via_envs(
+                terms,
+                normalized=normalized,
+                return_all=return_all,
+                **contract_opts,
+            )
+        else:
+            raise ValueError(
+                f"Unrecognized method: {method}, should be one of: "
+                "'canonical', 'envs'."
+            )
 
     @convert_cur_orthog
     def bipartite_schmidt_state(self, sz_a, get="ket", info=None):
@@ -3215,7 +3611,6 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         config = []
         omega = 1.0
         for i in range(psi.L):
-
             # form local density matrix
             ki = psi[i]
             bi = ki.H
@@ -3270,6 +3665,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         rng = np.random.default_rng(seed)
         for _ in range(C):
             yield psi0.sample_configuration(seed=rng, info=info)
+
 
 class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
     """Initialise a matrix product operator, with auto labelling and tagging.

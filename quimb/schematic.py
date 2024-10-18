@@ -430,6 +430,9 @@ class Drawing:
             coo, preset=preset, n=n, orientation=orientation, **style
         )
 
+    def square(self, coo, preset=None, **kwargs):
+        return self.marker(coo, preset=preset, marker="s", **kwargs)
+
     def cube(self, coo, preset=None, **kwargs):
         """Draw a cube at the specified coordinate, which must be 3D.
 
@@ -824,6 +827,24 @@ class Drawing:
 
         for coo in coos:
             self._adjust_lims(*coo)
+
+    def rectangle(self, cooa, coob, preset=None, **kwargs):
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        radius = style.pop("radius", 0.25)
+
+        forward, inverse = get_rotator_and_inverse(cooa, coob)
+
+        # rotate both onto y=0
+        xa, _ = forward(*cooa)
+        xb, _ = forward(*coob)
+        points = [
+            (xa - radius, -radius),
+            (xa - radius, +radius),
+            (xb + radius, +radius),
+            (xb + radius, -radius),
+        ]
+        points = [inverse(*coo) for coo in points]
+        self.shape(points, **style)
 
     def patch(self, coos, preset=None, **kwargs):
         """Draw a closed smooth patch through given coordinates.

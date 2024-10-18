@@ -1626,8 +1626,15 @@ class Tensor:
 
         Parameters
         ----------
-        selectors : dict[str, int], dict[str, slice]
-            Mapping of index(es) to which value to take.
+        selectors : dict[str, int or slice or "r"]
+            Mapping of index(es) to which value to take. The values can be:
+
+            - int: select a specific value for that index.
+            - slice: select a range of values for that index.
+            - "r": contract a random vector in.
+
+            The mapping can contain indices that don't appear on this tensor,
+            in which case they are ignored.
         inplace : bool, optional
             Whether to select inplace or not.
 
@@ -1643,18 +1650,29 @@ class Tensor:
 
         See Also
         --------
-        TensorNetwork.isel
+        TensorNetwork.isel, Tensor.rand_reduce
         """
         T = self if inplace else self.copy()
 
-        new_inds = tuple(
-            ix
-            for ix in self.inds
-            if (ix not in selectors) or isinstance(selectors[ix], slice)
-        )
+        new_inds = []
+        data_loc = []
 
-        data_loc = tuple(selectors.get(ix, slice(None)) for ix in self.inds)
-        T.modify(apply=lambda x: x[data_loc], inds=new_inds, left_inds=None)
+        for ix in T.inds:
+            sel = selectors.get(ix, slice(None))
+            if isinstance(sel, slice):
+                # index will be kept (including a partial slice of entries)
+                new_inds.append(ix)
+                data_loc.append(sel)
+            elif sel == "r":
+                # eagerly remove any 'random' selections
+                T.rand_reduce_(ix)
+            else:
+                # index will be removed by selecting a specific index
+                data_loc.append(int(sel))
+
+        T.modify(
+            apply=lambda x: x[tuple(data_loc)], inds=new_inds, left_inds=None
+        )
         return T
 
     isel_ = functools.partialmethod(isel, inplace=True)
@@ -2190,15 +2208,34 @@ class Tensor:
         """
         t = self if inplace else self.copy()
         axis = t.inds.index(ind)
-        new_data = array_contract(
-            (t.data, v),
-            (tuple(range(self.ndim)), (axis,)),
+
+        expr = array_contract_expression(
+            shapes=(self.shape, shape(v)),
+            inputs=(tuple(range(self.ndim)), (axis,)),
+            constants={1: v},
         )
+
         new_inds = t.inds[:axis] + t.inds[axis + 1 :]
-        t.modify(data=new_data, inds=new_inds)
+        t.modify(apply=expr, inds=new_inds)
         return t
 
     vector_reduce_ = functools.partialmethod(vector_reduce, inplace=True)
+
+    def rand_reduce(self, ind, dtype=None, inplace=False, **kwargs):
+        """Contract the index ``ind`` of this tensor with a random vector,
+        removing it.
+
+        Parameters
+        ----------
+        """
+        if dtype is None:
+            dtype = self.dtype
+
+        v = randn(self.ind_size(ind), dtype=self.dtype, **kwargs)
+
+        return self.vector_reduce(ind, v, inplace=inplace)
+
+    rand_reduce_ = functools.partialmethod(rand_reduce, inplace=True)
 
     def collapse_repeated(self, inplace=False):
         """Take the diagonals of any repeated indices, such that each index
@@ -7983,8 +8020,13 @@ class TensorNetwork(object):
 
         Parameters
         ----------
-        selectors : dict[str, int]
-            Mapping of index(es) to which value to take.
+        selectors : dict[str, int or slice or "r"]
+            Mapping of index(es) to which value to take. The values can be:
+
+            - int: select a specific value for that index.
+            - slice: select a range of values for that index.
+            - "r": contract a random vector in.
+
         inplace : bool, optional
             Whether to select inplace or not.
 
@@ -9606,7 +9648,7 @@ class TensorNetwork(object):
             if equalize_norms:
                 signs = []
                 for s in scalars:
-                    signs.append(do("sign", s))
+                    signs.append(s / do("abs", s))
                     tn.exponent += do("log10", do("abs", s))
                 scalars = signs
 

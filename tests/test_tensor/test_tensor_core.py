@@ -1909,6 +1909,15 @@ class TestTensorNetwork:
         patches = tuple(tn.gen_inds_connected(2))
         assert len(patches) == 34
 
+    def test_tn_isel_rand(self):
+        mps = qtn.MPS_rand_state(6, 7)
+        ramp = mps.isel({mps.site_ind(i): "r" for i in mps.sites})
+        assert ramp.outer_inds() == ()
+        # check we haven't selected an computation basis amplitude
+        rx = ramp.contract()
+        xs = mps.to_dense().ravel()
+        assert not any(np.allclose(rx, x) for x in xs)
+
 
 class TestTensorNetworkSimplifications:
     def test_rank_simplify(self):

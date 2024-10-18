@@ -1361,7 +1361,7 @@ class Gate:
         )
 
 
-def sample_bitstring_from_prob_ndarray(p):
+def sample_bitstring_from_prob_ndarray(p, seed=None):
     """Sample a bitstring from n-dimensional tensor ``p`` of probabilities.
 
     Examples
@@ -1373,7 +1373,8 @@ def sample_bitstring_from_prob_ndarray(p):
         >>> sample_bitstring_from_prob_ndarray(p)
         '01011'
     """
-    b = np.random.choice(p.size, p=p.flat)
+    rng = np.random.default_rng(seed)
+    b = rng.choice(p.size, p=p.ravel())
     return f"{b:0>{p.ndim}b}"
 
 
@@ -2642,7 +2643,7 @@ class Circuit:
         optimize="auto-hq",
         simplify_sequence="ADCRS",
         simplify_atol=1e-12,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         backend=None,
         dtype="complex128",
         rehearse=False,
@@ -2701,7 +2702,7 @@ class Circuit:
 
         # fix the output indices to the correct bitstring
         for i, x in zip(range(self.N), b):
-            psi_b.isel_({psi_b.site_ind(i): int(x)})
+            psi_b.isel_({psi_b.site_ind(i): x})
 
         # perform a final simplification and cast
         psi_b.full_simplify_(**fs_opts)
@@ -2727,7 +2728,7 @@ class Circuit:
         b="random",
         simplify_sequence="ADCRS",
         simplify_atol=1e-12,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         optimize="auto-hq",
         dtype="complex128",
         rehearse=True,
@@ -2766,9 +2767,7 @@ class Circuit:
 
         """
         if b == "random":
-            import random
-
-            b = [random.choice("01") for _ in range(self.N)]
+            b = "r" * self.N
 
         return self.amplitude(
             b=b,
@@ -2788,7 +2787,7 @@ class Circuit:
         optimize="auto-hq",
         simplify_sequence="ADCRS",
         simplify_atol=1e-12,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         backend=None,
         dtype="complex128",
         rehearse=False,
@@ -2885,7 +2884,7 @@ class Circuit:
         optimize="auto-hq",
         simplify_sequence="ADCRS",
         simplify_atol=1e-12,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         backend=None,
         dtype="complex128",
         rehearse=False,
@@ -3078,7 +3077,7 @@ class Circuit:
         if fix:
             # project (slice) fixed tensors with bitstring
             # this severs the indices connecting bra and ket on fixed sites
-            nm_lc.isel_({self.ket_site_ind(i): int(b) for i, b in fix.items()})
+            nm_lc.isel_({self.ket_site_ind(i): b for i, b in fix.items()})
 
         # having sliced we can do a final simplify
         nm_lc.full_simplify_(output_inds=output_inds, **fs_opts)
@@ -3215,12 +3214,149 @@ class Circuit:
             tuple(sorted(g)) for g in partition_all(group_size, order)
         )
 
+    def get_qubit_distances(self, method="dijkstra", alpha=2):
+        """Get a nested dictionary of qubit distances. This is computed from a
+        graph representing qubit interactions. The graph has an edge between
+        qubits if they are acted on by the same gate, and the distance-weight
+        of the edge is exponentially small in the number of gates between them.
+
+        Parameters
+        ----------
+        method : {'dijkstra', 'resistance'}, optional
+            The method to use to compute the qubit distances. See
+            :func:`networkx.all_pairs_dijkstra_path_length` and
+            :func:`networkx.resistance_distance`.
+        alpha : float, optional
+            The distance weight between qubits is ``alpha**(num_gates - 1 )``.
+
+        Returns
+        -------
+        dict[int, dict[int, float]]
+            The distance between each pair of qubits, accessed like
+            ``distances[q1][q2]``. If two qubits are not connected, the
+            distance is missing.
+        """
+        import networkx as nx
+
+        G = nx.Graph()
+        for g in self.gates:
+            for q1, q2 in itertools.combinations(g.qubits, 2):
+                if G.has_edge(q1, q2):
+                    G[q1][q2]["weight"] /= alpha
+                else:
+                    G.add_edge(q1, q2, weight=1)
+
+        if method == "dijkstra":
+            distances = dict(
+                nx.all_pairs_dijkstra_path_length(G, weight="weight")
+            )
+        elif method == "resistance":
+            distances = nx.resistance_distance(G, weight="weight")
+        else:
+            raise ValueError(f"Unknown method {method}.")
+
+        return distances
+
+    def reordered_gates_dfs_clustered(self):
+        """Get the gates reordered by a depth first search traversal of the
+        multi-qubit gate graph that greedily selects successive gates which
+        are 'close' in graph distance, and shifts single qubit gates to be
+        adjacent to multi-qubit gates where possible.
+        """
+        # first we make a directed graph of the multi-qubit gates
+        successors = {}
+        predecessors = {}
+        single_qubit_stacks = {}
+        single_qubit_predecessors = {}
+        last_gates = {}
+        queue = []
+
+        for i, g in enumerate(self.gates):
+            if g.total_qubit_count == 1:
+                # lazily accumulate single qubit gates
+                (q,) = g.qubits
+                single_qubit_stacks.setdefault(q, []).append(i)
+
+            else:
+                pi = predecessors[i] = []
+                sqpi = single_qubit_predecessors[i] = []
+
+                for q in g.qubits:
+                    # collect any single qubit gates acting on this qubit
+                    sqpi.extend(single_qubit_stacks.pop(q, []))
+
+                    if q in last_gates:
+                        # qubit has already been acted on -> have an edge
+                        h = last_gates[q]
+                        # mark h as a predecessor of i
+                        pi.append(h)
+                        # mark i as a successor of h
+                        successors.setdefault(h, []).append(i)
+
+                    # mark qubit as acted on
+                    last_gates[q] = i
+
+                if len(pi) == 0:
+                    # no predecessors -> is possible starting multiqubit gate
+                    queue.append(i)
+
+        # then we traverse the multi-qubit gates in a depth first, topological
+        # order, breaking ties by minimizing the distance between active qubits
+        distances = self.get_qubit_distances()
+
+        def gate_distance(i, j):
+            qis = self.gates[i].qubits
+            qjs = self.gates[j].qubits
+            return min(
+                distances[q1].get(q2, float("inf")) for q1 in qis for q2 in qjs
+            )
+
+        # sort initial queue by qubit with smallest index
+        queue.sort(key=lambda i: min(self.gates[i].qubits))
+        new_gates = []
+
+        while queue:
+            i = queue.pop(0)
+
+            # first flush any single qubit gates acting on the qubits of gate i
+            new_gates.extend(
+                self.gates[j] for j in single_qubit_predecessors.pop(i, [])
+            )
+            # then add the gate itself
+            new_gates.append(self.gates[i])
+
+            # then remove i as a predecessor of its successors
+            for j in successors.pop(i, []):
+                pj = predecessors[j]
+                pj.remove(i)
+                if not pj:
+                    # j has no more predecessors -> can be added to queue
+                    queue.append(j)
+
+            # check if this is the last time q is acted on,
+            # if so flush any remaining single qubit gates
+            for q in self.gates[i].qubits:
+                if last_gates[q] == i:
+                    # qubit has been acted on for the last time
+                    new_gates.extend(
+                        self.gates[j] for j in single_qubit_stacks.pop(q, [])
+                    )
+
+            # sort the queue of possible next gates
+            queue.sort(key=lambda k: gate_distance(i, k))
+
+        # flush any remaining single qubit gates
+        for q in sorted(single_qubit_stacks):
+            new_gates.extend(self.gates[j] for j in single_qubit_stacks.pop(q))
+
+        return new_gates
+
     def sample(
         self,
         C,
         qubits=None,
         order=None,
-        group_size=1,
+        group_size=10,
         max_marginal_storage=2**20,
         seed=None,
         optimize="auto-hq",
@@ -3228,7 +3364,7 @@ class Circuit:
         dtype="complex64",
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
     ):
         r"""Sample the circuit given by ``gates``, ``C`` times, using lightcone
         cancelling and caching marginal distribution results. This is a
@@ -3319,14 +3455,13 @@ class Circuit:
         # init TN norms, contraction trees, and marginals
         self._maybe_init_storage()
 
+        rng = np.random.default_rng(seed)
+
         # which qubits and an ordering e.g. (2, 3, 4, 5), (5, 3, 4, 2)
         qubits, order = self._parse_qubits_order(qubits, order)
 
         # group the ordering e.g. ((5, 3), (4, 2))
         groups = self._group_order(order, group_size)
-
-        if seed is not None:
-            np.random.seed(seed)
 
         result = dict()
         for _ in range(C):
@@ -3360,7 +3495,7 @@ class Circuit:
                     p = self._sampled_conditionals[key]
 
                 # the sampled bitstring e.g. '1' or '001010101'
-                b_where = sample_bitstring_from_prob_ndarray(p)
+                b_where = sample_bitstring_from_prob_ndarray(p, seed=rng)
 
                 # split back into individual qubit results
                 for q, b in zip(where, b_where):
@@ -3373,12 +3508,12 @@ class Circuit:
         self,
         qubits=None,
         order=None,
-        group_size=1,
+        group_size=10,
         result=None,
         optimize="auto-hq",
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         rehearse=True,
         progbar=False,
     ):
@@ -3431,7 +3566,7 @@ class Circuit:
         groups = self._group_order(order, group_size)
 
         if result is None:
-            result = {q: "0" for q in qubits}
+            result = {q: "r" for q in qubits}
 
         fix = {}
         tns_and_trees = {}
@@ -3459,6 +3594,7 @@ class Circuit:
         self,
         C,
         marginal_qubits,
+        fix=None,
         max_marginal_storage=2**20,
         seed=None,
         optimize="auto-hq",
@@ -3466,7 +3602,7 @@ class Circuit:
         dtype="complex64",
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
     ):
         r"""Sample from this circuit, *assuming* it to be chaotic. Which is to
         say, only compute and sample correctly from the final marginal,
@@ -3502,6 +3638,9 @@ class Circuit:
             The number of qubits to treat as marginal, or the actual qubits. If
             an int is given then the qubits treated as marginal will be
             ``circuit.calc_qubit_ordering()[:marginal_qubits]``.
+        fix : None or dict[int, str], optional
+            Measurement results on other qubits to fix. These will be randomly
+            sampled if ``fix`` is not given or a qubit is missing.
         seed : None or int, optional
             A random seed, passed to ``numpy.random.seed`` if given.
         optimize : str, optional
@@ -3531,8 +3670,7 @@ class Circuit:
         self._maybe_init_storage()
         qubits = tuple(range(self.N))
 
-        if seed is not None:
-            np.random.seed(seed)
+        rng = np.random.default_rng(seed)
 
         # choose which qubits to treat as marginal - ideally 'towards one side'
         #     to increase contraction efficiency
@@ -3547,7 +3685,10 @@ class Circuit:
         for _ in range(C):
             # generate a random bit-string for the fixed qubits
             for q in fix_qubits:
-                result[q] = np.random.choice(("0", "1"))
+                if (fix is None) or (q not in fix):
+                    result[q] = rng.choice(("0", "1"))
+                else:
+                    result[q] = fix[q]
 
             # compute the remaining marginal
             key = (where, tuple(sorted(result.items())))
@@ -3588,7 +3729,7 @@ class Circuit:
         optimize="auto-hq",
         simplify_sequence="ADCRS",
         simplify_atol=1e-6,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         dtype="complex64",
         rehearse=True,
     ):
@@ -3664,13 +3805,275 @@ class Circuit:
         sample_chaotic_rehearse, rehearse="tn"
     )
 
+    def get_gate_by_gate_circuits(self, group_size=10):
+        """Get a sequence of circuits by partitioning the gates into groups
+        such circuit `i + 1` acts on at most ``group_size`` new qubits compared
+        to circuit `i`.
+
+        Parameters
+        ----------
+        group_size : int, optional
+            The maximum number of new qubits that can be acted on by a circuit
+            compared to its predecessor.
+
+        Returns
+        -------
+        Sequence[dict]
+            A sequence of dicts, each with keys ``'circuit'`` and ``'where'``,
+            where the former is a :class:`~quimb.tensor.circuit.Circuit` and
+            the latter the tuple of new qubits that it acts on comparaed to
+            the previous circuit.
+        """
+        circs = [self.__class__(self.N)]
+        groups = []
+        current_group = set()
+
+        # this ensures that single qubit gates are always adjacent to
+        # multi-qubit gates and will thus always be included in the same group
+        gates = self.reordered_gates_dfs_clustered()
+
+        for gate in gates:
+            # if we were to add next gate, how many new qubits would we have?
+            next_group = current_group.union(gate.qubits)
+            if len(next_group) > group_size:
+                # over the limit: flush a copy of the current circuit and group
+                groups.append(tuple(sorted(current_group)))
+                circs.append(circs[-1].copy())
+                # start a new group
+                current_group = set(gate.qubits)
+            else:
+                # add the gate to the current group
+                current_group = next_group
+            circs[-1].apply_gate(gate)
+
+        # add the final group corresponding to circs[-1]
+        groups.append(tuple(sorted(current_group)))
+
+        return tuple({"circuit": c, "where": g} for c, g in zip(circs, groups))
+
+    def sample_gate_by_gate(
+        self,
+        C,
+        group_size=10,
+        seed=None,
+        max_marginal_storage=2**20,
+        optimize="auto-hq",
+        backend=None,
+        dtype="complex64",
+        simplify_sequence="ADCRS",
+        simplify_atol=1e-6,
+        simplify_equalize_norms=True,
+    ):
+        """Sample this circuit using the gate-by-gate method, where we 'evolve'
+        a result bitstring by sequentially including more and more gates, at
+        each step updating the result by computing a full conditional marginal.
+        See "How to simulate quantum measurement without computing marginals"
+        by Sergey Bravyi, David Gosset, Yinchen Liu
+        (https://arxiv.org/abs/2112.08499). The overall complexity of this is
+        guaranteed to be similar to that of computing a single amplitude which
+        can be much better than the naive "qubit-by-qubit" (`.sample`) method.
+        However, it requires evaluting a number of tensor networks that scales
+        linearly with the number of gates which can offset any practical
+        advantages for shallow circuits for example.
+
+        Parameters
+        ----------
+        C : int
+            The number of samples to generate.
+        group_size : int, optional
+            The maximum number of qubits that can be acted on by a circuit
+            compared to its predecessor. This will be the dimension of the
+            marginal computed at each step.
+        seed : None or int, optional
+            A random seed, passed to ``numpy.random.seed`` if given.
+        max_marginal_storage : int, optional
+            The total cumulative number of marginal probabilites to cache, once
+            this is exceeded caching will be turned off.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginals, shouldn't be
+            a non-reusable path optimizer as called on many different TNs.
+            Passed to :func:`cotengra.array_contract_tree`.
+        backend : str, optional
+            Backend to perform the marginal contraction with, e.g. ``'numpy'``,
+            ``'cupy'`` or ``'jax'``. Passed to ``cotengra``.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_equalize_norms : bool, optional
+            Actively renormalize tensor norms during simplification.
+        rehearse : bool, optional
+            If ``True``, generate and cache the simplified tensor network and
+            contraction tree but don't actually perform the contraction.
+            Returns a dict with keys ``'tn'`` and ``'tree'`` with the tensor
+            network that will be contracted and the corresponding contraction
+            tree if so.
+
+        Yields
+        ------
+        str
+        """
+        self._maybe_init_storage()
+
+        rng = np.random.default_rng(seed)
+
+        key = ("gate_by_gate_circuits", group_size)
+        try:
+            circs_wheres = self._storage[key]
+        except KeyError:
+            circs_wheres = self.get_gate_by_gate_circuits(group_size)
+            self._storage[key] = circs_wheres
+
+        for _ in range(C):
+            # start with all qubits in the |0> state
+            result = {q: "0" for q in range(self.N)}
+
+            for circ_where in circs_wheres:
+                # get the next circuit and the new group of qubits
+                circ_g = circ_where["circuit"]
+                where = circ_where["where"]
+
+                # remove the new group of qubits from our current result
+                for q in where:
+                    result.pop(q)
+
+                # check if we have already computed the conditional
+                key = (where, tuple(sorted(result.items())))
+
+                if key not in circ_g._sampled_conditionals:
+                    p = circ_g.compute_marginal(
+                        where,
+                        fix=result,
+                        optimize=optimize,
+                        backend=backend,
+                        dtype=dtype,
+                        simplify_sequence=simplify_sequence,
+                        simplify_atol=simplify_atol,
+                        simplify_equalize_norms=simplify_equalize_norms,
+                    )
+                    p /= p.sum()
+
+                    if circ_g._marginal_storage_size <= max_marginal_storage:
+                        circ_g._sampled_conditionals[key] = p
+                        circ_g._marginal_storage_size += p.size
+                else:
+                    p = circ_g._sampled_conditionals[key]
+
+                # sample a configuration for our new group
+                b_where = sample_bitstring_from_prob_ndarray(p, seed=rng)
+
+                # update the fixed qubits given new group result
+                for q, qx in zip(where, b_where):
+                    result[q] = qx
+
+            yield "".join(result[i] for i in range(self.N))
+
+    def sample_gate_by_gate_rehearse(
+        self,
+        group_size=10,
+        optimize="auto-hq",
+        dtype="complex64",
+        simplify_sequence="ADCRS",
+        simplify_atol=1e-6,
+        simplify_equalize_norms=True,
+        rehearse=True,
+        progbar=False,
+    ):
+        """Perform the preparations and contraction tree findings for
+        :meth:`~quimb.tensor.circuit.Circuit.sample_gate_by_gate`, caching
+        various intermedidate objects, but don't perform the main contractions.
+
+        Parameters
+        ----------
+        group_size : int, optional
+            The maximum number of qubits that can be acted on by a circuit
+            compared to its predecessor. This will be the dimension of the
+            marginal computed at each step.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginals, shouldn't be
+            a non-reusable path optimizer as called on many different TNs.
+            Passed to :func:`cotengra.array_contract_tree`.
+        dtype : str, optional
+            Data type to cast the TN to before contraction.
+        simplify_sequence : str, optional
+            Which local tensor network simplifications to perform and in which
+            order, see
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_atol : float, optional
+            The tolerance with which to compare to zero when applying
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.full_simplify`.
+        simplify_equalize_norms : bool, optional
+            Actively renormalize tensor norms during simplification.
+        rehearse : True or "tn", optional
+            If ``True``, generate and cache the simplified tensor network and
+            contraction tree but don't actually perform the contraction. If
+            "tn", only generate the simplified tensor networks.
+
+        Returns
+        -------
+        Sequence[dict] or Sequence[TensorNetwork]
+        """
+        self._maybe_init_storage()
+
+        key = ("gate_by_gate_circuits", group_size)
+        try:
+            circs_wheres = self._storage[key]
+        except KeyError:
+            circs_wheres = self.get_gate_by_gate_circuits(group_size)
+            self._storage[key] = circs_wheres
+
+        rehs = []
+        result = {q: "0" for q in range(self.N)}
+
+        for circs_wheres in _progbar(circs_wheres, disable=not progbar):
+            # get the next circuit and the new group of qubits
+            circ_g = circs_wheres["circuit"]
+            where = circs_wheres["where"]
+
+            # remove the new group of qubits from our current result
+            for q in where:
+                result.pop(q)
+
+            r = circ_g.compute_marginal(
+                where,
+                fix=result,
+                optimize=optimize,
+                dtype=dtype,
+                simplify_sequence=simplify_sequence,
+                simplify_atol=simplify_atol,
+                simplify_equalize_norms=simplify_equalize_norms,
+                rehearse=rehearse,
+            )
+
+            if rehearse != "tn":
+                r["where"] = where
+                r["circuit"] = circ_g
+
+            rehs.append(r)
+
+            # update the fixed qubits with randomly rotated results so we
+            # don't get zero probability networks when simplifying
+            for q in where:
+                result[q] = "r"
+
+        return rehs
+
+    sample_gate_by_gate_tns = functools.partialmethod(
+        sample_gate_by_gate_rehearse, rehearse="tn"
+    )
+
     def to_dense(
         self,
         reverse=False,
         optimize="auto-hq",
         simplify_sequence="R",
         simplify_atol=1e-12,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         backend=None,
         dtype=None,
         rehearse=False,
@@ -3846,7 +4249,7 @@ class Circuit:
         optimize="auto-hq",
         simplify_sequence="R",
         simplify_atol=1e-12,
-        simplify_equalize_norms=False,
+        simplify_equalize_norms=True,
         dtype=None,
         backend=None,
         autojit=False,
@@ -3956,6 +4359,112 @@ class Circuit:
                 )
 
         self.clear_storage()
+
+    def draw(
+        self,
+        figsize=None,
+        radius=1 / 3,
+        drawcolor=(0.5, 0.5, 0.5),
+        linewidth=1,
+    ):
+        """Draw a simple linear schematic of the circuit.
+
+        Parameters
+        ----------
+        figsize : tuple, optional
+            The size of the figure, if not given will be set based on the
+            number of gates and qubits.
+        radius : float, optional
+            The radius of the gates.
+        drawcolor : tuple, optional
+            The color of the wires.
+        linewidth : float, optional
+            The linewidth of the wires.
+
+        Returns
+        -------
+        fig : matplotlib.Figure
+            The figure object.
+        ax : matplotlib.Axes
+            The axis object.
+        """
+        from quimb.schematic import Drawing, hash_to_color
+
+        if figsize is None:
+            figsize = (self.num_gates / 6, self.N / 6)
+
+        d = Drawing(
+            figsize=figsize,
+            presets=dict(
+                wire=dict(
+                    color=drawcolor,
+                    linewidth=linewidth,
+                ),
+                gate=dict(
+                    radius=radius,
+                ),
+            ),
+        )
+
+        depths = {}
+        for i, g in enumerate(self.gates):
+            # level = max(depths.get(q, 0) for q in g.qubits) + 1
+            level = i
+
+            if len(g.qubits) == 1:
+                (q,) = g.qubits
+                # draw line from previous gate to this one
+                d.line(
+                    (depths.get(q, -1) + radius, q),
+                    (level - radius, q),
+                    preset="wire",
+                    zorder=level,
+                )
+                # draw the gate
+                d.marker(
+                    (level, q),
+                    color=hash_to_color(g.label),
+                    zorder=0,
+                    preset="gate",
+                )
+                # record last gate on this qubit
+                depths[q] = level
+            else:
+                # stretch a box over all qubits
+                qmin = min(g.qubits)
+                qmax = max(g.qubits)
+                d.rectangle(
+                    (level, qmin),
+                    (level, qmax),
+                    color=hash_to_color(g.label),
+                    zorder=0,
+                    alpha=1 / 3,
+                    preset="gate",
+                )
+                for q in g.qubits:
+                    # draw markers on each qubit acted on
+                    d.marker(
+                        (level, q),
+                        color=hash_to_color(g.label),
+                        zorder=0,
+                        preset="gate",
+                    )
+                    # draw lines from previous gate to this one
+                    d.line(
+                        (depths.get(q, -1) + radius, q),
+                        (level - radius, q),
+                        preset="wire",
+                        zorder=level,
+                    )
+                    # record last gate on this qubit
+                    depths[q] = level
+
+        # draw final lines to the right
+        level = max(depths.values(), default=0) + 1
+        for q in depths:
+            d.line((depths.get(q, -1), q), (level, q), preset="wire")
+
+        return d.fig, d.ax
 
     def __repr__(self):
         r = "<Circuit(n={}, num_gates={}, gate_opts={})>"
@@ -4151,6 +4660,36 @@ class CircuitMPS(Circuit):
         fidelity_estimate
         """
         return 1 - self.fidelity_estimate()
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        normalized=False,
+        **contract_opts,
+    ):
+        """Compute the local expectation value of a local operator at ``where``
+        (via forming the reduced density matrix). Note this moves the
+        orthogonality around inplace, and records it in `info`.
+
+        Parameters
+        ----------
+        G : Tensor
+            The local operator tensor.
+        where : int
+            The qubit to compute the expectation value at.
+
+        Returns
+        -------
+        float
+        """
+        return self._psi.local_expectation_canonical(
+            G,
+            where,
+            normalized=normalized,
+            info=self.gate_opts["info"],
+            **contract_opts,
+        )
 
 
 class CircuitPermMPS(CircuitMPS):
