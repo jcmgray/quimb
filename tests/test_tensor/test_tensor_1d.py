@@ -777,6 +777,16 @@ class TestMatrixProductState:
         ]
         assert len(set(configs)) > 1
 
+    def test_compute_local_expectation(self):
+        psi = qtn.MPS_rand_state(10, 7, dtype="complex128")
+        terms = {(i, i + 1): qu.rand_herm(4) for i in range(9)}
+
+        ex = psi.compute_local_expectation_exact(terms)
+        xa = psi.compute_local_expectation(terms, method="canonical")
+        assert xa == pytest.approx(ex)
+        xb = psi.compute_local_expectation(terms, method="envs")
+        assert xb == pytest.approx(ex)
+
 
 class TestMatrixProductOperator:
     @pytest.mark.parametrize("cyclic", [False, True])
