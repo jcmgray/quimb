@@ -357,8 +357,7 @@ def simulate_counts(p, C, phys_dim=2, seed=None):
         {'000': 514, '111': 510}
 
     """
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     n = infer_size(p, phys_dim)
     d = phys_dim**n
@@ -372,7 +371,7 @@ def simulate_counts(p, C, phys_dim=2, seed=None):
     pi = pi.reshape(-1)
 
     # raw counts in terms of integers
-    raw_counts = np.random.choice(np.arange(d), size=C, p=pi)
+    raw_counts = rng.choice(d, size=C, p=pi)
 
     # convert to frequencies of binary
     bin_str = "{:0>" + str(n) + "b}"

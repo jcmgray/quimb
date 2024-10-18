@@ -1668,7 +1668,7 @@ class Tensor:
                 T.rand_reduce_(ix)
             else:
                 # index will be removed by selecting a specific index
-                data_loc.append(sel)
+                data_loc.append(int(sel))
 
         T.modify(
             apply=lambda x: x[tuple(data_loc)], inds=new_inds, left_inds=None
@@ -2208,12 +2208,15 @@ class Tensor:
         """
         t = self if inplace else self.copy()
         axis = t.inds.index(ind)
-        new_data = array_contract(
-            (t.data, v),
-            (tuple(range(self.ndim)), (axis,)),
+
+        expr = array_contract_expression(
+            shapes=(self.shape, shape(v)),
+            inputs=(tuple(range(self.ndim)), (axis,)),
+            constants={1: v},
         )
+
         new_inds = t.inds[:axis] + t.inds[axis + 1 :]
-        t.modify(data=new_data, inds=new_inds)
+        t.modify(apply=expr, inds=new_inds)
         return t
 
     vector_reduce_ = functools.partialmethod(vector_reduce, inplace=True)
@@ -9645,7 +9648,7 @@ class TensorNetwork(object):
             if equalize_norms:
                 signs = []
                 for s in scalars:
-                    signs.append(do("sign", s))
+                    signs.append(s / do("abs", s))
                     tn.exponent += do("log10", do("abs", s))
                 scalars = signs
 

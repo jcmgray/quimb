@@ -383,7 +383,9 @@ class TestMatrixProductState:
     def test_partial_trace(self, rescale, keep):
         n = 10
         p = qtn.MPS_rand_state(n, 7)
-        r = p.ptr(keep=keep, upper_ind_id="u{}", rescale_sites=rescale)
+        r = p.partial_trace_to_mpo(
+            keep=keep, upper_ind_id="u{}", rescale_sites=rescale
+        )
         rd = r.to_qarray()
         if isinstance(keep, slice):
             keep = p.slice2sites(keep)
@@ -911,7 +913,7 @@ class TestMatrixProductOperator:
 
     def test_partial_transpose(self):
         p = qtn.MPS_rand_state(8, 10)
-        r = p.ptr([2, 3, 4, 5, 6, 7])
+        r = p.partial_trace_to_mpo([2, 3, 4, 5, 6, 7])
         rd = r.to_qarray()
 
         assert qu.isherm(rd)

@@ -2,14 +2,26 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-8-5)=
-## v1.8.5 (unreleased)
+(whats-new-1-9-0)=
+## v1.9.0 (unreleased)
+
+**Breaking Changes**
+
+- renamed `MatrixProductState.partial_trace` and `MatrixProductState.ptr` to [MatrixProductState.partial_trace_to_mpo](quimb.tensor.tensor_1d.MatrixProductState.partial_trace_to_mpo) to avoid confusion with other `partial_trace` methods that usually produce a dense matrix.
 
 **Enhancements:**
 
+- add [`Circuit.sample_gate_by_gate`](quimb.tensor.circuit.Circuit.sample_gate_by_gate) and related methods [`CircuitMPS.reordered_gates_dfs_clustered`](quimb.tensor.circuit.Circuit.reordered_gates_dfs_clustered) and [`CircuitMPS.get_qubit_distances`](quimb.tensor.circuit.CircuitMPS.get_qubit_distances) for sampling a circuit using the 'gate by gate' method introduced in https://arxiv.org/abs/2112.08499.
+- add [`Circuit.draw`](quimb.tensor.circuit.Circuit.draw) for drawing a very simple circuit schematic.
+- [`Circuit`](quimb.tensor.circuit.Circuit): by default turn on `simplify_equalize_norms` and use a `group_size=10` for sampling. This should result in faster and more stable sampling.
+- [`Circuit`](quimb.tensor.circuit.Circuit): use `numpy.random.default_rng` for random number generation.
+- add [`qtn.circ_a2a_rand`](quimb.tensor.circuit_gen.circ_a2a_rand) for generating random all-to-all circuits.
 - expose [`qtn.edge_coloring`](quimb.tensor.tensor_arbgeom_tebd.edge_coloring) as top level function and allow layers to be returned grouped.
-- add docstring for [`tn.contract_compressed`](quimb.tensor.tensor_core.TensorNetwork.contract_compressed)
+- add docstring for [`tn.contract_compressed`](quimb.tensor.tensor_core.TensorNetwork.contract_compressed) and by default pick up important settings from the supplied contraction path optimizer (`max_bond` and `compress_late`)
 - add [`Tensor.rand_reduce`](quimb.tensor.tensor_core.Tensor.rand_reduce) for randomly removing a tensor index by contracting a random vector into it. One can also supply the value `"r"` to `isel` selectors to use this.
+- add `fit-zipup` and `fit-projector` shorthand methods to the general 1d tensor network compression function
+- add [`MatrixProductState.compute_local_expectation`](quimb.tensor.tensor_1d.MatrixProductState.compute_local_expectation) for computing many local expectations for a MPS at once, to match the interface for this method elsewhere. These can either be computed via canonicalization (`method="canonical"`), or via explicit left and right environment contraction (`method="envs"`)
+- specialize [`CircuitMPS.local_expectation`](quimb.tensor.circuit.CircuitMPS.local_expectation) to make use of the MPS form.
 
 ---
 
