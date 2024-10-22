@@ -37,7 +37,7 @@ class TestMPOSpectralApprox:
         ham = MPO_ham_heis(20)
         dmrg = DMRG2(ham, bond_dims=[2, 4])
         dmrg.solve()
-        rho_ab = dmrg.state.ptr(range(6, 14))
+        rho_ab = dmrg.state.partial_trace_to_mpo(range(6, 14))
         xf = approx_spectral_function(
             rho_ab, lambda x: x, tol=0.1, verbosity=2
         )
@@ -55,7 +55,7 @@ class TestMPOSpectralApprox:
         psi0 = dmrg.state.to_dense()
         lne = logneg_subsys(psi0, [2] * n, sysa=sysa, sysb=sysb)
 
-        rho_ab = dmrg.state.ptr(sysab, rescale_sites=True)
+        rho_ab = dmrg.state.partial_trace_to_mpo(sysab, rescale_sites=True)
         rho_ab_pt = rho_ab.partial_transpose(range(3))
         lnx = log2(
             approx_spectral_function(rho_ab_pt, abs, tol=0.1, verbosity=2)

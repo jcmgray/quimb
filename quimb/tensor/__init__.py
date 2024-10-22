@@ -8,6 +8,7 @@ from .circuit import (
     Gate,
 )
 from .circuit_gen import (
+    circ_a2a_rand,
     circ_ansatz_1D_brickwork,
     circ_ansatz_1D_rand,
     circ_ansatz_1D_zigzag,
@@ -222,6 +223,7 @@ __all__ = (
     "array_contract",
     "bonds_size",
     "bonds",
+    "circ_a2a_rand",
     "circ_ansatz_1D_brickwork",
     "circ_ansatz_1D_rand",
     "circ_ansatz_1D_zigzag",

@@ -466,6 +466,28 @@ class TestCircuit:
 
         assert power_divergence(f_obs, f_exp)[0] < 100
 
+    @pytest.mark.parametrize("group_size", (1, 3))
+    def test_sample_gate_by_gate(self, group_size):
+        import collections
+        from scipy.stats import power_divergence
+
+        C = 2**10
+        L = 5
+        circ = random_a2a_circ(L, 3)
+
+        psi = circ.to_dense()
+        p_exp = abs(psi.reshape(-1)) ** 2
+        f_exp = p_exp * C
+
+        counts = collections.Counter(
+            circ.sample_gate_by_gate(C, group_size=group_size)
+        )
+        f_obs = np.zeros(2**L)
+        for b, c in counts.items():
+            f_obs[int(b, 2)] = c
+
+        assert power_divergence(f_obs, f_exp)[0] < 100
+
     def test_sample_chaotic(self):
         import collections
         from scipy.stats import power_divergence
