@@ -84,6 +84,7 @@ from .hd1bp import HD1BP, contract_hd1bp, sample_hd1bp
 from .hv1bp import HV1BP, contract_hv1bp, sample_hv1bp
 from .l1bp import L1BP, contract_l1bp
 from .l2bp import L2BP, compress_l2bp, contract_l2bp
+from .regions import RegionGraph
 
 __all__ = (
     "compress_d2bp",
@@ -101,6 +102,7 @@ __all__ = (
     "initialize_hyper_messages",
     "L1BP",
     "L2BP",
+    "RegionGraph",
     "sample_d2bp",
     "sample_hd1bp",
     "sample_hv1bp",

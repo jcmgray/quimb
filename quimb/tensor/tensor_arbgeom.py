@@ -1,18 +1,15 @@
 """Classes and algorithms related to arbitrary geometry tensor networks."""
 
-import contextlib
 import functools
-from operator import add
+from operator import add, mul
 
-from autoray import dag, do, size
+from autoray import dag, do
 
 from ..utils import check_opt, deprecated, ensure_dict
 from ..utils import progbar as Progbar
-from . import decomp
 from .contraction import get_symbol
 from .tensor_core import (
     TensorNetwork,
-    group_inds,
     oset,
     rand_uuid,
     tags_to_oset,
@@ -21,6 +18,11 @@ from .tensor_core import (
 
 def get_coordinate_formatter(ndims):
     return ",".join("{}" for _ in range(ndims))
+
+
+def prod(xs):
+    """Product of all elements in ``xs``."""
+    return functools.reduce(mul, xs)
 
 
 def tensor_network_align(*tns, ind_ids=None, trace=False, inplace=False):
@@ -605,6 +607,62 @@ class TensorNetworkGen(TensorNetwork):
         tags = self.maybe_convert_coo(tags)
         return super()._get_tids_from_tags(tags, which=which)
 
+    def _get_tid_to_site_map(self):
+        """Get a mapping from low level tensor id to the site it represents,
+        assuming there is a single tensor per site.
+        """
+        tid2site = {}
+        for site in self.sites:
+            (tid,) = self._get_tids_from_tags(site)
+            tid2site[tid] = site
+        return tid2site
+
+    def gen_bond_coos(self):
+        """Generate the coordinates (pairs of sites) of all bonds."""
+        tid2site = self._get_tid_to_site_map()
+        seen = set()
+        for tida in self.tensor_map:
+            for tidb in self._get_neighbor_tids(tida):
+                sitea, siteb = tid2site[tida], tid2site[tidb]
+                if sitea > siteb:
+                    sitea, siteb = siteb, sitea
+                bond = (sitea, siteb)
+                if bond not in seen:
+                    yield bond
+                    seen.add(bond)
+
+    def gen_regions_sites(self, max_region_size=None, sites=None):
+        """Generate sets of sites that represent 'regions' where every node is
+        connected to at least two other region nodes. This is a simple wrapper
+        around ``TensorNewtork.gen_regions`` that works with the sites
+        rather than ``tids``.
+
+        Parameters
+        ----------
+        max_region_size : None or int
+            Set the maximum number of tensors that can appear in a region. If
+            ``None``, wait until any valid region is found and set that as the
+            maximum size.
+        tags : None or sequence of str
+            If supplied, only consider regions containing these tids.
+
+        Yields
+        ------
+        tuple[hashable]
+        """
+        if sites is not None:
+            tags = tuple(map(self.site_tag, sites))
+            tids = self._get_tids_from_tags(tags, "any")
+        else:
+            tids = None
+
+        tid2site = self._get_tid_to_site_map()
+
+        for region in self.gen_regions(
+            max_region_size=max_region_size, tids=tids
+        ):
+            yield tuple(tid2site[tid] for tid in region)
+
     def reset_cached_properties(self):
         """Reset any cached properties, one should call this when changing the
         actual geometry of a TN inplace, for example.
@@ -1131,6 +1189,64 @@ class TensorNetworkGenVector(TensorNetworkGen):
         if gauges is not None:
             k.gauge_all_simple_(gauges=gauges)
 
+    def make_reduced_density_matrix(
+        self,
+        where,
+        allow_dangling=True,
+        bra_ind_id="b{}",
+        mangle_append="*",
+        layer_tags=("KET", "BRA"),
+    ):
+        """Form the tensor network representation of the reduced density
+        matrix, taking special care to handle potential hyper inner and outer
+        indices.
+
+        Parameters
+        ----------
+        where : node or sequence[node]
+            The sites to keep.
+        allow_dangling : bool, optional
+            Whether to allow dangling indices in the resulting density matrix.
+            These are non-physical indices, that usually result from having
+            cut a region of the tensor network.
+        bra_ind_id : str, optional
+            The string format to use for the bra indices.
+        mangle_append : str, optional
+            The string to append to indices that are not traced out.
+        layer_tags : tuple of str, optional
+            The tags to apply to the ket and bra tensor network layers.
+        """
+        where = set(where)
+        reindex_map = {}
+        phys_inds = set()
+
+        for coo in self.gen_site_coos():
+            kix = self.site_ind(coo)
+            if coo in where:
+                reindex_map[kix] = bra_ind_id.format(coo)
+            phys_inds.add(kix)
+
+        for ix, tids in self.ind_map.items():
+            if ix in phys_inds:
+                # traced out or handled above
+                continue
+
+            if (len(tids) == 1) and allow_dangling:
+                # dangling indices appear most often in cluster methods
+                continue
+
+            reindex_map[ix] = ix + mangle_append
+
+        ket = self.copy()
+        bra = self.reindex(reindex_map).conj_()
+
+        if layer_tags:
+            ket.add_tag(layer_tags[0])
+            bra.add_tag(layer_tags[1])
+
+        # index collisions already handled above
+        return ket.combine(bra, virtual=True, check_collisions=False)
+
     def local_expectation_cluster(
         self,
         G,
@@ -1198,13 +1314,13 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computations or not::
 
-                - False: perform the computation.
-                - 'tn': return the tensor networks of each local expectation,
-                  without running the path optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree`` for each local expectation.
-                - True: run the path optimizer and return the ``PathInfo`` for
-                  each local expectation.
+            - False: perform the computation.
+            - 'tn': return the tensor networks of each local expectation,
+                without running the path optimizer.
+            - 'tree': run the path optimizer and return the
+                ``cotengra.ContractonTree`` for each local expectation.
+            - True: run the path optimizer and return the ``PathInfo`` for
+                each local expectation.
 
         Returns
         -------
@@ -1385,26 +1501,42 @@ class TensorNetworkGenVector(TensorNetworkGen):
         by exactly contracting the full overlap tensor network.
         """
         k_inds = tuple(map(self.site_ind, where))
-        b_inds = tuple(map("_bra{}".format, where))
-        b = self.conj().reindex_(dict(zip(k_inds, b_inds)))
-        tn = (b | self)
+        bra_ind_id = "_bra{}"
+        b_inds = tuple(map(bra_ind_id.format, where))
+        # b = self.conj().reindex_(dict(zip(k_inds, b_inds)))
+        # tn = (b | self)
+        tn = self.make_reduced_density_matrix(where, bra_ind_id=bra_ind_id)
 
         if rehearse:
-            if rehearse == "tn":
-                return tn
-            if rehearse == "tree":
-                return tn.contraction_tree(
-                    optimize, output_inds=k_inds + b_inds
-                )
-            if rehearse:
-                return tn.contraction_info(
-                    optimize, output_inds=k_inds + b_inds
-                )
+            return _handle_rehearse(
+                rehearse, tn, optimize, output_inds=k_inds + b_inds
+            )
 
-        rho = tn.to_dense(k_inds, b_inds, optimize=optimize, **contract_opts)
-        expec = do("tensordot", rho, G, axes=((0, 1), (1, 0)))
+        rho = tn.contract(
+            output_inds=(*k_inds, *b_inds),
+            optimize=optimize,
+            **contract_opts,
+        ).data
+
+        ng = len(where)
+        if do("ndim", G) != 2 * ng:
+            # might be supplied in matrix form
+            G = do("reshape", G, rho.shape)
+
+        expec = do(
+            "tensordot",
+            rho,
+            G,
+            axes=(range(2 * ng), (*range(ng, 2 * ng), *range(0, ng))),
+        )
+
         if normalized:
-            expec = expec / do("trace", rho)
+            norm = do("trace", do("fuse", rho, range(ng), range(ng, 2 * ng)))
+
+            if normalized == "return":
+                return expec, norm
+
+            expec = expec / norm
 
         return expec
 
@@ -1471,6 +1603,487 @@ class TensorNetworkGenVector(TensorNetworkGen):
             optimize=optimize,
             normalized=normalized,
             rehearse=rehearse,
+            **contract_opts,
+        )
+
+    def local_expectation_loop_expansion(
+        self,
+        G,
+        where,
+        loops=None,
+        gauges=None,
+        normalized=True,
+        optimize="auto",
+        intersect=False,
+        use_all_starting_paths=False,
+        info=None,
+        progbar=False,
+        **contract_opts,
+    ):
+        """Compute the expectation of operator ``G`` at site(s) ``where`` by
+        expanding the expectation in terms of loops of tensors.
+
+        Parameters
+        ----------
+        G : array_like
+            The operator to compute the expectation of.
+        where : node or sequence[node]
+            The sites to compute the expectation at.
+        loops : None or sequence[NetworkPath], optional
+            The loops to use. If an integer, all loops up to and including that
+            length will be used if the loop passes through all sites in
+            ``where``. If ``None`` the maximum loop length is set as the
+            shortest loop found. If an explicit set of loops is given, only
+            these loops are considered, but only if they pass through all sites
+            in ``where``. ``intersect`` is ignored.
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            gauged.
+        normalized : bool or "local", optional
+            Whether to normalize the result. If "local" each loop term is
+            normalized separately. If ``True`` each term is normalized using
+            a loop expansion estimate of the norm. If ``False`` no
+            normalization is performed.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        info : dict, optional
+            A dictionary to store intermediate results in to avoid recomputing
+            them. This is useful when computing various expectations with
+            different sets of loops. This should only be reused when both the
+            tensor network and gauges remain the same.
+        intersect : bool, optional
+            If ``loops`` is not an explicit set of loops, whether to consider
+            self intersecting loops in the search for loops passing through
+            ``where``.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        expec : scalar
+        """
+        from quimb.experimental.belief_propagation import RegionGraph
+
+        info = info if info is not None else {}
+        info.setdefault("tns", {})
+        info.setdefault("expecs", {})
+
+        if isinstance(loops, int):
+            max_loop_length = loops
+            loops = None
+        else:
+            max_loop_length = None
+
+        if len(where) == 1:
+            (tid,) = self._get_tids_from_tags(where[0])
+            paths = [(tid,)]
+        elif len(where) == 2:
+            (tida,) = self._get_tids_from_tags(where[0])
+            (tidb,) = self._get_tids_from_tags(where[1])
+            if use_all_starting_paths:
+                paths = self.get_path_between_tids(tida, tidb, return_all=True)
+            else:
+                paths = [self.get_path_between_tids(tida, tidb)]
+        else:
+            raise NotImplementedError("Only 1 or 2 sites supported.")
+
+        if loops is None:
+            # find all loops that pass through local bonds
+            loops = tuple(
+                self.gen_paths_loops(
+                    max_loop_length=max_loop_length,
+                    intersect=intersect,
+                    paths=paths,
+                )
+            )
+
+        else:
+            # have explicit loop specification, maybe as a larger set ->
+            # need to select only the loops covering whole of `where`
+            loops = tuple(loops)
+
+            if "lookup" in info and hash(loops) == info["lookup_hash"]:
+                # want to share info across different expectations and also
+                # different sets of loops -> but if the loop set has changed
+                # then "lookup" specifically is probably incomplete
+                lookup = info["lookup"]
+            else:
+                # build cache of which coordinates are in which loop to avoid
+                # quadratic loop checking cost doing every time
+                lookup = {}
+                tid2site = self._get_tid_to_site_map()
+                for loop in loops:
+                    for tid in loop.tids:
+                        site = tid2site[tid]
+                        lookup.setdefault(site, set()).add(loop)
+
+                info["lookup"] = lookup
+                info["lookup_hash"] = hash(loops)
+
+            # get all loops which contain *all* sites in `where`
+            loops = set.intersection(*(lookup[coo] for coo in where))
+
+        # XXX: for larger intersecting loops the counting is not quite
+        # right subregion intersections are not all generated above?
+        rg = RegionGraph(loops, autocomplete=False)
+
+        # make sure the tree contribution is included
+        for path0 in paths:
+            rg.add_region(path0)
+
+        expecs = []
+        norms = []
+        counts = []
+
+        if progbar:
+            regions = Progbar(rg.regions)
+        else:
+            regions = rg.regions
+
+        for loop in regions:
+            C = rg.get_count(loop)
+            if C == 0:
+                # redundant loop
+                continue
+
+            try:
+                # have already computed this term in a different expectation
+                # e.g. with different set of loops
+                expec_loop, norm_loop = info["expecs"][loop, where]
+            except KeyError:
+                # get the gauged loop tn
+                try:
+                    tnl = info["tns"][loop]
+                except KeyError:
+                    tnl = self.select_path(loop, gauges=gauges)
+                    info["tns"][loop] = tnl
+
+                # compute the expectation with exact contraction
+                expec_loop, norm_loop = tnl.local_expectation_exact(
+                    G,
+                    where,
+                    normalized="return",
+                    optimize=optimize,
+                    **contract_opts,
+                )
+                # store for efficient calls with multiply loop sets
+                info["expecs"][loop, where] = expec_loop, norm_loop
+
+            expecs.append(expec_loop)
+            norms.append(norm_loop)
+            counts.append(C)
+
+        if normalized == "local":
+            # each loop expectation is normalized separately
+            expec = sum(
+                C * expec_loop / norm_loop
+                for C, expec_loop, norm_loop in zip(counts, expecs, norms)
+            )
+        elif normalized == "prod":
+            # each term is normalized by an overall normalization factor
+            expec = prod(e**C for C, e in zip(counts, expecs))
+            norm = prod(n**C for C, n in zip(counts, norms))
+            expec = expec / norm
+        elif normalized:
+            # each term is normalized by an simulteneous normalization factor
+            expec = sum(C * e for C, e in zip(counts, expecs))
+            norm = sum(C * n for C, n in zip(counts, norms))
+            expec = expec / norm
+        else:
+            # no normalization
+            expec = sum(
+                C * expec_loop for C, expec_loop in zip(counts, expecs)
+            )
+
+        return expec
+
+    def compute_local_expectation_loop_expansion(
+        self,
+        terms,
+        loops=None,
+        *,
+        gauges=None,
+        normalized=True,
+        optimize="auto",
+        info=None,
+        intersect=False,
+        return_all=False,
+        executor=None,
+        progbar=False,
+        **contract_opts,
+    ):
+        info = info if info is not None else {}
+
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_local_expectation_loop_expansion,
+            tn=self,
+            terms=terms,
+            loops=loops,
+            intersect=intersect,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
+            normalized=normalized,
+            gauges=gauges,
+            optimize=optimize,
+            info=info,
+            **contract_opts,
+        )
+
+    def local_expectation_cluster_expansion(
+        self,
+        G,
+        where,
+        clusters=None,
+        gauges=None,
+        normalized=True,
+        autocomplete=True,
+        optimize="auto",
+        info=None,
+        **contract_opts,
+    ):
+        """Compute the expectation of operator ``G`` at site(s) ``where`` by
+        expanding the expectation in terms of clusters of tensors.
+
+        Parameters
+        ----------
+        G : array_like
+            The operator to compute the expectation of.
+        where : node or sequence[node]
+            The sites to compute the expectation at.
+        clusters : None or sequence[sequence[node]], optional
+            The clusters to use. If an integer, all cluster up to and including
+            that size will be used if the cluster contains all sites in
+            ``where``. If ``None`` the maximum cluster size is set as the
+            smallest non-trivial cluster (2-connected subgraph)  found.
+            If an explicit set of clusters is given, only these clusters are
+            considered, but only if they contain all sites in ``where``.
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            gauged.
+        normalized : bool or "local", optional
+            Whether to normalize the result. If "local" each cluster term is
+            normalized separately. If ``True`` each term is normalized using
+            a loop expansion estimate of the norm. If ``False`` no
+            normalization is performed.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        info : dict, optional
+            A dictionary to store intermediate results in to avoid recomputing
+            them. This is useful when computing various expectations with
+            different sets of loops. This should only be reused when both the
+            tensor network and gauges remain the same.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        expec : scalar
+        """
+        from quimb.experimental.belief_propagation import RegionGraph
+
+        info = info if info is not None else {}
+        info.setdefault("tns", {})
+        info.setdefault("expecs", {})
+
+        if isinstance(clusters, int):
+            max_cluster_size = clusters
+            clusters = None
+        else:
+            max_cluster_size = None
+
+        if clusters is None:
+            clusters = tuple(
+                self.gen_regions_sites(
+                    max_region_size=max_cluster_size,
+                    sites=where,
+                )
+            )
+        else:
+            clusters = tuple(clusters)
+
+            if "lookup" in info and hash(clusters) == info["lookup_hash"]:
+                # want to share info across different expectations and also
+                # different sets of clusters -> but if the cluster set has
+                # changed then "lookup" specifically is probably incomplete
+                lookup = info["lookup"]
+            else:
+                # build cache of which coordinates are in which cluster to
+                # avoid quadratic cluster checking cost doing every time
+                lookup = {}
+                for cluster in clusters:
+                    for site in cluster:
+                        lookup.setdefault(site, set()).add(cluster)
+
+                info["lookup"] = lookup
+                info["lookup_hash"] = hash(clusters)
+
+            # get all clusters which contain *all* sites in `where`
+            clusters = set.intersection(*(lookup[coo] for coo in where))
+
+        rg = RegionGraph(clusters, autocomplete=autocomplete)
+
+        # make sure the tree contribution is included
+        rg.add_region(where)
+
+        expecs = []
+        norms = []
+        counts = []
+
+        for cluster in rg.regions:
+            C = rg.get_count(cluster)
+            if C == 0:
+                # redundant cluster
+                continue
+
+            try:
+                # have already computed this term in a different expectation
+                # e.g. with different set of clusters
+                expec_cluster, norm_cluster = info["expecs"][cluster, where]
+            except KeyError:
+                # get the gauged cluster tn
+                try:
+                    tnl = info["tns"][cluster]
+                except KeyError:
+                    tags = tuple(map(self.site_tag, cluster))
+                    # take copy as inserting gauges
+                    tnl = self.select_any(tags, virtual=False)
+                    tnl.gauge_simple_insert(gauges)
+                    info["tns"][cluster] = tnl
+
+                # compute the expectation with exact contraction
+                expec_cluster, norm_cluster = tnl.local_expectation_exact(
+                    G,
+                    where,
+                    normalized="return",
+                    optimize=optimize,
+                    **contract_opts,
+                )
+                # store for efficient calls with multiply cluster sets
+                info["expecs"][cluster, where] = expec_cluster, norm_cluster
+
+            expecs.append(expec_cluster)
+            norms.append(norm_cluster)
+            counts.append(C)
+
+        if normalized == "local":
+            # each loop expectation is normalized separately
+            expec = sum(C * e / n for C, e, n in zip(counts, expecs, norms))
+        elif normalized == "prod":
+            expec = prod(e**C for C, e in zip(counts, expecs))
+            norm = prod(n**C for C, n in zip(counts, norms))
+            expec = expec / norm
+        elif normalized:
+            # each term is normalized by an simulteneous normalization factor
+            expec = sum(C * e for C, e in zip(counts, expecs))
+            norm = sum(C * n for C, n in zip(counts, norms))
+            expec = expec / norm
+        else:
+            # no normalization
+            expec = sum(C * e for C, e in zip(counts, expecs))
+
+        return expec
+
+    def norm_cluster_expansion(
+        self,
+        clusters=None,
+        autocomplete=False,
+        gauges=None,
+        optimize="auto",
+        **contract_opts,
+    ):
+        """Compute the norm of this tensor network by expanding it in terms of
+        clusters of tensors.
+        """
+        from quimb.experimental.belief_propagation import RegionGraph
+
+        if isinstance(clusters, int):
+            max_cluster_size = clusters
+            clusters = None
+        else:
+            max_cluster_size = None
+
+        if clusters is None:
+            clusters = tuple(
+                self.gen_regions_sites(max_region_size=max_cluster_size)
+            )
+        else:
+            clusters = tuple(clusters)
+
+        psi = self.copy()
+
+        # make all tree like norms 1.0 -> region intersections
+        # which are tree like can thus be ignored
+        nfactor = psi.normalize_simple(gauges)
+
+        rg = RegionGraph(clusters, autocomplete=autocomplete)
+        for site in psi.sites:
+            if site not in rg.lookup:
+                # site is not covered by any cluster -> might be tree like
+                rg.add_region({site})
+
+        local_norms = []
+        for region in rg.regions:
+            C = rg.get_count(region)
+            if C == 0:
+                continue
+
+            tags = tuple(map(psi.site_tag, region))
+            kr = psi.select(tags, which="any", virtual=False)
+            kr.gauge_simple_insert(gauges)
+
+            lni = (kr.H | kr).contract(optimize=optimize, **contract_opts)
+            local_norms.append(do("log10", lni) * C)
+
+        return (10 ** sum(local_norms) * nfactor) ** 0.5
+
+    def compute_local_expectation_cluster_expansion(
+        self,
+        terms,
+        clusters=None,
+        *,
+        gauges=None,
+        normalized=True,
+        autocomplete=True,
+        optimize="auto",
+        info=None,
+        return_all=False,
+        executor=None,
+        progbar=False,
+        **contract_opts,
+    ):
+        info = info if info is not None else {}
+
+        if normalized == "global":
+            nfactor = self.norm_cluster_expansion(
+                clusters=clusters,
+                autocomplete=autocomplete,
+                gauges=gauges,
+                optimize=optimize,
+                **contract_opts,
+            )
+            tn = self / nfactor
+            normalized = False
+        else:
+            tn = self
+
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_local_expectation_cluster_expansion,
+            tn=tn,
+            terms=terms,
+            clusters=clusters,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
+            normalized=normalized,
+            gauges=gauges,
+            autocomplete=autocomplete,
+            optimize=optimize,
+            info=info,
             **contract_opts,
         )
 
@@ -1541,10 +2154,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
         if reduce:
             k.reduce_inds_onto_bond(*k_inds, tags="__BOND__", drop_tags=True)
 
-        b_inds = tuple(map("_bra{}".format, keep))
-        b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
-
-        tn = (b | k)
+        # b = k.conj().reindex_(dict(zip(k_inds, b_inds)))
+        # tn = (b | k)
+        bra_ind_id = "_bra{}"
+        b_inds = tuple(map(bra_ind_id.format, keep))
+        tn = k.make_reduced_density_matrix(keep, bra_ind_id=bra_ind_id)
         output_inds = k_inds + b_inds
 
         if flatten:
@@ -1564,16 +2178,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
                 tn, tn_reduced = tn.partition("__BOND__", inplace=True)
 
             if rehearse:
-                if rehearse == "tn":
-                    return tn
-                if rehearse == "tree":
-                    return tn.contraction_tree(
-                        optimize, output_inds=output_inds
-                    )
-                if rehearse:
-                    return tn.contraction_info(
-                        optimize, output_inds=output_inds
-                    )
+                return _handle_rehearse(
+                    rehearse, tn, optimize, output_inds=output_inds
+                )
 
             t_rho = tn.contract_compressed(
                 optimize,
@@ -1596,16 +2203,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             )
 
             if rehearse:
-                if rehearse == "tn":
-                    return tn
-                if rehearse == "tree":
-                    return tn.contraction_tree(
-                        optimize, output_inds=output_inds
-                    )
-                if rehearse:
-                    return tn.contraction_info(
-                        optimize, output_inds=output_inds
-                    )
+                return _handle_rehearse(
+                    rehearse, tn, optimize, output_inds=output_inds
+                )
 
             rho = tn.to_dense(
                 k_inds,
@@ -2123,6 +2723,23 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     )
 
 
+def _handle_rehearse(rehearse, tn, optimize, **kwargs):
+    if rehearse is True:
+        tree = tn.contraction_tree(optimize, **kwargs)
+        return {
+            "tn": tn,
+            "tree": tree,
+            "W": tree.contraction_width(log=2),
+            "C": tree.contraction_cost(log=10),
+        }
+    if rehearse == "tn":
+        return tn
+    if rehearse == "tree":
+        return tn.contraction_tree(optimize, **kwargs)
+    if rehearse == "info":
+        return tn.contraction_info(optimize, **kwargs)
+
+
 def _compute_expecs_maybe_in_parallel(
     fn,
     tn,
@@ -2174,3 +2791,13 @@ def _tn_local_expectation_cluster(tn, *args, **kwargs):
 def _tn_local_expectation_exact(tn, *args, **kwargs):
     """Define as function for pickleability."""
     return tn.local_expectation_exact(*args, **kwargs)
+
+
+def _tn_local_expectation_loop_expansion(tn, *args, **kwargs):
+    """Define as function for pickleability."""
+    return tn.local_expectation_loop_expansion(*args, **kwargs)
+
+
+def _tn_local_expectation_cluster_expansion(tn, *args, **kwargs):
+    """Define as function for pickleability."""
+    return tn.local_expectation_cluster_expansion(*args, **kwargs)

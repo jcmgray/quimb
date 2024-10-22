@@ -134,3 +134,93 @@ def test_normalize_simple():
         k.gauge_simple_insert(gauges)
 
         assert k.H @ k == pytest.approx(1.0)
+
+
+def test_local_expectation_loop_expansions():
+    import quimb as qu
+
+    edges = [(0, 1), (0, 2), (2, 3), (1, 3), (2, 4), (3, 5), (4, 5)]
+    psi = qtn.TN_from_edges_rand(
+        edges,
+        D=3,
+        phys_dim=2,
+        seed=42,
+        dist="uniform",
+        loc=-0.1,
+    )
+    G = qu.rand_herm(4)
+    where = (0, 2)
+    o_ex = psi.local_expectation_exact(G, where)
+
+    gauges = {}
+    psi.gauge_all_simple_(100, 5e-6, gauges=gauges)
+    psi.normalize_simple(gauges)
+
+    # test loop generation per term
+    o_c0 = psi.local_expectation_loop_expansion(
+        G, where, loops=0, gauges=gauges
+    )
+    assert o_c0 == pytest.approx(
+        psi.local_expectation_cluster(G, where, gauges=gauges)
+    )
+    assert o_ex == pytest.approx(o_c0, rel=0.5, abs=0.01)
+    o_c1 = psi.local_expectation_loop_expansion(
+        G, where, loops=4, gauges=gauges
+    )
+    assert o_ex == pytest.approx(o_c1, rel=0.5, abs=0.01)
+    o_c2 = psi.local_expectation_loop_expansion(
+        G, where, loops=6, gauges=gauges
+    )
+    assert o_ex == pytest.approx(o_c2, rel=0.4, abs=0.01)
+
+    # test manual loops supply
+    loops = tuple(psi.gen_paths_loops(6))
+    o_cl = psi.local_expectation_loop_expansion(
+        G, where, loops=loops, gauges=gauges
+    )
+    assert o_ex == pytest.approx(o_cl, rel=0.4, abs=0.01)
+
+
+def test_local_expectation_cluster_expansions():
+    import quimb as qu
+
+    edges = [(0, 1), (0, 2), (2, 3), (1, 3), (2, 4), (3, 5), (4, 5)]
+    psi = qtn.TN_from_edges_rand(
+        edges,
+        D=3,
+        phys_dim=2,
+        seed=42,
+        dist="uniform",
+        loc=-0.1,
+    )
+    G = qu.rand_herm(4)
+    where = (0, 2)
+    o_ex = psi.local_expectation_exact(G, where)
+
+    gauges = {}
+    psi.gauge_all_simple_(100, 5e-6, gauges=gauges)
+    psi.normalize_simple(gauges)
+
+    # test cluster generation per term
+    o_c0 = psi.local_expectation_cluster_expansion(
+        G, where, clusters=0, gauges=gauges
+    )
+    assert o_c0 == pytest.approx(
+        psi.local_expectation_cluster(G, where, gauges=gauges)
+    )
+    assert o_ex == pytest.approx(o_c0, rel=0.5, abs=0.01)
+    o_c1 = psi.local_expectation_cluster_expansion(
+        G, where, clusters=4, gauges=gauges
+    )
+    assert o_ex == pytest.approx(o_c1, rel=0.5, abs=0.01)
+    o_c2 = psi.local_expectation_cluster_expansion(
+        G, where, clusters=6, gauges=gauges
+    )
+    assert o_ex == pytest.approx(o_c2, rel=0.4, abs=0.01)
+
+    # test manual clusters supply
+    clusters = tuple(psi.gen_regions(4))
+    o_cl = psi.local_expectation_cluster_expansion(
+        G, where, clusters=clusters, gauges=gauges
+    )
+    assert o_ex == pytest.approx(o_cl, rel=0.4, abs=0.01)
