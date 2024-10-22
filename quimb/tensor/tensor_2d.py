@@ -4804,8 +4804,20 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         self._Lx = len(arrays)
         self._Ly = len(arrays[0])
 
-        cyclicx = sum(d > 1 for d in ar.shape(arrays[0][1])) == 5
-        cyclicy = sum(d > 1 for d in ar.shape(arrays[1][0])) == 5
+        cyclicx = (
+            sum(d > 1 for d in ar.shape(arrays[0][1])) == 5
+        ) or (
+            # handle D=1 PBC case
+            (ar.ndim(arrays[0][1]) == 5) and
+            (sum(d == 1 for d in ar.shape(arrays[0][1])) == 4)
+        )
+        cyclicy = (
+            sum(d > 1 for d in ar.shape(arrays[1][0])) == 5
+        ) or (
+            # handle D=1 PBC case
+            (ar.ndim(arrays[1][0]) == 5) and
+            (sum(d == 1 for d in ar.shape(arrays[1][0])) == 4)
+        )
 
         # cache for both creating and retrieving indices
         ix = defaultdict(rand_uuid)
