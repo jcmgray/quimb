@@ -58,7 +58,7 @@ docs = [
 ]
 
 [project.scripts]
-quimb-mpi-python = "bin/quimb-mpi-python"
+quimb-mpi-python = ".:bin/quimb-mpi-python"
 
 [build-system]
 build-backend = "setuptools.build_meta"
