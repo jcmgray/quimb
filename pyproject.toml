@@ -1,9 +1,69 @@
+[project]
+name = "quimb"
+description = "Quantum information and many-body library."
+readme = { file = "README.md", content-type = "text/markdown" }
+dynamic = ["version"]
+authors = [{ name = "Johnnie Gray", email = "johnniemcgray@gmail.com" }]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = [
+    "quantum",
+    "physics",
+    "tensor",
+    "networks",
+    "tensors",
+    "dmrg",
+    "tebd",
+    "mera",
+    "peps",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "autoray >=0.6.12",
+    "cotengra >=0.6.1",
+    "cytoolz >=0.8.0",
+    "numba >=0.39",
+    "numpy >=1.17",
+    "psutil >=4.3.1",
+    "scipy >=1.0.0",
+    "tqdm >=4",
+]
+
+
+[project.optional-dependencies]
+tensor = ["matplotlib>=2.0", "networkx>=2.3"]
+advanced_solvers = ["mpi4py", "petsc4py", "slepc4py"]
+tests = ["coverage", "pytest", "pytest-cov"]
+docs = [
+    "astroid<3.0.0",
+    "autoray>=0.6.12",
+    "cotengra>=0.6.1",
+    "doc2dash>=2.4.1",
+    "furo",
+    "ipython!=8.7.0",
+    "myst-nb",
+    "setuptools_scm",
+    "sphinx-autoapi",
+    "sphinx-copybutton",
+    "sphinx-design",
+    "sphinx>=2.0",
+]
+
+[project.scripts]
+quimb-mpi-python = "bin/quimb-mpi-python"
+
 [build-system]
 build-backend = "setuptools.build_meta"
-requires = [
-    "setuptools>=45",
-    "setuptools_scm[toml]>=6.2"
-]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
 
 [tool.setuptools_scm]
 write_to = "quimb/_version.py"
