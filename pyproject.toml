@@ -57,12 +57,12 @@ docs = [
     "sphinx>=2.0",
 ]
 
-[project.scripts]
-quimb-mpi-python = ".:bin/quimb-mpi-python"
-
 [build-system]
 build-backend = "setuptools.build_meta"
-requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+
+[tool.setuptools.packages]
+find = { exclude = ["paper"] }
 
 [tool.setuptools_scm]
 write_to = "quimb/_version.py"
