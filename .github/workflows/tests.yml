@@ -77,14 +77,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install micromamba
-      uses: mamba-org/setup-micromamba@v1
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v3
       with:
+        python-version: ${{ matrix.python-version }}
+        miniforge-version: latest
+        activate-environment: test-env
         environment-file: ci/requirements/py-${{ matrix.conda-env }}.yml
-        environment-name: test-env
-        create-args: >-
-          python=${{ matrix.python-version }}
-        cache-environment: true
 
     - name: Matrix submodule tests with pytest
       if: ${{ matrix.testset == 'matrix' }}
