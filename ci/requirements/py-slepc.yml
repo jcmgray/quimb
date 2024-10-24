@@ -20,5 +20,5 @@ dependencies:
   - pytest-cov
   - scipy
   - slepc=*=*complex*
-  - slepc4py
+  - slepc4py<=3.21
   - tqdm
