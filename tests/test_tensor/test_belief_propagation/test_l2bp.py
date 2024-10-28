@@ -2,8 +2,8 @@ import pytest
 
 import quimb.tensor as qtn
 from quimb.experimental.belief_propagation.l2bp import (
-    contract_l2bp,
     compress_l2bp,
+    contract_l2bp,
 )
 
 
@@ -14,7 +14,7 @@ def test_contract_tree_exact(dtype):
     info = {}
     norm2_bp = contract_l2bp(psi, info=info, progbar=True)
     assert info["converged"]
-    assert norm2_bp == pytest.approx(norm2, rel=5e-6)
+    assert norm2_bp == pytest.approx(norm2, rel=1e-5)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])

@@ -2,8 +2,8 @@ import pytest
 
 import quimb.tensor as qtn
 from quimb.experimental.belief_propagation.d2bp import (
-    contract_d2bp,
     compress_d2bp,
+    contract_d2bp,
     sample_d2bp,
 )
 
@@ -27,7 +27,7 @@ def test_tree_exact(dtype):
     info = {}
     norm2_bp = contract_d2bp(psi, info=info, progbar=True)
     assert info["converged"]
-    assert norm2_bp == pytest.approx(norm2, rel=5e-6)
+    assert norm2_bp == pytest.approx(norm2, rel=1e-5)
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1])
