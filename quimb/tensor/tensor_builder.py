@@ -28,10 +28,10 @@ from .tensor_2d_tebd import LocalHam2D
 from .tensor_3d import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
 from .tensor_3d_tebd import LocalHam3D
 from .tensor_arbgeom import (
-    create_lazy_edge_map,
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
+    create_lazy_edge_map,
 )
 from .tensor_core import (
     COPY_tensor,
@@ -676,6 +676,7 @@ def TN_rand_tree(
     n,
     D,
     phys_dim=None,
+    max_degree=None,
     seed=None,
     dtype="float64",
     site_tag_id="I{}",
@@ -693,6 +694,10 @@ def TN_rand_tree(
     phys_dim : int, optional
         If not ``None``, give each tensor a 'physical', free index of this size
         to mimic a wavefunction of ``n`` sites.
+    max_degree : int, optional
+        The maximum degree of any node in the tree, for example 3 means
+        that each tensor can connect to at most 3 other tensors - creating a
+        binary tree (1 parent and two children).
     seed : int, optional
         A random seed.
     site_tag_id : str, optional
@@ -704,11 +709,10 @@ def TN_rand_tree(
     -------
     TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
-    import networkx as nx
+    from .geometry import edges_tree_rand
 
-    G = nx.random_tree(n, seed=seed)
     return TN_from_edges_rand(
-        G.edges,
+        edges=edges_tree_rand(n, max_degree=max_degree, seed=seed),
         D=D,
         phys_dim=phys_dim,
         seed=seed,

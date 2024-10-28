@@ -542,7 +542,7 @@ def edges_3d_diamond_cubic(Lx, Ly, Lz, cyclic=False, cells=None):
 def edges_tree_rand(n, max_degree=None, seed=None):
     """Return a random tree with ``n`` nodes. This a convenience function for
     testing purposes and the trees generated are not guaranteed to be uniformly
-    random (for that see ``networkx.random_tree``).
+    random (for that see ``networkx.random_labeled_tree``).
 
     Parameters
     ----------
