@@ -121,11 +121,8 @@ docs/autoapi
 .fuse_hidden*
 
 \.pytest_cache/
-
-*.ipynb_checkpoints/
-
 \.vscode/
-
+*.ipynb_checkpoints/
 
 # quimb specific
 ctg_cache

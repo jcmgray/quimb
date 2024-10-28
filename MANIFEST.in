@@ -1,6 +1,0 @@
-include quimb/_version.py
-include README.md
-include setup.cfg
-include LICENSE.txt
-graft tests
-graft deps

@@ -57,15 +57,21 @@ docs = [
     "sphinx>=2.0",
 ]
 
+[project.urls]
+"Documentation" = "https://quimb.readthedocs.io/"
+"Repository" = "https://github.com/jcmgray/quimb/"
+"Issues" = "https://github.com/jcmgray/quimb/issues"
+"Changelog" = "https://github.com/jcmgray/quimb/releases"
+
 [build-system]
-build-backend = "setuptools.build_meta"
-requires = ["setuptools>=64", "setuptools_scm>=8"]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages]
-find = { exclude = ["paper"] }
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools_scm]
-write_to = "quimb/_version.py"
+[tool.hatch.build.hooks.vcs]
+version-file = "quimb/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = "tests"
