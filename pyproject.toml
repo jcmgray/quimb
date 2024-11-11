@@ -39,9 +39,20 @@ dependencies = [
 
 
 [project.optional-dependencies]
-tensor = ["matplotlib>=2.0", "networkx>=2.3"]
-advanced_solvers = ["mpi4py", "petsc4py", "slepc4py"]
-tests = ["coverage", "pytest", "pytest-cov"]
+tensor = [
+    "matplotlib>=2.0",
+    "networkx>=2.3"
+]
+advanced_solvers = [
+    "mpi4py",
+    "petsc4py",
+    "slepc4py"
+]
+tests = [
+    "coverage",
+    "pytest",
+    "pytest-cov"
+]
 docs = [
     "astroid<3.0.0",
     "autoray>=0.6.12",
@@ -61,7 +72,7 @@ docs = [
 "Documentation" = "https://quimb.readthedocs.io/"
 "Repository" = "https://github.com/jcmgray/quimb/"
 "Issues" = "https://github.com/jcmgray/quimb/issues"
-"Changelog" = "https://github.com/jcmgray/quimb/releases"
+"Changelog" = "https://quimb.readthedocs.io/en/latest/changelog.html"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
