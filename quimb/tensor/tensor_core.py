@@ -63,7 +63,6 @@ from .contraction import (
     array_contract_pathinfo,
     array_contract_tree,
     get_contract_backend,
-    get_contract_strategy,
     get_symbol,
     get_tensor_linop_backend,
     inds_to_eq,

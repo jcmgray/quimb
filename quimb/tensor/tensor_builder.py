@@ -16,7 +16,13 @@ from ..gen.operators import (
     ham_heis,
     spin_operator,
 )
-from ..gen.rand import choice, rand_phase, randn, random_seed_fn, seed_rand
+from ..gen.rand import (
+    choice,
+    rand_phase,
+    randn,
+    random_seed_fn,
+    get_rand_fill_fn,
+)
 from ..utils import concat, deprecated, unique
 from .array_ops import asarray, do, reshape, sensibly_scale
 from .contraction import array_contract
@@ -66,42 +72,6 @@ def delta_array(shape, dtype="float64"):
     x[(idx[0] == idx).all(axis=0)] = 1
     make_immutable(x)
     return x
-
-
-def get_rand_fill_fn(
-    dist="normal",
-    loc=0.0,
-    scale=1.0,
-    seed=None,
-    dtype="float64",
-):
-    """Get a callable with the given random distribution and parameters, that
-    has signature ``fill_fn(shape) -> array``.
-
-    Parameters
-    ----------
-    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
-        Type of random number to generate, defaults to 'normal'.
-    loc : float, optional
-        An additive offset to add to the random numbers.
-    scale : float, optional
-        A multiplicative factor to scale the random numbers by.
-    seed : int, optional
-        A random seed.
-    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
-        The underlying data type.
-
-    Returns
-    -------
-    callable
-    """
-    if seed is not None:
-        seed_rand(seed)
-
-    def fill_fn(shape=()):
-        return randn(shape, dtype=dtype, dist=dist, loc=loc, scale=scale)
-
-    return fill_fn
 
 
 @random_seed_fn
@@ -600,11 +570,7 @@ def TN_from_edges_rand(
     -------
     TensorNetworkGen, TensorNetworkGenVector or TensorNetworkGenOperator
     """
-    if seed is not None:
-        seed_rand(seed)
-
-    def fill_fn(shape):
-        return randn(shape, dtype=dtype, **randn_opts)
+    fill_fn = get_rand_fill_fn(seed=seed, dtype=dtype, **randn_opts)
 
     return TN_from_edges_and_fill_fn(
         fill_fn=fill_fn,

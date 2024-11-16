@@ -22,6 +22,8 @@ Release notes for `quimb`.
 - add `fit-zipup` and `fit-projector` shorthand methods to the general 1d tensor network compression function
 - add [`MatrixProductState.compute_local_expectation`](quimb.tensor.tensor_1d.MatrixProductState.compute_local_expectation) for computing many local expectations for a MPS at once, to match the interface for this method elsewhere. These can either be computed via canonicalization (`method="canonical"`), or via explicit left and right environment contraction (`method="envs"`)
 - specialize [`CircuitMPS.local_expectation`](quimb.tensor.circuit.CircuitMPS.local_expectation) to make use of the MPS form.
+- add [`PEPS.product_state`](quimb.tensor.tensor_2d.PEPS.product_state) for constructing a PEPS representing a product state.
+- add [`PEPS.vacuum`](quimb.tensor.tensor_2d.PEPS.vacuum) for constructing a PEPS representing the vacuum state $|000\ldots0\rangle$.
 
 ---
 

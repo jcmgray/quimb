@@ -1,5 +1,5 @@
-"""Functions for generating random quantum objects and states.
-"""
+"""Functions for generating random quantum objects and states."""
+
 import math
 import random
 from functools import wraps
@@ -338,6 +338,42 @@ def rand_phase(shape, scale=1, dtype=complex):
         z *= scale
 
     return z
+
+
+def get_rand_fill_fn(
+    dist="normal",
+    loc=0.0,
+    scale=1.0,
+    seed=None,
+    dtype="float64",
+):
+    """Get a callable with the given random distribution and parameters, that
+    has signature ``fill_fn(shape) -> array``.
+
+    Parameters
+    ----------
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    seed : int, optional
+        A random seed.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The underlying data type.
+
+    Returns
+    -------
+    callable
+    """
+    if seed is not None:
+        seed_rand(seed)
+
+    def fill_fn(shape=()):
+        return randn(shape, dtype=dtype, dist=dist, loc=loc, scale=scale)
+
+    return fill_fn
 
 
 def rand_matrix(

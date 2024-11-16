@@ -10,7 +10,7 @@ from operator import add
 import autoray as ar
 
 from ..gen.operators import swap
-from ..gen.rand import randn, seed_rand
+from ..gen.rand import get_rand_fill_fn
 from ..utils import (
     check_opt,
     deprecated,
@@ -19,7 +19,6 @@ from ..utils import (
     print_multi_line,
 )
 from ..utils import progbar as Progbar
-from . import array_ops as ops
 from . import decomp
 from .tensor_1d import maybe_factor_gate_into_tensor
 from .tensor_arbgeom import (
@@ -2501,8 +2500,9 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
-            How to perform the compression on the boundary.
+        mode : {'mps', 'full-bond', ...}, optional
+            How to perform the compression on the boundary, can also be any of
+            the generic 1D or arbgeom methods.
         layer_tags : None or sequence of str, optional
             If given, perform a multilayer contraction, contracting the inner
             sites in each layer into the boundary individually.
@@ -4320,12 +4320,72 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
 
     def compute_norm(
         self,
+        max_bond=None,
+        *,
+        cutoff=1e-10,
+        canonize=True,
+        mode="mps",
         layer_tags=("KET", "BRA"),
+        compress_opts=None,
+        sequence=None,
+        equalize_norms=False,
+        progbar=None,
         **contract_opts,
     ):
-        """Compute the norm of this vector via boundary contraction."""
+        """Compute the norm of this vector via boundary contraction.
+
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum boundary dimension, AKA 'chi'. The default of ``None``
+            means truncation is left purely to ``cutoff`` and is not
+            recommended in 2D.
+        cutoff : float, optional
+            Cut-off value to used to truncate singular values in the boundary
+            contraction.
+        canonize : bool, optional
+            Whether to sweep one way with canonization before compressing.
+        mode : {'mps', 'full-bond', ...}, optional
+            How to perform the compression on the boundary, can also be any of
+            the generic 1D or arbgeom methods.
+        layer_tags : None or sequence of str, optional
+            If given, perform a multilayer contraction, contracting the inner
+            sites in each layer into the boundary individually.
+        compress_opts : None or dict, optional
+            Other low level options to pass to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+        sequence : sequence of {'xmin', 'xmax', 'ymin', 'ymax'}, optional
+            Which directions to cycle throught when performing the inwards
+            contractions, i.e. *from* that direction. If ``around`` is
+            specified you will likely need all of these! Default is to contract
+            from the two shortest opposing sides.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the boundary tensors after each
+            contraction, gathering the overall scaling coefficient, log10, in
+            ``tn.exponent``.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Additional options to pass to :meth:`contract_boundary`.
+
+        Returns
+        -------
+        scalar
+        """
         norm = self.make_norm(layer_tags=layer_tags)
-        return norm.contract_boundary(layer_tags=layer_tags, **contract_opts)
+        return norm.contract_boundary(
+            max_bond=max_bond,
+            cutoff=cutoff,
+            canonize=canonize,
+            mode=mode,
+            layer_tags=layer_tags,
+            compress_opts=compress_opts,
+            sequence=sequence,
+            equalize_norms=equalize_norms,
+            progbar=progbar,
+            inplace=True,
+            **contract_opts
+        )
 
     def compute_local_expectation(
         self,
@@ -4804,19 +4864,20 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         self._Lx = len(arrays)
         self._Ly = len(arrays[0])
 
-        cyclicx = (
-            sum(d > 1 for d in ar.shape(arrays[0][1])) == 5
-        ) or (
+        shape_on_xmin_edge = ar.shape(arrays[0][self._Ly // 2])
+        ndim_xmin_edge = len(shape_on_xmin_edge)
+        shape_on_ymin_edge = ar.shape(arrays[self._Lx // 2][0])
+        ndim_ymin_edge = len(shape_on_ymin_edge)
+
+        cyclicx = (sum(d > 1 for d in shape_on_xmin_edge) == 5) or (
             # handle D=1 PBC case
-            (ar.ndim(arrays[0][1]) == 5) and
-            (sum(d == 1 for d in ar.shape(arrays[0][1])) == 4)
+            (ndim_xmin_edge == 5)
+            and (sum(d == 1 for d in shape_on_xmin_edge) == 4)
         )
-        cyclicy = (
-            sum(d > 1 for d in ar.shape(arrays[1][0])) == 5
-        ) or (
+        cyclicy = (sum(d > 1 for d in shape_on_ymin_edge) == 5) or (
             # handle D=1 PBC case
-            (ar.ndim(arrays[1][0]) == 5) and
-            (sum(d == 1 for d in ar.shape(arrays[1][0])) == 4)
+            (ndim_ymin_edge == 5)
+            and (sum(d == 1 for d in shape_on_ymin_edge) == 4)
         )
 
         # cache for both creating and retrieving indices
@@ -5051,6 +5112,7 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         phys_dim=2,
         dist="normal",
         loc=0.0,
+        scale=1.0,
         dtype="float64",
         seed=None,
         **peps_opts,
@@ -5086,19 +5148,96 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
         --------
         PEPS.from_fill_fn
         """
-        if seed is not None:
-            seed_rand(seed)
-
-        def fill_fn(shape):
-            return ops.sensibly_scale(
-                ops.sensibly_scale(
-                    randn(shape, dist=dist, loc=loc, dtype=dtype)
-                )
-            )
+        fill_fn = get_rand_fill_fn(
+            dist=dist,
+            loc=loc,
+            scale=scale,
+            dtype=dtype,
+            seed=seed,
+        )
 
         return cls.from_fill_fn(
             fill_fn, Lx, Ly, bond_dim, phys_dim, **peps_opts
         )
+
+    @classmethod
+    def product_state(cls, site_map, cyclic=False, **peps_opts):
+        """Create a PEPS representing a product state, with explicit bonds of
+        dimension 1 between sites.
+
+        Parameters
+        ----------
+        site_map : dict[tuple[int, int], array] or Sequence[Sequence[array]]
+            A mapping of site coordinates to physical vectors, or a 2D array of
+            physical vectors. Each vector being a single site state.
+        cyclic : bool or tuple[bool, bool], optional
+            Whether the lattice is cyclic in the x and y directions.
+        peps_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
+
+        Returns
+        -------
+        PEPS
+        """
+        try:
+            cyclicx, cyclicy = cyclic
+        except (TypeError, ValueError):
+            cyclicx = cyclicy = cyclic
+
+        if isinstance(site_map, dict):
+            getarray = site_map.get
+            Lx = max(i for i, j in site_map.keys()) + 1
+            Ly = max(j for i, j in site_map.keys()) + 1
+        else:
+
+            def getarray(ij):
+                i, j = ij
+                return site_map[i][j]
+
+            Lx = len(site_map)
+            Ly = len(site_map[0])
+
+        arrays = [[None for _ in range(Ly)] for _ in range(Lx)]
+
+        for i in range(Lx):
+            for j in range(Ly):
+                bond_shape = []
+                if cyclicx or (i < Lx - 1):  # bond up
+                    bond_shape.append(1)
+                if cyclicy or (j < Ly - 1):  # bond right
+                    bond_shape.append(1)
+                if cyclicx or (i > 0):  # bond down
+                    bond_shape.append(1)
+                if cyclicy or (j > 0):  # bond left
+                    bond_shape.append(1)
+
+                ary = getarray((i, j))
+                new_shape = (*bond_shape, *ar.shape(ary))
+                arrays[i][j] = ar.do("reshape", ary, new_shape)
+
+        return cls(arrays, **peps_opts)
+
+    @classmethod
+    def vacuum(cls, Lx, Ly, phys_dim=2, **peps_opts):
+        """Create the 'vaccum' state PEPS, i.e. |00...0>.
+
+        Parameters
+        ----------
+        Lx : int
+            The number of rows.
+        Ly : int
+            The number of columns.
+        phys_dim : int, optional
+            The physical index dimension.
+        peps_opts
+            Supplied to :class:`~quimb.tensor.tensor_2d.PEPS.product_state`.
+
+        Returns
+        -------
+        """
+        data = ar.do("array", [1.0] + [0.0] * (phys_dim - 1))
+        site_map = {(i, j): data for i in range(Lx) for j in range(Ly)}
+        return cls.product_state(site_map, **peps_opts)
 
     def add_PEPS(self, other, inplace=False):
         return tensor_network_ag_sum(self, other, inplace=inplace)
@@ -5318,6 +5457,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         herm=False,
         dist="normal",
         loc=0.0,
+        scale=1.0,
         dtype="float64",
         seed=None,
         **pepo_opts,
@@ -5348,20 +5488,24 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         -------
         X : PEPO
         """
-        if seed is not None:
-            seed_rand(seed)
+        fill_fn = get_rand_fill_fn(
+            dist=dist,
+            loc=loc,
+            scale=scale,
+            dtype=dtype,
+            seed=seed,
+        )
 
-        def fill_fn(shape):
-            X = ops.sensibly_scale(
-                ops.sensibly_scale(
-                    randn(shape, dist=dist, loc=loc, dtype=dtype)
-                )
-            )
-            if herm:
+        if herm:
+            _fill_fn_orig = fill_fn
+
+            def fill_fn(shape):
+                X = _fill_fn_orig(shape)
                 new_order = list(range(len(shape)))
                 new_order[-2], new_order[-1] = new_order[-1], new_order[-2]
-                X = (ar.do("conj", X) + ar.do("transpose", X, new_order)) / 2
-            return X
+                return (
+                    ar.do("conj", X) + ar.do("transpose", X, new_order)
+                ) / 2
 
         return cls.from_fill_fn(
             fill_fn,
