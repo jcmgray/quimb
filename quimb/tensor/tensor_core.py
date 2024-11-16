@@ -3018,9 +3018,14 @@ class Tensor:
         """General detailed info to show in various reprs. Sublasses can add
         more relevant info to this dict.
         """
+        try:
+            dtype = get_dtype_name(self.data)
+        except ImportError:
+            dtype = "unknown"
+
         return {
             "backend": self.backend,
-            "dtype": get_dtype_name(self.data),
+            "dtype": dtype,
         }
 
     def _repr_info_str(self, normal=True, extra=False):
