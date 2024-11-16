@@ -2713,6 +2713,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         compute_local_expectation_via_envs, local_expectation_canonical
         partial_trace_to_dense_canonical
         """
+        if self.cyclic:
+            raise NotImplementedError("Only supports OBC.")
+
         if info is None:
             # this is used to keep track of canonical center
             info = {}
