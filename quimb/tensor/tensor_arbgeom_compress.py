@@ -380,6 +380,8 @@ def tensor_network_ag_compress_superorthogonal(
     for st in site_tags:
         tnc.contract_(st, optimize=optimize)
 
+    tnc.fuse_multibonds_()
+
     if not canonize:
         # turn off gauging effect
         compress_opts.setdefault("max_iterations", 1)
@@ -487,6 +489,7 @@ _TNAG_COMPRESS_METHODS = {
     "local-early": tensor_network_ag_compress_local_early,
     "local-late": tensor_network_ag_compress_local_late,
     "projector": tensor_network_ag_compress_projector,
+    "su": tensor_network_ag_compress_superorthogonal,
     "superorthogonal": tensor_network_ag_compress_superorthogonal,
     "l2bp": tensor_network_ag_compress_l2bp,
 }
