@@ -14,8 +14,8 @@ from autoray import (
 )
 
 from ..core import njit, qarray
-from ..utils import compose as fn_compose
 from ..linalg.base_linalg import norm_fro_dense
+from ..utils import compose as fn_compose
 
 
 def asarray(array):
@@ -62,6 +62,34 @@ def asarray(array):
         (backend,) = backends
 
     return do("array", nested_tup, like=backend)
+
+
+_blocksparselookup = {}
+
+
+def isblocksparse(x):
+    """Check if `x` is a block-sparse array. Cached on class for speed."""
+    try:
+        return _blocksparselookup[x.__class__]
+    except KeyError:
+        # XXX: make this a more established interface
+        isbs = hasattr(x, "align_axes")
+        _blocksparselookup[x.__class__] = isbs
+        return isbs
+
+
+_fermioniclookup = {}
+
+
+def isfermionic(x):
+    """Check if `x` is a fermionic array. Cached on class for speed."""
+    try:
+        return _fermioniclookup[x.__class__]
+    except KeyError:
+        # XXX: make this a more established interface
+        isf = hasattr(x, "phase_flip")
+        _fermioniclookup[x.__class__] = isf
+        return isf
 
 
 @functools.lru_cache(2**14)
