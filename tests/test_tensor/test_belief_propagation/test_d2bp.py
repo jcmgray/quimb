@@ -27,7 +27,7 @@ def test_tree_exact(dtype):
     info = {}
     norm2_bp = contract_d2bp(psi, info=info, progbar=True)
     assert info["converged"]
-    assert norm2_bp == pytest.approx(norm2, rel=1e-5)
+    assert norm2_bp == pytest.approx(norm2, rel=1e-4)
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1])

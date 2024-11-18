@@ -1,5 +1,5 @@
-"""Core tensor network tools.
-"""
+"""Core tensor network tools."""
+
 import collections
 import contextlib
 import copy
@@ -52,8 +52,9 @@ from .array_ops import (
     find_antidiag_axes,
     find_columns,
     find_diag_axes,
+    isblocksparse,
     iscomplex,
-    ndim,
+    isfermionic,
     norm_fro,
 )
 from .contraction import (
@@ -697,8 +698,7 @@ def choose_local_compress_gauge_settings(
     canonize_after_distance=None,
     mode="auto",
 ):
-    """Choose default gauge settings for arbitrary geometry local compression.
-    """
+    """Choose default gauge settings for arbitrary geometry local compression."""
     if tree_gauge_distance is None:
         if canonize:
             # default to r=3 gauge
@@ -928,7 +928,8 @@ def tensor_multifuse(ts, inds, gauges=None):
         # contract into a single gauge
         gauges[inds[0]] = functools.reduce(lambda x, y: do("kron", x, y), gs)
 
-    if hasattr(ts[0].data, "align_axes"):
+    if isblocksparse(ts[0].data):
+        # need to drop unaligned sectors pre-fusing
         arrays = [t.data for t in ts]
         axes = [tuple(map(t.inds.index, inds)) for t in ts]
         arrays = do("align_axes", *arrays, axes)
@@ -1391,7 +1392,7 @@ class Tensor:
         self._set_tags(tags)
         self._set_left_inds(left_inds)
 
-        if ndim(self._data) != len(self._inds):
+        if do("ndim", self._data) != len(self._inds):
             raise ValueError(
                 f"Wrong number of inds, {self.inds}, supplied for array"
                 f" of shape {self._data.shape}."
@@ -1507,7 +1508,7 @@ class Tensor:
     def check(self):
         """Do some basic diagnostics on this tensor, raising errors if
         something is wrong."""
-        if ndim(self.data) != len(self.inds):
+        if do("ndim", self.data) != len(self.inds):
             raise ValueError(
                 f"Wrong number of inds, {self.inds}, supplied for array"
                 f" of shape {self.data.shape}."
@@ -1598,7 +1599,7 @@ class Tensor:
         if kwargs:
             raise ValueError(f"Option(s) {kwargs} not valid.")
 
-        if len(self.inds) != ndim(self.data):
+        if len(self.inds) != do("ndim", self.data):
             raise ValueError(
                 "Mismatch between number of data dimensions and "
                 "number of indices supplied."
@@ -1753,7 +1754,6 @@ class Tensor:
             new_data = do("concatenate", (self.data,) * num_repeats, axis=axis)
 
         elif mode == "random":
-
             if rand_strength is None:
                 # assume if "random" mode selected then want non-zero strength
                 rand_strength = 1.0
@@ -1865,7 +1865,11 @@ class Tensor:
         self.modify(data=new_data, inds=new_inds)
 
     def new_ind_pair_with_identity(
-        self, new_left_ind, new_right_ind, d, inplace=False,
+        self,
+        new_left_ind,
+        new_right_ind,
+        d,
+        inplace=False,
     ):
         """Expand this tensor with two new indices of size ``d``, by taking an
         (outer) tensor product with the identity operator. The two new indices
@@ -1894,7 +1898,7 @@ class Tensor:
         new_data = array_contract(
             arrays=(x_id, t.data),
             inputs=(output[:2], output[2:]),
-            output=output
+            output=output,
         )
         # update indices
         new_inds = (new_left_ind, new_right_ind, *t.inds)
@@ -3431,7 +3435,6 @@ def _tensor_network_gate_inds_lazy_split(
     ng,
     tags,
     contract,
-    dims,
     **compress_opts,
 ):
     lix = [f"l{i}" for i in range(ng)]
@@ -3470,7 +3473,7 @@ def _tensor_network_gate_inds_lazy_split(
 
         if swap_rank < spat_rank:
             contract = "swap-split-gate"
-        elif spat_rank < prod(dims):
+        elif spat_rank < prod(G.shape[:ng]):
             contract = "split-gate"
         else:
             # else no rank reduction available - leave as ``contract=False``.
@@ -3629,18 +3632,21 @@ def tensor_network_gate_inds(
     tn = self if inplace else self.copy()
 
     ng = len(inds)
-    ndimG = ndim(G)
-    dims = [tn.ind_size(ix) for ix in inds]
+    ndimG = do("ndim", G)
 
     if ndimG != 2 * ng:
         # gate supplied as matrix, factorize it
-        G = do("reshape", G, dims * 2)
 
-    if not all(d == dims[i % ng] for i, d in enumerate(G.shape)):
-        raise ValueError(
-            f"Gate with shape {G.shape} doesn't match "
-            f"indices {inds} with dimensions {dims}."
-        )
+        if isblocksparse(G):
+            # can't simply infer shape -> guess all same size
+            # the gate should be supplied as a tensor to avoid this
+            dg = round(do("size", G) ** (1 / (2 * ng)))
+            gate_shape = (dg,) * (2 * ng)
+            G = do("reshape", G, gate_shape)
+        else:
+            # can infer required shape from physical dimensions
+            dims = tuple(tn.ind_size(ix) for ix in inds)
+            G = do("reshape", G, dims * 2)
 
     basic = contract in _BASIC_GATE_CONTRACT
     if (
@@ -3676,7 +3682,7 @@ def tensor_network_gate_inds(
             raise ValueError(f"`contract='{contract}'` invalid for >2 sites.")
 
         _tensor_network_gate_inds_lazy_split(
-            tn, G, inds, ng, tags, contract, dims, **compress_opts
+            tn, G, inds, ng, tags, contract, **compress_opts
         )
 
     return tn
@@ -4265,8 +4271,9 @@ class TensorNetwork(object):
             append = None if mangle_inner is True else str(mangle_inner)
             tn.mangle_inner_(append)
 
-        if hasattr(next(iter(tn.tensor_map.values())).data, "phase_flip"):
-            # need to phase dual outer indices
+        # if we have fermionic data, need to phase dual outer indices
+        ex_data = next(iter(tn.tensor_map.values())).data
+        if isfermionic(ex_data):
             outer_inds = tn.outer_inds()
             for t in tn:
                 data = t.data
@@ -6050,7 +6057,7 @@ class TensorNetwork(object):
         canonize_after_distance=None,
         mode="auto",
         inplace=False,
-        **compress_opts
+        **compress_opts,
     ):
         """Compress all bonds one by one in this network.
 
@@ -6115,7 +6122,7 @@ class TensorNetwork(object):
                 mode=mode,
                 canonize_distance=canonize_distance,
                 canonize_after_distance=canonize_after_distance,
-                **compress_opts
+                **compress_opts,
             )
 
         return tn
@@ -6911,9 +6918,7 @@ class TensorNetwork(object):
         if touched_tids is not None:
             # use indices adjacent to the given tensors
             next_touched = oset(
-                ix
-                for tid in touched_tids
-                for ix in tn.tensor_map[tid].inds
+                ix for tid in touched_tids for ix in tn.tensor_map[tid].inds
             )
         else:
             # use all indices
@@ -7367,8 +7372,7 @@ class TensorNetwork(object):
         progbar=False,
         inplace=False,
     ):
-        """Core routine for performing compressed contraction.
-        """
+        """Core routine for performing compressed contraction."""
         tn = self if inplace else self.copy()
 
         # options relating to the compression itself
@@ -8397,7 +8401,9 @@ class TensorNetwork(object):
         contract, contract_cumulative
         """
         tn, tagged_ts = self.partition_tensors(
-            tags, which=which, inplace=inplace,
+            tags,
+            which=which,
+            inplace=inplace,
         )
 
         if not tagged_ts:
@@ -8407,9 +8413,7 @@ class TensorNetwork(object):
             )
 
         # whether we should let tensor_contract return a raw scalar
-        preserve_tensor = (
-            preserve_tensor or inplace or (tn.num_tensors >= 1)
-        )
+        preserve_tensor = preserve_tensor or inplace or (tn.num_tensors >= 1)
 
         t = tensor_contract(
             *tagged_ts,
@@ -10650,8 +10654,9 @@ class TensorNetwork(object):
     )
 
     def max_bond(self):
-        """Return the size of the largest bond in this network."""
-        return max(t.max_dim() for t in self)
+        """Return the size of the largest bond (i.e. index connecting 2+
+        tensors) in this network."""
+        return max(map(self.ind_size, self._inner_inds), default=None)
 
     @property
     def shape(self):

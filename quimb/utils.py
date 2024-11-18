@@ -488,6 +488,22 @@ class LRU(collections.OrderedDict):
             del self[oldest]
 
 
+class ExponentialGeometricRollingDiffMean:
+    def __init__(self, factor=1 / 3, initial=1.0):
+        self.x_prev = None
+        self.dx = None
+        self.value = initial
+        self.factor = factor
+
+    def update(self, x):
+        if self.x_prev is not None:
+            # get the absolute change
+            self.dx = abs(x - self.x_prev)
+            # compute
+            self.value = self.value ** (1 - self.factor) * self.dx**self.factor
+        self.x_prev = x
+
+
 def gen_bipartitions(it):
     """Generate all unique bipartitions of ``it``. Unique meaning
     ``(1, 2), (3, 4)`` is considered the same as ``(3, 4), (1, 2)``.
