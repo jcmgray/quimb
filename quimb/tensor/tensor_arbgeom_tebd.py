@@ -789,42 +789,126 @@ class TEBDGen:
 
     @default_to_neutral_style
     def plot(
-        self, zoom="auto", xscale="symlog", xscale_linthresh=20, hlines=()
+        self,
+        zoom="auto",
+        xscale="symlog",
+        xscale_linthresh=20,
+        color_energy=(0.0, 0.5, 1.0),
+        color_gauge_diff=(1.0, 0.5, 0.0),
+        hlines=(),
+        figsize=(8, 4),
     ):
+        """Plot an overview of the evolution of the energy and gauge diffs.
+
+        Parameters
+        ----------
+        zoom : int or 'auto', optional
+            The number of iterations to zoom in on, or 'auto' to automatically
+            choose a reasonable zoom level.
+        xscale : {'linear', 'log', 'symlog'}, optional
+            The x-axis scale, for the upper plot of the entire evolution.
+        xscale_linthresh : float, optional
+            The linear threshold for the upper symlog scale.
+        color_energy : str or tuple, optional
+            The color to use for the energy plot.
+        color_gauge_diff : str or tuple, optional
+            The color to use for the gauge diff plot.
+        hlines : dict, optional
+            Add horizontal lines to the plot, with keys as labels and values
+            as the y-values.
+        figsize : tuple, optional
+            The size of the figure.
+
+        Returns
+        -------
+        fig, axs : matplotlib.Figure, tuple[matplotlib.Axes]
+        """
         import matplotlib.pyplot as plt
         import numpy as np
+        from matplotlib.ticker import ScalarFormatter
         from matplotlib.colors import hsv_to_rgb
 
-        fig, ax = plt.subplots()
+        def set_axis_color(ax, which, color):
+            ax.spines[which].set_visible(True)
+            ax.spines[which].set_color(color)
+            ax.yaxis.label.set_color(color)
+            ax.tick_params(axis="y", colors=color, which="both")
 
-        xs = np.array(self.its)
-        ys = np.array(self.energies)
+        x_en = np.array(self.its)
+        y_en = np.array(self.energies)
+        x_gd = np.arange(1, len(self._gauge_diffs) + 1)
+        y_gd = np.array(self._gauge_diffs)
 
-        ax.plot(xs, ys, ".-")
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Energy")
+        if zoom is not None:
+            if zoom == "auto":
+                zoom = min(200, self.n // 2)
+        nz = self.n - zoom
 
-        if xscale == "symlog":
-            ax.set_xscale(xscale, linthresh=xscale_linthresh)
-            ax.axvline(xscale_linthresh, color=(0.5, 0.5, 0.5), ls="-", lw=0.5)
-        else:
-            ax.set_xscale(xscale)
+        fig, axs = plt.subplots(nrows=2, figsize=figsize)
+
+        # plotted zoomed out
+        # energy
+        axl = axs[0]
+        axl.plot(x_en, y_en, marker="|", color=color_energy)
+        axl.set_xscale(xscale, linthresh=xscale_linthresh)
+        axl.set_ylabel("Energy")
+        axl.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        set_axis_color(axl, "left", color_energy)
+        # gauge diff
+        axr = axl.twinx()
+        axr.plot(
+            x_gd,
+            y_gd,
+            linestyle="--",
+            color=color_gauge_diff,
+        )
+        axr.set_ylabel("Max gauge diff")
+        axr.set_yscale("log")
+        set_axis_color(axr, "right", color_gauge_diff)
+
+        axl.axvline(
+            nz,
+            color=(0.5, 0.5, 0.5, 0.5),
+            linestyle="-",
+            linewidth=1,
+        )
+
+        # plotted zoomed in
+        # energy
+        iz = min(range(len(x_en)), key=lambda i: x_en[i] < nz)
+        axl = axs[1]
+        axl.plot(x_en[iz:], y_en[iz:], marker="|", color=color_energy)
+        axl.set_ylabel("Energy")
+        axl.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+        set_axis_color(axl, "left", color_energy)
+        axl.set_xlabel("Iteration")
+        # gauge diff
+        iz = min(range(len(x_gd)), key=lambda i: x_gd[i] < nz)
+        axr = axl.twinx()
+        axr.plot(
+            x_gd[iz:],
+            y_gd[iz:],
+            linestyle="--",
+            color=color_gauge_diff,
+        )
+        axr.set_ylabel("Max gauge diff")
+        axr.set_yscale("log")
+        set_axis_color(axr, "right", color_gauge_diff)
 
         if hlines:
             hlines = dict(hlines)
             for i, (label, value) in enumerate(hlines.items()):
-                color = hsv_to_rgb([(0.1 * i) % 1.0, 0.9, 0.9])
-                ax.axhline(value, color=color, ls="--", label=label)
-                ax.text(1, value, label, color=color, va="bottom", ha="left")
+                color = hsv_to_rgb([(0.45 - (0.08 * i)) % 1.0, 0.7, 0.6])
+                axs[0].axhline(value, color=color, ls=":", label=label)
+                axs[1].axhline(value, color=color, ls=":", label=label)
+                axs[0].text(
+                    1, value, label, color=color, va="bottom", ha="left"
+                )
+                axs[1].text(
+                    nz, value, label, color=color, va="bottom", ha="left"
+                )
 
-        if zoom is not None:
-            if zoom == "auto":
-                zoom = min(50, ys.size // 2)
-
-            iax = ax.inset_axes([0.5, 0.5, 0.5, 0.5])
-            iax.plot(xs[-zoom:], ys[-zoom:], ".-")
-
-        return fig, ax
+        return fig, axs
 
     def __repr__(self):
         s = "<{}(n={}, tau={}, D={})>"
