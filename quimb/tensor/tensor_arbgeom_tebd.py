@@ -606,8 +606,8 @@ class TEBDGen:
 
     def _set_progbar_description(self, pbar):
         desc = f"n={self._n}, tau={float(self.last_tau):.2g}"
-        if self._gauge_diffs:
-            desc += f", max|dS|={self._gauge_diffs[-1]:.2g}"
+        if getattr(self, "gauge_diffs", None):
+            desc += f", max|dS|={self.gauge_diffs[-1]:.2g}"
         if self.energies:
             desc += f", energy~{float(self.energies[-1]):.6g}"
         pbar.set_description(desc)
@@ -836,8 +836,8 @@ class TEBDGen:
 
         x_en = np.array(self.its)
         y_en = np.array(self.energies)
-        x_gd = np.arange(1, len(self._gauge_diffs) + 1)
-        y_gd = np.array(self._gauge_diffs)
+        x_gd = np.arange(1, len(self.gauge_diffs) + 1)
+        y_gd = np.array(self.gauge_diffs)
 
         if zoom is not None:
             if zoom == "auto":
@@ -1004,8 +1004,8 @@ class SimpleUpdateGen(TEBDGen):
         self.equilibrate_opts.setdefault("max_iterations", 100)
         self.equilibrate_opts.setdefault("tol", 1e-3)
 
-        self._gauges_prev = None
-        self._gauge_diffs = []
+        self.gauges_prev = None
+        self.gauge_diffs = []
 
         return super().__init__(
             psi0,
@@ -1063,10 +1063,10 @@ class SimpleUpdateGen(TEBDGen):
             self.equilibrate()
 
         # check gauges for convergence / progbar
-        if self._gauges_prev is not None:
+        if self.gauges_prev is not None:
             sdiffs = []
             for k, g in self.gauges.items():
-                g_prev = self._gauges_prev[k]
+                g_prev = self.gauges_prev[k]
                 try:
                     sdiff = do("linalg.norm", g - g_prev)
                 except ValueError:
@@ -1075,12 +1075,12 @@ class SimpleUpdateGen(TEBDGen):
                 sdiffs.append(sdiff)
 
             max_sdiff = max(sdiffs)
-            self._gauge_diffs.append(max_sdiff)
+            self.gauge_diffs.append(max_sdiff)
 
             if self.tol is not None and (max_sdiff < self.tol):
                 self.stop = True
 
-        self._gauges_prev = self.gauges.copy()
+        self.gauges_prev = self.gauges.copy()
 
     def normalize(self):
         """Normalize the state and simple gauges."""
