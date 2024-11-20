@@ -631,6 +631,16 @@ class TensorNetworkGen(TensorNetwork):
                     yield bond
                     seen.add(bond)
 
+    def get_site_neighbor_map(self):
+        """Get a mapping from each site to its neighbors."""
+        tid2site = self._get_tid_to_site_map()
+        return {
+            tid2site[tid]: tuple(
+                tid2site[ntid] for ntid in self._get_neighbor_tids(tid)
+            )
+            for tid in self.tensor_map
+        }
+
     def gen_regions_sites(self, max_region_size=None, sites=None):
         """Generate sets of sites that represent 'regions' where every node is
         connected to at least two other region nodes. This is a simple wrapper
@@ -795,6 +805,24 @@ def gauge_product_boundary_vector(
         tn.tensor_map[tid_r].gate_(G, ix)
 
     return tn
+
+
+def region_remove_dangling(sites, neighbors, where=()):
+    sites = list(sites)
+    i = 0
+    while i < len(sites):
+        # check next site
+        site = sites[i]
+        # can only reduce non target sites
+        if site not in where:
+            num_neighbors = sum(nsite in sites for nsite in neighbors[site])
+            if num_neighbors < 2:
+                # dangling -> remove!
+                sites.pop(i)
+                # back to beginning
+                i = -1
+        i += 1
+    return frozenset(sites)
 
 
 _VALID_GATE_PROPAGATE = {"sites", "register", False, True}
@@ -1247,6 +1275,366 @@ class TensorNetworkGenVector(TensorNetworkGen):
         # index collisions already handled above
         return ket.combine(bra, virtual=True, check_collisions=False)
 
+    def partial_trace_exact(
+        self,
+        where,
+        optimize="auto-hq",
+        normalized=True,
+        rehearse=False,
+        get="matrix",
+        **contract_opts,
+    ):
+        """Compute the reduced density matrix at sites ``where`` by exactly
+        contracting the full overlap tensor network.
+
+        Parameters
+        ----------
+        where : sequence[node]
+            The sites to keep.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use, when exactly contracting the
+            full tensor network.
+        normalized : bool or "return", optional
+            Whether to normalize the result. If "return", return the norm
+            separately.
+        rehearse : bool, optional
+            Whether to perform the computation or not, if ``True`` return a
+            rehearsal info dict.
+        get : {'matrix', 'array', 'tensor'}, optional
+            Whether to return the result as a dense array, the data itself, or
+            a tensor network.
+
+        Returns
+        -------
+        array or Tensor or dict or (array, float), (Tensor, float)
+        """
+        k_inds = tuple(map(self.site_ind, where))
+        bra_ind_id = "_bra{}"
+        b_inds = tuple(map(bra_ind_id.format, where))
+
+        tn = self.make_reduced_density_matrix(where, bra_ind_id=bra_ind_id)
+
+        if rehearse:
+            return _handle_rehearse(
+                rehearse, tn, optimize, output_inds=k_inds + b_inds
+            )
+
+        rho = tn.contract(
+            output_inds=(*k_inds, *b_inds),
+            optimize=optimize,
+            **contract_opts,
+        )
+
+        if normalized:
+            rho_array_fused = rho.to_dense(k_inds, b_inds)
+            nfactor = do("trace", rho_array_fused)
+        else:
+            rho_array_fused = nfactor = None
+
+        if get == "matrix":
+            if rho_array_fused is None:
+                # might have computed already
+                rho_array_fused = rho.to_dense(k_inds, b_inds)
+            if normalized is True:
+                # multiply norm in
+                rho = rho_array_fused / nfactor
+            else:
+                rho = rho_array_fused
+        elif get == "array":
+            if normalized is True:
+                # multiply norm in
+                rho = rho.data / nfactor
+            else:
+                rho = rho.data
+        elif get == "tensor":
+            if normalized is True:
+                # multiply norm in, inplace
+                rho.multiply_(1 / nfactor)
+        else:
+            raise ValueError(f"Unrecognized 'get' value: {get}")
+
+        if normalized == "return":
+            return rho, nfactor
+        else:
+            return rho
+
+    def local_expectation_exact(
+        self,
+        G,
+        where,
+        optimize="auto-hq",
+        normalized=True,
+        rehearse=False,
+        **contract_opts,
+    ):
+        """Compute the local expectation of operator ``G`` at sites ``where``
+        by exactly contracting the full overlap tensor network.
+
+        Parameters
+        ----------
+        G : array_like
+            The operator to compute the expectation of.
+        where : sequence[node]
+            The sites to compute the expectation at.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use, when exactly contracting the
+            full tensor network.
+        normalized : bool or "return", optional
+            Whether to normalize the result. If "return", return the norm
+            separately.
+        rehearse : bool, optional
+            Whether to perform the computation or not, if ``True`` return a
+            rehearsal info dict.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        float or (float, float)
+        """
+        rho = self.partial_trace_exact(
+            where=where,
+            optimize=optimize,
+            rehearse=rehearse,
+            normalized=normalized,
+            get="array",
+            **contract_opts,
+        )
+
+        if rehearse:
+            # immediately return the info dict
+            return rho
+
+        if normalized == "return":
+            # separate out the norm
+            rho, nfactor = rho
+
+        ng = len(where)
+        if do("ndim", G) != 2 * ng:
+            # might be supplied in matrix form
+            G = do("reshape", G, rho.shape)
+
+        # contract the expectation!
+        expec = do(
+            "tensordot",
+            rho,
+            G,
+            axes=(range(2 * ng), (*range(ng, 2 * ng), *range(0, ng))),
+        )
+
+        if normalized == "return":
+            return expec, nfactor
+        else:
+            return expec
+
+    def compute_local_expectation_exact(
+        self,
+        terms,
+        optimize="auto-hq",
+        *,
+        normalized=True,
+        return_all=False,
+        rehearse=False,
+        executor=None,
+        progbar=False,
+        **contract_opts,
+    ):
+        """Compute the local expectations of many operators,
+        by exactly contracting the full overlap tensor network.
+
+        Parameters
+        ----------
+        terms : dict[node or (node, node), array_like]
+            The terms to compute the expectation of, with keys being the sites
+            and values being the local operators.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use, when exactly contracting the
+            full tensor network.
+        normalized : bool, optional
+            Whether to normalize the result.
+        return_all : bool, optional
+            Whether to return all results, or just the summed expectation.
+        rehearse : {False, 'tn', 'tree', True}, optional
+            Whether to perform the computations or not::
+
+                - False: perform the computation.
+                - 'tn': return the tensor networks of each local expectation,
+                  without running the path optimizer.
+                - 'tree': run the path optimizer and return the
+                  ``cotengra.ContractonTree`` for each local expectation.
+                - True: run the path optimizer and return the ``PathInfo`` for
+                  each local expectation.
+
+        executor : Executor, optional
+            If supplied compute the terms in parallel using this executor.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        expecs : float or dict[node or (node, node), float]
+            If ``return_all==False``, return the summed expectation value of
+            the given terms. Otherwise, return a dictionary mapping each term's
+            location to the expectation value.
+        """
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_local_expectation_exact,
+            tn=self,
+            terms=terms,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
+            optimize=optimize,
+            normalized=normalized,
+            rehearse=rehearse,
+            **contract_opts,
+        )
+
+    def get_cluster(
+        self,
+        where,
+        gauges=None,
+        max_distance=0,
+        fillin=0,
+        smudge=1e-12,
+        power=1.0,
+    ):
+        """Get the wavefunction cluster tensor network for the sites
+        surrounding ``where``, potentially gauging the region with the simple
+        update style bond gauges in ``gauges``.
+
+        Parameters
+        ----------
+        where : sequence[node]
+            The sites around which to form the cluster.
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            used.
+        max_distance : int, optional
+            The maximum graph distance to include tensors neighboring ``where``
+            when computing the expectation. The default 0 means only the
+            tensors at sites ``where`` are used, 1 includes there direct
+            neighbors, etc.
+        fillin : bool or int, optional
+            When selecting the local tensors, whether and how many times to
+            'fill-in' corner tensors attached multiple times to the local
+            region. On a lattice this fills in the corners. See
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        smudge : float, optional
+            A small value to add to the gauges before multiplying them in and
+            inverting them to avoid numerical issues.
+        power : float, optional
+            The power to raise the singular values to before multiplying them
+            in and inverting them.
+
+        Returns
+        -------
+        TensorNetworkGenVector
+        """
+        # select a local neighborhood of tensor tids
+        tids = self._get_tids_from_tags(
+            tuple(map(self.site_tag, where)), "any"
+        )
+
+        if len(tids) == 2:
+            # connect the sites up
+            tids = self.get_path_between_tids(*tids).tids
+
+        # select the local patch!
+        k = self._select_local_tids(
+            tids,
+            max_distance=max_distance,
+            fillin=fillin,
+            virtual=False,
+        )
+
+        if gauges is not None:
+            # gauge the region with simple update style bond gauges
+            k.gauge_simple_insert(gauges, smudge=smudge, power=power)
+
+        return k
+
+    def partial_trace_cluster(
+        self,
+        where,
+        gauges=None,
+        optimize="auto-hq",
+        normalized=True,
+        max_distance=0,
+        fillin=0,
+        smudge=1e-12,
+        power=1.0,
+        get="matrix",
+        rehearse=False,
+        **contract_opts,
+    ):
+        """Compute the approximate reduced density matrix at sites ``where`` by
+        contracting a local cluster of tensors, potentially gauging the region
+        with the simple update style bond gauges in ``gauges``.
+
+        Parameters
+        ----------
+        where : sequence[node]
+            The sites to keep.
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            used.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use, when exactly contracting the
+            local tensors.
+        normalized : bool or "return", optional
+            Whether to normalize the result. If "return", return the norm
+            separately.
+        max_distance : int, optional
+            The maximum graph distance to include tensors neighboring ``where``
+            when computing the expectation. The default 0 means only the
+            tensors at sites ``where`` are used, 1 includes there direct
+            neighbors, etc.
+        fillin : bool or int, optional
+            When selecting the local tensors, whether and how many times to
+            'fill-in' corner tensors attached multiple times to the local
+            region. On a lattice this fills in the corners. See
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        smudge : float, optional
+            A small value to add to the gauges before multiplying them in and
+            inverting them to avoid numerical issues.
+        power : float, optional
+            The power to raise the singular values to before multiplying them
+            in and inverting them.
+        get : {'matrix', 'array', 'tensor'}, optional
+            Whether to return the result as a fused matrix (i.e. always 2D),
+            unfused array, or still labeled Tensor.
+        rehearse : bool, optional
+            Whether to perform the computation or not, if ``True`` return a
+            rehearsal info dict.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+        """
+        k = self.get_cluster(
+            where,
+            gauges=gauges,
+            max_distance=max_distance,
+            fillin=fillin,
+            smudge=smudge,
+            power=power,
+        )
+
+        return k.partial_trace_exact(
+            where=where,
+            optimize=optimize,
+            normalized=normalized,
+            rehearse=rehearse,
+            get=get,
+            **contract_opts,
+        )
+
     def local_expectation_cluster(
         self,
         G,
@@ -1296,7 +1684,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
         max_distance : int, optional
             The maximum graph distance to include tensors neighboring ``where``
             when computing the expectation. The default 0 means only the
-            tensors at sites ``where`` are used.
+            tensors at sites ``where`` are used, 1 includes there direct
+            neighbors, etc.
         fillin : bool or int, optional
             When selecting the local tensors, whether and how many times to
             'fill-in' corner tensors attached multiple times to the local
@@ -1326,24 +1715,14 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         expectation : float
         """
-        # select a local neighborhood of tensors
-        tids = self._get_tids_from_tags(
-            tuple(map(self.site_tag, where)), "any"
-        )
-
-        if len(tids) == 2:
-            tids = self.get_path_between_tids(*tids).tids
-
-        k = self._select_local_tids(
-            tids,
+        k = self.get_cluster(
+            where,
+            gauges=gauges,
             max_distance=max_distance,
             fillin=fillin,
-            virtual=False,
+            smudge=smudge,
+            power=power,
         )
-
-        if gauges is not None:
-            # gauge the region with simple update style bond gauges
-            k.gauge_simple_insert(gauges, smudge=smudge, power=power)
 
         if max_bond is not None:
             return k.local_expectation(
@@ -1416,9 +1795,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The terms to compute the expectation of, with keys being the sites
             and values being the local operators.
         max_distance : int, optional
-            The maximum graph distance to include tensors neighboring each
-            term's sites when computing the expectation. The default 0 means
-            only the tensors at sites of each term are used.
+            The maximum graph distance to include tensors neighboring ``where``
+            when computing the expectation. The default 0 means only the
+            tensors at sites ``where`` are used, 1 includes there direct
+            neighbors, etc.
         fillin : bool or int, optional
             When selecting the local tensors, whether and how many times to
             'fill-in' corner tensors attached multiple times to the local
@@ -1487,124 +1867,6 @@ class TensorNetworkGenVector(TensorNetworkGen):
         "compute_local_expectation_simple",
         "compute_local_expectation_cluster",
     )
-
-    def local_expectation_exact(
-        self,
-        G,
-        where,
-        optimize="auto-hq",
-        normalized=True,
-        rehearse=False,
-        **contract_opts,
-    ):
-        """Compute the local expectation of operator ``G`` at site(s) ``where``
-        by exactly contracting the full overlap tensor network.
-        """
-        k_inds = tuple(map(self.site_ind, where))
-        bra_ind_id = "_bra{}"
-        b_inds = tuple(map(bra_ind_id.format, where))
-        # b = self.conj().reindex_(dict(zip(k_inds, b_inds)))
-        # tn = (b | self)
-        tn = self.make_reduced_density_matrix(where, bra_ind_id=bra_ind_id)
-
-        if rehearse:
-            return _handle_rehearse(
-                rehearse, tn, optimize, output_inds=k_inds + b_inds
-            )
-
-        rho = tn.contract(
-            output_inds=(*k_inds, *b_inds),
-            optimize=optimize,
-            **contract_opts,
-        ).data
-
-        ng = len(where)
-        if do("ndim", G) != 2 * ng:
-            # might be supplied in matrix form
-            G = do("reshape", G, rho.shape)
-
-        expec = do(
-            "tensordot",
-            rho,
-            G,
-            axes=(range(2 * ng), (*range(ng, 2 * ng), *range(0, ng))),
-        )
-
-        if normalized:
-            norm = do("trace", do("fuse", rho, range(ng), range(ng, 2 * ng)))
-
-            if normalized == "return":
-                return expec, norm
-
-            expec = expec / norm
-
-        return expec
-
-    def compute_local_expectation_exact(
-        self,
-        terms,
-        optimize="auto-hq",
-        *,
-        normalized=True,
-        return_all=False,
-        rehearse=False,
-        executor=None,
-        progbar=False,
-        **contract_opts,
-    ):
-        """Compute the local expectations of many operators,
-        by exactly contracting the full overlap tensor network.
-
-        Parameters
-        ----------
-        terms : dict[node or (node, node), array_like]
-            The terms to compute the expectation of, with keys being the sites
-            and values being the local operators.
-        optimize : str or PathOptimizer, optional
-            The contraction path optimizer to use, when exactly contracting the
-            full tensor network.
-        normalized : bool, optional
-            Whether to normalize the result.
-        return_all : bool, optional
-            Whether to return all results, or just the summed expectation.
-        rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computations or not::
-
-                - False: perform the computation.
-                - 'tn': return the tensor networks of each local expectation,
-                  without running the path optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree`` for each local expectation.
-                - True: run the path optimizer and return the ``PathInfo`` for
-                  each local expectation.
-
-        executor : Executor, optional
-            If supplied compute the terms in parallel using this executor.
-        progbar : bool, optional
-            Whether to show a progress bar.
-        contract_opts
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
-
-        Returns
-        -------
-        expecs : float or dict[node or (node, node), float]
-            If ``return_all==False``, return the summed expectation value of
-            the given terms. Otherwise, return a dictionary mapping each term's
-            location to the expectation value.
-        """
-        return _compute_expecs_maybe_in_parallel(
-            fn=_tn_local_expectation_exact,
-            tn=self,
-            terms=terms,
-            return_all=return_all,
-            executor=executor,
-            progbar=progbar,
-            optimize=optimize,
-            normalized=normalized,
-            rehearse=rehearse,
-            **contract_opts,
-        )
 
     def local_expectation_loop_expansion(
         self,
@@ -1840,6 +2102,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         gauges=None,
         normalized=True,
         autocomplete=True,
+        autoreduce=True,
         optimize="auto",
         info=None,
         **contract_opts,
@@ -1906,6 +2169,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
         else:
             clusters = tuple(clusters)
 
+            if not clusters:
+                # always include base sites
+                clusters = (tuple(where),)
+
             if "lookup" in info and hash(clusters) == info["lookup_hash"]:
                 # want to share info across different expectations and also
                 # different sets of clusters -> but if the cluster set has
@@ -1925,6 +2192,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             # get all clusters which contain *all* sites in `where`
             clusters = set.intersection(*(lookup[coo] for coo in where))
 
+        if autoreduce:
+            neighbors = self.get_site_neighbor_map()
+        else:
+            neighbors = None
+
         rg = RegionGraph(clusters, autocomplete=autocomplete)
 
         # make sure the tree contribution is included
@@ -1939,6 +2211,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
             if C == 0:
                 # redundant cluster
                 continue
+
+            if autoreduce:
+                # check if we can map cluster to a smaller generalized loop
+                cluster = region_remove_dangling(cluster, neighbors, where)
 
             try:
                 # have already computed this term in a different expectation
@@ -1963,7 +2239,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
                     optimize=optimize,
                     **contract_opts,
                 )
-                # store for efficient calls with multiply cluster sets
+                # store for efficient calls with multiple cluster sets
                 info["expecs"][cluster, where] = expec_cluster, norm_cluster
 
             expecs.append(expec_cluster)
@@ -1992,8 +2268,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
         self,
         clusters=None,
         autocomplete=False,
+        autoreduce=True,
         gauges=None,
         optimize="auto",
+        progbar=False,
         **contract_opts,
     ):
         """Compute the norm of this tensor network by expanding it in terms of
@@ -2020,17 +2298,35 @@ class TensorNetworkGenVector(TensorNetworkGen):
         # which are tree like can thus be ignored
         nfactor = psi.normalize_simple(gauges)
 
+        if autoreduce:
+            neighbors = self.get_site_neighbor_map()
+        else:
+            neighbors = None
+
         rg = RegionGraph(clusters, autocomplete=autocomplete)
         for site in psi.sites:
             if site not in rg.lookup:
                 # site is not covered by any cluster -> might be tree like
                 rg.add_region({site})
 
+        if progbar:
+            regions = Progbar(rg.regions)
+        else:
+            regions = rg.regions
+
         local_norms = []
-        for region in rg.regions:
+        for region in regions:
             C = rg.get_count(region)
             if C == 0:
                 continue
+
+            if autoreduce:
+                # check if we can map cluster to a smaller generalized loop
+                region = region_remove_dangling(region, neighbors)
+
+                if not region:
+                    # region is tree like -> contributes 1.0
+                    continue
 
             tags = tuple(map(psi.site_tag, region))
             kr = psi.select(tags, which="any", virtual=False)
@@ -2400,6 +2696,119 @@ class TensorNetworkGenVector(TensorNetworkGen):
     compute_local_expectation_tn = functools.partialmethod(
         compute_local_expectation, rehearse="tn"
     )
+
+    def sample_configuration_cluster(
+        self,
+        gauges=None,
+        max_distance=0,
+        fillin=0,
+        max_iterations=100,
+        tol=5e-6,
+        optimize="auto-hq",
+        seed=None,
+    ):
+        """Sample a configuration for this state using the simple update or
+        cluster style environement approximation. The algorithms proceeds as
+        a decimation:
+
+        1. Compute every remaining site's local density matrix.
+        2. The site with the largest bias is sampled.
+        3. The site is projected into this sampled local config.
+        4. The state is regauged given the projection.
+        5. Repeat until all sites are sampled.
+
+        Parameters
+        ----------
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            gauged.
+        max_distance : int, optional
+            The maximum distance to consider when computing the local density
+            matrix for each site. Zero meaning on the site itself, 1 meaning
+            the site and its immediate neighbors, etc.
+        fillin : bool or int, optional
+            When selecting the local tensors, whether and how many times to
+            'fill-in' corner tensors attached multiple times to the local
+            region. On a lattice this fills in the corners. See
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        max_iterations : int, optional
+            The maximum number of iterations to perform when gauging the state.
+        tol : float, optional
+            The tolerance to converge to when gauging the state.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        seed : None, int or np.random.Generator, optional
+            A random seed or random number generator to use.
+
+        Returns
+        -------
+        config : dict[Node, int]
+            The sampled configuration.
+        omega : float
+            The probability of the sampled configuration in terms of the
+            approximate distribution induced by the cluster scheme.
+        """
+        import numpy as np
+
+        rng = np.random.default_rng(seed)
+
+        psi = self.copy()
+        gauges = gauges.copy() if gauges is not None else {}
+
+        # do an initial equilibration of the bond gauges
+        psi.gauge_all_simple_(
+            max_iterations=max_iterations,
+            tol=tol,
+            gauges=gauges,
+        )
+
+        config = {}
+        omega = 1.0
+        remaining = set(psi.sites)
+
+        while remaining:
+            probs = {}
+
+            for i in remaining:
+                # get the approx local density matrix for each remaining site
+                rhoi = psi.partial_trace_cluster(
+                    where=(i,),
+                    gauges=gauges,
+                    max_distance=max_distance,
+                    fillin=fillin,
+                    optimize=optimize,
+                    normalized=False,
+                )
+                # extract the diagonal
+                rhoi = do("to_numpy", rhoi)
+                pi = np.diag(rhoi).real
+                # normalize and store
+                probs[i] = pi / pi.sum()
+
+            # choose site with maximum bias to sample enxt
+            i = max(probs, key=lambda i: np.max(probs[i]))
+            remaining.remove(i)
+            # get the local prob distribution at that site
+            pmax = probs[i]
+            # sample a local config according to the distribution
+            xi = rng.choice(pmax.size, p=pmax)
+            config[i] = xi
+            # track local probability
+            omega *= pmax[xi]
+            # project the site into the sampled state
+            psi.isel_({psi.site_ind(i): xi})
+            # get the local tid, to efficiently restart the gauging
+            tids = psi._get_tids_from_tags(i)
+            # regauge, given the projected site
+            psi.gauge_all_simple_(
+                max_iterations=max_iterations,
+                tol=tol,
+                gauges=gauges,
+                touched_tids=tids,
+            )
+
+        return config, omega
 
 
 class TensorNetworkGenOperator(TensorNetworkGen):

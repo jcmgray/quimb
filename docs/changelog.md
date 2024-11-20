@@ -26,6 +26,8 @@ Release notes for `quimb`.
 - add [`PEPS.vacuum`](quimb.tensor.tensor_2d.PEPS.vacuum) for constructing a PEPS representing the vacuum state $|000\ldots0\rangle$.
 - [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): improve scheduling and add `damping` and `touched_tids` options.
 - [`qtn.SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen): add gauge difference update checking and `tol` and `equilibrate` settings. Update `.plot()` method. Default to a small `cutoff`.
+- add [`psi.sample_configuration_cluster`](quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.sample_configuration_cluster) for sampling a tensor network using the simple update or cluster style environment approximation.
+- add the new doc {ref}`ex-circuit-sampling`
 
 ---
 
