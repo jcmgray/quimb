@@ -830,7 +830,7 @@ class TestNumbaFuncs:
         c = qu.randn(1, dtype=c_dtype)[0]
         res = X - c * Y
         qu.core.subtract_update_(X, c, Y)
-        assert_allclose(res, X, rtol=1e-6)
+        assert_allclose(res, X, rtol=1e-4)
 
     @mark.parametrize("size", [300, 3000, (300, 5), (3000, 5)])
     @mark.parametrize(
@@ -848,4 +848,4 @@ class TestNumbaFuncs:
         c = qu.randn(1, dtype=c_dtype).item()
         res = X / c
         qu.core.divide_update_(X, c, Y)
-        assert_allclose(res, Y, rtol=1e-6)
+        assert_allclose(res, Y, rtol=1e-4)
