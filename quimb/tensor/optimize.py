@@ -129,6 +129,18 @@ class Vectorizer:
         for array, info in zip(arrays, self.infos):
             if not isinstance(array, np.ndarray):
                 array = to_numpy(array)
+
+            if array.dtype != info.dtype:
+                warnings.warn(
+                    "dtype mismatch between input parameter and updated "
+                    "values. This can occur e.g. with jax and double "
+                    "precision arrays (in which case consider setting "
+                    '`jax.config.update("jax_enable_x64", True)` at startup '
+                    "or using single precision parameters directly)."
+                    f" For now casting from {array.dtype} to {info.dtype}."
+                )
+                array = array.astype(info.dtype)
+
             # flatten
             if info.iscomplex:
                 # view as real array of double the length
