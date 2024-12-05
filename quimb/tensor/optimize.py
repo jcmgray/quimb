@@ -20,7 +20,6 @@ from ..utils import (
     tree_map,
     tree_unflatten,
 )
-from .contraction import contract_backend
 from .interface import get_jax
 from .tensor_core import (
     TensorNetwork,
@@ -266,7 +265,6 @@ def _parse_pytree_to_backend(x, to_constant):
 
     def collect(x):
         if hasattr(x, "get_params"):
-
             if hasattr(x, "apply_to_arrays"):
                 x.apply_to_arrays(to_constant)
 
@@ -655,7 +653,7 @@ class TorchHandler:
         def get_gradient_from_torch(t):
             if t.grad is None:
                 return np.zeros(t.shape, dtype=get_dtype_name(t))
-            return to_numpy(t.grad).conj()
+            return to_numpy(t.grad)
 
         result.backward()
         grads = tree_map(get_gradient_from_torch, variables)
@@ -1108,10 +1106,7 @@ class MakeArrayFn:
 
     def __call__(self, arrays):
         tn_compute = inject_variables(arrays, self.tn_opt)
-
-        # set backend explicitly as maybe mixing with numpy arrays
-        with contract_backend(self.autodiff_backend):
-            return self.loss_fn(self.norm_fn(tn_compute))
+        return self.loss_fn(self.norm_fn(tn_compute))
 
 
 def identity_fn(x):
@@ -1795,7 +1790,7 @@ class TNOptimizer:
         ax.plot(xs, ys, ".-")
         if xscale == "symlog":
             ax.set_xscale(xscale, linthresh=xscale_linthresh)
-            ax.axvline(xscale_linthresh, color=(.5, .5, .5), ls="-", lw=0.5)
+            ax.axvline(xscale_linthresh, color=(0.5, 0.5, 0.5), ls="-", lw=0.5)
         else:
             ax.set_xscale(xscale)
         ax.set_xlabel("Iteration")

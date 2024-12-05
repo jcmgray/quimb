@@ -1,15 +1,14 @@
 import functools
 import importlib
 
-import pytest
 import numpy as np
-from numpy.testing import assert_allclose
+import pytest
 from autoray import real
+from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor.optimize import Vectorizer, parse_network_to_backend
-
 
 found_torch = importlib.util.find_spec("torch") is not None
 found_autograd = importlib.util.find_spec("autograd") is not None
@@ -206,7 +205,9 @@ def test_optimize_pbc_heis(heis_pbc, backend, method):
     assert loss_fn(psi_opt, H) == pytest.approx(en_ex, rel=1e-2)
 
 
-@pytest.mark.parametrize("backend", [jax_case, autograd_case, tensorflow_case])
+@pytest.mark.parametrize(
+    "backend", [jax_case, autograd_case, tensorflow_case, pytorch_case]
+)
 @pytest.mark.parametrize("method", ["simple", "basin"])
 def test_optimize_ham_mbl_complex(ham_mbl_pbc_complex, backend, method):
     psi0, H, norm_fn, loss_fn, en_ex = ham_mbl_pbc_complex
@@ -269,7 +270,9 @@ def test_every_parametrized_gate(backend):
     assert tnopt.loss < f0
 
 
-@pytest.mark.parametrize("backend", [jax_case, autograd_case, tensorflow_case])
+@pytest.mark.parametrize(
+    "backend", [jax_case, autograd_case, tensorflow_case, pytorch_case]
+)
 def test_parametrized_circuit(backend):
     H = qu.ham_mbl(4, dh=3.0, dh_dim=3)
     gs = qu.groundstate(H)
