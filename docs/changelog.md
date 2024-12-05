@@ -2,6 +2,14 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-9-1)=
+## v1.9.1 (unreleased)
+
+**Enhancements:**
+
+- replace all `numba` based paralellism (`prange` and parallel vectorize) with explicit thread pool based parallelism. Should be more reliable and no need to set `NUMBA_NUM_THREADS` anymore. Remove env var `QUIMB_NUMBA_PAR`.
+
+
 (whats-new-1-9-0)=
 ## v1.9.0 (2024-11-19)
 
