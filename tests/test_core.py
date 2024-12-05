@@ -32,7 +32,7 @@ class TestQuimbify:
     def test_vector_create(self):
         x = [1, 2, 3j]
         p = qu.qu(x, qtype="ket")
-        assert type(p) == qu.qarray
+        assert isinstance(p, qu.qarray)
         assert p.dtype == complex
         assert p.shape == (3, 1)
         p = qu.qu(x, qtype="bra")
@@ -42,7 +42,7 @@ class TestQuimbify:
     def test_dop_create(self):
         x = np.random.randn(3, 3)
         p = qu.qu(x, qtype="dop")
-        assert type(p) == qu.qarray
+        assert isinstance(p, qu.qarray)
         assert p.dtype == complex
         assert p.shape == (3, 3)
 
@@ -79,9 +79,9 @@ class TestQuimbify:
     def test_sparse_create(self):
         x = [[1, 0], [3, 0]]
         p = qu.qu(x, "dop", sparse=False)
-        assert type(p) == qu.qarray
+        assert isinstance(p, qu.qarray)
         p = qu.qu(x, "dop", sparse=True)
-        assert type(p) == sp.csr_matrix
+        assert isinstance(p, sp.csr_matrix)
         assert p.dtype == complex
         assert p.nnz == 2
 
@@ -496,7 +496,8 @@ class TestPermikron:
         b = qu.pkron(a, [2, 2, 2], [0, 2])
         c = (
             (a & qu.eye(2))
-            .toarray().reshape([2, 2, 2, 2, 2, 2])
+            .toarray()
+            .reshape([2, 2, 2, 2, 2, 2])
             .transpose([0, 2, 1, 3, 5, 4])
             .reshape([8, 8])
         )
@@ -507,7 +508,8 @@ class TestPermikron:
         b = qu.pkron(a, np.array([2, 2, 2]), [2, 0])
         c = (
             (a & qu.eye(2))
-            .toarray().reshape([2, 2, 2, 2, 2, 2])
+            .toarray()
+            .reshape([2, 2, 2, 2, 2, 2])
             .transpose([1, 2, 0, 4, 5, 3])
             .reshape([8, 8])
         )
@@ -518,7 +520,8 @@ class TestPermikron:
         b = qu.pkron(a, np.array([2, 2, 2]), [2, 0])
         c = (
             (a & qu.eye(2))
-            .toarray().reshape([2, 2, 2, 2, 2, 2])
+            .toarray()
+            .reshape([2, 2, 2, 2, 2, 2])
             .transpose([1, 2, 0, 4, 5, 3])
             .reshape([8, 8])
         )
@@ -587,10 +590,10 @@ class TestPartialTraceDense:
     def test_partial_trace_return_type(self):
         a = qu.qu([0, 2**-0.5, 2**-0.5, 0], "ket")
         b = qu.partial_trace(a, [2, 2], 1)
-        assert type(b) == qu.qarray
+        assert isinstance(b, qu.qarray)
         a = qu.qu([0, 2**-0.5, 2**-0.5, 0], "dop")
         b = qu.partial_trace(a, [2, 2], 1)
-        assert type(b) == qu.qarray
+        assert isinstance(b, qu.qarray)
 
     def test_partial_trace_single_ket(self):
         dims = [2, 3, 4]
@@ -721,7 +724,7 @@ class TestPartialTraceSparse:
     def test_partial_trace_sparse_basic(self):
         a = qu.rand_rho(4)
         b = qu.partial_trace(a, [2, 2], 0)
-        assert type(b) == qu.qarray
+        assert isinstance(b, qu.qarray)
         assert qu.isherm(b)
         assert_allclose(qu.tr(b), 1.0)
 
@@ -730,7 +733,8 @@ class TestPartialTraceSparse:
         dims = [2, 3, 2]
         b = qu.partial_trace(a, dims, 1)
         c = (
-            a.toarray().reshape([*dims, *dims])
+            a.toarray()
+            .reshape([*dims, *dims])
             .trace(axis1=2, axis2=5)
             .trace(axis1=0, axis2=2)
         )

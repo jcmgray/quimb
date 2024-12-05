@@ -3,9 +3,8 @@ submatrices.
 """
 
 import numpy as np
-import numba
 
-from ..core import njit, pnjit, qarray
+from ..core import njit, qarray
 
 
 @njit
@@ -84,7 +83,7 @@ def compute_blocks(ix, jx, d):  # pragma: no cover
     return sorted([sorted(g) for g in groups if g])
 
 
-@pnjit
+@njit
 def subselect(A, p):  # pragma: no cover
     """Select only the intersection of rows and columns of ``A`` matching the
     basis indices ``p``. Faster than double numpy slicing.
@@ -118,14 +117,14 @@ def subselect(A, p):  # pragma: no cover
     dp = len(p)
     out = np.empty((dp, dp), dtype=A.dtype)
 
-    for i in numba.prange(dp):
-        for j in numba.prange(dp):
+    for i in range(dp):
+        for j in range(dp):
             out[i, j] = A[p[i], p[j]]
 
     return out
 
 
-@pnjit
+@njit
 def subselect_set(A, B, p):  # pragma: no cover
     """Set only the intersection of rows and colums of ``A`` matching the
     basis indices ``p`` to ``B``.
@@ -153,8 +152,8 @@ def subselect_set(A, B, p):  # pragma: no cover
     """
     dp = len(p)
 
-    for i in numba.prange(dp):
-        for j in numba.prange(dp):
+    for i in range(dp):
+        for j in range(dp):
             A[p[i], p[j]] = B[i, j]
 
 

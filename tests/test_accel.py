@@ -397,7 +397,7 @@ class TestExplt:
 class TestKron:
     @mark.parametrize("big", [False, True])
     def test_kron_dense(self, mat_d, mat_d2, big):
-        x = kron_dense(mat_d, mat_d2, par_thresh=0 if big else 1e100)
+        x = kron_dense(mat_d, mat_d2, size_blocks=1 if big else _TEST_SZ)
         assert mat_d.shape == (_TEST_SZ, _TEST_SZ)
         assert mat_d2.shape == (_TEST_SZ, _TEST_SZ)
         xn = np.kron(mat_d, mat_d2)
