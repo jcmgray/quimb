@@ -2,10 +2,10 @@
 
 import math
 import random
-from functools import wraps
-from numbers import Integral
-from itertools import count, chain
 from concurrent.futures import wait
+from functools import wraps
+from itertools import chain, count
+from numbers import Integral
 
 import numpy as np
 import numpy.random
@@ -19,13 +19,12 @@ from ..core import (
     get_thread_pool,
     kron,
     nmlz,
+    phase_to_complex,
     prod,
     ptr,
-    pvectorize,
     qarray,
     qu,
     rdmul,
-    vectorize,
 )
 
 
@@ -299,26 +298,6 @@ def rand_rademacher(shape, scale=1, loc=0.0, dtype=float):
         x = x.astype(dtype)
 
     return x
-
-
-def _phase_to_complex_base(x):
-    return 1j * math.sin(x) + math.cos(x)
-
-
-_phase_sigs = ["complex64(float32)", "complex128(float64)"]
-_phase_to_complex_seq = vectorize(_phase_sigs)(_phase_to_complex_base)
-"""Turn array of phases into unit circle complex numbers - sequential.
-"""
-_phase_to_complex_par = pvectorize(_phase_sigs)(_phase_to_complex_base)
-"""Turn array of phases into unit circle complex numbers - parallel.
-"""
-
-
-def phase_to_complex(x):
-    if x.size >= 512:
-        return _phase_to_complex_par(x)
-    # XXX: this is not as fast as numexpr - investigate?
-    return _phase_to_complex_seq(x)
 
 
 @random_seed_fn

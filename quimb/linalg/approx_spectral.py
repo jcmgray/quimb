@@ -659,7 +659,7 @@ def plot_approx_spectral_info(info):
 
     Z = info["estimate"]
 
-    alpha = len(info["estimates_raw"])**-(1 / 6)
+    alpha = len(info["estimates_raw"]) ** -(1 / 6)
 
     # plot the raw kyrlov runs
     for x in info["estimates_raw"]:
@@ -675,7 +675,7 @@ def plot_approx_spectral_info(info):
     # plot the overall final samples
     axs[1].hist(
         info["samples"],
-        bins=round(len(info["samples"])**0.5),
+        bins=round(len(info["samples"]) ** 0.5),
         orientation="horizontal",
         color=(0.2, 0.6, 1.0),
     )
@@ -823,13 +823,13 @@ def approx_spectral_function(
         # need to store all the info
         if info is None:
             info = {}
-        info.setdefault('estimate', None)
-        info.setdefault('error', None)
-        info.setdefault('samples', None)
-        info.setdefault('estimates_raw', [])
-        info.setdefault('estimates_window', [])
-        info.setdefault('estimates_fit', [])
-        info.setdefault('estimates', [])
+        info.setdefault("estimate", None)
+        info.setdefault("error", None)
+        info.setdefault("samples", None)
+        info.setdefault("estimates_raw", [])
+        info.setdefault("estimates_window", [])
+        info.setdefault("estimates_fit", [])
+        info.setdefault("estimates", [])
 
     # generate repeat estimates
     kwargs = {
