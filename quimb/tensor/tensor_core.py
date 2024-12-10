@@ -6852,7 +6852,12 @@ class TensorNetwork(object):
         inplace=False,
     ):
         """Iterative gauge all the bonds in this tensor network with a 'simple
-        update' like strategy.
+        update' like strategy. If gauges are not supplied they are initialized
+        and then reabsorbed at the end, in which case this method acts as a
+        kind of conditioning. More usefully, if you supply `gauges` then they
+        will be updated inplace and *not* absorbed back into the tensor
+        network, with the assumption that you are using/tracking them
+        externally.
 
         Parameters
         ----------
@@ -6880,6 +6885,11 @@ class TensorNetwork(object):
         Returns
         -------
         TensorNetwork
+
+        See Also
+        --------
+        gauge_simple_insert, gauge_simple_remove, gauge_simple_temp,
+        gauge_all_canonize
         """
         tn = self if inplace else self.copy()
 
