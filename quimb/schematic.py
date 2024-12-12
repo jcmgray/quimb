@@ -1,5 +1,4 @@
-"""Draw psuedo-3D diagrams using matplotlib.
-"""
+"""Draw psuedo-3D diagrams using matplotlib."""
 
 import functools
 import warnings
@@ -474,9 +473,13 @@ class Drawing:
             The 2D or 3D coordinates of the line endpoints. If 3D, the
             coordinates will be projected onto the 2D plane, and a z-order
             will be assigned based on average z-order of the endpoints.
+        shorten : float or tuple[float, float], optional
+            Shorten the line by this *absolute* amount at each end. If a tuple,
+            the first value is the start shortening, the second the end
+            shortening.
         stretch : float
-            Stretch the line by this factor. 1.0 is no stretch, 0.5 is half
-            length, 2.0 is double length. Default is 1.0.
+            Stretch the line by this *relative* factor. 1.0 is no stretch, 0.5
+            is half length, 2.0 is double length. Default is 1.0.
         arrowhead : bool or dict, optional
             Draw an arrowhead at the end of the line. Default is False. If a
             dict, it is passed as keyword arguments to the arrowhead method.
@@ -489,33 +492,46 @@ class Drawing:
 
         See Also
         --------
-        Drawing.arrowhead
+        Drawing.arrowhead, Drawing.curve
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
         style.setdefault("color", self.drawcolor)
         style.setdefault("solid_capstyle", "round")
-        style.setdefault("stretch", 1.0)
-        style.setdefault("arrowhead", None)
         style.setdefault("text", None)
-        stretch = style.pop("stretch")
-        arrowhead = style.pop("arrowhead")
+        stretch = style.pop("stretch", None)
+        shorten = style.pop("shorten", None)
+        arrowhead = style.pop("arrowhead", None)
         text = style.pop("text")
 
         if len(cooa) == 2:
-            xs, ys = zip(*[self._2d_project(*coo) for coo in [cooa, coob]])
+            xa, ya = self._2d_project(*cooa)
+            xb, yb = self._2d_project(*coob)
             style.setdefault("zorder", +0.0)
         else:
             style.setdefault(
                 "zorder",
                 mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]),
             )
-            xs, ys = zip(*[self._3d_project(*coo) for coo in [cooa, coob]])
+            xa, ya = self._3d_project(*cooa)
+            xb, yb = self._3d_project(*coob)
 
-        if stretch != 1.0:
+        if stretch is not None:
             # shorten around center
-            center = mean(xs), mean(ys)
-            xs = [center[0] + stretch * (x - center[0]) for x in xs]
-            ys = [center[1] + stretch * (y - center[1]) for y in ys]
+            center = (xa + xb) / 2, (ya + yb) / 2
+            xa, xb = [center[0] + stretch * (x - center[0]) for x in (xa, xb)]
+            ya, yb = [center[1] + stretch * (y - center[1]) for y in (ya, yb)]
+
+        if shorten is not None:
+            forward, inverse = get_rotator_and_inverse((xa, ya), (xb, yb))
+            R = forward(xb, yb)[0]
+            try:
+                start, end = shorten
+            except TypeError:
+                start = end = shorten
+            ra = (start, 0.0)
+            rb = (R - end, 0.0)
+            xa, ya = inverse(*ra)
+            xb, yb = inverse(*rb)
 
         if arrowhead is not None:
             if arrowhead is True:
@@ -524,7 +540,7 @@ class Drawing:
                 arrowhead = dict(arrowhead)
             self.arrowhead(cooa, coob, preset=preset, **(style | arrowhead))
 
-        line = mpl.lines.Line2D(xs, ys, **style)
+        line = mpl.lines.Line2D([xa, xb], [ya, yb], **style)
         self.ax.add_artist(line)
 
         if text:
@@ -537,8 +553,8 @@ class Drawing:
             text.setdefault("zorder", style["zorder"])
             self.text_between(cooa, coob, **text)
 
-        for x, y in zip(xs, ys):
-            self._adjust_lims(x, y)
+        self._adjust_lims(xa, ya)
+        self._adjust_lims(xb, yb)
 
     def line_offset(
         self,
@@ -719,6 +735,11 @@ class Drawing:
         smoothing : float, optional
             The amount of smoothing to apply to the curve. 0.0 is no smoothing,
             1.0 is maximum smoothing. Default is 0.5.
+        shorten : float or tuple[float, float], optional
+            Shorten the line by this *absolute* amount at each end. If a tuple,
+            the first value is the start shortening, the second the end
+            shortening. The shortening is calculated with respect to the first
+            and last segments of the curve.
         preset : str, optional
             A preset style to use for the curve.
         kwargs
@@ -735,6 +756,7 @@ class Drawing:
         style.setdefault("capstyle", "round")
         style.setdefault("smoothing", 1 / 2)
         smoothing = style.pop("smoothing")
+        shorten = style.pop("shorten", None)
 
         if len(coos[0]) != 2:
             style.setdefault(
@@ -745,6 +767,21 @@ class Drawing:
             coos = [self._2d_project(*coo) for coo in coos]
 
         N = len(coos)
+
+        if shorten is not None:
+            try:
+                start, end = shorten
+            except TypeError:
+                start = end = shorten
+            # shorten first segment
+            _, inverse = get_rotator_and_inverse(coos[0], coos[1])
+            ra = (start, 0.0)
+            coos[0] = inverse(*ra)
+            # shorten last segment
+            forward, inverse = get_rotator_and_inverse(coos[-2], coos[-1])
+            R = forward(*coos[-1])[0]
+            rb = (R - end, 0.0)
+            coos[-1] = inverse(*rb)
 
         if N <= 2 or smoothing == 0.0:
             path = coos
@@ -1165,7 +1202,7 @@ _COLORS_DEFAULT = {
 }
 
 
-def get_wong_color(
+def get_color(
     which,
     alpha=None,
     hue_factor=0.0,
@@ -1209,6 +1246,9 @@ def get_wong_color(
     if alpha is not None:
         return (r, g, b, alpha)
     return r, g, b
+
+
+get_wong_color = get_color
 
 
 _COLORS_SORTED = [
@@ -1334,7 +1374,6 @@ def jitter_color(color, factor=0.05):
     return tuple(rgb) + rgba[3:]
 
 
-
 COLORING_SEED = 8  # 8, 10
 
 
@@ -1445,20 +1484,21 @@ def get_rotator_and_inverse(pa, pb):
     the origin and then translates them by offset.
     """
     theta = get_angle(pa, pb)
+    ct = cos(theta)
+    st = sin(theta)
+    cmt = ct
+    smt = -st
     dx, dy = pa
 
     def forward(x, y):
         """Rotate and translate a point."""
         x, y = x - dx, y - dy
-        x, y = (
-            x * cos(-theta) - y * sin(-theta),
-            x * sin(-theta) + y * cos(-theta),
-        )
+        x, y = (x * cmt - y * smt, x * smt + y * cmt)
         return x, y
 
     def inverse(x, y):
         """Rotate and translate a point."""
-        x, y = x * cos(theta) - y * sin(theta), x * sin(theta) + y * cos(theta)
+        x, y = x * ct - y * st, x * st + y * ct
         return x + dx, y + dy
 
     return forward, inverse

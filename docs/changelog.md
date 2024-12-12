@@ -8,6 +8,7 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - replace all `numba` based paralellism (`prange` and parallel vectorize) with explicit thread pool based parallelism. Should be more reliable and no need to set `NUMBA_NUM_THREADS` anymore. Remove env var `QUIMB_NUMBA_PAR`.
+- [`schematic.Drawing`](quimb.schematic.Drawing): add `shorten` kwarg to [line drawing](quimb.schematic.Drawing.line) and [curve drawing](quimb.schematic.Drawing.curve) and examples to {ref}`schematic`.
 
 
 (whats-new-1-9-0)=
