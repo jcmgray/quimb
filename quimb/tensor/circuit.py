@@ -15,7 +15,7 @@ import re
 import warnings
 
 import numpy as np
-from autoray import backend_like, do, reshape
+from autoray import astype, backend_like, do, get_dtype_name, reshape
 
 import quimb as qu
 
@@ -41,6 +41,7 @@ from .tensor_builder import (
 from .tensor_core import (
     PTensor,
     Tensor,
+    TensorNetwork,
     get_tags,
     oset_union,
     rand_uuid,
@@ -1522,6 +1523,21 @@ class Circuit:
     bra_site_ind_id : str, optional
         Use this to label 'bra' site indices when creating certain (mostly
         internal) intermediate tensor networks.
+    dtype : str, optional
+        A default dtype to perform calculations in. Depending on
+        `convert_eager`, this is enforced *after* circuit construction
+        and simplification (the default for exact simulation), or eagerly to
+        the initial state and as gates are applied (the default for MPS
+        simulation).
+    to_backend : callable, optional
+        If given, apply this function to both the initial state arrays and to
+        every gate as it is applied.
+    convert_eager : bool, optional
+        Whether to eagerly perform dtype casting and application of
+        `to_backend` as gates are supplied, or wait until after the necessary
+        TNs for a particular task such as sampling are formed and simplified.
+        Deferred conversion (`convert_eager=False`) is the default mode for
+        full contraction.
 
     Attributes
     ----------
@@ -1595,7 +1611,9 @@ class Circuit:
         round_tag_id="ROUND_{}",
         tag_gate_labels=True,
         bra_site_ind_id="b{}",
+        dtype=None,
         to_backend=None,
+        convert_eager=False,
     ):
         if (N is None) and (psi0 is None):
             raise ValueError("You must supply one of `N` or `psi0`.")
@@ -1626,12 +1644,12 @@ class Circuit:
         self.tag_gate_rounds = tag_gate_rounds
         self.tag_gate_labels = tag_gate_labels
 
+        self.dtype = dtype
         self.to_backend = to_backend
-        if self.to_backend is not None:
-            self._psi.apply_to_arrays(self.to_backend)
-            self._backend_gate_cache = {}
-        else:
-            self._backend_gate_cache = None
+        self.convert_eager = convert_eager
+        if self.convert_eager:
+            self._maybe_convert(self._psi)
+        self._backend_gate_cache = {}
 
         self.gate_opts = ensure_dict(gate_opts)
         self.gate_opts.setdefault("contract", gate_contract)
@@ -1665,6 +1683,8 @@ class Circuit:
         new.tag_gate_rounds = self.tag_gate_rounds
         new.tag_gate_labels = self.tag_gate_labels
         new.to_backend = self.to_backend
+        new.dtype = self.dtype
+        new.convert_eager = self.convert_eager
         new._backend_gate_cache = self._backend_gate_cache
         new._gates = self._gates.copy()
         new._ket_site_ind_id = self._ket_site_ind_id
@@ -1675,6 +1695,31 @@ class Circuit:
         new._storage = self._storage.copy()
         new._sampled_conditionals = self._sampled_conditionals.copy()
         return new
+
+    def _maybe_convert(self, obj, dtype=None):
+        istn = isinstance(obj, TensorNetwork)
+
+        if dtype is None:
+            # use default dtype
+            dtype = self.dtype
+
+        if dtype is not None:
+            # cast array or TN to dtype
+            if istn:
+                obj.astype_(dtype)
+            else:
+                if get_dtype_name(obj) != dtype:
+                    obj = astype(obj, dtype)
+
+        if self.to_backend is not None:
+            # once dtype is enforced, apply to_backend
+            # for e.g. gpu transfer etc
+            if istn:
+                obj.apply_to_arrays(self.to_backend)
+            else:
+                obj = self.to_backend(obj)
+
+        return obj
 
     def apply_to_arrays(self, fn):
         """Apply a function to all the arrays in the circuit."""
@@ -1788,6 +1833,7 @@ class Circuit:
 
             N = 0
             for gate in gates:
+                gate = parse_to_gate(*gate)
                 if gate.qubits:
                     N = max(N, max(gate.qubits) + 1)
                 if gate.controls:
@@ -1861,10 +1907,11 @@ class Circuit:
         else:
             # gate supplied as a matrix/tensor
             G = gate.array
-            if self.to_backend is not None:
+
+            if self.convert_eager:
                 key = id(G)
                 if key not in self._backend_gate_cache:
-                    self._backend_gate_cache[key] = self.to_backend(G)
+                    self._backend_gate_cache[key] = self._maybe_convert(G)
                 G = self._backend_gate_cache[key]
 
             # apply the gate to the TN!
@@ -2377,7 +2424,9 @@ class Circuit:
         # make sure all same dtype and drop singlet dimensions
         psi = self._psi.copy()
         psi.squeeze_()
-        psi.astype_(psi.dtype)
+        if not self.convert_eager:
+            # not converted yet
+            self._maybe_convert(psi)
         return psi
 
     def get_uni(self, transposed=False):
@@ -2562,7 +2611,10 @@ class Circuit:
         if key in self._storage:
             return self._storage[key].copy()
 
-        psi = self.psi
+        # we simplify and store a copy
+        psi = self._psi.copy()
+        psi.squeeze_()
+
         # make sure to keep all outer indices
         output_inds = tuple(map(psi.site_ind, range(self.N)))
 
@@ -2645,7 +2697,7 @@ class Circuit:
         simplify_atol=1e-12,
         simplify_equalize_norms=True,
         backend=None,
-        dtype="complex128",
+        dtype=None,
         rehearse=False,
     ):
         r"""Get the amplitude coefficient of bitstring ``b``.
@@ -2706,7 +2758,7 @@ class Circuit:
 
         # perform a final simplification and cast
         psi_b.full_simplify_(**fs_opts)
-        psi_b.astype_(dtype)
+        self._maybe_convert(psi_b, dtype)
 
         if rehearse == "tn":
             return psi_b
@@ -2730,7 +2782,7 @@ class Circuit:
         simplify_atol=1e-12,
         simplify_equalize_norms=True,
         optimize="auto-hq",
-        dtype="complex128",
+        dtype=None,
         rehearse=True,
     ):
         """Perform just the tensor network simplifications and contraction tree
@@ -2789,7 +2841,7 @@ class Circuit:
         simplify_atol=1e-12,
         simplify_equalize_norms=True,
         backend=None,
-        dtype="complex128",
+        dtype=None,
         rehearse=False,
     ):
         r"""Perform the partial trace on the circuit wavefunction, retaining
@@ -2852,7 +2904,8 @@ class Circuit:
             seq=simplify_sequence,
             atol=simplify_atol,
             equalize_norms=simplify_equalize_norms,
-        ).astype_(dtype)
+        )
+        self._maybe_convert(rho, dtype)
 
         if rehearse == "tn":
             return rho
@@ -2886,7 +2939,7 @@ class Circuit:
         simplify_atol=1e-12,
         simplify_equalize_norms=True,
         backend=None,
-        dtype="complex128",
+        dtype=None,
         rehearse=False,
     ):
         r"""Compute the a single expectation value of operator ``G``, acting on
@@ -2966,7 +3019,7 @@ class Circuit:
         rhoG = rho | TG
 
         rhoG.full_simplify_(output_inds=output_inds, **fs_opts)
-        rhoG.astype_(dtype)
+        self._maybe_convert(rhoG, dtype)
 
         if rehearse == "tn":
             return rhoG
@@ -3091,7 +3144,7 @@ class Circuit:
                 nm_lc.multiply_(nfact, spread_over="all")
 
         # cast to desired data type
-        nm_lc.astype_(dtype)
+        self._maybe_convert(nm_lc, dtype)
 
         if rehearse == "tn":
             return nm_lc
@@ -4122,9 +4175,7 @@ class Circuit:
             atol=simplify_atol,
             equalize_norms=simplify_equalize_norms,
         )
-
-        if dtype is not None:
-            psi.astype_(dtype)
+        self._maybe_convert(psi, dtype)
 
         if rehearse == "tn":
             return psi
@@ -4504,6 +4555,16 @@ class CircuitMPS(Circuit):
         - ``'nonlocal'``: turn the gate into a potentially nonlocal (sub) MPO
           and apply it directly. See :func:`tensor_network_1d_compress`.
 
+    dtype : str, optional
+        The data type to use for the state tensor.
+    to_backend : callable, optional
+        A function to convert tensor data to a particular backend.
+    convert_eager : bool, optional
+        Whether to eagerly perform dtype casting and application of
+        `to_backend` as gates are supplied, or wait until after the necessary
+        TNs for a particular task such as sampling are formed and simplified.
+        Eager conversion (`convert_eager=True`) is the default mode for
+        MPS simulation, unlike full contraction.
     circuit_opts
         Supplied to :class:`~quimb.tensor.circuit.Circuit`.
 
@@ -4540,6 +4601,9 @@ class CircuitMPS(Circuit):
         cutoff=1e-10,
         gate_opts=None,
         gate_contract="auto-mps",
+        dtype=None,
+        to_backend=None,
+        convert_eager=True,
         **circuit_opts,
     ):
         gate_opts = ensure_dict(gate_opts)
@@ -4553,6 +4617,10 @@ class CircuitMPS(Circuit):
         circuit_opts.setdefault("tag_gate_numbers", False)
         circuit_opts.setdefault("tag_gate_rounds", False)
         circuit_opts.setdefault("tag_gate_labels", False)
+
+        circuit_opts.setdefault("dtype", dtype)
+        circuit_opts.setdefault("to_backend", to_backend)
+        circuit_opts.setdefault("convert_eager", convert_eager)
 
         super().__init__(N, psi0, gate_opts, **circuit_opts)
 
@@ -4571,10 +4639,10 @@ class CircuitMPS(Circuit):
             )
 
         for gate in gates:
-            if isinstance(gate, Gate):
-                self._apply_gate(gate, **gate_opts)
-            else:
-                self.apply_gate(*gate, **gate_opts)
+            if not isinstance(gate, Gate):
+                gate = parse_to_gate(*gate)
+
+            self._apply_gate(gate, **gate_opts)
 
             if progbar and (gate.total_qubit_count >= 2):
                 # these don't change for single qubit gates
@@ -4586,7 +4654,10 @@ class CircuitMPS(Circuit):
     @property
     def psi(self):
         # no squeeze so that bond dims of 1 preserved
-        return self._psi.copy()
+        psi = self._psi.copy()
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+        return psi
 
     @property
     def uni(self):
@@ -4611,6 +4682,17 @@ class CircuitMPS(Circuit):
         self,
         C,
         seed=None,
+        dtype=None,
+        *,
+        qubits=None,
+        order=None,
+        group_size=None,
+        max_marginal_storage=None,
+        optimize=None,
+        backend=None,
+        simplify_sequence=None,
+        simplify_atol=None,
+        simplify_equalize_norms=None,
     ):
         """Sample the MPS circuit ``C`` times.
 
@@ -4621,7 +4703,31 @@ class CircuitMPS(Circuit):
         seed : None, int, or generator, optional
             A random seed or generator to use for reproducibility.
         """
-        for config, _ in self._psi.sample(C, seed=seed):
+        unsupported = (
+            qubits,
+            order,
+            group_size,
+            max_marginal_storage,
+            optimize,
+            backend,
+            simplify_sequence,
+            simplify_atol,
+            simplify_equalize_norms,
+        )
+
+        if any(x is not None for x in unsupported):
+            warnings.warn(
+                "Unsupported options for sampling an MPS circuit supplied, "
+                "ignoring: " + ", ".join(map(str, unsupported))
+            )
+
+        if dtype is not None or not self.convert_eager:
+            psi = self._psi.copy()
+            self._maybe_convert(psi, dtype)
+        else:
+            psi = self._psi
+
+        for config, _ in psi.sample(C, seed=seed):
             yield "".join(map(str, config))
 
     def fidelity_estimate(self):
@@ -4666,6 +4772,13 @@ class CircuitMPS(Circuit):
         G,
         where,
         normalized=False,
+        dtype=None,
+        *,
+        simplify_sequence=None,
+        simplify_atol=None,
+        simplify_equalize_norms=None,
+        backend=None,
+        rehearse=None,
         **contract_opts,
     ):
         """Compute the local expectation value of a local operator at ``where``
@@ -4678,12 +4791,38 @@ class CircuitMPS(Circuit):
             The local operator tensor.
         where : int
             The qubit to compute the expectation value at.
+        normalized : bool, optional
+            Whether to normalize the expectation value by the norm of the
+            state.
+        dtype : dtype, optional
+            If given, ensure the TN is cast to this dtype before contracting.
 
         Returns
         -------
         float
         """
-        return self._psi.local_expectation_canonical(
+        unsupported = (
+            simplify_sequence,
+            simplify_atol,
+            simplify_equalize_norms,
+            backend,
+            rehearse,
+        )
+
+        if any(x is not None for x in unsupported):
+            warnings.warn(
+                "Unsupported options for computing local_expectation with an "
+                "MPS circuit supplied, ignoring: "
+                + ", ".join(map(str, unsupported))
+            )
+
+        if dtype is not None or not self.convert_eager:
+            psi = self._psi.copy()
+            self._maybe_convert(psi, dtype)
+        else:
+            psi = self._psi
+
+        return psi.local_expectation_canonical(
             G,
             where,
             normalized=normalized,
@@ -4747,7 +4886,12 @@ class CircuitPermMPS(CircuitMPS):
         """
         return self._psi.copy()
 
-    def sample(self, C, seed=None):
+    def sample(
+        self,
+        C,
+        seed=None,
+        dtype=None,
+    ):
         """Sample the PermMPS circuit ``C`` times.
 
         Parameters
@@ -4762,15 +4906,22 @@ class CircuitPermMPS(CircuitMPS):
         str
             The next sample bitstring.
         """
+        if dtype is not None or not self.convert_eager:
+            psi = self._psi.copy()
+            self._maybe_convert(psi, dtype)
+        else:
+            psi = self._psi
+
         # configuring is in physical order, so need to reorder for sampling
         ordering = self.calc_qubit_ordering()
-        for config, _ in self._psi.sample(C, seed=seed):
+        for config, _ in psi.sample(C, seed=seed):
             yield "".join(str(config[i]) for i in ordering)
 
     @property
     def psi(self):
         # need to reindex and retag the MPS
         psi = self._psi.copy()
+
         psi.view_as_(TensorNetworkGenVector)
         psi.reindex_(
             {
@@ -4784,6 +4935,10 @@ class CircuitPermMPS(CircuitMPS):
                 for i, q in enumerate(self.qubits)
             }
         )
+
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+
         return psi
 
 
@@ -4791,11 +4946,19 @@ class CircuitDense(Circuit):
     """Quantum circuit simulation keeping the state in full dense form."""
 
     def __init__(
-        self, N=None, psi0=None, gate_opts=None, gate_contract=True, tags=None
+        self,
+        N=None,
+        psi0=None,
+        gate_opts=None,
+        gate_contract=True,
+        tags=None,
+        convert_eager=True,
+        **circuit_opts,
     ):
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault("contract", gate_contract)
-        super().__init__(N, psi0, gate_opts, tags)
+        gate_opts.setdefault("convert_eager", convert_eager)
+        super().__init__(N, psi0, gate_opts, tags, **circuit_opts)
 
     @property
     def psi(self):

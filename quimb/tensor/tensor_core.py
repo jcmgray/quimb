@@ -1945,6 +1945,11 @@ class Tensor:
         return getattr(self._data, "dtype", None)
 
     @property
+    def dtype_name(self):
+        """The name of the data type of the array elements."""
+        return get_dtype_name(self._data)
+
+    @property
     def backend(self):
         """The backend inferred from the data."""
         return infer_backend(self._data)

@@ -1,8 +1,8 @@
-import math
 import itertools
+import math
 
-import pytest
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 import quimb as qu
@@ -377,8 +377,8 @@ class TestCircuit:
 
     @pytest.mark.parametrize("gate2", ["cx", "iswap"])
     def test_circuit_simplify_tensor_network(self, gate2):
-        import random
         import itertools
+        import random
 
         depth = n = 8
 
@@ -449,6 +449,7 @@ class TestCircuit:
     @pytest.mark.parametrize("group_size", (1, 2, 6))
     def test_sample(self, group_size):
         import collections
+
         from scipy.stats import power_divergence
 
         C = 2**10
@@ -469,6 +470,7 @@ class TestCircuit:
     @pytest.mark.parametrize("group_size", (1, 3))
     def test_sample_gate_by_gate(self, group_size):
         import collections
+
         from scipy.stats import power_divergence
 
         C = 2**10
@@ -490,6 +492,7 @@ class TestCircuit:
 
     def test_sample_chaotic(self):
         import collections
+
         from scipy.stats import power_divergence
 
         C = 2**12
@@ -658,6 +661,63 @@ class TestCircuit:
         circ.apply_gate("SWAP", qubits=(N - 2, N - 1), controls=range(N - 2))
         (b,) = circ.sample(1, group_size=3)
         assert b[N - 2] == "0"
+
+    @pytest.mark.parametrize("dtype", [None, "complex64", "complex128"])
+    @pytest.mark.parametrize("backend", [None, "torch"])
+    @pytest.mark.parametrize("dtype_final", [None, "complex64", "complex128"])
+    @pytest.mark.parametrize("convert_eager", [True, False])
+    def test_conversions(self, dtype, backend, dtype_final, convert_eager):
+        if backend == "torch":
+            pytest.importorskip("torch")
+
+            def to_backend(x):
+                import torch
+
+                return torch.tensor(x)
+
+        else:
+            to_backend = None
+
+        circ = qtn.Circuit(
+            2, dtype=dtype, to_backend=to_backend, convert_eager=convert_eager
+        )
+        circ.h(0)
+        circ.cx(0, 1)
+        circ.y(1)
+
+        if not convert_eager:
+            # constructed with default dtype
+            assert circ._psi.dtype_name == "complex128"
+            assert circ._psi.backend == "numpy"
+        else:
+            # constructed with this type
+            assert circ._psi.dtype == dtype or dtype is None
+            if backend == "torch":
+                assert circ._psi.backend == "torch"
+            else:
+                assert circ._psi.backend == "numpy"
+
+        # converted to this type
+        if dtype is None:
+            expected_default_dtype = "complex128"
+        else:
+            expected_default_dtype = dtype
+
+        if backend != "torch":
+            test_tn_default = circ.amplitude_tn()
+            test_tn_explicit = circ.amplitude_tn(dtype=dtype_final)
+        else:
+            # test a less simplified tensor network
+            test_tn_default = circ.partial_trace_tn(
+                (1,), simplify_sequence="R"
+            )
+            test_tn_explicit = circ.partial_trace_tn(
+                (1,), simplify_sequence="R", dtype=dtype_final
+            )
+
+        assert test_tn_default.dtype_name == expected_default_dtype
+        if dtype_final is not None:
+            assert test_tn_explicit.dtype_name == dtype_final
 
 
 class TestCircuitMPS:
