@@ -79,6 +79,7 @@ from .fitting import (
     tensor_network_distance,
     tensor_network_fit_als,
     tensor_network_fit_autodiff,
+    tensor_network_fit_tree,
 )
 from .networking import (
     compute_centralities,
@@ -9080,10 +9081,17 @@ class TensorNetwork(object):
         ----------
         tn_target : TensorNetwork
             The target tensor network to try and fit the current one to.
-        method : {'als', 'autodiff'}, optional
-            Whether to use alternating least squares (ALS) or automatic
-            differentiation to perform the optimization. Generally ALS is
-            better for simple geometries, autodiff better for complex ones.
+        method : {'als', 'autodiff', 'tree'}, optional
+            How to perform the fitting. The options are:
+
+            - 'als': alternating least squares (ALS) optimization,
+            - 'autodiff': automatic differentiation optimization,
+            - 'tree': ALS where the fitted tensor network has a tree structure
+              and thus a canonical form can be utilized for much greater
+              efficiency and stability.
+
+            Generally ALS is better for simple geometries, autodiff better for
+            complex ones. Tree best if the tensor network has a tree structure.
         tol : float, optional
             The target norm distance.
         inplace : bool, optional
@@ -9092,8 +9100,9 @@ class TensorNetwork(object):
             Show a live progress bar of the fitting process.
         fitting_opts
             Supplied to either
-            :func:`~quimb.tensor.tensor_core.tensor_network_fit_als` or
-            :func:`~quimb.tensor.tensor_core.tensor_network_fit_autodiff`.
+            :func:`~quimb.tensor.tensor_core.tensor_network_fit_als`,
+            :func:`~quimb.tensor.tensor_core.tensor_network_fit_autodiff`, or
+            :func:`~quimb.tensor.tensor_core.tensor_network_fit_tree`.
 
         Returns
         -------
@@ -9103,9 +9112,9 @@ class TensorNetwork(object):
         See Also
         --------
         tensor_network_fit_als, tensor_network_fit_autodiff,
-        tensor_network_distance
+        tensor_network_fit_tree, tensor_network_distance,
+        tensor_network_1d_compress
         """
-        check_opt("method", method, ("als", "autodiff"))
         fitting_opts["tol"] = tol
         fitting_opts["inplace"] = inplace
         fitting_opts["progbar"] = progbar
@@ -9114,7 +9123,15 @@ class TensorNetwork(object):
 
         if method == "autodiff":
             return tensor_network_fit_autodiff(self, tn_target, **fitting_opts)
-        return tensor_network_fit_als(self, tn_target, **fitting_opts)
+        elif method == "tree":
+            return tensor_network_fit_tree(self, tn_target, **fitting_opts)
+        elif method == "als":
+            return tensor_network_fit_als(self, tn_target, **fitting_opts)
+        else:
+            raise ValueError(
+                f"Unrecognized method {method}. Should be one of: "
+                "{'als', 'autodiff', 'tree'}."
+            )
 
     fit_ = functools.partialmethod(fit, inplace=True)
 
