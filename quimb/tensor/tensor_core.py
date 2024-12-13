@@ -10683,7 +10683,20 @@ class TensorNetwork(object):
         """The dtype of this TensorNetwork, this is the minimal common type
         of all the tensors data.
         """
+        # TODO: support non numpy dtypes here
         return get_common_dtype(*self.arrays)
+
+    @property
+    def dtype_name(self):
+        """The name of the data type of the array elements."""
+        return next(iter(self.tensor_map.values())).dtype_name
+
+    @property
+    def backend(self):
+        """Get the backend of any tensor in this network, asssuming it to be
+        the same for all tensors.
+        """
+        return next(iter(self.tensor_map.values())).backend
 
     def iscomplex(self):
         return iscomplex(self)
