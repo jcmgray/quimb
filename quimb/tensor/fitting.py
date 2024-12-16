@@ -3,7 +3,6 @@
 from autoray import backend_like, compose, dag, do
 
 from ..utils import check_opt
-from .tensor_core import TNLinearOperator
 from .contraction import contract_strategy
 
 
@@ -243,12 +242,9 @@ def conjugate_gradient(A, b, x0=None, tol=1e-10, maxiter=1000):
     """
     if x0 is None:
         x0 = do("zeros_like", b)
-
     x = x0
     r = p = b - A @ x
-
     rsold = vdot_broadcast(r, r)
-
     for _ in range(maxiter):
         Ap = A @ p
         alpha = rsold / vdot_broadcast(p, Ap)
@@ -259,7 +255,6 @@ def conjugate_gradient(A, b, x0=None, tol=1e-10, maxiter=1000):
             break
         p = r + (rsnew / rsold) * p
         rsold = rsnew
-
     return x
 
 
@@ -269,131 +264,154 @@ def _tn_fit_als_core(
     tnAB,
     xBB,
     tol,
-    contract_optimize,
     steps,
-    enforce_pos,
-    pos_smudge,
-    solver="solve",
-    iterative=False,
-    iterative_solver="cg",
-    iterative_maxiter=2,
+    dense_solve="auto",
+    solver="auto",
+    solver_maxiter=4,
+    solver_dense="auto",
+    enforce_pos=False,
+    pos_smudge=1e-15,
     progbar=False,
 ):
-    from .tensor_core import group_inds
+    from .tensor_core import group_inds, TNLinearOperator
 
-    backend = next(iter(tnAA.tensors)).backend
+    if solver == "auto":
+        # XXX: maybe make this depend on local tensor as well?
+        solver = None
+    if solver_dense == "auto":
+        solver_dense = "solve"
 
-    # shared intermediates + greedy = good reuse of contractions
-    with contract_strategy(contract_optimize), backend_like(backend):
-        # prepare each of the contractions we are going to repeat
-        env_contractions = []
-        for tg in var_tags:
-            # varying tensor and conjugate in norm <A|A>
-            tk = tnAA["__KET__", tg]
-            tb = tnAA["__BRA__", tg]
+    # prepare each of the contractions we are going to repeat
+    env_contractions = []
+    for tg in var_tags:
+        # varying tensor and conjugate in norm <A|A>
+        tk = tnAA["__KET__", tg]
+        tb = tnAA["__BRA__", tg]
 
-            # get inds, and ensure any bonds come last, for linalg.solve
-            lix, bix, rix = group_inds(tk, tb)
-            tk.transpose_(*lix, *bix)
-            tb.transpose_(*rix, *bix)
+        # get inds, and ensure any bonds come last, for linalg.solve
+        lix, bix, rix = group_inds(tk, tb)
+        tk.transpose_(*lix, *bix)
+        tb.transpose_(*rix, *bix)
 
-            # form TNs with 'holes', i.e. environment tensors networks
-            A_tn = tnAA.select((tg,), "!all")
-            y_tn = tnAB.select((tg,), "!all")
+        # form TNs with 'holes', i.e. environment tensors networks
+        A_tn = tnAA.select((tg,), "!all")
+        b_tn = tnAB.select((tg,), "!all")
 
-            env_contractions.append((tk, tb, lix, bix, rix, A_tn, y_tn))
+        # should we form the dense operator explicitly?
+        if dense_solve == "auto":
+            # only for small enough tensors
+            dense_i = tk.size <= 2**10
+        else:
+            dense_i = dense_solve
 
-        if tol != 0.0 or progbar:
-            old_d = float("inf")
+        # which method to use to solve the local minimization
+        if dense_i:
+            solver_i = solver_dense
+        else:
+            solver_i = solver
+
+        env_contractions.append(
+            (tk, tb, lix, bix, rix, A_tn, b_tn, dense_i, solver_i)
+        )
+
+    if tol != 0.0 or progbar:
+        old_d = float("inf")
+
+    if progbar:
+        import tqdm
+
+        pbar = tqdm.trange(steps)
+    else:
+        pbar = range(steps)
+
+    for _ in pbar:
+        for (
+            tk,
+            tb,
+            lix,
+            bix,
+            rix,
+            A_tn,
+            b_tn,
+            dense_i,
+            solver_i,
+        ) in env_contractions:
+            if not dense_i:
+                A = TNLinearOperator(
+                    A_tn,
+                    left_inds=rix + bix,
+                    right_inds=lix + bix,
+                    ldims=tb.shape,
+                    rdims=tk.shape,
+                )
+                b = b_tn.to_dense((*rix, *bix))
+                x0 = tk.to_dense((*lix, *bix))
+
+                if solver_i is None:
+                    x = conjugate_gradient(
+                        A, b, x0=x0, tol=tol, maxiter=solver_maxiter
+                    )
+                else:
+                    x = do(
+                        f"scipy.sparse.linalg.{solver_i}",
+                        A,
+                        b,
+                        x0=x0,
+                        rtol=tol,
+                        maxiter=solver_maxiter,
+                    )[0]
+            else:
+                # form local normalization and local overlap
+                A = A_tn.to_dense(rix, lix)
+                # leave trailing bond batch dims
+                b = b_tn.to_dense(rix, bix)
+
+                if solver_i is None:
+                    x = conjugate_gradient(
+                        A,
+                        b,
+                        x0=tk.to_dense(lix, bix),
+                        tol=tol,
+                        maxiter=solver_maxiter,
+                    )
+                elif enforce_pos or solver_i == "eigh":
+                    el, V = do("linalg.eigh", A)
+                    elmax = do("max", el)
+                    el = do("clip", el, elmax * pos_smudge, None)
+                    # can solve directly using eigendecomposition
+                    x = V @ ((dag(V) @ b) / do("reshape", el, (-1, 1)))
+                elif solver_i == "solve":
+                    x = do("linalg.solve", A, b)
+                elif solver_i == "lstsq":
+                    x = do("linalg.lstsq", A, b, rcond=pos_smudge)[0]
+                else:
+                    raise ValueError(
+                        f"Unknown or unsupported dense solver_dense: '{solver_i}'"
+                    )
+
+            x_r = do("reshape", x, tk.shape)
+            # n.b. because we are using virtual TNs -> updates propagate
+            tk.modify(data=x_r)
+            tb.modify(data=do("conj", x_r))
+
+        # assess | A - B | (normalized) for convergence or printing
+        if (tol != 0.0) or progbar:
+            dagx = dag(x)
+
+            if x.ndim == 2:
+                xAA = do("trace", do("real", dagx @ (A @ x)))  # <A|A>
+                xAB = do("trace", do("real", dagx @ b))  # <A|B>
+            else:
+                xAA = do("real", dagx @ (A @ x))
+                xAB = do("real", dagx @ b)
+
+            d = abs(xAA + xBB - 2 * xAB) ** 0.5 * 2 / (xAA**0.5 + xBB**0.5)
+            if abs(d - old_d) < tol:
+                break
+            old_d = d
 
         if progbar:
-            import tqdm
-
-            pbar = tqdm.trange(steps)
-        else:
-            pbar = range(steps)
-
-        # the main iterative sweep on each tensor, locally optimizing
-        for _ in pbar:
-            for tk, tb, lix, bix, rix, A_tn, y_tn in env_contractions:
-                if iterative:
-                    Ni = TNLinearOperator(
-                        A_tn,
-                        left_inds=rix + bix,
-                        right_inds=lix + bix,
-                        ldims=tb.shape,
-                        rdims=tk.shape,
-                    )
-                    bi = y_tn.to_dense((*rix, *bix))
-                    x0 = tk.to_dense((*lix, *bix))
-
-                    if iterative_solver is None:
-                        x = conjugate_gradient(
-                            Ni, bi, x0=x0, tol=tol, maxiter=iterative_maxiter
-                        )
-                    else:
-                        x = do(
-                            f"scipy.sparse.linalg.{iterative_solver}",
-                            Ni,
-                            bi,
-                            x0=x0,
-                            rtol=tol,
-                            maxiter=iterative_maxiter,
-                        )[0]
-
-                else:
-                    # form local normalization and local overlap
-                    Ni = A_tn.to_dense(rix, lix)
-                    bi = y_tn.to_dense(rix, bix)
-
-                    if enforce_pos:
-                        el, V = do("linalg.eigh", Ni)
-                        elmax = do("max", el)
-                        el = do("clip", el, elmax * pos_smudge, None)
-                        # can solve directly using eigendecomposition
-                        x = V @ ((dag(V) @ bi) / do("reshape", el, (-1, 1)))
-                    else:
-                        Ni_p = Ni
-
-                        if solver is None:
-                            x0 = tk.to_dense(lix, bix)
-                            x = conjugate_gradient(
-                                Ni_p,
-                                bi,
-                                x0=x0,
-                                tol=tol,
-                                maxiter=iterative_maxiter,
-                            )
-                        if solver == "solve":
-                            x = do("linalg.solve", Ni_p, bi)
-                        elif solver == "lstsq":
-                            x = do("linalg.lstsq", Ni_p, bi, rcond=pos_smudge)[
-                                0
-                            ]
-
-                x_r = do("reshape", x, tk.shape)
-                # n.b. because we are using virtual TNs -> updates propagate
-                tk.modify(data=x_r)
-                tb.modify(data=do("conj", x_r))
-
-            # assess | A - B | (normalized) for convergence or printing
-            if (tol != 0.0) or progbar:
-                dagx = dag(x)
-
-                if x.ndim == 2:
-                    xAA = do("trace", do("real", dagx @ (Ni @ x)))  # <A|A>
-                    xAB = do("trace", do("real", dagx @ bi))  # <A|B>
-                else:
-                    xAA = do("real", dagx @ (Ni @ x))
-                    xAB = do("real", dagx @ bi)
-
-                d = abs(xAA + xBB - 2 * xAB) ** 0.5 * 2 / (xAA**0.5 + xBB**0.5)
-                if abs(d - old_d) < tol:
-                    break
-                old_d = d
-
-            if progbar:
-                pbar.set_description(f"{d:.3g}")
+            pbar.set_description(f"{d:.4g}")
 
 
 def tensor_network_fit_als(
@@ -402,13 +420,16 @@ def tensor_network_fit_als(
     tags=None,
     steps=100,
     tol=1e-9,
-    solver="solve",
+    dense_solve="auto",
+    solver="auto",
+    solver_maxiter=4,
+    solver_dense="auto",
     enforce_pos=False,
     pos_smudge=None,
     tnAA=None,
     tnAB=None,
     xBB=None,
-    contract_optimize="greedy",
+    contract_optimize="auto-hq",
     inplace=False,
     progbar=False,
     **kwargs,
@@ -430,15 +451,27 @@ def tensor_network_fit_als(
         The maximum number of ALS steps.
     tol : float, optional
         The target norm distance.
-    solver : {'solve', 'lstsq', ...}, optional
+    dense_solve : {'auto', True, False}, optional
+        Whether to solve the local minimization problem in dense form. If
+        ``'auto'``, will only use dense form for small tensors.
+    solver : {"auto", None, "cg", ...}, optional
+        What solver to use for the iterative (but not dense) local
+        minimization. If ``None`` will use a built in conjugate gradient
+        solver. If a string, will use the corresponding solver from
+        ``scipy.sparse.linalg``.
+    solver_maxiter : int, optional
+        The maximum number of iterations for the iterative solver.
+    solver_dense : {"auto", None, 'solve', 'eigh', 'lstsq', ...}, optional
         The underlying driver function used to solve the local minimization,
-        e.g. ``numpy.linalg.solve`` for ``'solve'`` with ``numpy`` backend.
+        e.g. ``numpy.linalg.solve`` for ``'solve'`` with ``numpy`` backend, if
+        solving the local problem in dense form.
     enforce_pos : bool, optional
         Whether to enforce positivity of the locally formed environments,
-        which can be more stable.
+        which can be more stable, only for dense solves. This sets
+        ``solver_dense='eigh'``.
     pos_smudge : float, optional
         If enforcing positivity, the level below which to clip eigenvalues
-        for make the local environment positive definite.
+        for make the local environment positive definit, only for dense solves.
     tnAA : TensorNetwork, optional
         If you have already formed the overlap ``tn.H & tn``, maybe
         approximately, you can supply it here. The unconjugated layer should
@@ -472,7 +505,7 @@ def tensor_network_fit_als(
     tn_fit.add_tag("__KET__")
 
     if tags is None:
-        to_tag = tn_fit
+        to_tag = tn_fit.tensors
     else:
         to_tag = tn_fit.select_tensors(tags, "any")
 
@@ -483,7 +516,10 @@ def tensor_network_fit_als(
         var_tags.append(var_tag)
 
     # form the norm of the varying TN (A) and its overlap with the target (B)
-    tn_fit_conj = tn_fit.conj().retag_({"__KET__": "__BRA__"})
+    if tnAA is None or tnAB is None:
+        tn_fit_conj = tn_fit.conj().retag_({"__KET__": "__BRA__"})
+    else:
+        tn_fit_conj = None
     if tnAA is None:
         tnAA = tn_fit | tn_fit_conj
     if tnAB is None:
@@ -499,20 +535,25 @@ def tensor_network_fit_als(
     if pos_smudge is None:
         pos_smudge = max(tol, 1e-15)
 
-    _tn_fit_als_core(
-        var_tags=var_tags,
-        tnAA=tnAA,
-        tnAB=tnAB,
-        xBB=xBB,
-        tol=tol,
-        contract_optimize=contract_optimize,
-        steps=steps,
-        enforce_pos=enforce_pos,
-        pos_smudge=pos_smudge,
-        solver=solver,
-        progbar=progbar,
-        **kwargs,
-    )
+    backend = next(iter(tnAA.tensors)).backend
+
+    with contract_strategy(contract_optimize), backend_like(backend):
+        _tn_fit_als_core(
+            var_tags=var_tags,
+            tnAA=tnAA,
+            tnAB=tnAB,
+            xBB=xBB,
+            tol=tol,
+            steps=steps,
+            dense_solve=dense_solve,
+            solver=solver,
+            solver_maxiter=solver_maxiter,
+            solver_dense=solver_dense,
+            enforce_pos=enforce_pos,
+            pos_smudge=pos_smudge,
+            progbar=progbar,
+            **kwargs,
+        )
 
     if not inplace:
         tn = tn.copy()
@@ -643,6 +684,6 @@ def tensor_network_fit_tree(
             old_d = d
 
         if progbar:
-            pbar.set_description(f"{d:.3g}")
+            pbar.set_description(f"{d:.4g}")
 
     return tn_fit.conj_()

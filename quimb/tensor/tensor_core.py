@@ -10924,9 +10924,8 @@ class TNLinearOperator(spla.LinearOperator):
             self._tensors = tns.tensors
 
             if ldims is None or rdims is None:
-                ix_sz = tns.ind_sizes()
-                ldims = tuple(ix_sz[i] for i in left_inds)
-                rdims = tuple(ix_sz[i] for i in right_inds)
+                ldims = tuple(map(tns.ind_size, left_inds))
+                rdims = tuple(map(tns.ind_size, right_inds))
 
         else:
             self._tensors = tuple(tns)
