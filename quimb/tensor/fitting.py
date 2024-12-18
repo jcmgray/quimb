@@ -14,6 +14,7 @@ def tensor_network_distance(
     xBB=None,
     method="auto",
     normalized=False,
+    output_inds=None,
     **contract_opts,
 ):
     r"""Compute the Frobenius norm distance between two tensor networks:
@@ -57,6 +58,9 @@ def tensor_network_distance(
         If ``'infidelity'``, compute the normalized infidelity
         ``1 - |<A|B>|^2 / (|A| |B|)``, which can be faster to optimize e.g.,
         but does not take into account normalization.
+    output_inds : sequence of str, optional
+        Specify the output indices of `tnA` and `tnB` to contract over. This
+        can be necessary if either network has hyper indices.
     contract_opts
         Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
 
@@ -69,12 +73,15 @@ def tensor_network_distance(
     tnA = tnA.as_network()
     tnB = tnB.as_network()
 
-    oix = tnA.outer_inds()
-    if set(oix) != set(tnB.outer_inds()):
-        raise ValueError(
-            "Can only compute distance between tensor "
-            "networks with matching outer indices."
-        )
+    if output_inds is None:
+        oix = tnA.outer_inds()
+        if set(oix) != set(tnB.outer_inds()):
+            raise ValueError(
+                "Can only compute distance between tensor "
+                "networks with matching outer indices."
+            )
+    else:
+        oix = output_inds
 
     if method == "auto":
         d = tnA.inds_size(oix)
@@ -90,33 +97,40 @@ def tensor_network_distance(
 
     # overlap method
     if xAA is None:
-        xAA = (tnA | tnA.H).contract(**contract_opts)
+        # <A|A>
+        xAA = tnA.norm(squared=True, output_inds=oix, **contract_opts)
     if xAB is None:
-        xAB = (tnA | tnB.H).contract(**contract_opts)
+        # <B|A>
+        xAB = tnA.overlap(tnB, output_inds=oix, **contract_opts)
     if xBB is None:
-        xBB = (tnB | tnB.H).contract(**contract_opts)
+        # <B|B>
+        xBB = tnB.norm(squared=True, output_inds=oix, **contract_opts)
+
+    xAA = do("abs", xAA)
+    xBB = do("abs", xBB)
+    xAB = do("real", xAB)
 
     if normalized == "infidelity":
         # compute normalized infidelity
-        return 1 - do("abs", xAB**2 / (xAA * xBB))
+        return 1 - xAB**2 / (xAA * xBB)
 
     if normalized == "infidelity_sqrt":
         # compute normalized sqrt infidelity
-        return 1 - do("abs", xAB / (xAA * xBB) ** 0.5)
+        return 1 - do("abs", xAB) / (xAA * xBB) ** 0.5
 
     if normalized == "squared":
         return (
-            do("abs", xAA + xBB - 2 * do("real", xAB))
+            do("abs", xAA + xBB - 2 * xAB)
             # divide by average norm-squared of A and B
             * 2
-            / (do("abs", xAA) + do("abs", xBB))
+            / (xAA + xBB)
         ) ** 0.5
 
-    dAB = do("abs", xAA + xBB - 2 * do("real", xAB)) ** 0.5
+    dAB = do("abs", xAA + xBB - 2 * xAB) ** 0.5
 
     if normalized:
         # divide by average norm of A and B
-        dAB = dAB * 2 / (do("abs", xAA) ** 0.5 + do("abs", xBB) ** 0.5)
+        dAB = dAB * 2 / (xAA**0.5 + xBB**0.5)
 
     return dAB
 
@@ -130,6 +144,7 @@ def tensor_network_fit_autodiff(
     contract_optimize="auto-hq",
     distance_method="auto",
     normalized="squared",
+    output_inds=None,
     xBB=None,
     inplace=False,
     progbar=False,
@@ -164,6 +179,9 @@ def tensor_network_fit_autodiff(
         If ``'infidelity'``, compute the normalized infidelity
         ``1 - |<A|B>|^2 / (|A| |B|)``, which can be faster to optimize e.g.,
         but does not take into account normalization.
+    output_inds : sequence of str, optional
+        Specify the output indices of `tnA` and `tnB` to contract over. This
+        can be necessary if either network has hyper indices.
     xBB : float, optional
         If you already know, have computed ``tn_target.H @ tn_target``, or
         don't care about the overall scale of the norm distance, you can supply
@@ -183,9 +201,8 @@ def tensor_network_fit_autodiff(
     from .tensor_core import tensor_network_distance
 
     if xBB is None:
-        xBB = (tn_target | tn_target.H).contract(
-            output_inds=(),
-            optimize=contract_optimize,
+        xBB = tn_target.norm(
+            squared=True, output_inds=output_inds, optimize=contract_optimize
         )
 
     tnopt = TNOptimizer(
@@ -196,6 +213,7 @@ def tensor_network_fit_autodiff(
             "method": distance_method,
             "optimize": contract_optimize,
             "normalized": normalized,
+            "output_inds": output_inds,
         },
         autodiff_backend=autodiff_backend,
         progbar=progbar,
@@ -218,7 +236,7 @@ def vdot_broadcast(x, y):
     return do("sum", x * do("conj", y), axis=0)
 
 
-def conjugate_gradient(A, b, x0=None, tol=1e-10, maxiter=1000):
+def conjugate_gradient(A, b, x0=None, tol=1e-5, maxiter=1000):
     """
     Conjugate Gradient solver for complex matrices/linear operators.
 
@@ -273,7 +291,7 @@ def _tn_fit_als_core(
     pos_smudge=1e-15,
     progbar=False,
 ):
-    from .tensor_core import group_inds, TNLinearOperator
+    from .tensor_core import TNLinearOperator, group_inds
 
     if solver == "auto":
         # XXX: maybe make this depend on local tensor as well?
@@ -300,7 +318,7 @@ def _tn_fit_als_core(
         # should we form the dense operator explicitly?
         if dense_solve == "auto":
             # only for small enough tensors
-            dense_i = tk.size <= 2**10
+            dense_i = tk.size <= 512
         else:
             dense_i = dense_solve
 
@@ -367,12 +385,9 @@ def _tn_fit_als_core(
                 b = b_tn.to_dense(rix, bix)
 
                 if solver_i is None:
+                    x0 = tk.to_dense(lix, bix)
                     x = conjugate_gradient(
-                        A,
-                        b,
-                        x0=tk.to_dense(lix, bix),
-                        tol=tol,
-                        maxiter=solver_maxiter,
+                        A, b, x0=x0, tol=tol, maxiter=solver_maxiter
                     )
                 elif enforce_pos or solver_i == "eigh":
                     el, V = do("linalg.eigh", A)
@@ -429,6 +444,7 @@ def tensor_network_fit_als(
     tnAA=None,
     tnAB=None,
     xBB=None,
+    output_inds=None,
     contract_optimize="auto-hq",
     inplace=False,
     progbar=False,
@@ -517,19 +533,25 @@ def tensor_network_fit_als(
 
     # form the norm of the varying TN (A) and its overlap with the target (B)
     if tnAA is None or tnAB is None:
-        tn_fit_conj = tn_fit.conj().retag_({"__KET__": "__BRA__"})
+        tn_fit_conj = tn_fit.conj(mangle_inner=True, output_inds=output_inds)
+        tn_fit_conj.retag_({"__KET__": "__BRA__"})
     else:
         tn_fit_conj = None
-    if tnAA is None:
-        tnAA = tn_fit | tn_fit_conj
-    if tnAB is None:
-        tnAB = tn_target | tn_fit_conj
 
+    if tnAA is None:
+        # <A|A>
+        tnAA = tn_fit.combine(
+            tn_fit_conj, virtual=True, check_collisions=False
+        )
+    if tnAB is None:
+        # <A|B>
+        tnAB = tn_target.combine(
+            tn_fit_conj, virtual=True, check_collisions=False
+        )
     if (tol != 0.0 or progbar) and (xBB is None):
         # <B|B>
-        xBB = (tn_target | tn_target.H).contract(
-            optimize=contract_optimize,
-            output_inds=(),
+        xBB = tn_target.norm(
+            squared=True, output_inds=output_inds, optimize=contract_optimize
         )
 
     if pos_smudge is None:
@@ -619,10 +641,7 @@ def tensor_network_fit_tree(
     TensorNetwork
     """
     if xBB is None:
-        xBB = (tn_target | tn_target.H).contract(
-            optimize=contract_optimize,
-            output_inds=(),
-        )
+        xBB = tn_target.norm(squared=True, optimize=contract_optimize)
 
     tn_fit = tn.conj(inplace=inplace)
     tnAB = tn_fit | tn_target

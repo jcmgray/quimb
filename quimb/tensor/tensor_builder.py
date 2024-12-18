@@ -18,10 +18,10 @@ from ..gen.operators import (
 )
 from ..gen.rand import (
     choice,
+    get_rand_fill_fn,
     rand_phase,
     randn,
     random_seed_fn,
-    get_rand_fill_fn,
 )
 from ..utils import concat, deprecated, unique
 from .array_ops import asarray, do, reshape, sensibly_scale
@@ -829,6 +829,79 @@ def TN_from_strings(
             tn.fuse_multibonds_()
 
     return tn
+
+
+def HTN_rand(
+    n,
+    reg,
+    n_out=0,
+    n_hyper_in=0,
+    n_hyper_out=0,
+    d_min=2,
+    d_max=3,
+    seed=None,
+    dtype="float64",
+    dist="normal",
+    scale=1.0,
+    loc=0.0,
+    site_ind_id="k{}",
+):
+    """Create a random, possibly hyper, tensor network, with a mix of normal
+    and hyper inner and outer indices. Useful for testing edges cases.
+
+    Parameters
+    ----------
+    n : int
+        The number of tensors.
+    reg : int
+        The average degree (number of dimensions per tensor) of the tensor
+        network (prior to placing extra indices).
+    n_out : int, optional
+        The number of normal outer indices to add (i.e. appear exactly once).
+    n_hyper_in : int, optional
+        The number of hyper inner indices to add (i.e. appear on three or more
+        tensors).
+    n_hyper_out : int, optional
+        The number of hyper outer indices to add (i.e. appear in output and
+        two or more tensors).
+    d_min : int, optional
+        The minimum size of any dimension.
+    d_max : int, optional
+        The maximum size of any dimension.
+    seed : int, optional
+        A random seed.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    import cotengra as ctg
+
+    fill_fn = get_rand_fill_fn(
+        dtype=dtype, dist=dist, scale=scale, loc=loc, seed=seed
+    )
+
+    inputs, output, shapes, _ = ctg.utils.rand_equation(
+        n=n,
+        reg=reg,
+        n_out=n_out,
+        n_hyper_in=n_hyper_in,
+        n_hyper_out=n_hyper_out,
+        d_min=d_min,
+        d_max=d_max,
+        seed=seed,
+    )
+
+    # map output symbols to explicitly enumerated indices
+    outmap = {ix: site_ind_id.format(i) for i, ix in enumerate(output)}
+
+    return TensorNetwork(
+        Tensor(
+            data=fill_fn(shape),
+            inds=[outmap.get(ix, ix) for ix in term],
+        )
+        for term, shape in zip(inputs, shapes)
+    )
 
 
 def HTN_CP_from_inds_and_fill_fn(

@@ -136,3 +136,17 @@ def test_fit_partial_tags(opts, dtype):
         assert (k1f[2] - k1[2]).norm() > 1e-12
         assert (k1f[3] - k1[3]).norm() < 1e-12
         assert (k1f[4] - k1[4]).norm() > 1e-12
+
+
+def test_hyper_distance():
+    tna = qtn.HTN_rand(10, 3, 2, 2, 2, 2, 2, seed=0, dtype="complex128")
+    tnb = qtn.HTN_rand(10, 3, 2, 2, 2, 2, 2, seed=1, dtype="complex128")
+    oix = [f"k{i}" for i in range(4)]
+    xa = tna.to_dense(oix)
+    xb = tnb.to_dense(oix)
+    assert tna.norm(output_inds=oix) == pytest.approx(np.linalg.norm(xa))
+    assert tnb.norm(output_inds=oix) == pytest.approx(np.linalg.norm(xb))
+    assert tnb.overlap(tna, output_inds=oix) == pytest.approx(np.vdot(xa, xb))
+    assert tna.distance(tnb, output_inds=oix) == pytest.approx(
+        np.linalg.norm(xa - xb)
+    )

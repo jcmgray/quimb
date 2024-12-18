@@ -234,6 +234,14 @@ def norm_fro(x):
 norm_fro.register("numpy", norm_fro_dense)
 
 
+@norm_fro.register("autograd")
+def norm_fro_autoray(x):
+    # seems to be bug with autograd's linalg.norm and complex numbers
+    # https://github.com/HIPS/autograd/issues/666
+    # so implement manually
+    return do("sum", do("abs", x) ** 2) ** 0.5
+
+
 def sensibly_scale(x):
     """Take an array and scale it *very* roughly such that random tensor
     networks consisting of such arrays do not have gigantic norms.
