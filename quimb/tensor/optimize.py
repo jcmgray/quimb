@@ -462,7 +462,7 @@ class AutoGradHandler:
     def __init__(self, device="cpu"):
         if device != "cpu":
             raise ValueError(
-                "`autograd` currently is only " "backed by cpu, numpy arrays."
+                "`autograd` currently is only backed by cpu, numpy arrays."
             )
 
     def to_variable(self, x):

@@ -79,6 +79,7 @@ from .fitting import (
     tensor_network_distance,
     tensor_network_fit_als,
     tensor_network_fit_autodiff,
+    tensor_network_fit_tree,
 )
 from .networking import (
     compute_centralities,
@@ -2707,7 +2708,7 @@ class Tensor:
         idx = np.unravel_index(flat_idx, self.shape)
         return dict(zip(self.inds, idx))
 
-    def norm(self):
+    def norm(self, squared=False, **contract_opts):
         r"""Frobenius norm of this tensor:
 
         .. math::
@@ -2717,7 +2718,35 @@ class Tensor:
         where the trace is taken over all indices. Equivalent to the square
         root of the sum of squared singular values across any partition.
         """
-        return norm_fro(self.data)
+        # NOTE: for compatibility with TN.norm, we accept contract_opts
+        norm = norm_fro(self.data)
+        if squared:
+            return norm ** 2
+        return norm
+
+    def overlap(self, other, **contract_opts):
+        r"""Overlap of this tensor with another tensor:
+
+        .. math::
+
+            \langle o | t \rangle = \mathrm{Tr} \left(o^{\dagger} t\right)
+
+        where the trace is taken over all indices.
+
+        Parameters
+        ----------
+        other : Tensor or TensorNetwork
+            The other tensor or network to overlap with. This tensor will be
+            conjugated.
+
+        Returns
+        -------
+        scalar
+        """
+        if isinstance(other, Tensor):
+            return other.conj() @ self
+        else:
+            return conj(other.overlap(self, **contract_opts))
 
     def normalize(self, inplace=False):
         T = self if inplace else self.copy()
@@ -4055,6 +4084,7 @@ class TensorNetwork(object):
         return self
 
     def _modify_tensor_tags(self, old, new, tid):
+        # XXX: change to generators here?
         self._unlink_tags(old - new, tid)
         self._link_tags(new - old, tid)
 
@@ -4265,8 +4295,25 @@ class TensorNetwork(object):
         self.reindex_(reindex_map)
         return self
 
-    def conj(self, mangle_inner=False, inplace=False):
-        """Conjugate all the tensors in this network (leaves all indices)."""
+    def conj(self, mangle_inner=False, output_inds=None, inplace=False):
+        """Conjugate all the tensors in this network (leave all outer indices).
+
+        Parameters
+        ----------
+        mangle_inner : {bool, str, None}, optional
+            Whether to mangle the inner indices of the network. If a string is
+            given, it will be appended to the index names.
+        output_inds : sequence of str, optional
+            If given, the indices to mangle will be restricted to those not in
+            this list. This is only needed for (hyper) tensor networks where
+            output indices are not given simply by those that appear once.
+        inplace : bool, optional
+            Whether to perform the conjugation inplace or not.
+
+        Returns
+        -------
+        TensorNetwork
+        """
         tn = self if inplace else self.copy()
 
         for t in tn:
@@ -4274,7 +4321,14 @@ class TensorNetwork(object):
 
         if mangle_inner:
             append = None if mangle_inner is True else str(mangle_inner)
-            tn.mangle_inner_(append)
+
+            # allow explicitly setting which indices to mangle
+            if output_inds is None:
+                which = None
+            else:
+                which = oset(tn.ind_map) - tags_to_oset(output_inds)
+
+            tn.mangle_inner_(append=append, which=which)
 
         # if we have fermionic data, need to phase dual outer indices
         ex_data = next(iter(tn.tensor_map.values())).data
@@ -4312,7 +4366,62 @@ class TensorNetwork(object):
         """
         return prod(t.largest_element() for t in self)
 
-    def norm(self, **contract_opts):
+    def make_norm(
+        self,
+        mangle_append="*",
+        layer_tags=("KET", "BRA"),
+        output_inds=None,
+        return_all=False,
+    ):
+        """Make the norm (squared) tensor network of this tensor network
+        ``tn.H & tn``. This deterministally mangles the inner indices of the
+        bra to avoid clashes with the ket, and also adds tags to the top and
+        bottom layers. If the tensor network has hyper outer indices, you may
+        need to specify the output indices. This allows 'hyper' norms.
+
+        Parameters
+        ----------
+        mangle_append : {str, False or None}, optional
+            How to mangle the inner indices of the bra.
+        layer_tags : (str, str), optional
+            The tags to identify the top and bottom.
+        output_inds : sequence of str, optional
+            If given, the indices to mangle will be restricted to those not in
+            this list. This is only needed for (hyper) tensor networks where
+            output indices are not given simply by those that appear once.
+        return_all : bool, optional
+            Return the norm, the ket and the bra. These are virtual, i.e. are
+            views of the same tensors.
+
+        Returns
+        -------
+        tn_norm : TensorNetwork
+        """
+        ket = self.copy()
+
+        if layer_tags:
+            ket.add_tag(layer_tags[0])
+
+        bra = ket.conj(
+            mangle_inner=mangle_append,
+            output_inds=output_inds,
+        )
+        if layer_tags:
+            bra.retag_({layer_tags[0]: layer_tags[1]})
+
+        norm = ket.combine(
+            bra,
+            # both are already copies
+            virtual=True,
+            # mangling already avoids clashes
+            check_collisions=not mangle_append
+        )
+
+        if return_all:
+            return norm, ket, bra
+        return norm
+
+    def norm(self, output_inds=None, squared=False, **contract_opts):
         r"""Frobenius norm of this tensor network. Computed by exactly
         contracting the TN with its conjugate:
 
@@ -4323,41 +4432,109 @@ class TensorNetwork(object):
         where the trace is taken over all indices. Equivalent to the square
         root of the sum of squared singular values across any partition.
         """
-        norm = self | self.conj()
-        return norm.contract(**contract_opts) ** 0.5
+        tn_norm = self.make_norm(output_inds=output_inds, layer_tags=None)
+        norm2 = tn_norm.contract(output_inds=(), **contract_opts)
+        if squared:
+            return norm2
+        return norm2 ** 0.5
 
-    def make_norm(
+    def make_overlap(
         self,
-        mangle_append="*",
+        other,
         layer_tags=("KET", "BRA"),
+        output_inds=None,
         return_all=False,
     ):
-        """Make the norm tensor network of this tensor network ``tn.H & tn``.
+        """Make the overlap tensor network of this tensor network with another
+        tensor network `other.H & self`. This deterministally mangles the inner
+        indices of the bra to avoid clashes with the ket, and also adds tags to
+        the top and bottom layers. If the tensor network has hyper outer
+        indices, you may need to specify the output indices. This allows
+        'hyper' overlaps.
 
         Parameters
         ----------
-        mangle_append : {str, False or None}, optional
-            How to mangle the inner indices of the bra.
+        other : TensorNetwork
+            The other tensor network to overlap with, it should have the same
+            outer indices as this tensor network, all other indices will be
+            explicitly mangled in the copy taken, allowing 'hyper' overlaps.
+            This tensor network will be conjugated in the overlap.
         layer_tags : (str, str), optional
             The tags to identify the top and bottom.
+        output_inds : sequence of str, optional
+            If given, the indices to mangle will be restricted to those not in
+            this list. This is only needed for (hyper) tensor networks where
+            output indices are not given simply by those that appear once.
         return_all : bool, optional
-            Return the norm, the ket and the bra.
+            Return the overlap, the ket and the bra. These are virtual, i.e.
+            are views of the same tensors.
 
         Returns
         -------
-        norm : TensorNetwork
+        tn_overlap : TensorNetwork
         """
         ket = self.copy()
-        ket.add_tag(layer_tags[0])
+        if layer_tags:
+            ket.add_tag(layer_tags[0])
 
-        bra = ket.retag({layer_tags[0]: layer_tags[1]})
-        bra.conj_(mangle_append)
+        if output_inds is None:
+            output_inds = ket.outer_inds()
 
-        norm = ket | bra
+        bra = other.as_network().conj(
+            mangle_inner=True,
+            output_inds=output_inds,
+        )
+        if layer_tags:
+            bra.add_tag(layer_tags[1])
+
+        overlap = ket.combine(
+            bra,
+            # both are already copies
+            virtual=True,
+            # mangling already avoids clashes
+            check_collisions=False,
+        )
 
         if return_all:
-            return norm, ket, bra
-        return norm
+            return overlap, ket, bra
+
+        return overlap
+
+    def overlap(self, other, output_inds=None, **contract_opts):
+        r"""Overlap of this tensor network with another tensor network. Computed
+        by exactly contracting the TN with the conjugate of the other TN:
+
+        .. math::
+
+            \langle O, T \rangle = \mathrm{Tr} \left(O^{\dagger} T\right)
+
+        where the trace is taken over all indices. This supports 'hyper'
+        tensor networks, where the output indices are not simply those that
+        appear once.
+
+        Parameters
+        ----------
+        other : TensorNetwork
+            The other tensor network to overlap with, it should have the same
+            outer indices as this tensor network, all other indices will be
+            explicitly mangled in the copy taken, allowing 'hyper' overlaps.
+            This tensor network will be conjugated in the overlap.
+        output_inds : sequence of str, optional
+            If given, the indices to mangle will be restricted to those not in
+            this list. This is only needed for (hyper) tensor networks where
+            output indices are not given simply by those that appear once.
+        contract_opts
+            Supplied to :meth:`~quimb.tensor.tensor_contract` for the
+            contraction.
+
+        Returns
+        -------
+        scalar
+        """
+        tn_overlap = self.make_overlap(
+            other, output_inds=output_inds, layer_tags=None
+        )
+        return tn_overlap.contract(output_inds=(), **contract_opts)
 
     def multiply(self, x, inplace=False, spread_over=8):
         """Scalar multiplication of this tensor network with ``x``.
@@ -4759,10 +4936,9 @@ class TensorNetwork(object):
         """Get a copy or a virtual copy (doesn't copy the tensors) of this
         ``TensorNetwork``, only with the tensors corresponding to ``tids``.
         """
-        tn = TensorNetwork(())
+        tn = self.new(like=self)
         for tid in tids:
             tn.add_tensor(self.tensor_map[tid], tid=tid, virtual=virtual)
-        tn.view_like_(self)
         return tn
 
     def _select_without_tids(self, tids, virtual=True):
@@ -9080,10 +9256,17 @@ class TensorNetwork(object):
         ----------
         tn_target : TensorNetwork
             The target tensor network to try and fit the current one to.
-        method : {'als', 'autodiff'}, optional
-            Whether to use alternating least squares (ALS) or automatic
-            differentiation to perform the optimization. Generally ALS is
-            better for simple geometries, autodiff better for complex ones.
+        method : {'als', 'autodiff', 'tree'}, optional
+            How to perform the fitting. The options are:
+
+            - 'als': alternating least squares (ALS) optimization,
+            - 'autodiff': automatic differentiation optimization,
+            - 'tree': ALS where the fitted tensor network has a tree structure
+              and thus a canonical form can be utilized for much greater
+              efficiency and stability.
+
+            Generally ALS is better for simple geometries, autodiff better for
+            complex ones. Tree best if the tensor network has a tree structure.
         tol : float, optional
             The target norm distance.
         inplace : bool, optional
@@ -9092,8 +9275,9 @@ class TensorNetwork(object):
             Show a live progress bar of the fitting process.
         fitting_opts
             Supplied to either
-            :func:`~quimb.tensor.tensor_core.tensor_network_fit_als` or
-            :func:`~quimb.tensor.tensor_core.tensor_network_fit_autodiff`.
+            :func:`~quimb.tensor.tensor_core.tensor_network_fit_als`,
+            :func:`~quimb.tensor.tensor_core.tensor_network_fit_autodiff`, or
+            :func:`~quimb.tensor.tensor_core.tensor_network_fit_tree`.
 
         Returns
         -------
@@ -9103,18 +9287,26 @@ class TensorNetwork(object):
         See Also
         --------
         tensor_network_fit_als, tensor_network_fit_autodiff,
-        tensor_network_distance
+        tensor_network_fit_tree, tensor_network_distance,
+        tensor_network_1d_compress
         """
-        check_opt("method", method, ("als", "autodiff"))
         fitting_opts["tol"] = tol
         fitting_opts["inplace"] = inplace
         fitting_opts["progbar"] = progbar
 
         tn_target = tn_target.as_network()
 
+        if method == "als":
+            return tensor_network_fit_als(self, tn_target, **fitting_opts)
         if method == "autodiff":
             return tensor_network_fit_autodiff(self, tn_target, **fitting_opts)
-        return tensor_network_fit_als(self, tn_target, **fitting_opts)
+        elif method == "tree":
+            return tensor_network_fit_tree(self, tn_target, **fitting_opts)
+        else:
+            raise ValueError(
+                f"Unrecognized method {method}. Should be one of: "
+                "{'als', 'autodiff', 'tree'}."
+            )
 
     fit_ = functools.partialmethod(fit, inplace=True)
 
@@ -10907,9 +11099,8 @@ class TNLinearOperator(spla.LinearOperator):
             self._tensors = tns.tensors
 
             if ldims is None or rdims is None:
-                ix_sz = tns.ind_sizes()
-                ldims = tuple(ix_sz[i] for i in left_inds)
-                rdims = tuple(ix_sz[i] for i in right_inds)
+                ldims = tuple(map(tns.ind_size, left_inds))
+                rdims = tuple(map(tns.ind_size, right_inds))
 
         else:
             self._tensors = tuple(tns)

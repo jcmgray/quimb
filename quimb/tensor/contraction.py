@@ -6,7 +6,7 @@ import threading
 import contextlib
 import collections
 
-import  cotengra as ctg
+import cotengra as ctg
 
 
 _CONTRACT_STRATEGY = 'greedy'
