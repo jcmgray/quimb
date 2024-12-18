@@ -10361,7 +10361,7 @@ class TensorNetwork(object):
         split_simplify_opts=None,
         custom_methods=(),
         split_method="svd",
-        check_zero=True,
+        check_zero="auto",
         inplace=False,
         progbar=False,
     ):
@@ -10405,6 +10405,9 @@ class TensorNetwork(object):
         check_zero : bool, optional
             Whether to check if tensors have zero norm and in that case do
             nothing if and when equalizing norms, rather than generating a NaN.
+            If 'auto' this will only be turned on if other methods that
+            explicitly check data entries ("A", "D", "C", "S", "L") are being
+            used (the default).
         progbar : bool, optional
             Show a live progress bar of the simplification process.
         inplace : bool, optional
@@ -10430,6 +10433,10 @@ class TensorNetwork(object):
         # all the methods
         if output_inds is None:
             output_inds = self.outer_inds()
+
+        if check_zero == "auto":
+            # any method but R checks data entries anyway
+            check_zero == bool(set(seq) - {"R"})
 
         tn.squeeze_(exclude=output_inds)
 
