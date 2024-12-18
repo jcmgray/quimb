@@ -1945,6 +1945,11 @@ class Tensor:
         return getattr(self._data, "dtype", None)
 
     @property
+    def dtype_name(self):
+        """The name of the data type of the array elements."""
+        return get_dtype_name(self._data)
+
+    @property
     def backend(self):
         """The backend inferred from the data."""
         return infer_backend(self._data)
@@ -9006,7 +9011,8 @@ class TensorNetwork(object):
 
         # then form the 'oblique' projectors
         Pl, Pr = decomp.compute_oblique_projectors(
-            Rl, Rr,
+            Rl,
+            Rr,
             max_bond=max_bond,
             cutoff=cutoff,
             **compress_opts,
@@ -9384,7 +9390,7 @@ class TensorNetwork(object):
 
     randomize_ = functools.partialmethod(randomize, inplace=True)
 
-    def strip_exponent(self, tid_or_tensor, value=None):
+    def strip_exponent(self, tid_or_tensor, value=None, check_zero=False):
         """Scale the elements of tensor corresponding to ``tid`` so that the
         norm of the array is some value, which defaults to ``1``. The log of
         the scaling factor, base 10, is then accumulated in the ``exponent``
@@ -9396,6 +9402,11 @@ class TensorNetwork(object):
             The tensor identifier or actual tensor.
         value : None or float, optional
             The value to scale the norm of the tensor to.
+        check_zero : bool, optional
+            Whether to check if the tensor has zero norm and in that case do
+            nothing, since the `exponent` would be -inf. Off by default to
+            avoid data dependent computational graphs when tracing and
+            computing gradients etc.
         """
         if (value is None) or (value is True):
             value = 1.0
@@ -9406,6 +9417,10 @@ class TensorNetwork(object):
             t = self.tensor_map[tid_or_tensor]
 
         stripped_factor = t.norm() / value
+
+        if check_zero and (stripped_factor == 0.0):
+            return
+
         t.modify(apply=lambda data: data / stripped_factor)
         self.exponent = self.exponent + do("log10", stripped_factor)
 
@@ -9420,7 +9435,7 @@ class TensorNetwork(object):
         # reset the exponent to zero
         self.exponent = 0.0
 
-    def equalize_norms(self, value=None, inplace=False):
+    def equalize_norms(self, value=None, check_zero=False, inplace=False):
         """Make the Frobenius norm of every tensor in this TN equal without
         changing the overall value if ``value=None``, or set the norm of every
         tensor to ``value`` by scalar multiplication only.
@@ -9431,6 +9446,11 @@ class TensorNetwork(object):
             Set the norm of each tensor to this value specifically. If supplied
             the change in overall scaling will be accumulated in
             ``tn.exponent`` in the form of a base 10 power.
+        check_zero : bool, optional
+            Whether, if and when equalizing norms, to check if tensors have
+            zero norm and in that case do nothing, since the `exponent` would
+            be -inf. Off by default to avoid data dependent computational
+            graphs when tracing and computing gradients etc.
         inplace : bool, optional
             Whether to perform the norm equalization inplace or not.
 
@@ -9441,7 +9461,7 @@ class TensorNetwork(object):
         tn = self if inplace else self.copy()
 
         for tid in tn.tensor_map:
-            tn.strip_exponent(tid, value=value)
+            tn.strip_exponent(tid, value=value, check_zero=check_zero)
 
         if value is None:
             tn.distribute_exponent()
@@ -9586,6 +9606,7 @@ class TensorNetwork(object):
         equalize_norms=False,
         cache=None,
         max_combinations=500,
+        check_zero=False,
         inplace=False,
     ):
         """Simplify this tensor network by performing contractions that don't
@@ -9602,6 +9623,11 @@ class TensorNetwork(object):
             exponent in ``tn.exponent``.
         cache : None or set
             Persistent cache used to mark already checked tensors.
+        check_zero : bool, optional
+            Whether, if and when equalizing norms, to check if tensors have
+            zero norm and in that case do nothing, since the `exponent` would
+            be -inf. Off by default to avoid data dependent computational
+            graphs when tracing and computing gradients etc.
         inplace : bool, optional
             Whether to perform the rand reduction inplace.
 
@@ -9747,7 +9773,7 @@ class TensorNetwork(object):
             tn |= tab
 
             if equalize_norms:
-                tn.strip_exponent(tab, equalize_norms)
+                tn.strip_exponent(tab, equalize_norms, check_zero=check_zero)
 
             for ix in out_ab:
                 # now we need to check outputs indices again
@@ -9755,10 +9781,16 @@ class TensorNetwork(object):
 
         if scalars:
             if equalize_norms:
+                # move overall scaling factor into exponent, absorb phase
                 signs = []
                 for s in scalars:
-                    signs.append(s / do("abs", s))
-                    tn.exponent += do("log10", do("abs", s))
+                    sa = do("abs", s)
+                    if check_zero and (sa == 0.0):
+                        # whole contraction is zero
+                        signs = [0.0]
+                        break
+                    signs.append(s / sa)
+                    tn.exponent += do("log10", sa)
                 scalars = signs
 
             if tn.num_tensors:
@@ -10018,6 +10050,7 @@ class TensorNetwork(object):
         atol=1e-12,
         equalize_norms=False,
         cache=None,
+        check_zero=False,
         inplace=False,
         **split_opts,
     ):
@@ -10034,6 +10067,11 @@ class TensorNetwork(object):
             exponent in ``tn.exponent``.
         cache : None or set
             Persistent cache used to mark already checked tensors.
+        check_zero : bool, optional
+            Whether, if and when equalizing norms, to check if tensors have
+            zero norm and in that case do nothing, since the `exponent` would
+            be -inf. Off by default to avoid data dependent computational
+            graphs when tracing and computing gradients etc.
         inplace, bool, optional
             Whether to perform the split simplification inplace.
         """
@@ -10070,8 +10108,12 @@ class TensorNetwork(object):
                 tn |= tr
 
                 if equalize_norms:
-                    tn.strip_exponent(tl, equalize_norms)
-                    tn.strip_exponent(tr, equalize_norms)
+                    tn.strip_exponent(
+                        tl, equalize_norms, check_zero=check_zero
+                    )
+                    tn.strip_exponent(
+                        tr, equalize_norms, check_zero=check_zero
+                    )
 
             else:
                 cache.add(cache_key)
@@ -10088,6 +10130,7 @@ class TensorNetwork(object):
         cache=None,
         equalize_norms=False,
         max_combinations=500,
+        check_zero=False,
         inplace=False,
         **split_opts,
     ):
@@ -10175,8 +10218,8 @@ class TensorNetwork(object):
 
             tensor_fuse_squeeze(tl, tr)
             if equalize_norms:
-                tn.strip_exponent(tl, equalize_norms)
-                tn.strip_exponent(tr, equalize_norms)
+                tn.strip_exponent(tl, equalize_norms, check_zero=check_zero)
+                tn.strip_exponent(tr, equalize_norms, check_zero=check_zero)
 
             queue.extend(tl.inds)
             queue.extend(tr.inds)
@@ -10194,6 +10237,7 @@ class TensorNetwork(object):
         loops=None,
         cache=None,
         equalize_norms=False,
+        check_zero=False,
         inplace=False,
         **split_opts,
     ):
@@ -10213,6 +10257,11 @@ class TensorNetwork(object):
         cache : set, optional
             For performance reasons can supply a cache for already checked
             loops.
+        check_zero : bool, optional
+            Whether, if and when equalizing norms, to check if tensors have
+            zero norm and in that case do nothing, since the `exponent` would
+            be -inf. Off by default to avoid data dependent computational
+            graphs when tracing and computing gradients etc.
         inplace : bool, optional
             Whether to replace the loops inplace.
         split_opts
@@ -10293,8 +10342,8 @@ class TensorNetwork(object):
 
             tensor_fuse_squeeze(tl, tr)
             if equalize_norms:
-                tn.strip_exponent(tl, equalize_norms)
-                tn.strip_exponent(tr, equalize_norms)
+                tn.strip_exponent(tl, equalize_norms, check_zero=check_zero)
+                tn.strip_exponent(tr, equalize_norms, check_zero=check_zero)
 
         return tn
 
@@ -10307,13 +10356,14 @@ class TensorNetwork(object):
         atol=1e-12,
         equalize_norms=False,
         cache=None,
-        inplace=False,
-        progbar=False,
         rank_simplify_opts=None,
         loop_simplify_opts=None,
         split_simplify_opts=None,
         custom_methods=(),
         split_method="svd",
+        check_zero="auto",
+        inplace=False,
+        progbar=False,
     ):
         """Perform a series of tensor network 'simplifications' in a loop until
         there is no more reduction in the number of tensors or indices. Note
@@ -10352,6 +10402,12 @@ class TensorNetwork(object):
         cache : None or set
             A persistent cache for each simplification process to mark
             already processed tensors.
+        check_zero : bool, optional
+            Whether to check if tensors have zero norm and in that case do
+            nothing if and when equalizing norms, rather than generating a NaN.
+            If 'auto' this will only be turned on if other methods that
+            explicitly check data entries ("A", "D", "C", "S", "L") are being
+            used (the default).
         progbar : bool, optional
             Show a live progress bar of the simplification process.
         inplace : bool, optional
@@ -10377,6 +10433,10 @@ class TensorNetwork(object):
         # all the methods
         if output_inds is None:
             output_inds = self.outer_inds()
+
+        if check_zero == "auto":
+            # any method but R checks data entries anyway
+            check_zero = bool(set(seq) - {"R"})
 
         tn.squeeze_(exclude=output_inds)
 
@@ -10417,6 +10477,7 @@ class TensorNetwork(object):
                         output_inds=ix_o,
                         cache=cache,
                         equalize_norms=equalize_norms,
+                        check_zero=check_zero,
                         **rank_simplify_opts,
                     )
                 elif meth == "A":
@@ -10430,6 +10491,7 @@ class TensorNetwork(object):
                         atol=atol,
                         cache=cache,
                         equalize_norms=equalize_norms,
+                        check_zero=check_zero,
                         **split_simplify_opts,
                     )
                 elif meth == "L":
@@ -10438,6 +10500,7 @@ class TensorNetwork(object):
                         cutoff=atol,
                         cache=cache,
                         equalize_norms=equalize_norms,
+                        check_zero=check_zero,
                         **loop_simplify_opts,
                     )
                 elif meth == "P":
@@ -10446,6 +10509,7 @@ class TensorNetwork(object):
                         cutoff=atol,
                         cache=cache,
                         equalize_norms=equalize_norms,
+                        check_zero=check_zero,
                         **loop_simplify_opts,
                     )
                 else:
@@ -10457,9 +10521,10 @@ class TensorNetwork(object):
         if equalize_norms:
             if equalize_norms is True:
                 # this also redistributes the collected exponents
-                tn.equalize_norms_()
+                value = None
             else:
-                tn.equalize_norms_(value=equalize_norms)
+                value = equalize_norms
+            tn.equalize_norms_(value=value, check_zero=check_zero)
 
         if progbar:
             pbar.close()
@@ -10589,6 +10654,7 @@ class TensorNetwork(object):
         max_simplification_iterations=100,
         converged_tol=0.01,
         equalize_norms=True,
+        check_zero=True,
         progbar=False,
         inplace=False,
         **full_simplify_opts,
@@ -10601,6 +10667,7 @@ class TensorNetwork(object):
         simplify_opts = {
             "atol": atol,
             "equalize_norms": equalize_norms,
+            "check_zero": check_zero,
             "progbar": progbar,
             "output_inds": output_inds,
             "cache": set(),
@@ -10678,7 +10745,20 @@ class TensorNetwork(object):
         """The dtype of this TensorNetwork, this is the minimal common type
         of all the tensors data.
         """
+        # TODO: support non numpy dtypes here
         return get_common_dtype(*self.arrays)
+
+    @property
+    def dtype_name(self):
+        """The name of the data type of the array elements."""
+        return next(iter(self.tensor_map.values())).dtype_name
+
+    @property
+    def backend(self):
+        """Get the backend of any tensor in this network, asssuming it to be
+        the same for all tensors.
+        """
+        return next(iter(self.tensor_map.values())).backend
 
     def iscomplex(self):
         return iscomplex(self)

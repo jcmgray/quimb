@@ -8,7 +8,10 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - replace all `numba` based paralellism (`prange` and parallel vectorize) with explicit thread pool based parallelism. Should be more reliable and no need to set `NUMBA_NUM_THREADS` anymore. Remove env var `QUIMB_NUMBA_PAR`.
+- [`Circuit`](quimb.tensor.circuit.Circuit): add `dtype` and `convert_eager` options. `dtype` specifies what the computation should be performed in. `convert_eager` specifies whether to apply this (and any `to_backend` calls) as soon as gates are applied (the default for MPS circuit simulation) or just prior to contraction (the default for exact contraction simulation).
+- [`tn.full_simplify`](quimb.tensor.tensor_core.TensorNetwork.full_simplify): add `check_zero` (by default set of `"auto"`) option which explicitly checks for zero tensor norms when equalizing norms to avoid `log10(norm)` resulting in -inf or nan. Since it creates a data dependency that breaks e.g. `jax` tracing, it is optional.
 - [`schematic.Drawing`](quimb.schematic.Drawing): add `shorten` kwarg to [line drawing](quimb.schematic.Drawing.line) and [curve drawing](quimb.schematic.Drawing.curve) and examples to {ref}`schematic`.
+- [`TensorNetwork`](quimb.tensor.tensor_core.TensorNetwork): add `.backend` and `.dtype_name` properties.
 
 
 (whats-new-1-9-0)=
