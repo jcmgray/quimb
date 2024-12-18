@@ -10436,7 +10436,7 @@ class TensorNetwork(object):
 
         if check_zero == "auto":
             # any method but R checks data entries anyway
-            check_zero == bool(set(seq) - {"R"})
+            check_zero = bool(set(seq) - {"R"})
 
         tn.squeeze_(exclude=output_inds)
 
