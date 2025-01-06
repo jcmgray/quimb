@@ -261,7 +261,7 @@ class LocalHamGen:
                     range(ndim_G // 2, ndim_G),
                 )
 
-            U = do("linalg.expm", G * x)
+            U = do("scipy.linalg.expm", G * x)
 
             if need_to_reshape:
                 U = do("reshape", U, shape_orig)

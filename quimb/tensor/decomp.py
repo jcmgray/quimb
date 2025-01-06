@@ -1,5 +1,4 @@
-"""Functions for decomposing and projecting matrices.
-"""
+"""Functions for decomposing and projecting matrices."""
 
 import functools
 import operator
@@ -999,7 +998,7 @@ def isometrize_exp(x, backend):
             "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
         )
         x = x - dag(x)
-        Q = do("linalg.expm", x)
+        Q = do("scipy.linalg.expm", x)
         return Q[:m, :n]
 
 
