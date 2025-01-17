@@ -3,7 +3,7 @@
 `quimb` is available on both [pypi](https://pypi.org/project/quimb/) and
 [conda-forge](https://anaconda.org/conda-forge/quimb). While `quimb` is
 pure python and has no direct dependencies itself, the recommended distribution
-would be [mambaforge](https://github.com/conda-forge/miniforge#mambaforge)
+would be [miniforge](https://conda-forge.org/download/)
 for installing the various backend array libraries and their dependencies.
 
 **Installing with `pip`:**
@@ -16,14 +16,15 @@ pip install quimb
 conda install -c conda-forge quimb
 ```
 
-**Installing with `mambaforge`:**
+**Installing with `mamba`:**
 ```bash
 mamba install quimb
 ```
 ```{hint}
-Mamba is a faster version of `conda`, and the -forge distritbution comes
-pre-configured with only the `conda-forge` channel, which further simplifies
-and speeds up installing dependencies.
+Mamba is a faster version of `conda` tool, and the -forge distribution comes
+pre-configured with the community `conda-forge` channel only, which further
+simplifies and speeds up installing dependencies. `mini-` refers to *not*
+including the many default packages that come with `Anaconda`.
 ```
 
 **Installing the latest version directly from github:**
@@ -55,15 +56,19 @@ The core packages `quimb` requires are:
 - [tqdm](https://github.com/tqdm/tqdm)
 - [psutil](https://github.com/giampaolo/psutil)
 
-For ease and performance (i.e. mkl compiled libraries), [conda](https://conda.io/miniconda.html/) is the recommended distribution with which to install these.
+For ease and performance (i.e. mkl compiled libraries), [miniforge](https://conda-forge.org/download/) is the recommended distribution with which to install these.
+
+```{hint}
+This is mostly becuase MKL still (as of January 2025) provides a significant performance boost over OpenBLAS for decompositions such as `svd`, `qr` and `eigh`. Using conda-forge you can specify MKL using `blas=*=mkl` in either the install command or your `environment.yml` file.
+```
 
 In addition, the tensor network library, {mod}`quimb.tensor`, requires:
 
-- [cotengra](https://cotengra.readthedocs.io)
 - [autoray](https://autoray.readthedocs.io)
+- [cotengra](https://cotengra.readthedocs.io)
 
-`cotengra` efficiently optimizes and performs tensor contraction expressions. It can be installed with `pip` or from [conda-forge](https://conda-forge.org) and is a required dependency since various bits of the core `quimb` module now make use tensor-network functionality behind the scenes.
 `autoray` allows backend agnostic numeric code for various tensor network operations so that many libraries other than `numpy` can be used. It can be installed via `pip` from [pypi](https://pypi.org/project/autoray/) or via `conda` [from conda-forge](https://anaconda.org/conda-forge/autoray).
+`cotengra` efficiently optimizes and performs tensor contraction expressions. It can be installed with `pip` or from [conda-forge](https://conda-forge.org) and is a required dependency since various bits of the core `quimb` module now make use tensor-network functionality behind the scenes. If you are performing advanced contractions you may want to see the [cotengra installation docs](https://cotengra.readthedocs.io/en/latest/installation.html).
 
 ## Optional Dependencies
 
