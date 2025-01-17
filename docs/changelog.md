@@ -2,6 +2,18 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-10-1)=
+## v1.10.1 (unreleased)
+
+**Enhancements:**
+
+- [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure): add a `seed` kwarg
+
+**Bug fixes:**
+
+- fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) for `cupy` backend arrays ({issue}`276`).
+
+
 (whats-new-1-10-0)=
 ## v1.10.0 (2024-12-18)
 
