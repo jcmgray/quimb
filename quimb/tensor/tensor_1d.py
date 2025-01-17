@@ -3495,6 +3495,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         renorm=True,
         info=None,
         get=None,
+        seed=None,
         inplace=False,
     ):
         r"""Measure this MPS at ``site``, including projecting the state.
@@ -3530,6 +3531,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         get : {None, 'outcome'}, optional
             If ``'outcome'``, simply return the outcome, and don't perform any
             projection.
+        seed : None, int, or np.random.Generator, optional
+            A random seed or generator to use.
         inplace : bool, optional
             Whether to perform the measurement in place or not.
 
@@ -3556,11 +3559,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         # diagonal of reduced density matrix = probs
         tii = t.contract(t.H, output_inds=(ind,))
-        p = do("real", tii.data)
+        pi = do("to_numpy", tii.data).real
+        pi /= pi.sum()
 
+        rng = np.random.default_rng(seed)
         if outcome is None:
             # sample an outcome
-            outcome = do("random.choice", do("arange", d, like=p), p=p)
+            outcome = rng.choice(pi.size, p=pi)
+        outcome = int(outcome)
 
         if get == "outcome":
             return outcome
@@ -3569,7 +3575,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         t.isel_({ind: outcome})
 
         if renorm:
-            t.modify(data=t.data / p[outcome] ** 0.5)
+            t.modify(data=t.data / pi[outcome] ** 0.5)
 
         if remove:
             # contract the projected tensor into neighbor
