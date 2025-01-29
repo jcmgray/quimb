@@ -14,24 +14,9 @@ from scipy.ndimage import uniform_filter1d
 from ..core import divide_update_, dot, njit, prod, ptr, subtract_update_, vdot
 from ..gen.rand import rand_phase, rand_rademacher, randn, seed_rand
 from ..linalg.mpi_launcher import get_mpi_pool
-from ..utils import (
-    default_to_neutral_style,
-    find_library,
-    format_number_with_error,
-    int2tup,
-    raise_cant_find_library_function,
-)
+from ..utils import format_number_with_error, int2tup
 from ..utils import progbar as Progbar
-
-if find_library("cotengra") and find_library("autoray"):
-    from ..tensor.tensor_1d import MatrixProductOperator
-    from ..tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
-    from ..tensor.tensor_core import Tensor
-else:
-    reqs = "[cotengra,autoray]"
-    Tensor = raise_cant_find_library_function(reqs)
-    construct_lanczos_tridiag_MPO = raise_cant_find_library_function(reqs)
-
+from ..utils_plot import default_to_neutral_style
 
 # --------------------------------------------------------------------------- #
 #                  'Lazy' representation tensor contractions                  #
@@ -67,6 +52,8 @@ def lazy_ptr_linop(psi_ab, dims, sysa, **linop_opts):
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
     """
+    from .tensor.tensor_core import Tensor
+
     sysa = int2tup(sysa)
 
     Kab = Tensor(
@@ -126,6 +113,8 @@ def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb, **linop_opts):
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
     """
+    from .tensor.tensor_core import Tensor
+
     sysa, sysb = int2tup(sysa), int2tup(sysb)
     sys_ab = sorted(sysa + sysb)
 
@@ -517,8 +506,14 @@ def single_random_estimate(
     info=None,
     **lanczos_opts,
 ):
+    from ..tensor.tensor_1d import MatrixProductOperator
+
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):
+        from ..tensor.tensor_approx_spectral import (
+            construct_lanczos_tridiag_MPO,
+        )
+
         lanc_fn = construct_lanczos_tridiag_MPO
     else:
         lanc_fn = construct_lanczos_tridiag

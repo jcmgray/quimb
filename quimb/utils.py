@@ -802,50 +802,6 @@ def tree_apply_dict(f, tree, is_leaf):
 tree_register_container(dict, tree_map_dict, tree_iter_dict, tree_apply_dict)
 
 
-# a style to use for matplotlib that works with light and dark backgrounds
-NEUTRAL_STYLE = {
-    "axes.edgecolor": (0.5, 0.5, 0.5),
-    "axes.facecolor": (0, 0, 0, 0),
-    "axes.grid": True,
-    "axes.labelcolor": (0.5, 0.5, 0.5),
-    "axes.spines.right": False,
-    "axes.spines.top": False,
-    "figure.facecolor": (0, 0, 0, 0),
-    "grid.alpha": 0.1,
-    "grid.color": (0.5, 0.5, 0.5),
-    "legend.frameon": False,
-    "text.color": (0.5, 0.5, 0.5),
-    "xtick.color": (0.5, 0.5, 0.5),
-    "xtick.minor.visible": True,
-    "ytick.color": (0.5, 0.5, 0.5),
-    "ytick.minor.visible": True,
-}
-
-
-def default_to_neutral_style(fn):
-    """Wrap a function or method to use the neutral style by default."""
-
-    @functools.wraps(fn)
-    def wrapper(*args, style="neutral", show_and_close=True, **kwargs):
-        import matplotlib.pyplot as plt
-
-        if style == "neutral":
-            style = NEUTRAL_STYLE
-        elif not style:
-            style = {}
-
-        with plt.style.context(style):
-            out = fn(*args, **kwargs)
-
-            if show_and_close:
-                plt.show()
-                plt.close()
-
-            return out
-
-    return wrapper
-
-
 def autocorrect_kwargs(func=None, valid_kwargs=None):
     """A decorator that suggests the right keyword arguments if you get them
     wrong. Useful for functions with many specific options.

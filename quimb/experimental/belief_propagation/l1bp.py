@@ -1,5 +1,3 @@
-import autoray as ar
-
 import quimb.tensor as qtn
 from quimb.utils import oset
 
@@ -22,10 +20,32 @@ class L1BP(BeliefPropagationCommon):
         The tags identifying the sites in ``tn``, each tag forms a region,
         which should not overlap. If the tensor network is structured, then
         these are inferred automatically.
-    damping : float, optional
-        The damping parameter to use, defaults to no damping.
-    update : {'parallel', 'sequential'}, optional
-        Whether to update all messages in parallel or sequentially.
+    damping : float or callable, optional
+        The damping factor to apply to messages. This simply mixes some part
+        of the old message into the new one, with the final message being
+        ``damping * old + (1 - damping) * new``. This makes convergence more
+        reliable but slower.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially (newly computed messages are
+        immediately used for other updates in the same iteration round) or in
+        parallel (all messages are comptued using messages from the previous
+        round only). Sequential generally helps convergence but parallel can
+        possibly converge to differnt solutions.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -39,17 +59,27 @@ class L1BP(BeliefPropagationCommon):
         self,
         tn,
         site_tags=None,
+        *,
         damping=0.0,
         update="sequential",
+        normalize=None,
+        distance=None,
+        inplace=False,
         local_convergence=True,
         optimize="auto-hq",
         message_init_function=None,
         **contract_opts,
     ):
-        self.backend = next(t.backend for t in tn)
-        self.damping = damping
+        super().__init__(
+            tn,
+            damping=damping,
+            update=update,
+            normalize=normalize,
+            distance=distance,
+            inplace=inplace,
+        )
+
         self.local_convergence = local_convergence
-        self.update = update
         self.optimize = optimize
         self.contract_opts = contract_opts
 
@@ -65,33 +95,6 @@ class L1BP(BeliefPropagationCommon):
             self.touch_map,
         ) = create_lazy_community_edge_map(tn, site_tags)
         self.touched = oset()
-
-        self._abs = ar.get_lib_fn(self.backend, "abs")
-        self._max = ar.get_lib_fn(self.backend, "max")
-        self._sum = ar.get_lib_fn(self.backend, "sum")
-        _real = ar.get_lib_fn(self.backend, "real")
-        _argmax = ar.get_lib_fn(self.backend, "argmax")
-        _reshape = ar.get_lib_fn(self.backend, "reshape")
-        self._norm = ar.get_lib_fn(self.backend, "linalg.norm")
-
-        def _normalize(x):
-
-            # sx = self._sum(x)
-            # sphase = sx / self._abs(sx)
-            # smag = self._norm(x)**0.5
-            # return x / (smag * sphase)
-
-            return x / self._sum(x)
-            # return x / self._norm(x)
-            # return x / self._max(x)
-            # fx = _reshape(x, (-1,))
-            # return x / fx[_argmax(self._abs(_real(fx)))]
-
-        def _distance(x, y):
-            return self._sum(self._abs(x - y))
-
-        self._normalize = _normalize
-        self._distance = _distance
 
         # for each meta bond create initial messages
         self.messages = {}
@@ -110,7 +113,7 @@ class L1BP(BeliefPropagationCommon):
                         **self.contract_opts,
                     )
                     # normalize
-                    tm.modify(apply=self._normalize)
+                    tm.modify(apply=self._normalize_fn)
                 else:
                     shape = tuple(tn_i.ind_size(ix) for ix in bix)
                     tm = qtn.Tensor(
@@ -156,20 +159,21 @@ class L1BP(BeliefPropagationCommon):
                 optimize=self.optimize,
                 **self.contract_opts,
             )
-            return self._normalize(tm_new.data)
+            return self._normalize_fn(tm_new.data)
 
         def _update_m(key, data):
             nonlocal nconv, max_mdiff
 
             tm = self.messages[key]
 
-            if callable(self.damping):
-                damping_m = self.damping()
-                data = (1 - damping_m) * data + damping_m * tm.data
-            elif self.damping != 0.0:
-                data = (1 - self.damping) * data + self.damping * tm.data
+            # pre-damp distance
+            mdiff = self._distance_fn(data, tm.data)
 
-            mdiff = float(self._distance(tm.data, data))
+            if self.damping:
+                data = self.fn_damping(data, tm.data)
+
+            # # post-damp distance
+            # mdiff = self._distance_fn(data, tm.data)
 
             if mdiff > tol:
                 # mark touching messages for update
@@ -198,10 +202,14 @@ class L1BP(BeliefPropagationCommon):
                 _update_m(key, data)
 
         self.touched = new_touched
-        return nconv, ncheck, max_mdiff
+        return {
+            "nconv": nconv,
+            "ncheck": ncheck,
+            "max_mdiff": max_mdiff,
+        }
 
-    def contract(self, strip_exponent=False):
-        tvals = []
+    def contract(self, strip_exponent=False, check_zero=True):
+        zvals = []
         for site, tn_ic in self.local_tns.items():
             if site in self.neighbors:
                 tval = qtn.tensor_contract(
@@ -218,9 +226,8 @@ class L1BP(BeliefPropagationCommon):
                     optimize=self.optimize,
                     **self.contract_opts,
                 )
-            tvals.append(tval)
+            zvals.append((tval, 1))
 
-        mvals = []
         for i, j in self.edges:
             mval = qtn.tensor_contract(
                 self.messages[i, j],
@@ -228,24 +235,28 @@ class L1BP(BeliefPropagationCommon):
                 optimize=self.optimize,
                 **self.contract_opts,
             )
-            mvals.append(mval)
+            # power / counting factor is -1 for messages
+            zvals.append((mval, -1))
 
         return combine_local_contractions(
-            tvals, mvals, self.backend, strip_exponent=strip_exponent
+            zvals,
+            backend=self.backend,
+            strip_exponent=strip_exponent,
+            check_zero=check_zero,
         )
 
-    def normalize_messages(self):
+    def normalize_message_pairs(self):
         """Normalize all messages such that for each bond `<m_i|m_j> = 1` and
         `<m_i|m_i> = <m_j|m_j>` (but in general != 1).
         """
         for i, j in self.edges:
             tmi = self.messages[i, j]
             tmj = self.messages[j, i]
-            nij = abs(tmi @ tmj)**0.5
-            nii = (tmi @ tmi)**0.25
-            njj = (tmj @ tmj)**0.25
-            tmi /= (nij * nii / njj)
-            tmj /= (nij * njj / nii)
+            nij = abs(tmi @ tmj) ** 0.5
+            nii = (tmi @ tmi) ** 0.25
+            njj = (tmj @ tmj) ** 0.25
+            tmi /= nij * nii / njj
+            tmj /= nij * njj / nii
 
 
 def contract_l1bp(
@@ -255,6 +266,7 @@ def contract_l1bp(
     site_tags=None,
     damping=0.0,
     update="sequential",
+    diis=False,
     local_convergence=True,
     optimize="auto-hq",
     strip_exponent=False,
@@ -308,6 +320,7 @@ def contract_l1bp(
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        diis=diis,
         info=info,
         progbar=progbar,
     )

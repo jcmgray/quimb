@@ -8,6 +8,7 @@ TODO:
 - [ ] implement sequential update
 
 """
+
 import autoray as ar
 import quimb.tensor as qtn
 
@@ -174,81 +175,6 @@ def compute_all_tensor_messages_tree(x, ms, backend=None):
     return mouts
 
 
-def iterate_belief_propagation_basic(
-    tn,
-    messages,
-    damping=None,
-    smudge_factor=1e-12,
-    tol=None,
-):
-    """Run a single iteration of belief propagation. This is the basic version
-    that does not vectorize contractions.
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        The tensor network to run BP on.
-    messages : dict
-        The current messages. For every index and tensor id pair, there should
-        be a message to and from with keys ``(ix, tid)`` and ``(tid, ix)``.
-    smudge_factor : float, optional
-        A small number to add to the denominator of messages to avoid division
-        by zero. Note when this happens the numerator will also be zero.
-
-    Returns
-    -------
-    new_messages : dict
-        The new messages.
-    """
-    backend = ar.infer_backend(next(iter(messages.values())))
-
-    # _sum = ar.get_lib_fn(backend, "sum")
-    # n.b. at small sizes python sum is faster than numpy sum
-    _sum = ar.get_lib_fn(backend, "sum")
-    # _max = ar.get_lib_fn(backend, "max")
-    _abs = ar.get_lib_fn(backend, "abs")
-
-    def _normalize_and_insert(k, m, max_dm):
-        # normalize and insert
-        m = m / _sum(m)
-
-        old_m = messages[k]
-
-        if damping is not None:
-            # mix old and new
-            m = damping * old_m + (1 - damping) * m
-
-        # compare to the old messages
-        dm = _sum(_abs(m - old_m))
-        max_dm = max(dm, max_dm)
-
-        # set and return the max diff so far
-        messages[k] = m
-        return max_dm
-
-    max_dm = 0.0
-
-    # hyper index messages
-    for ix, tids in tn.ind_map.items():
-        ms = compute_all_hyperind_messages_prod(
-            [messages[tid, ix] for tid in tids], smudge_factor
-        )
-        for tid, m in zip(tids, ms):
-            max_dm = _normalize_and_insert((ix, tid), m, max_dm)
-
-    # tensor messages
-    for tid, t in tn.tensor_map.items():
-        inds = t.inds
-        ms = compute_all_tensor_messages_tree(
-            t.data,
-            [messages[ix, tid] for ix in inds],
-        )
-        for ix, m in zip(inds, ms):
-            max_dm = _normalize_and_insert((tid, ix), m, max_dm)
-
-    return messages, max_dm
-
-
 class HD1BP(BeliefPropagationCommon):
     """Object interface for hyper, dense, 1-norm belief propagation. This is
     standard belief propagation in tensor network form.
@@ -259,37 +185,127 @@ class HD1BP(BeliefPropagationCommon):
         The tensor network to run BP on.
     messages : dict, optional
         Initial messages to use, if not given then uniform messages are used.
+    damping : float or callable, optional
+        The damping factor to apply to messages. This simply mixes some part
+        of the old message into the new one, with the final message being
+        ``damping * old + (1 - damping) * new``. This makes convergence more
+        reliable but slower.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially (newly computed messages are
+        immediately used for other updates in the same iteration round) or in
+        parallel (all messages are comptued using messages from the previous
+        round only). Sequential generally helps convergence but parallel can
+        possibly converge to differnt solutions.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
     smudge_factor : float, optional
         A small number to add to the denominator of messages to avoid division
         by zero. Note when this happens the numerator will also be zero.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
     """
 
     def __init__(
         self,
         tn,
+        *,
         messages=None,
-        damping=None,
+        damping=0.0,
+        update="sequential",
+        normalize=None,
+        distance=None,
         smudge_factor=1e-12,
+        inplace=False,
     ):
-        self.tn = tn
-        self.backend = next(t.backend for t in tn)
+        super().__init__(
+            tn,
+            damping=damping,
+            update=update,
+            normalize=normalize,
+            distance=distance,
+            inplace=inplace,
+        )
+
         self.smudge_factor = smudge_factor
-        self.damping = damping
-        if messages is None:
+
+        if callable(messages):
+            messages = initialize_hyper_messages(
+                tn, fill_fn=messages, smudge_factor=smudge_factor
+            )
+        elif messages is None:
             messages = initialize_hyper_messages(
                 tn, smudge_factor=smudge_factor
             )
         self.messages = messages
 
-    def iterate(self, **kwargs):
-        self.messages, max_dm = iterate_belief_propagation_basic(
-            self.tn,
-            self.messages,
-            damping=self.damping,
-            smudge_factor=self.smudge_factor,
-            **kwargs,
-        )
-        return None, None, max_dm
+    def iterate(self, tol=None):
+        if self.update == "sequential":
+            new_messages = self.messages
+        else:
+            new_messages = {}
+
+        def _normalize_and_insert(key, new_m, max_mdiff):
+            # normalize and insert
+            new_m = self._normalize_fn(new_m)
+            old_m = self.messages[key]
+
+            # pre-damp distance
+            mdiff = self._distance_fn(old_m, new_m)
+
+            if self.damping:
+                new_m = self.fn_damping(old_m, new_m)
+
+            # # post-damp distance
+            # mdiff = self._distance_fn(old_m, new_m)
+
+            max_mdiff = max(mdiff, max_mdiff)
+
+            # set and return the max diff so far
+            new_messages[key] = new_m
+            return max_mdiff
+
+        max_mdiff = 0.0
+
+        # hyper index messages
+        for ix, tids in self.tn.ind_map.items():
+            ms = compute_all_hyperind_messages_prod(
+                [self.messages[tid, ix] for tid in tids],
+                self.smudge_factor,
+            )
+            for tid, m in zip(tids, ms):
+                max_mdiff = _normalize_and_insert((ix, tid), m, max_mdiff)
+
+        if self.update == "parallel":
+            self.messages.update(new_messages)
+            new_messages.clear()
+
+        # tensor messages
+        for tid, t in self.tn.tensor_map.items():
+            inds = t.inds
+            ms = compute_all_tensor_messages_tree(
+                t.data,
+                [self.messages[ix, tid] for ix in inds],
+            )
+            for ix, m in zip(inds, ms):
+                max_mdiff = _normalize_and_insert((tid, ix), m, max_mdiff)
+
+        if self.update == "parallel":
+            self.messages.update(new_messages)
+
+        return max_mdiff
 
     def get_gauged_tn(self):
         """Assuming the supplied tensor network has no hyper or dangling
@@ -305,15 +321,15 @@ class HD1BP(BeliefPropagationCommon):
             ma = self.messages[ka]
             mb = self.messages[kb]
 
-            el, ev = ar.do('linalg.eig', ar.do('outer', ma, mb))
-            k = ar.do('argsort', -ar.do('abs', el))
+            el, ev = ar.do("linalg.eig", ar.do("outer", ma, mb))
+            k = ar.do("argsort", -ar.do("abs", el))
             ev = ev[:, k]
             Uinv = ev
-            U = ar.do('linalg.inv', ev)
+            U = ar.do("linalg.inv", ev)
             tng._insert_gauge_tids(U, tida, tidb, Uinv)
         return tng
 
-    def contract(self, strip_exponent=False):
+    def contract(self, strip_exponent=False, check_zero=True):
         """Estimate the total contraction, i.e. the exponential of the 'Bethe
         free entropy'.
         """
@@ -321,6 +337,7 @@ class HD1BP(BeliefPropagationCommon):
             self.tn,
             self.messages,
             strip_exponent=strip_exponent,
+            check_zero=check_zero,
             backend=self.backend,
         )
 
@@ -331,8 +348,15 @@ def contract_hd1bp(
     max_iterations=1000,
     tol=5e-6,
     damping=0.0,
+    diis=False,
+    update="sequential",
+    normalize=None,
+    distance=None,
+    tol_abs=None,
+    tol_rolling_diff=None,
     smudge_factor=1e-12,
     strip_exponent=False,
+    check_zero=True,
     info=None,
     progbar=False,
 ):
@@ -350,13 +374,45 @@ def contract_hd1bp(
     tol : float, optional
         The convergence tolerance for messages.
     damping : float, optional
-        The damping factor to use, 0.0 means no damping.
+        The damping parameter to use, defaults to no damping.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace to
+        help converge the messages by extrapolating to low error guesses.
+        If a dict, should contain options for the DIIS algorithm. The
+        relevant options are {`max_history`, `beta`, `rcond`}.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially or in parallel.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
+    tol_abs : float, optional
+        The absolute convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``.
+    tol_rolling_diff : float, optional
+        The rolling mean convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``. This is used to stop
+        running when the messages are just bouncing around the same level,
+        without any overall upward or downward trends, roughly speaking.
     smudge_factor : float, optional
         A small number to add to the denominator of messages to avoid division
         by zero. Note when this happens the numerator will also be zero.
     strip_exponent : bool, optional
         Whether to strip the exponent from the final result. If ``True``
         then the returned result is ``(mantissa, exponent)``.
+    check_zero : bool, optional
+        Whether to check for zero values and return zero early.
     info : dict, optional
         If specified, update this dictionary with information about the
         belief propagation run.
@@ -371,15 +427,24 @@ def contract_hd1bp(
         tn,
         messages=messages,
         damping=damping,
+        update=update,
+        normalize=normalize,
+        distance=distance,
         smudge_factor=smudge_factor,
     )
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        diis=diis,
+        tol_abs=tol_abs,
+        tol_rolling_diff=tol_rolling_diff,
         info=info,
         progbar=progbar,
     )
-    return bp.contract(strip_exponent=strip_exponent)
+    return bp.contract(
+        strip_exponent=strip_exponent,
+        check_zero=check_zero,
+    )
 
 
 def run_belief_propagation_hd1bp(

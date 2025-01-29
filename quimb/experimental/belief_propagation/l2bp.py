@@ -12,6 +12,10 @@ from .bp_common import (
 )
 
 
+def _identity(x):
+    return x
+
+
 class L2BP(BeliefPropagationCommon):
     """Lazy (as in multiple uncontracted tensors per site) 2-norm (as in for
     wavefunctions and operators) belief propagation.
@@ -24,10 +28,38 @@ class L2BP(BeliefPropagationCommon):
         The tags identifying the sites in ``tn``, each tag forms a region,
         which should not overlap. If the tensor network is structured, then
         these are inferred automatically.
-    damping : float, optional
-        The damping parameter to use, defaults to no damping.
-    update : {'parallel', 'sequential'}, optional
-        Whether to update all messages in parallel or sequentially.
+    damping : float or callable, optional
+        The damping factor to apply to messages. This simply mixes some part
+        of the old message into the new one, with the final message being
+        ``damping * old + (1 - damping) * new``. This makes convergence more
+        reliable but slower.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially (newly computed messages are
+        immediately used for other updates in the same iteration round) or in
+        parallel (all messages are comptued using messages from the previous
+        round only). Sequential generally helps convergence but parallel can
+        possibly converge to differnt solutions.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
+    symmetrize : bool or callable, optional
+        Whether to symmetrize the messages, i.e. for each message ensure that
+        it is hermitian with respect to its bra and ket indices. If a callable
+        it should take a message and return the symmetrized message.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -41,16 +73,27 @@ class L2BP(BeliefPropagationCommon):
         self,
         tn,
         site_tags=None,
+        *,
         damping=0.0,
         update="sequential",
+        normalize=None,
+        distance=None,
+        inplace=False,
+        symmetrize=True,
         local_convergence=True,
         optimize="auto-hq",
         **contract_opts,
     ):
-        self.backend = next(t.backend for t in tn)
-        self.damping = damping
+        super().__init__(
+            tn,
+            damping=damping,
+            update=update,
+            normalize=normalize,
+            distance=distance,
+            inplace=inplace,
+        )
+
         self.local_convergence = local_convergence
-        self.update = update
         self.optimize = optimize
         self.contract_opts = contract_opts
 
@@ -67,25 +110,8 @@ class L2BP(BeliefPropagationCommon):
         ) = create_lazy_community_edge_map(tn, site_tags)
         self.touched = oset()
 
-        _abs = ar.get_lib_fn(self.backend, "abs")
-        _sum = ar.get_lib_fn(self.backend, "sum")
-        _transpose = ar.get_lib_fn(self.backend, "transpose")
-        _conj = ar.get_lib_fn(self.backend, "conj")
-
-        def _normalize(x):
-            return x / _sum(x)
-
-        def _symmetrize(x):
-            N = ar.ndim(x)
-            perm = (*range(N // 2, N), *range(0, N // 2))
-            return x + _conj(_transpose(x, perm))
-
-        def _distance(x, y):
-            return _sum(_abs(x - y))
-
-        self._normalize = _normalize
-        self._symmetrize = _symmetrize
-        self._distance = _distance
+        # these are all settable properties
+        self.symmetrize = symmetrize
 
         # initialize messages
         self.messages = {}
@@ -106,8 +132,8 @@ class L2BP(BeliefPropagationCommon):
                     drop_tags=True,
                     **self.contract_opts,
                 )
-                tm.modify(apply=self._symmetrize)
-                tm.modify(apply=self._normalize)
+                tm.modify(apply=self._symmetrize_fn)
+                tm.modify(apply=self._normalize_fn)
                 self.messages[i, j] = tm
 
         # initialize contractions
@@ -144,6 +170,36 @@ class L2BP(BeliefPropagationCommon):
                     (tn_i_left, *tks, tn_i_right), virtual=True
                 )
 
+    @property
+    def symmetrize(self):
+        return self._symmetrize
+
+    @symmetrize.setter
+    def symmetrize(self, symmetrize):
+        if callable(symmetrize):
+            # explicit function
+            self._symmetrize = True
+            self._symmetrize_fn = symmetrize
+
+        elif symmetrize:
+            # default symmetrization
+            _transpose = ar.get_lib_fn(self.backend, "transpose")
+            _conj = ar.get_lib_fn(self.backend, "conj")
+
+            def _symmetrize_fn(x):
+                N = ar.ndim(x)
+                perm = (*range(N // 2, N), *range(0, N // 2))
+                # XXX: do this blockwise for block/fermi arrays?
+                return x + _conj(_transpose(x, perm))
+
+            self._symmetrize = True
+            self._symmetrize_fn = _symmetrize_fn
+
+        else:
+            # no symmetrization
+            self._symmetrize = False
+            self._symmetrize_fn = _identity
+
     def iterate(self, tol=5e-6):
         if (not self.local_convergence) or (not self.touched):
             # assume if asked to iterate that we want to check all messages
@@ -171,8 +227,8 @@ class L2BP(BeliefPropagationCommon):
                 optimize=self.optimize,
                 **self.contract_opts,
             )
-            tm_new.modify(apply=self._symmetrize)
-            tm_new.modify(apply=self._normalize)
+            tm_new.modify(apply=self._symmetrize_fn)
+            tm_new.modify(apply=self._normalize_fn)
             return tm_new.data
 
         def _update_m(key, data):
@@ -180,14 +236,14 @@ class L2BP(BeliefPropagationCommon):
 
             tm = self.messages[key]
 
-            if self.damping > 0.0:
-                data = (1 - self.damping) * data + self.damping * tm.data
+            # pre-damp distance
+            mdiff = self._distance_fn(data, tm.data)
 
-            try:
-                mdiff = float(self._distance(tm.data, data))
-            except (TypeError, ValueError):
-                # handle e.g. lazy arrays
-                mdiff = float("inf")
+            if self.damping:
+                data = self.fn_damping(data, tm.data)
+
+            # # post-damp distance
+            # mdiff = self._distance_fn(data, tm.data)
 
             if mdiff > tol:
                 # mark touching messages for update
@@ -217,26 +273,31 @@ class L2BP(BeliefPropagationCommon):
 
         self.touched = new_touched
 
-        return nconv, ncheck, max_mdiff
+        return {
+            "nconv": nconv,
+            "ncheck": ncheck,
+            "max_mdiff": max_mdiff,
+        }
 
-    def normalize_messages(self):
+    def normalize_message_pairs(self):
         """Normalize all messages such that for each bond `<m_i|m_j> = 1` and
-        `<m_i|m_i> = <m_j|m_j>` (but in general != 1).
+        `<m_i|m_i> = <m_j|m_j>` (but in general != 1). This is different to
+        normalizing each message.
         """
         for i, j in self.edges:
             tmi = self.messages[i, j]
             tmj = self.messages[j, i]
-            nij = (tmi @ tmj)**0.5
-            nii = (tmi @ tmi)**0.25
-            njj = (tmj @ tmj)**0.25
-            tmi /= (nij * nii / njj)
-            tmj /= (nij * njj / nii)
+            nij = (tmi @ tmj) ** 0.5
+            nii = (tmi @ tmi) ** 0.25
+            njj = (tmj @ tmj) ** 0.25
+            tmi /= nij * nii / njj
+            tmj /= nij * njj / nii
 
-    def contract(self, strip_exponent=False):
+    def contract(self, strip_exponent=False, check_zero=True):
         """Estimate the contraction of the norm squared using the current
         messages.
         """
-        tvals = []
+        zvals = []
         for i, ket in self.local_tns.items():
             # we allow missing keys here for tensors which are just
             # disconnected but still appear in local_tns
@@ -250,22 +311,23 @@ class L2BP(BeliefPropagationCommon):
                     bra,
                 )
             )
-            tvals.append(
-                tni.contract(all, optimize=self.optimize, **self.contract_opts)
-            )
+            z = tni.contract(all, optimize=self.optimize, **self.contract_opts)
+            zvals.append((z, 1))
 
-        mvals = []
         for i, j in self.edges:
-            mvals.append(
-                (self.messages[i, j] & self.messages[j, i]).contract(
-                    all,
-                    optimize=self.optimize,
-                    **self.contract_opts,
-                )
+            z = (self.messages[i, j] & self.messages[j, i]).contract(
+                all,
+                optimize=self.optimize,
+                **self.contract_opts,
             )
+            # power / counting factor is -1 for messages, i.e. divide
+            zvals.append((z, -1))
 
         return combine_local_contractions(
-            tvals, mvals, self.backend, strip_exponent=strip_exponent
+            zvals,
+            backend=self.backend,
+            strip_exponent=strip_exponent,
+            check_zero=check_zero,
         )
 
     def partial_trace(

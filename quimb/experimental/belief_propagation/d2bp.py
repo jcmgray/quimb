@@ -1,3 +1,5 @@
+import contextlib
+
 import autoray as ar
 
 import quimb.tensor as qtn
@@ -6,7 +8,9 @@ from quimb.utils import oset
 from .bp_common import (
     BeliefPropagationCommon,
     combine_local_contractions,
+    normalize_message_pair,
 )
+from .regions import RegionGraph
 
 
 class D2BP(BeliefPropagationCommon):
@@ -34,10 +38,32 @@ class D2BP(BeliefPropagationCommon):
         Computed automatically if not specified.
     optimize : str or PathOptimizer, optional
         The path optimizer to use when contracting the messages.
-    damping : float, optional
-        The damping factor to use, 0.0 means no damping.
-    update : {'parallel', 'sequential'}, optional
-        Whether to update all messages in parallel or sequentially.
+    damping : float or callable, optional
+        The damping factor to apply to messages. This simply mixes some part
+        of the old message into the new one, with the final message being
+        ``damping * old + (1 - damping) * new``. This makes convergence more
+        reliable but slower.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially (newly computed messages are
+        immediately used for other updates in the same iteration round) or in
+        parallel (all messages are comptued using messages from the previous
+        round only). Sequential generally helps convergence but parallel can
+        possibly converge to differnt solutions.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -48,40 +74,35 @@ class D2BP(BeliefPropagationCommon):
     def __init__(
         self,
         tn,
+        *,
         messages=None,
         output_inds=None,
         optimize="auto-hq",
         damping=0.0,
         update="sequential",
+        normalize=None,
+        distance=None,
+        inplace=False,
         local_convergence=True,
         **contract_opts,
     ):
-        from quimb.tensor.contraction import array_contract_expression
+        super().__init__(
+            tn=tn,
+            damping=damping,
+            update=update,
+            normalize=normalize,
+            distance=distance,
+            inplace=inplace,
+        )
 
-        self.tn = tn
         self.contract_opts = contract_opts
         self.contract_opts.setdefault("optimize", optimize)
-        self.damping = damping
         self.local_convergence = local_convergence
-        self.update = update
 
         if output_inds is None:
             self.output_inds = set(self.tn.outer_inds())
         else:
             self.output_inds = set(output_inds)
-
-        self.backend = next(t.backend for t in tn)
-        _abs = ar.get_lib_fn(self.backend, "abs")
-        _sum = ar.get_lib_fn(self.backend, "sum")
-
-        def _normalize(x):
-            return x / _sum(x)
-
-        def _distance(x, y):
-            return _sum(_abs(x - y))
-
-        self._normalize = _normalize
-        self._distance = _distance
 
         if messages is None:
             self.messages = {}
@@ -113,36 +134,39 @@ class D2BP(BeliefPropagationCommon):
                 self.touch_map[ix, tid] = this_touchmap
 
                 if (ix, tid) not in self.messages:
-                    tm = (t_in.reindex({ix: jx}).conj_() @ t_in).data
-                    self.messages[ix, tid] = self._normalize(tm.data)
+                    m = (t_in.reindex({ix: jx}).conj_() @ t_in).data
+                    self.messages[ix, tid] = self._normalize_fn(m)
 
         # for efficiency setup all the contraction expressions ahead of time
         for ix, tids in self.tn.ind_map.items():
-            if ix in self.output_inds:
-                continue
+            if ix not in self.output_inds:
+                self.build_expr(ix)
 
-            for tida, tidb in (sorted(tids), sorted(tids, reverse=True)):
-                ta = self.tn.tensor_map[tida]
-                kix = ta.inds
-                bix = tuple(
-                    i if i in self.output_inds else i + "*" for i in kix
-                )
-                inputs = [kix, bix]
-                data = [ta.data, ta.data.conj()]
-                shapes = [ta.shape, ta.shape]
-                for i in kix:
-                    if (i != ix) and i not in self.output_inds:
-                        inputs.append((i + "*", i))
-                        data.append((i, tida))
-                        shapes.append(self.messages[i, tida].shape)
+    def build_expr(self, ix):
+        from quimb.tensor.contraction import array_contract_expression
 
-                expr = array_contract_expression(
-                    inputs=inputs,
-                    output=(ix + "*", ix),
-                    shapes=shapes,
-                    **self.contract_opts,
-                )
-                self.exprs[ix, tidb] = expr, data
+        tids = self.tn.ind_map[ix]
+
+        for tida, tidb in (sorted(tids), sorted(tids, reverse=True)):
+            ta = self.tn.tensor_map[tida]
+            kix = ta.inds
+            bix = tuple(i if i in self.output_inds else i + "*" for i in kix)
+            inputs = [kix, bix]
+            data = [ta.data, ta.data.conj()]
+            shapes = [ta.shape, ta.shape]
+            for i in kix:
+                if (i != ix) and i not in self.output_inds:
+                    inputs.append((i + "*", i))
+                    data.append((i, tida))
+                    shapes.append(self.messages[i, tida].shape)
+
+            expr = array_contract_expression(
+                inputs=inputs,
+                output=(ix + "*", ix),
+                shapes=shapes,
+                **self.contract_opts,
+            )
+            self.exprs[ix, tidb] = expr, data
 
     def update_touched_from_tids(self, *tids):
         """Specify that the messages for the given ``tids`` have changed."""
@@ -184,21 +208,22 @@ class D2BP(BeliefPropagationCommon):
             expr, data = self.exprs[key]
             m = expr(*data[:2], *(self.messages[mkey] for mkey in data[2:]))
             # enforce hermiticity and normalize
-            return self._normalize(m + ar.dag(m))
+            return self._normalize_fn(m + ar.dag(m))
 
         def _update_m(key, new_m):
             nonlocal nconv, max_mdiff
 
             old_m = self.messages[key]
-            if self.damping > 0.0:
-                new_m = self._normalize(
-                    self.damping * old_m + (1 - self.damping) * new_m
-                )
-            try:
-                mdiff = float(self._distance(old_m, new_m))
-            except (TypeError, ValueError):
-                # handle e.g. lazy arrays
-                mdiff = float("inf")
+
+            # pre-damp distance
+            mdiff = self._distance_fn(old_m, new_m)
+
+            if self.damping:
+                new_m = self.fn_damping(old_m, new_m)
+
+            # # post-damp distance
+            # mdiff = self._distance_fn(old_m, new_m)
+
             if mdiff > tol:
                 # mark touching messages for update
                 new_touched.update(self.touch_map[key])
@@ -226,7 +251,11 @@ class D2BP(BeliefPropagationCommon):
 
         self.touched = new_touched
 
-        return nconv, ncheck, max_mdiff
+        return {
+            "nconv": nconv,
+            "ncheck": ncheck,
+            "max_mdiff": max_mdiff,
+        }
 
     def compute_marginal(self, ind):
         """Compute the marginal for the index ``ind``."""
@@ -264,7 +293,32 @@ class D2BP(BeliefPropagationCommon):
         p = ar.do("real", p)
         return p / ar.do("sum", p)
 
-    def contract(self, strip_exponent=False):
+    def normalize_message_pairs(self):
+        """Normalize a pair of messages such that `<mi|mj> = 1` and
+        `<mi|mi> = <mj|mj>` (but in general != 1).
+        """
+        _reshape = ar.get_lib_fn(self.backend, "reshape")
+
+        for ix, tids in self.tn.ind_map.items():
+            if len(tids) != 2:
+                continue
+            tida, tidb = tids
+            ml = self.messages[ix, tida]
+            mr = self.messages[ix, tidb]
+
+            nml, nmr = normalize_message_pair(
+                _reshape(ml, (-1,)),
+                _reshape(mr, (-1,)),
+            )
+
+            self.messages[ix, tida] = _reshape(nml, ml.shape)
+            self.messages[ix, tidb] = _reshape(nmr, mr.shape)
+
+    def contract(
+        self,
+        strip_exponent=False,
+        check_zero=True,
+    ):
         """Estimate the total contraction, i.e. the 2-norm.
 
         Parameters
@@ -277,7 +331,7 @@ class D2BP(BeliefPropagationCommon):
         -------
         scalar or (scalar, float)
         """
-        tvals = []
+        zvals = []
 
         for tid, t in self.tn.tensor_map.items():
             arrays = [t.data, ar.do("conj", t.data)]
@@ -298,9 +352,8 @@ class D2BP(BeliefPropagationCommon):
             tval = qtn.array_contract(
                 arrays, inputs, output, **self.contract_opts
             )
-            tvals.append(tval)
+            zvals.append((tval, 1))
 
-        mvals = []
         for ix, tids in self.tn.ind_map.items():
             if ix in self.output_inds:
                 continue
@@ -310,10 +363,93 @@ class D2BP(BeliefPropagationCommon):
             mval = qtn.array_contract(
                 (ml, mr), ((1, 2), (1, 2)), (), **self.contract_opts
             )
-            mvals.append(mval)
+            # counting factor is -1 i.e. divide by the message
+            zvals.append((mval, -1))
 
         return combine_local_contractions(
-            tvals, mvals, self.backend, strip_exponent=strip_exponent
+            zvals,
+            backend=self.backend,
+            strip_exponent=strip_exponent,
+            check_zero=check_zero,
+        )
+
+    def contract_cluster_expansion(
+        self,
+        clusters=None,
+        autocomplete=True,
+        optimize="auto-hq",
+        strip_exponent=False,
+        check_zero=True,
+        info=None,
+        progbar=False,
+        **contract_opts,
+    ):
+        self.normalize_message_pairs()
+
+        if isinstance(clusters, int):
+            max_cluster_size = clusters
+            clusters = None
+        else:
+            max_cluster_size = None
+
+        if clusters is None:
+            clusters = tuple(
+                self.tn.gen_regions(max_region_size=max_cluster_size)
+            )
+        else:
+            clusters = tuple(clusters)
+
+        rg = RegionGraph(clusters, autocomplete=autocomplete)
+
+        for tid in self.tn.tensor_map:
+            rg.add_region([tid])
+
+        if info is None:
+            info = {}
+        info.setdefault("contractions", {})
+        contractions = info["contractions"]
+
+        zvals = []
+
+        if progbar:
+            import tqdm
+
+            it = tqdm.tqdm(rg.regions)
+        else:
+            it = rg.regions
+
+        for region in it:
+            counting_factor = rg.get_count(region)
+
+            if counting_factor == 0:
+                continue
+
+            try:
+                zr = contractions[region]
+            except KeyError:
+                k = self.tn._select_tids(region, virtual=False)
+                b = k.conj()
+                # apply gauge by contracting messages into ket layer
+                for oix in k.outer_inds():
+                    if oix in self.output_inds:
+                        continue
+                    (tid,) = k.ind_map[oix]
+                    m = self.messages[oix, tid]
+                    t = k.tensor_map[tid]
+                    t.gate_(m, oix)
+                zr = (k | b).contract(
+                    optimize=optimize,
+                    **contract_opts,
+                )
+                contractions[region] = zr
+
+            zvals.append((zr, counting_factor))
+
+        return combine_local_contractions(
+            zvals,
+            backend=self.backend,
+            strip_exponent=strip_exponent,
+            check_zero=check_zero,
         )
 
     def compress(
@@ -371,24 +507,163 @@ class D2BP(BeliefPropagationCommon):
 
         return tn
 
+    def gauge_insert(self, tn, smudge=1e-12):
+        """Insert the sqrt of messages on the boundary of a part of the main BP
+        TN.
+
+        Parameters
+        ----------
+        tn : TensorNetwork
+            The tensor network to insert the messages into.
+        smudge : float, optional
+            Smudge factor to avoid numerical issues, the eigenvalues of the
+            messages are clipped to be at least the largest eigenvalue times
+            this factor.
+
+        Returns
+        -------
+        list[tuple[Tensor, str, array_like]]
+            The sequence of tensors, indices and inverse gauges to apply to
+            reverse the gauges applied.
+        """
+        outer = []
+
+        _eigh = ar.get_lib_fn(self.backend, "linalg.eigh")
+        _clip = ar.get_lib_fn(self.backend, "clip")
+        _sqrt = ar.get_lib_fn(self.backend, "sqrt")
+
+        for ix in tn.outer_inds():
+            # get the tensor and dangling index
+            (tid,) = tn.ind_map[ix]
+            try:
+                m = self.messages[ix, tid]
+            except KeyError:
+                # could be phsyical index or not generated yet
+                continue
+            t = tn.tensor_map[tid]
+
+            # compute the 'square root' of the message
+            s2, W = _eigh(m)
+            s2 = _clip(s2, s2[-1] * smudge, None)
+            s = _sqrt(s2)
+            msqrt = qtn.decomp.ldmul(s, ar.dag(W))
+            msqrt_inv = qtn.decomp.rddiv(W, s)
+            t.gate_(msqrt, ix)
+            outer.append((t, ix, msqrt_inv))
+
+        return outer
+
+    @contextlib.contextmanager
+    def gauge_temp(self, tn, ungauge_outer=True):
+        """Context manager to temporarily gauge a tensor network, presumably a
+        subnetwork of the main BP network, using the current messages, and then
+        un-gauge it afterwards.
+
+        Parameters
+        ----------
+        tn : TensorNetwork
+            The tensor network to gauge.
+        ungauge_outer : bool, optional
+            Whether to un-gauge the outer indices of the tensor network.
+        """
+        outer = self.gauge_insert(tn)
+        try:
+            yield outer
+        finally:
+            if ungauge_outer:
+                for t, ix, msqrt_inv in outer:
+                    t.gate_(msqrt_inv, ix)
+
+    def gate_(
+        self,
+        G,
+        where,
+        max_bond=None,
+        cutoff=0.0,
+        cutoff_mode="rsum2",
+        renorm=0,
+        tn=None,
+        **gate_opts,
+    ):
+        """Apply a gate to the tensor network at the specified sites, using
+        the current messages to gauge the tensors.
+        """
+        if len(where) == 1:
+            # single site gate
+            self.tn.gate_(G, where, contract=True)
+            return
+
+        gate_opts.setdefault("contract", "reduce-split")
+
+        if tn is None:
+            tn = self.tn
+        site_tags = tuple(map(tn.site_tag, where))
+        tn_where = tn.select_any(site_tags)
+
+        with self.gauge_temp(tn_where):
+            # contract and split the gate
+            tn_where.gate_(
+                G,
+                where,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                cutoff_mode=cutoff_mode,
+                renorm=renorm,
+                **gate_opts,
+            )
+
+            # update the messages for this bond
+            taga, tagb = site_tags
+            (tida,) = tn._get_tids_from_tags(taga)
+            (tidb,) = tn._get_tids_from_tags(tagb)
+            ta = tn.tensor_map[tida]
+            tb = tn.tensor_map[tidb]
+            lix, (ix,), rix = qtn.group_inds(ta, tb)
+
+            # make use of the fact that we already have gauged tensors
+            A = ta.to_dense(lix, (ix,))
+            B = tb.to_dense((ix,), rix)
+            ma = ar.dag(A) @ A
+            mb = B @ ar.dag(B)
+
+            shape_changed = self.messages[ix, tidb].shape != ma.shape
+
+            self.messages[ix, tidb] = ma
+            self.messages[ix, tida] = mb
+
+            # mark the sites as touched
+            self.update_touched_from_tids(tida, tidb)
+            if shape_changed:
+                # rebuild the contraction expressions if shapes changed
+                for cix in (*lix, ix, *rix):
+                    if cix not in self.output_inds:
+                        self.build_expr(cix)
+
 
 def contract_d2bp(
     tn,
+    *,
     messages=None,
     output_inds=None,
-    optimize="auto-hq",
-    damping=0.0,
-    update="sequential",
-    local_convergence=True,
     max_iterations=1000,
     tol=5e-6,
+    damping=0.0,
+    diis=False,
+    update="sequential",
+    normalize=None,
+    distance=None,
+    tol_abs=None,
+    tol_rolling_diff=None,
+    local_convergence=True,
+    optimize="auto-hq",
     strip_exponent=False,
+    check_zero=True,
     info=None,
     progbar=False,
     **contract_opts,
 ):
     """Estimate the norm squared of ``tn`` using dense 2-norm belief
-    propagation.
+    propagation (no hyper indices).
 
     Parameters
     ----------
@@ -397,28 +672,58 @@ def contract_d2bp(
     messages : dict[(str, int), array_like], optional
         The initial messages to use, effectively defaults to all ones if not
         specified.
+    output_inds : set[str], optional
+        The indices to consider as output (dangling) indices of the tn.
+        Computed automatically if not specified.
     max_iterations : int, optional
         The maximum number of iterations to perform.
     tol : float, optional
         The convergence tolerance for messages.
-    output_inds : set[str], optional
-        The indices to consider as output (dangling) indices of the tn.
-        Computed automatically if not specified.
-    optimize : str or PathOptimizer, optional
-        The path optimizer to use when contracting the messages.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
-    update : {'parallel', 'sequential'}, optional
-        Whether to update all messages in parallel or sequentially.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace to
+        help converge the messages by extrapolating to low error guesses.
+        If a dict, should contain options for the DIIS algorithm. The
+        relevant options are {`max_history`, `beta`, `rcond`}.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially or in parallel.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
+    tol_abs : float, optional
+        The absolute convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``.
+    tol_rolling_diff : float, optional
+        The rolling mean convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``. This is used to stop
+        running when the messages are just bouncing around the same level,
+        without any overall upward or downward trends, roughly speaking.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
+    optimize : str or PathOptimizer, optional
+        The path optimizer to use when contracting the messages.
     strip_exponent : bool, optional
-        Whether to strip the exponent from the final result. If ``True``
-        then the returned result is ``(mantissa, exponent)``.
+        Whether to return the mantissa and exponent separately.
+    check_zero : bool, optional
+        Whether to check for zero values and return zero early.
     info : dict, optional
-        If specified, update this dictionary with information about the
-        belief propagation run.
+        If supplied, the following information will be added to it:
+        ``converged`` (bool), ``iterations`` (int), ``max_mdiff`` (float),
+        ``rolling_abs_mean_diff`` (float).
     progbar : bool, optional
         Whether to show a progress bar.
     contract_opts
@@ -433,18 +738,26 @@ def contract_d2bp(
         messages=messages,
         output_inds=output_inds,
         optimize=optimize,
-        damping=damping,
         local_convergence=local_convergence,
+        damping=damping,
         update=update,
+        normalize=normalize,
+        distance=distance,
         **contract_opts,
     )
     bp.run(
         max_iterations=max_iterations,
+        diis=diis,
         tol=tol,
+        tol_abs=tol_abs,
+        tol_rolling_diff=tol_rolling_diff,
         info=info,
         progbar=progbar,
     )
-    return bp.contract(strip_exponent=strip_exponent)
+    return bp.contract(
+        strip_exponent=strip_exponent,
+        check_zero=check_zero,
+    )
 
 
 def compress_d2bp(
@@ -455,12 +768,17 @@ def compress_d2bp(
     renorm=0,
     messages=None,
     output_inds=None,
-    optimize="auto-hq",
-    damping=0.0,
-    update="sequential",
-    local_convergence=True,
     max_iterations=1000,
     tol=5e-6,
+    damping=0.0,
+    diis=False,
+    update="sequential",
+    normalize=None,
+    distance=None,
+    tol_abs=None,
+    tol_rolling_diff=None,
+    local_convergence=True,
+    optimize="auto-hq",
     inplace=False,
     info=None,
     progbar=False,
@@ -479,25 +797,55 @@ def compress_d2bp(
         The cutoff to use when compressing.
     cutoff_mode : int, optional
         The cutoff mode to use when compressing.
+    renorm : float, optional
+        Whether to renormalize the singular values when compressing.
     messages : dict[(str, int), array_like], optional
         The initial messages to use, effectively defaults to all ones if not
         specified.
+    output_inds : set[str], optional
+        The indices to consider as output (dangling) indices of the tn.
+        Computed automatically if not specified.
     max_iterations : int, optional
         The maximum number of iterations to perform.
     tol : float, optional
         The convergence tolerance for messages.
-    output_inds : set[str], optional
-        The indices to consider as output (dangling) indices of the tn.
-        Computed automatically if not specified.
-    optimize : str or PathOptimizer, optional
-        The path optimizer to use when contracting the messages.
     damping : float, optional
         The damping parameter to use, defaults to no damping.
-    update : {'parallel', 'sequential'}, optional
-        Whether to update all messages in parallel or sequentially.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace to
+        help converge the messages by extrapolating to low error guesses.
+        If a dict, should contain options for the DIIS algorithm. The
+        relevant options are {`max_history`, `beta`, `rcond`}.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially or in parallel.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
+    tol_abs : float, optional
+        The absolute convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``.
+    tol_rolling_diff : float, optional
+        The rolling mean convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``. This is used to stop
+        running when the messages are just bouncing around the same level,
+        without any overall upward or downward trends, roughly speaking.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
+    optimize : str or PathOptimizer, optional
+        The path optimizer to use when contracting the messages.
     inplace : bool, optional
         Whether to perform the compression inplace.
     info : dict, optional
@@ -519,12 +867,18 @@ def compress_d2bp(
         optimize=optimize,
         damping=damping,
         update=update,
+        normalize=normalize,
+        distance=distance,
         local_convergence=local_convergence,
+        inplace=inplace,
         **contract_opts,
     )
     bp.run(
         max_iterations=max_iterations,
         tol=tol,
+        diis=diis,
+        tol_abs=tol_abs,
+        tol_rolling_diff=tol_rolling_diff,
         info=info,
         progbar=progbar,
     )
@@ -545,6 +899,14 @@ def sample_d2bp(
     tol=1e-2,
     bias=None,
     seed=None,
+    optimize="auto-hq",
+    damping=0.0,
+    diis=False,
+    update="sequential",
+    normalize=None,
+    distance=None,
+    tol_abs=None,
+    tol_rolling_diff=None,
     local_convergence=True,
     progbar=False,
     **contract_opts,
@@ -570,6 +932,40 @@ def sample_d2bp(
         done by raising the probability of each bit-string to this power.
     seed : int, optional
         A random seed for reproducibility.
+    optimize : str or PathOptimizer, optional
+        The path optimizer to use when contracting the messages.
+    damping : float, optional
+        The damping parameter to use, defaults to no damping.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace to
+        help converge the messages by extrapolating to low error guesses.
+        If a dict, should contain options for the DIIS algorithm. The
+        relevant options are {`max_history`, `beta`, `rcond`}.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially or in parallel.
+    normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
+        How to normalize messages after each update. If None choose
+        automatically. If a callable, it should take a message and return the
+        normalized message. If a string, it should be one of 'L1', 'L2',
+        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
+        but also normalizes the phase of the message, by default used for
+        complex dtypes.
+    distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
+        How to compute the distance between messages to check for convergence.
+        If None choose automatically. If a callable, it should take two
+        messages and return the distance. If a string, it should be one of
+        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
+        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
+        messages, by default used for complex dtypes if phased normalization is
+        not already being used.
+    tol_abs : float, optional
+        The absolute convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``.
+    tol_rolling_diff : float, optional
+        The rolling mean convergence tolerance for maximum message update
+        distance, if not given then taken as ``tol``. This is used to stop
+        running when the messages are just bouncing around the same level,
+        without any overall upward or downward trends, roughly speaking.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -600,10 +996,21 @@ def sample_d2bp(
     bp = D2BP(
         tn,
         messages=messages,
+        optimize=optimize,
+        damping=damping,
+        update=update,
+        normalize=normalize,
+        distance=distance,
         local_convergence=local_convergence,
         **contract_opts,
     )
-    bp.run(max_iterations=max_iterations, tol=tol)
+    bp.run(
+        max_iterations=max_iterations,
+        tol=tol,
+        diis=diis,
+        tol_abs=tol_abs,
+        tol_rolling_diff=tol_rolling_diff,
+    )
 
     marginals = dict.fromkeys(output_inds)
 
@@ -640,12 +1047,23 @@ def sample_d2bp(
 
         bp = D2BP(
             tn,
-            messages=bp.messages,
+            messages=messages,
+            optimize=optimize,
+            damping=damping,
+            update=update,
+            normalize=normalize,
+            distance=distance,
             local_convergence=local_convergence,
             **contract_opts,
         )
         bp.update_touched_from_tids(*tids)
-        bp.run(tol=tol, max_iterations=max_iterations)
+        bp.run(
+            max_iterations=max_iterations,
+            tol=tol,
+            diis=diis,
+            tol_abs=tol_abs,
+            tol_rolling_diff=tol_rolling_diff,
+        )
 
     if progbar:
         pbar.close()

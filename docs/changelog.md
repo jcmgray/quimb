@@ -8,6 +8,10 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure): add a `seed` kwarg
+- belief propagation, implement DIIS (direct inversion in the iterative subspace)
+- belief propagation, unify various aspects such as message normalization and distance.
+- belief propagation, add a `plot` method.
+- add `qu.plot_multi_series_zoom` for plotting multiple series with a zoomed inset, useful for various convergence plots such as BP
 
 **Bug fixes:**
 

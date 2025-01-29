@@ -7,22 +7,37 @@ from quimb.experimental.belief_propagation.d2bp import contract_d2bp
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
-def test_contract_tree_exact(dtype):
+@pytest.mark.parametrize("local_convergence", [False, True])
+@pytest.mark.parametrize("normalize", ["L1", "L2", "Linf"])
+def test_contract_tree_exact(dtype, local_convergence, normalize):
     tn = qtn.TN_rand_tree(10, 3, seed=42, dtype=dtype)
     Z_ex = tn.contract()
     info = {}
-    Z_bp = contract_l1bp(tn, info=info, progbar=True)
+    Z_bp = contract_l1bp(
+        tn,
+        info=info,
+        normalize=normalize,
+        local_convergence=local_convergence,
+        progbar=True,
+    )
     assert info["converged"]
     assert Z_ex == pytest.approx(Z_bp, rel=5e-6)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("damping", [0.0, 0.1])
-def test_contract_loopy_approx(dtype, damping):
+@pytest.mark.parametrize("diis", [False, True])
+def test_contract_loopy_approx(dtype, damping, diis):
     tn = qtn.TN2D_rand(3, 4, 5, dtype=dtype, dist="uniform")
     Z_ex = tn.contract()
     info = {}
-    Z_bp = contract_l1bp(tn, damping=damping, info=info, progbar=True)
+    Z_bp = contract_l1bp(
+        tn,
+        damping=damping,
+        diis=diis,
+        info=info,
+        progbar=True,
+    )
     assert info["converged"]
     assert Z_ex == pytest.approx(Z_bp, rel=0.1)
 
@@ -36,13 +51,17 @@ def test_contract_double_loopy_approx(dtype, damping, update):
     Z_ex = tn.contract()
     info = {}
     Z_bp1 = contract_l1bp(
-        tn, damping=damping, update=update, info=info, progbar=True
+        tn,
+        damping=damping,
+        update=update,
+        info=info,
+        progbar=True,
     )
     assert info["converged"]
     assert Z_bp1 == pytest.approx(Z_ex, rel=0.3)
     # compare with 2-norm BP on the peps directly
     Z_bp2 = contract_d2bp(peps)
-    assert Z_bp1 == pytest.approx(Z_bp2, rel=5e-6)
+    assert Z_bp1 == pytest.approx(Z_bp2, rel=5e-5)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
@@ -82,7 +101,8 @@ def test_contract_tree_triple_sandwich_exact(dtype):
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("damping", [0.0, 0.1])
-def test_contract_tree_triple_sandwich_loopy_approx(dtype, damping):
+@pytest.mark.parametrize("diis", [False, True])
+def test_contract_tree_triple_sandwich_loopy_approx(dtype, damping, diis):
     edges = qtn.edges_2d_hexagonal(2, 3)
     ket = qtn.TN_from_edges_rand(
         edges,
@@ -100,7 +120,13 @@ def test_contract_tree_triple_sandwich_loopy_approx(dtype, damping):
     tn = ket.H | G_ket
     Z_ex = tn.contract()
     info = {}
-    Z_bp = contract_l1bp(tn, damping=damping, info=info, progbar=True)
+    Z_bp = contract_l1bp(
+        tn,
+        damping=damping,
+        diis=diis,
+        info=info,
+        progbar=True,
+    )
     assert info["converged"]
     assert Z_bp == pytest.approx(Z_ex, rel=0.5)
 

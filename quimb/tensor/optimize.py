@@ -14,12 +14,12 @@ from autoray import astype, get_dtype_name, to_numpy
 
 from ..core import prod
 from ..utils import (
-    default_to_neutral_style,
     ensure_dict,
     tree_flatten,
     tree_map,
     tree_unflatten,
 )
+from ..utils_plot import default_to_neutral_style
 from .interface import get_jax
 from .tensor_core import (
     TensorNetwork,
@@ -1416,7 +1416,7 @@ class TNOptimizer:
         """Extract the optimized tensor network, this is a three part process:
 
             1. inject the current optimized vector into the target tensor
-               network,
+               network or pytree,
             2. run it through ``norm_fn``,
             3. drop any tags used to identify variables.
 

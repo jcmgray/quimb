@@ -1,14 +1,16 @@
 """Functions for more advanced calculations of quantities and properties of
 quantum objects.
 """
-import numbers
-import itertools
-import functools
+
 import collections
-from math import sin, cos, pi, log, log2, sqrt
+import functools
+import itertools
+import numbers
+from math import cos, log, log2, pi, sin, sqrt
 
 import numpy as np
 import numpy.linalg as nla
+from cotengra import array_contract
 from scipy.optimize import minimize
 
 from .core import (
@@ -32,22 +34,20 @@ from .core import (
     tr,
     zeroify,
 )
-from .linalg.base_linalg import eigh, eigvalsh, norm, sqrtm, norm_trace_dense
+from .gen.operators import pauli
+from .gen.states import basis_vec, bell_state, bloch_state
 from .linalg.approx_spectral import (
     entropy_subsys_approx,
     gen_bipartite_spectral_fn,
     logneg_subsys_approx,
     tr_sqrt_subsys_approx,
 )
-from .gen.operators import pauli
-from .gen.states import basis_vec, bell_state, bloch_state
+from .linalg.base_linalg import eigh, eigvalsh, norm, norm_trace_dense, sqrtm
 from .utils import (
     frequencies,
     int2tup,
     keymap,
 )
-
-from .tensor.contraction import array_contract
 
 
 def fidelity(p1, p2, squared=False):

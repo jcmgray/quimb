@@ -8,21 +8,27 @@ from quimb.experimental.belief_propagation import (
 )
 
 
-def test_contract_tree_exact():
+@pytest.mark.parametrize("local_convergence", [False, True])
+def test_contract_tree_exact(local_convergence):
     tn = qtn.TN_rand_tree(20, 3)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_d1bp(tn, info=info, progbar=True)
+    Z_bp = contract_d1bp(
+        tn, info=info, local_convergence=local_convergence, progbar=True
+    )
     assert info["converged"]
     assert Z == pytest.approx(Z_bp, rel=1e-12)
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1])
-def test_contract_normal(damping):
+@pytest.mark.parametrize("diis", [False, True])
+def test_contract_normal(damping, diis):
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_d1bp(tn, damping=damping, info=info, progbar=True)
+    Z_bp = contract_d1bp(
+        tn, damping=damping, diis=diis, info=info, progbar=True
+    )
     assert info["converged"]
     assert Z == pytest.approx(Z_bp, rel=1e-1)
 
