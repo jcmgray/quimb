@@ -52,7 +52,7 @@ def lazy_ptr_linop(psi_ab, dims, sysa, **linop_opts):
     sysa : int or sequence of int, optional
         Index(es) of the 'a' subsystem(s) to keep.
     """
-    from .tensor.tensor_core import Tensor
+    from ..tensor.tensor_core import Tensor
 
     sysa = int2tup(sysa)
 
@@ -113,7 +113,7 @@ def lazy_ptr_ppt_linop(psi_abc, dims, sysa, sysb, **linop_opts):
         Index(es) of the 'b' subsystem(s) to keep, with respect to all
         the dimensions, ``dims``, (i.e. pre-partial trace).
     """
-    from .tensor.tensor_core import Tensor
+    from ..tensor.tensor_core import Tensor
 
     sysa, sysb = int2tup(sysa), int2tup(sysb)
     sys_ab = sorted(sysa + sysb)
