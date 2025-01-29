@@ -75,7 +75,7 @@ class Vectorizer:
         def extractor(x):
             if isinstance(x, Tensor):
                 x = x.data
-            arrays.append(self._reshape(x, -1))
+            arrays.append(self._reshape(x, (-1,)))
 
         arrays = []
         tree_apply(extractor, tree)
