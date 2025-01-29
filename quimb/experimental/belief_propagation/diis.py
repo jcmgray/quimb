@@ -49,7 +49,7 @@ class Vectorizer:
                 info = x
             else:
                 array = x
-                shape = ar.do("shape", x.shape, like=self.backend)
+                shape = ar.do("shape", x, like=self.backend)
                 size = ar.do("size", x, like=self.backend)
                 info = ArrayInfo(shape, size)
 
