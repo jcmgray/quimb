@@ -7,7 +7,8 @@ import numpy as np
 import scipy.sparse.linalg as spla
 from autoray import conj, dag, do, reshape
 
-from ..utils import default_to_neutral_style, pairwise
+from ..utils import pairwise
+from ..utils_plot import default_to_neutral_style
 from .contraction import contract_strategy
 from .drawing import get_colors
 from .optimize import TNOptimizer
