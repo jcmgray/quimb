@@ -9,11 +9,12 @@ from quimb.experimental.belief_propagation.hv1bp import (
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1, 0.5])
-def test_contract_hyper(damping):
+@pytest.mark.parametrize("diis", [False, True])
+def test_contract_hyper(damping, diis):
     htn = qtn.HTN_random_ksat(3, 50, alpha=2.0, seed=42, mode="dense")
     info = {}
     num_solutions = contract_hv1bp(
-        htn, damping=damping, info=info, progbar=True
+        htn, damping=damping, diis=diis, info=info, progbar=True
     )
     assert info["converged"]
     assert num_solutions == pytest.approx(309273226, rel=0.1)
@@ -29,11 +30,14 @@ def test_contract_tree_exact():
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1, 0.5])
-def test_contract_normal(damping):
+@pytest.mark.parametrize("diis", [False, True])
+def test_contract_normal(damping, diis):
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_hv1bp(tn, damping=damping, info=info, progbar=True)
+    Z_bp = contract_hv1bp(
+        tn, damping=damping, diis=diis, info=info, progbar=True
+    )
     assert info["converged"]
     assert Z == pytest.approx(Z_bp, rel=1e-1)
 

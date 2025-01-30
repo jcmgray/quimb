@@ -184,7 +184,6 @@ class DIIS:
         coeffs = [self.scalar(c) for c in coeffs[1:]]
 
         # construct linear combination of previous guesses!
-        # xnew = np.zeros_like(self.guesses[0])
         xnew = ar.do("zeros_like", self.guesses[0], like=self.backend)
         for ci, xi in zip(coeffs, self.guesses):
             xnew += ci * xi
@@ -216,8 +215,6 @@ class DIIS:
             same tree structure as `y`.
         """
         # convert from pytree -> single real vector
-        #   copy is important so that sequence of
-        #   guesses are not the same object
         y = self.vectorizer.pack(y)
         x = self.guesses[self.head]
         if x is None:
@@ -228,7 +225,7 @@ class DIIS:
             xnext = self._extrapolate()
 
         self.head = (self.head + 1) % self.max_history
-        # # TODO: make copy backend agnostic
+        # NOTE: copy seems to be necessary here to avoid in-place modifications
         self.guesses[self.head] = ar.do("copy", xnext, like=self.backend)
 
         # convert new extrapolated guess back to pytree
