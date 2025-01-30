@@ -89,8 +89,12 @@ class D1BP(BeliefPropagationCommon):
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
-    fill_fn : callable, optional
-        If specified, use this function to fill in the initial messages.
+    contract_every : int, optional
+        If not None, 'contract' (via BP) the tensor network every
+        ``contract_every`` iterations. The resulting values are stored in
+        ``zvals`` at corresponding points ``zval_its``.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
 
     Attributes
     ----------
@@ -115,6 +119,7 @@ class D1BP(BeliefPropagationCommon):
         distance=None,
         local_convergence=True,
         message_init_function=None,
+        contract_every=None,
         inplace=False,
     ):
         super().__init__(
@@ -123,6 +128,7 @@ class D1BP(BeliefPropagationCommon):
             update=update,
             normalize=normalize,
             distance=distance,
+            contract_every=contract_every,
             inplace=inplace,
         )
 

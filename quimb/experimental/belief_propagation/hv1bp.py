@@ -349,6 +349,12 @@ class HV1BP(BeliefPropagationCommon):
     thread_pool : bool or int, optional
         Whether to use a thread pool for parallelization, if ``True`` use the
         default number of threads, if an integer use that many threads.
+    contract_every : int, optional
+        If not None, 'contract' (via BP) the tensor network every
+        ``contract_every`` iterations. The resulting values are stored in
+        ``zvals`` at corresponding points ``zval_its``.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
     """
 
     def __init__(
@@ -360,9 +366,10 @@ class HV1BP(BeliefPropagationCommon):
         update="parallel",
         normalize="L2",
         distance="L2",
-        inplace=False,
         smudge_factor=1e-12,
         thread_pool=False,
+        contract_every=None,
+        inplace=False,
     ):
         super().__init__(
             tn,
@@ -370,6 +377,7 @@ class HV1BP(BeliefPropagationCommon):
             update=update,
             normalize=normalize,
             distance=distance,
+            contract_every=contract_every,
             inplace=inplace,
         )
 
@@ -458,13 +466,25 @@ class HV1BP(BeliefPropagationCommon):
         self._distance_fn = _distance_fn
 
     def initialize_messages_batched(self, messages=None):
-        if messages is None:
-            # XXX: explicit use uniform distribution to avoid non-vectorized
-            # contractions?
-            messages = initialize_hyper_messages(self.tn)
-
         _stack = ar.get_lib_fn(self.backend, "stack")
         _array = ar.get_lib_fn(self.backend, "array")
+
+        if isinstance(messages, dict):
+            # 'dense' (i.e. non-batch) messages explicitly supplied
+            message_init_fn = None
+        elif callable(messages):
+            # custom message initialization function
+            message_init_fn = messages
+            messages = None
+        elif messages == "dense":
+            # explicitly create dense messages first
+            message_init_fn = None
+            messages = initialize_hyper_messages(self.tn)
+        elif messages is None:
+            # default to uniform messages
+            message_init_fn = ar.get_lib_fn(self.backend, "ones")
+        else:
+            raise ValueError(f"Unrecognized messages={messages}")
 
         # here we are stacking all contractions with matching rank
         #
@@ -479,27 +499,37 @@ class HV1BP(BeliefPropagationCommon):
         batched_inputs_m = {}
         input_locs_m = {}
         output_locs_m = {}
+        shapes_m = {}
+
         for ix, tids in self.tn.ind_map.items():
             # all updates of the same rank can be performed simultaneously
             rank = len(tids)
             try:
                 batch = batched_inputs_m[rank]
+                shape = shapes_m[rank]
             except KeyError:
                 batch = batched_inputs_m[rank] = [[] for _ in range(rank)]
+                shape = shapes_m[rank] = [rank, 0, self.tn.ind_size(ix)]
 
+            # batch index
+            b = shape[1]
             for p, tid in enumerate(tids):
-                batch_p = batch[p]
-                # position in the stack
-                b = len(batch_p)
+                if message_init_fn is None:
+                    # we'll stack the messages later
+                    batch[p].append(messages[tid, ix])
                 input_locs_m[tid, ix] = (rank, p, b)
                 output_locs_m[ix, tid] = (rank, p, b)
-                batch_p.append(messages[tid, ix])
+
+            # increment batch index
+            shape[1] = b + 1
 
         # prepare tensor messages
         batched_tensors = {}
         batched_inputs_t = {}
         input_locs_t = {}
         output_locs_t = {}
+        shapes_t = {}
+
         for tid, t in self.tn.tensor_map.items():
             # all updates of the same rank can be performed simultaneously
             rank = t.ndim
@@ -510,26 +540,39 @@ class HV1BP(BeliefPropagationCommon):
             try:
                 batch = batched_inputs_t[rank]
                 batch_t = batched_tensors[rank]
+                shape = shapes_t[rank]
             except KeyError:
                 batch = batched_inputs_t[rank] = [[] for _ in range(rank)]
                 batch_t = batched_tensors[rank] = []
+                shape = shapes_t[rank] = [rank, 0, t.shape[0]]
 
+            # batch index
+            b = shape[1]
             for p, ix in enumerate(t.inds):
-                batch_p = batch[p]
-                # position in the stack
-                b = len(batch_p)
+                if message_init_fn is None:
+                    # we'll stack the messages later
+                    batch[p].append(messages[ix, tid])
                 input_locs_t[ix, tid] = (rank, p, b)
                 output_locs_t[tid, ix] = (rank, p, b)
-                batch_p.append(messages[ix, tid])
 
             batch_t.append(t.data)
+            # increment batch index
+            shape[1] = b + 1
 
-        # stack messages in into single arrays
-        for batched_inputs in (batched_inputs_m, batched_inputs_t):
-            for key, batch in batched_inputs.items():
-                batched_inputs[key] = _stack(
-                    tuple(_stack(batch_p) for batch_p in batch)
-                )
+        # combine or create batch message arrays
+        for batched_inputs, shapes in zip(
+            (batched_inputs_m, batched_inputs_t), (shapes_m, shapes_t)
+        ):
+            for rank, batch in batched_inputs.items():
+                if isinstance(messages, dict):
+                    # stack given messages into single arrays
+                    batched_inputs[rank] = _stack(
+                        tuple(_stack(batch_p) for batch_p in batch)
+                    )
+                else:
+                    # create message arrays directly
+                    batched_inputs[rank] = message_init_fn(shapes[rank])
+
         # stack all tensors of each rank into a single array
         for rank, tensors in batched_tensors.items():
             batched_tensors[rank] = _stack(tensors)
@@ -671,7 +714,7 @@ class HV1BP(BeliefPropagationCommon):
         )
         return max(t_max_mdiff, m_max_mdiff)
 
-    def get_messages(self):
+    def get_messages_dense(self):
         """Get messages in individual form from the batched stacks."""
         return _extract_messages_from_inputs_batched(
             self.batched_inputs_m,
@@ -679,6 +722,17 @@ class HV1BP(BeliefPropagationCommon):
             self.input_locs_m,
             self.input_locs_t,
         )
+
+    def get_messages(self):
+        import warnings
+
+        warnings.warn(
+            "get_messages() is deprecated, or in the future it might return "
+            "the batch messages, use get_messages_dense() instead.",
+            DeprecationWarning,
+        )
+
+        return self.get_messages_dense()
 
     def contract(self, strip_exponent=False, check_zero=False):
         """Estimate the contraction of the tensor network using the current
@@ -751,7 +805,7 @@ class HV1BP(BeliefPropagationCommon):
         """
         return contract_hyper_messages(
             self.tn,
-            self.get_messages(),
+            self.get_messages_dense(),
             strip_exponent=strip_exponent,
             check_zero=check_zero,
             backend=self.backend,
@@ -959,7 +1013,7 @@ def run_belief_propagation_hv1bp(
         info=info,
         progbar=progbar,
     )
-    return bp.get_messages(), bp.converged
+    return bp.get_messages_dense(), bp.converged
 
 
 def sample_hv1bp(

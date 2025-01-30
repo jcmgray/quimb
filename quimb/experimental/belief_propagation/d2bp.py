@@ -67,6 +67,12 @@ class D2BP(BeliefPropagationCommon):
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
+    contract_every : int, optional
+        If not None, 'contract' (via BP) the tensor network every
+        ``contract_every`` iterations. The resulting values are stored in
+        ``zvals`` at corresponding points ``zval_its``.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
     contract_opts
         Other options supplied to ``cotengra.array_contract``.
     """
@@ -82,8 +88,9 @@ class D2BP(BeliefPropagationCommon):
         update="sequential",
         normalize=None,
         distance=None,
-        inplace=False,
         local_convergence=True,
+        contract_every=None,
+        inplace=False,
         **contract_opts,
     ):
         super().__init__(
@@ -92,6 +99,7 @@ class D2BP(BeliefPropagationCommon):
             update=update,
             normalize=normalize,
             distance=distance,
+            contract_every=contract_every,
             inplace=inplace,
         )
 

@@ -11,6 +11,8 @@ Release notes for `quimb`.
 - belief propagation, implement DIIS (direct inversion in the iterative subspace)
 - belief propagation, unify various aspects such as message normalization and distance.
 - belief propagation, add a `plot` method.
+- belief propagation, add a `contract_every` option.
+- HV1BP: vectorize both contraction and message initialization
 - add `qu.plot_multi_series_zoom` for plotting multiple series with a zoomed inset, useful for various convergence plots such as BP
 
 **Bug fixes:**

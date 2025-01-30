@@ -51,6 +51,12 @@ class L1BP(BeliefPropagationCommon):
         input messages have converged then stop updating them.
     optimize : str or PathOptimizer, optional
         The path optimizer to use when contracting the messages.
+    contract_every : int, optional
+        If not None, 'contract' (via BP) the tensor network every
+        ``contract_every`` iterations. The resulting values are stored in
+        ``zvals`` at corresponding points ``zval_its``.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
     contract_opts
         Other options supplied to ``cotengra.array_contract``.
     """
@@ -64,10 +70,11 @@ class L1BP(BeliefPropagationCommon):
         update="sequential",
         normalize=None,
         distance=None,
-        inplace=False,
         local_convergence=True,
         optimize="auto-hq",
         message_init_function=None,
+        contract_every=None,
+        inplace=False,
         **contract_opts,
     ):
         super().__init__(
@@ -76,6 +83,7 @@ class L1BP(BeliefPropagationCommon):
             update=update,
             normalize=normalize,
             distance=distance,
+            contract_every=contract_every,
             inplace=inplace,
         )
 

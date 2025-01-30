@@ -54,8 +54,6 @@ class L2BP(BeliefPropagationCommon):
         norms. 'L2phased' is like 'L2' but also normalizes the phases of the
         messages, by default used for complex dtypes if phased normalization is
         not already being used.
-    inplace : bool, optional
-        Whether to perform any operations inplace on the input tensor network.
     symmetrize : bool or callable, optional
         Whether to symmetrize the messages, i.e. for each message ensure that
         it is hermitian with respect to its bra and ket indices. If a callable
@@ -65,6 +63,12 @@ class L2BP(BeliefPropagationCommon):
         input messages have converged then stop updating them.
     optimize : str or PathOptimizer, optional
         The path optimizer to use when contracting the messages.
+    contract_every : int, optional
+        If not None, 'contract' (via BP) the tensor network every
+        ``contract_every`` iterations. The resulting values are stored in
+        ``zvals`` at corresponding points ``zval_its``.
+    inplace : bool, optional
+        Whether to perform any operations inplace on the input tensor network.
     contract_opts
         Other options supplied to ``cotengra.array_contract``.
     """
@@ -78,10 +82,11 @@ class L2BP(BeliefPropagationCommon):
         update="sequential",
         normalize=None,
         distance=None,
-        inplace=False,
         symmetrize=True,
         local_convergence=True,
         optimize="auto-hq",
+        contract_every=None,
+        inplace=False,
         **contract_opts,
     ):
         super().__init__(
@@ -90,6 +95,7 @@ class L2BP(BeliefPropagationCommon):
             update=update,
             normalize=normalize,
             distance=distance,
+            contract_every=contract_every,
             inplace=inplace,
         )
 

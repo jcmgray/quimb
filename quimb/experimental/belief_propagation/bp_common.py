@@ -71,6 +71,10 @@ class BeliefPropagationCommon:
         norms. 'L2phased' is like 'L2' but also normalizes the phases of the
         messages, by default used for complex dtypes if phased normalization is
         not already being used.
+    contract_every : int, optional
+        If not None, 'contract' (via BP) the tensor network every
+        ``contract_every`` iterations. The resulting values are stored in
+        ``zvals`` at corresponding points ``zval_its``.
     inplace : bool, optional
         Whether to perform any operations inplace on the input tensor network.
     """
@@ -83,6 +87,7 @@ class BeliefPropagationCommon:
         update="sequential",
         normalize=None,
         distance=None,
+        contract_every=None,
         inplace=False,
     ):
         self.tn = tn if inplace else tn.copy()
@@ -109,9 +114,13 @@ class BeliefPropagationCommon:
                 distance = "L2"
         self.distance = distance
 
+        self.contract_every = contract_every
         self.n = 0
+        self.converged = False
         self.mdiffs = []
         self.rdiffs = []
+        self.zval_its = []
+        self.zvals = []
 
     @property
     def damping(self):
@@ -124,10 +133,10 @@ class BeliefPropagationCommon:
         else:
             self._damping = damping
 
-            def damp(old, new):
+            def fn_damping(old, new):
                 return damping * old + (1 - damping) * new
 
-            self.fn_damping = damp
+            self.fn_damping = fn_damping
 
     @property
     def normalize(self):
@@ -247,6 +256,16 @@ class BeliefPropagationCommon:
         self._distance = distance
         self._distance_fn = _distance_fn
 
+    def _maybe_contract(self):
+        should_contract = (
+            (self.contract_every is not None)
+            and (self.n % self.contract_every == 0)
+            and ((not self.zval_its) or (self.zval_its[-1] != self.n))
+        )
+        if should_contract:
+            self.zval_its.append(self.n)
+            self.zvals.append(self.contract())
+
     def run(
         self,
         max_iterations=1000,
@@ -311,6 +330,8 @@ class BeliefPropagationCommon:
         rdm = RollingDiffMean()
         self.converged = False
         while not self.converged and it < max_iterations:
+            self._maybe_contract()
+
             # perform a single iteration of BP
             # we supply tol here for use with local convergence
             result = self.iterate(tol=tol)
@@ -350,6 +371,8 @@ class BeliefPropagationCommon:
             it += 1
             self.n += 1
 
+        self._maybe_contract()
+
         # finally:
         if pbar is not None:
             pbar.close()
@@ -368,10 +391,15 @@ class BeliefPropagationCommon:
             info["max_mdiff"] = max_mdiff
             info["rolling_abs_mean_diff"] = rdm.absmeandiff()
 
-    def plot(self, **kwargs):
+    def plot(self, zvals_yscale="asinh", **kwargs):
         from quimb import plot_multi_series_zoom
 
         data = {
+            "zvals": {
+                "x": self.zval_its,
+                "y": self.zvals,
+                "yscale": zvals_yscale,
+            },
             "mdiffs": self.mdiffs,
             "rdiffs": self.rdiffs,
         }
@@ -380,6 +408,16 @@ class BeliefPropagationCommon:
 
         kwargs.setdefault("yscale", "log")
         return plot_multi_series_zoom(data, **kwargs)
+
+    @property
+    def mdiff(self):
+        try:
+            return self.mdiffs[-1]
+        except IndexError:
+            return float("nan")
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(n={self.n}, mdiff={self.mdiff:.3g})"
 
 
 def initialize_hyper_messages(

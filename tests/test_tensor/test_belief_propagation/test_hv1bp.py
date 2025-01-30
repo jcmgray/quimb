@@ -20,11 +20,18 @@ def test_contract_hyper(damping, diis):
     assert num_solutions == pytest.approx(309273226, rel=0.1)
 
 
-def test_contract_tree_exact():
+@pytest.mark.parametrize("messages", [None, "dense", "random"])
+def test_contract_tree_exact(messages):
     tn = qtn.TN_rand_tree(20, 3)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_hv1bp(tn, info=info, progbar=True)
+
+    if messages == "random":
+
+        def messages(shape):
+            return qu.randn(shape, dist="uniform")
+
+    Z_bp = contract_hv1bp(tn, messages=messages, info=info, progbar=True)
     assert info["converged"]
     assert Z == pytest.approx(Z_bp, rel=1e-12)
 
