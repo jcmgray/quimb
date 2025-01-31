@@ -2228,18 +2228,6 @@ class TensorNetwork3DFlat(TensorNetwork3D):
         "_Lz",
     )
 
-    def bond(self, coo1, coo2):
-        """Get the name of the index defining the bond between sites at
-        ``coo1`` and ``coo2``.
-        """
-        (b_ix,) = self[coo1].bonds(self[coo2])
-        return b_ix
-
-    def bond_size(self, coo1, coo2):
-        """Return the size of the bond between sites at ``coo1`` and ``coo2``."""
-        b_ix = self.bond(coo1, coo2)
-        return self[coo1].ind_size(b_ix)
-
 
 class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
     r"""Projected Entangled Pair States object (3D).

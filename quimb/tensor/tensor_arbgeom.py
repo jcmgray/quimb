@@ -617,6 +617,43 @@ class TensorNetworkGen(TensorNetwork):
             tid2site[tid] = site
         return tid2site
 
+    def bond(self, coo1, coo2):
+        """Get the name of the index defining the bond between sites at
+        ``coo1`` and ``coo2``. This will error if there is not exactly one bond
+        between the sites.
+
+        Parameters
+        ----------
+        coo1 : hashable or str
+            The first site, or site tag.
+        coo2 : hashable or str
+            The second site, or site tag.
+
+        Returns
+        -------
+        str
+        """
+        (b_ix,) = self[coo1].bonds(self[coo2])
+        return b_ix
+
+    def bond_size(self, coo1, coo2):
+        """Return the (combined) size of the bond(s) between sites at ``coo1``
+        and ``coo2``.
+
+        Parameters
+        ----------
+        coo1 : hashable or str
+            The first site, or site tag.
+        coo2 : hashable or str
+            The second site, or site tag.
+
+        Returns
+        -------
+        int
+        """
+        b_ix = self.bond(coo1, coo2)
+        return self[coo1].ind_size(b_ix)
+
     def gen_bond_coos(self):
         """Generate the coordinates (pairs of sites) of all bonds."""
         tid2site = self._get_tid_to_site_map()

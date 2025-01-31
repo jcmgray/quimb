@@ -4696,20 +4696,6 @@ class TensorNetwork2DFlat(TensorNetwork2D):
         "_Ly",
     )
 
-    def bond(self, coo1, coo2):
-        """Get the name of the index defining the bond between sites at
-        ``coo1`` and ``coo2``.
-        """
-        (b_ix,) = self[coo1].bonds(self[coo2])
-        return b_ix
-
-    def bond_size(self, coo1, coo2):
-        """Return the (combined) size of the bond(s) between sites at ``coo1``
-        and ``coo2``.
-        """
-        b_ix = self.bond(coo1, coo2)
-        return self[coo1].ind_size(b_ix)
-
     def expand_bond_dimension(
         self, new_bond_dim, inplace=True, bra=None, rand_strength=0.0
     ):
