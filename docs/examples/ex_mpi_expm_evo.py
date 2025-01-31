@@ -9,6 +9,7 @@ quimb-mpi-python --syncro ex_mpi_modes_expm_evo.py
 And will display slightly different output for each that explains the
 three modes.
 """
+
 import quimb as qu
 from mpi4py import MPI
 
@@ -24,8 +25,9 @@ shape = (2**n, 2**n)
 
 # this makes the function print some information when called
 #     - in order to be pickled is has to be located in the main package
-ham_heis_verbose = qu.utils.Verbosify(qu.ham_heis,
-                                      highlight='ownership', mpi=True)
+ham_heis_verbose = qu.utils.Verbosify(
+    qu.ham_heis, highlight="ownership", mpi=True
+)
 
 H = qu.Lazy(ham_heis_verbose, n=n, sparse=True, shape=shape)
 
@@ -36,7 +38,7 @@ psi0 = qu.rand_ket(2**n, seed=42)
 # evolve the system, processes split 'hard' work (slepc computations)
 #     - should see each worker gets given a different ownership rows
 #     - but all end up with the results.
-evo = qu.Evolution(psi0, H, method='expm', expm_backend='slepc')
+evo = qu.Evolution(psi0, H, method="expm", expm_backend="slepc")
 evo.update_to(5)
 
 
@@ -47,14 +49,22 @@ pool = qu.get_mpi_pool()
 
 dims = [2] * n
 bsz = 5
-logneg_subsys_verbose = qu.utils.Verbosify(qu.logneg_subsys,
-                                           highlight='sysb', mpi=True)
+logneg_subsys_verbose = qu.utils.Verbosify(
+    qu.logneg_subsys, highlight="sysb", mpi=True
+)
 
 # each process only computes its own fraction of these
 #     - should see each process calls logneg with different ``sysb``.
-fs = [pool.submit(logneg_subsys_verbose, evo.pt, dims=dims,
-                  sysa=range(0, bsz), sysb=range(i, i + bsz))
-      for i in range(bsz, n - bsz)]
+fs = [
+    pool.submit(
+        logneg_subsys_verbose,
+        evo.pt,
+        dims=dims,
+        sysa=range(0, bsz),
+        sysb=range(i, i + bsz),
+    )
+    for i in range(bsz, n - bsz)
+]
 
 # but then the results are comminucated to everyone
 rs = [f.result() for f in fs]
