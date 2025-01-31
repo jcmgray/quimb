@@ -1,7 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400;1,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Spline+Sans+Mono:ital,wght@0,300..700;1,300..700&display=swap');
 
 h1, h2, h3 {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: 'Spline Sans Mono', monospace;
     font-weight: bold;
 }
 
@@ -30,7 +30,7 @@ article {
 }
 
 code, kbd, pre, samp {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: 'Spline Sans Mono', monospace;
 }
 
 code.literal {
