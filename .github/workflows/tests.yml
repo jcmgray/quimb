@@ -84,6 +84,8 @@ jobs:
         miniforge-version: latest
         activate-environment: test-env
         environment-file: ci/requirements/py-${{ matrix.conda-env }}.yml
+        channels: conda-forge
+        conda-remove-defaults: "true"
 
     - name: Matrix submodule tests with pytest
       if: ${{ matrix.testset == 'matrix' }}
