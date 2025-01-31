@@ -14,5 +14,5 @@ dependencies:
   - psutil
   - pytest
   - pytest-cov
-  - scipy
+  - scipy!=1.15.0,!=1.15.1
   - tqdm
