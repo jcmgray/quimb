@@ -453,13 +453,13 @@ def tensor_network_ag_compress_l2bp(
         Whether to perform the compression inplace.
     compress_opts
         Supplied to
-        :func:`~quimb.experimental.belief_propagation.l2bp.compress_l2bp`.
+        :func:`~quimb.tensor.belief_propagation.l2bp.compress_l2bp`.
 
     Returns
     -------
     TensorNetwork
     """
-    from quimb.experimental.belief_propagation.l2bp import compress_l2bp
+    from quimb.tensor.belief_propagation.l2bp import compress_l2bp
 
     if not canonize:
         compress_opts.setdefault("max_iterations", 1)

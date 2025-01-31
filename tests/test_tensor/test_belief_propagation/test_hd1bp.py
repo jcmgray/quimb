@@ -2,18 +2,14 @@ import pytest
 
 import quimb as qu
 import quimb.tensor as qtn
-from quimb.experimental.belief_propagation.hd1bp import (
-    HD1BP,
-    contract_hd1bp,
-    sample_hd1bp,
-)
+import quimb.tensor.belief_propagation as qbp
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1])
 def test_contract_hyper(damping):
     htn = qtn.HTN_random_ksat(3, 50, alpha=2.0, seed=42, mode="dense")
     info = {}
-    num_solutions = contract_hd1bp(
+    num_solutions = qbp.contract_hd1bp(
         htn, damping=damping, info=info, progbar=True
     )
     assert info["converged"]
@@ -25,7 +21,7 @@ def test_contract_tree_exact(normalize):
     tn = qtn.TN_rand_tree(20, 3)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_hd1bp(
+    Z_bp = qbp.contract_hd1bp(
         tn,
         info=info,
         normalize=normalize,
@@ -41,7 +37,7 @@ def test_contract_normal(damping, diis):
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_hd1bp(
+    Z_bp = qbp.contract_hd1bp(
         tn, damping=damping, diis=diis, info=info, progbar=True
     )
     assert info["converged"]
@@ -52,7 +48,7 @@ def test_contract_normal(damping, diis):
 def test_sample(damping):
     nvars = 20
     htn = qtn.HTN_random_ksat(3, nvars, alpha=2.0, seed=42, mode="dense")
-    config, tn_config, omega = sample_hd1bp(
+    config, tn_config, omega = qbp.sample_hd1bp(
         htn, damping=damping, seed=42, progbar=True
     )
     assert len(config) == nvars
@@ -64,7 +60,7 @@ def test_sample(damping):
 def test_get_gauged_tn():
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
-    bp = HD1BP(tn)
+    bp = qbp.HD1BP(tn)
     bp.run()
     Zbp = bp.contract()
     assert Z == pytest.approx(Zbp, rel=1e-1)

@@ -2,10 +2,7 @@ import pytest
 
 import quimb as qu
 import quimb.tensor as qtn
-from quimb.experimental.belief_propagation import (
-    D1BP,
-    contract_d1bp,
-)
+import quimb.tensor.belief_propagation as qbp
 
 
 @pytest.mark.parametrize("local_convergence", [False, True])
@@ -13,7 +10,7 @@ def test_contract_tree_exact(local_convergence):
     tn = qtn.TN_rand_tree(20, 3)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_d1bp(
+    Z_bp = qbp.contract_d1bp(
         tn, info=info, local_convergence=local_convergence, progbar=True
     )
     assert info["converged"]
@@ -26,7 +23,7 @@ def test_contract_normal(damping, diis):
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
     info = {}
-    Z_bp = contract_d1bp(
+    Z_bp = qbp.contract_d1bp(
         tn, damping=damping, diis=diis, info=info, progbar=True
     )
     assert info["converged"]
@@ -36,7 +33,7 @@ def test_contract_normal(damping, diis):
 def test_get_gauged_tn():
     tn = qtn.TN2D_from_fill_fn(lambda s: qu.randn(s, dist="uniform"), 6, 6, 2)
     Z = tn.contract()
-    bp = D1BP(tn)
+    bp = qbp.D1BP(tn)
     bp.run()
     Zbp = bp.contract()
     assert Z == pytest.approx(Zbp, rel=1e-1)

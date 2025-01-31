@@ -5,6 +5,14 @@ Release notes for `quimb`.
 (whats-new-1-10-1)=
 ## v1.10.1 (unreleased)
 
+**Breaking Changes**
+
+- move belief propagation to `quimb.tensor.belief_propagation`
+
+**Breaking Changes**
+
+- move belief propagation to `quimb.tensor.belief_propagation`
+
 **Enhancements:**
 
 - [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure): add a `seed` kwarg
@@ -128,7 +136,7 @@ Release notes for `quimb`.
 - add [`TensorNetwork.drape_bond_between`](quimb.tensor.tensor_core.TensorNetwork.drape_bond_between) for 'draping' an existing bond between two tensors through a third
 - add [`Tensor.new_ind_pair_with_identity`](quimb.tensor.tensor_core.Tensor.new_ind_pair_with_identity)
 - TN2D, TN3D and arbitrary geom classical partition function builders ([`TN_classical_partition_function_from_edges`](quimb.tensor.tensor_builder.TN_classical_partition_function_from_edges)) now all support `outputs=` kwarg specifying non-marginalized variables
-- add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.experimental.belief_propagation.d1bp.D1BP)
+- add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP)
 - add [`qtn.enforce_1d_like`](quimb.tensor.tensor_1d_compress.enforce_1d_like) for checking whether a tensor network is 1D-like, including automatically adding strings of identities between non-local bonds, expanding applicability of [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
 - add [`MatrixProductState.canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].
 - add [`MatrixProductState.left_canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.left_canonicalize) as (by default *non-inplace*) version of `left_canonize`, to follow the pattern of other tensor network methods. `left_canonize` is now an alias for `left_canonicalize_` [note trailing underscore].
@@ -339,7 +347,7 @@ Release notes for `quimb`.
   [Tensor.idxmax](quimb.tensor.Tensor.idxmax) for finding the index of the
   minimum/maximum element.
 - 2D and 3D classical partition function TN builders: allow output indices.
-- [`quimb.experimental.belief_propagation`]([`quimb.experimental.belief_propagation`]):
+- [`quimb.tensor.belief_propagation`]([`quimb.tensor.belief_propagation`]):
   add various 1-norm/2-norm dense/lazy BP algorithms.
 
 **Bug fixes:**

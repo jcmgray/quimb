@@ -1926,7 +1926,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         expec : scalar
         """
-        from quimb.experimental.belief_propagation import RegionGraph
+        from quimb.tensor.belief_propagation import RegionGraph
 
         info = info if info is not None else {}
         info.setdefault("tns", {})
@@ -2147,7 +2147,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         expec : scalar
         """
-        from quimb.experimental.belief_propagation import RegionGraph
+        from quimb.tensor.belief_propagation import RegionGraph
 
         info = info if info is not None else {}
         info.setdefault("tns", {})
@@ -2277,7 +2277,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         """Compute the norm of this tensor network by expanding it in terms of
         clusters of tensors.
         """
-        from quimb.experimental.belief_propagation import RegionGraph
+        from quimb.tensor.belief_propagation import RegionGraph
 
         if isinstance(clusters, int):
             max_cluster_size = clusters

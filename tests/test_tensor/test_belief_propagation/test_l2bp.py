@@ -1,10 +1,7 @@
 import pytest
 
 import quimb.tensor as qtn
-from quimb.experimental.belief_propagation.l2bp import (
-    compress_l2bp,
-    contract_l2bp,
-)
+import quimb.tensor.belief_propagation as qbp
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
@@ -12,7 +9,7 @@ def test_contract_tree_exact(dtype):
     psi = qtn.TN_rand_tree(20, 3, 2, dtype=dtype)
     norm2 = psi.H @ psi
     info = {}
-    norm2_bp = contract_l2bp(psi, info=info, progbar=True)
+    norm2_bp = qbp.contract_l2bp(psi, info=info, progbar=True)
     assert info["converged"]
     assert norm2_bp == pytest.approx(norm2, rel=1e-5)
 
@@ -22,7 +19,7 @@ def test_contract_loopy_approx(dtype):
     peps = qtn.PEPS.rand(3, 4, 3, dtype=dtype, seed=42)
     norm_ex = peps.H @ peps
     info = {}
-    norm_bp = contract_l2bp(peps, damping=0.1, info=info, progbar=True)
+    norm_bp = qbp.contract_l2bp(peps, damping=0.1, info=info, progbar=True)
     assert info["converged"]
     assert norm_bp == pytest.approx(norm_ex, rel=0.2)
 
@@ -35,7 +32,7 @@ def test_compress_loopy(damping, dtype):
     # local, naive compression scheme
     peps_c1 = peps.compress_all(max_bond=2)
     info = {}
-    peps_c2 = compress_l2bp(
+    peps_c2 = qbp.compress_l2bp(
         peps, max_bond=2, damping=damping, info=info, progbar=True
     )
     assert info["converged"]
@@ -61,7 +58,7 @@ def test_contract_double_layer_tree_exact(dtype):
 
     norm_ex = tn.H @ tn
     info = {}
-    norm_bp = contract_l2bp(tn, info=info, progbar=True)
+    norm_bp = qbp.contract_l2bp(tn, info=info, progbar=True)
     assert info["converged"]
 
     assert norm_bp == pytest.approx(norm_ex, rel=1e-6)
@@ -85,7 +82,7 @@ def test_compress_double_layer_loopy(dtype, damping, update):
 
     # compress using BP
     info = {}
-    tn_bp = compress_l2bp(
+    tn_bp = qbp.compress_l2bp(
         tn_lazy,
         max_bond=3,
         damping=damping,
