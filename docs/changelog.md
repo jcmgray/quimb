@@ -9,19 +9,16 @@ Release notes for `quimb`.
 
 - move belief propagation to `quimb.tensor.belief_propagation`
 
-**Breaking Changes**
-
-- move belief propagation to `quimb.tensor.belief_propagation`
-
 **Enhancements:**
 
 - [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure): add a `seed` kwarg
 - belief propagation, implement DIIS (direct inversion in the iterative subspace)
 - belief propagation, unify various aspects such as message normalization and distance.
-- belief propagation, add a `plot` method.
+- belief propagation, add a [`plot`](quimb.tensor.belief_propagation.bp_common.BeliefPropagationCommon.plot) method.
 - belief propagation, add a `contract_every` option.
 - HV1BP: vectorize both contraction and message initialization
-- add `qu.plot_multi_series_zoom` for plotting multiple series with a zoomed inset, useful for various convergence plots such as BP
+- add [`qu.plot_multi_series_zoom`](quimb.utils_plot.plot_multi_series_zoom) for plotting multiple series with a zoomed inset, useful for various convergence plots such as BP
+- add `info` option to [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple) for tracking extra information such as number of iterations and max gauge difffi
 
 **Bug fixes:**
 

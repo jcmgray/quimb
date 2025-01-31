@@ -7029,6 +7029,7 @@ class TensorNetwork(object):
         gauges=None,
         equalize_norms=False,
         touched_tids=None,
+        info=None,
         progbar=False,
         inplace=False,
     ):
@@ -7058,6 +7059,13 @@ class TensorNetwork(object):
             Whether to equalize the norms of the tensors after each update.
         touched_tids : sequence of int, optional
             The tensor identifiers to start the gauge sweep from.
+        info : dict, optional
+            Store extra information about the gauging process in this dict.
+            If supplied, the following keys are filled:
+
+            - 'iterations': the number of iterations performed.
+            - 'max_sdiff': the maximum singular value difference.
+
         progbar : bool, optional
             Whether to show a progress bar.
         inplace : bool, optional
@@ -7093,7 +7101,7 @@ class TensorNetwork(object):
         }[(power == 1.0, smudge == 0.0)]
 
         # for retrieving singular values
-        info = {}
+        sub_info = {}
 
         # accrue scaling to avoid numerical blow-ups
         nfact = 0.0
@@ -7176,10 +7184,10 @@ class TensorNetwork(object):
 
                 # perform SVD to get new bond gauge
                 tensor_compress_bond(
-                    t1, t2, absorb=None, info=info, cutoff=0.0
+                    t1, t2, absorb=None, info=sub_info, cutoff=0.0
                 )
 
-                s = info["singular_values"]
+                s = sub_info["singular_values"]
                 snorm = do("linalg.norm", s)
                 new_gauge = s / snorm
                 nfact = do("log10", snorm) + nfact
@@ -7248,6 +7256,10 @@ class TensorNetwork(object):
                 s_1_2 = s**0.5
                 t1.multiply_index_diagonal_(ix, s_1_2)
                 t2.multiply_index_diagonal_(ix, s_1_2)
+
+        if info is not None:
+            info["iterations"] = it
+            info["max_sdiff"] = max_sdiff
 
         return tn
 

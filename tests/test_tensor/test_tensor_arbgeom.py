@@ -121,8 +121,13 @@ def test_gate_sandwich_with_op():
 def test_normalize_simple():
     psi = qtn.PEPS.rand(3, 3, 2, dtype=complex)
     gauges = {}
-    psi.gauge_all_simple_(100, 5e-6, gauges=gauges)
+    info = {}
+    psi.gauge_all_simple_(100, 5e-6, gauges=gauges, info=info)
     psi.normalize_simple(gauges)
+
+    assert info["iterations"] <= 100
+    if info["iterations"] < 100:
+        assert info["max_sdiff"] < 5e-6
 
     for where in [
         [(0, 0)],
