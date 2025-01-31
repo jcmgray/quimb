@@ -2318,11 +2318,22 @@ class Tensor:
         G,
         ind,
         preserve_inds=True,
+        transposed=False,
         inplace=False,
     ):
-        """Gate this tensor - contract a matrix into one of its indices without
+        r"""Gate this tensor - contract a matrix into one of its indices without
         changing its indices. Unlike ``contract``, ``G`` is a raw array and the
-        tensor remains with the same set of indices.
+        tensor remains with the same set of indices. This is like applying:
+
+        .. math::
+
+            x \leftarrow G x
+
+        or if ``transposed=True``:
+
+        .. math::
+
+            x \leftarrow x G
 
         Parameters
         ----------
@@ -2330,6 +2341,12 @@ class Tensor:
             The matrix to gate the tensor index with.
         ind : str
             Which index to apply the gate to.
+        preserve_inds : bool, optional
+            If ``True``, the order of the indices is preserved, otherwise the
+            gated index will be left at the first axis, avoiding a transpose.
+        transposed : bool, optional
+            If ``True``, the gate is effectively transpose and applied, or
+            equivalently, contracted to its left rather than right.
 
         Returns
         -------
@@ -2359,7 +2376,11 @@ class Tensor:
         t = self if inplace else self.copy()
 
         ax = t.inds.index(ind)
-        new_data = do("tensordot", G, t.data, ((1,), (ax,)))
+
+        if transposed:
+            new_data = do("tensordot", G, t.data, ((0,), (ax,)))
+        else:
+            new_data = do("tensordot", G, t.data, ((1,), (ax,)))
 
         if preserve_inds:
             # gated index is now first axis, so move it to the correct position

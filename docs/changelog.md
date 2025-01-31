@@ -19,6 +19,7 @@ Release notes for `quimb`.
 - HV1BP: vectorize both contraction and message initialization
 - add [`qu.plot_multi_series_zoom`](quimb.utils_plot.plot_multi_series_zoom) for plotting multiple series with a zoomed inset, useful for various convergence plots such as BP
 - add `info` option to [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple) for tracking extra information such as number of iterations and max gauge difffi
+- [`Tensor.gate`](quimb.tensor.tensor_core.Tensor.gate): add `transposed` option
 
 **Bug fixes:**
 
