@@ -19,5 +19,6 @@
 ./examples/ex_quimb_within_torch
 ./examples/ex_quimb_within_jax_flax_optax
 ./examples/ex_tn_tensor_fitting
+./examples/ex_circuit_to_mpo
 ./examples/schematic-demo
 ```
