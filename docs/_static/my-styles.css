@@ -21,16 +21,8 @@ h3 {
 	font-size: 0.85rem;
 }
 
-body {
-    font-family: 'Atkinson Hyperlegible', sans-serif;
-}
-
 article {
 	font-size: 0.9rem;
-}
-
-code, kbd, pre, samp {
-    font-family: 'Spline Sans Mono', monospace;
 }
 
 code.literal {
