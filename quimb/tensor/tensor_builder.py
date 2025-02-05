@@ -2118,7 +2118,7 @@ def parse_j_coupling_to_function(j):
     function.
     """
     if callable(j):
-        return j
+        return functools.cache(j)
 
     elif isinstance(j, dict):
 
