@@ -66,7 +66,7 @@ def _ensure_dict(k, v):
         v = {"y": v}
     v["y"] = np.asarray(v["y"])
 
-    if v["y"].size == 0:
+    if v["y"].size < 2:
         return None
 
     # make sure x-coords exists explicitly
@@ -121,6 +121,9 @@ def plot_multi_series_zoom(
     data = [d for d in data if d is not None]
 
     nrows = len(data)
+
+    if nrows == 0:
+        return None, None
 
     if figsize is None:
         figsize = (8, 2 * nrows)
