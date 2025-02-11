@@ -207,7 +207,7 @@ def maybe_realify_scalar(data):
 
 @functools.singledispatch
 def tensor_contract(
-    *tensors,
+    *tensors: "Tensor",
     output_inds=None,
     optimize=None,
     get=None,
@@ -435,7 +435,7 @@ def _check_left_right_isom(method, absorb):
 
 @functools.singledispatch
 def tensor_split(
-    T,
+    T: "Tensor",
     left_inds,
     method="svd",
     get=None,
@@ -628,7 +628,12 @@ def tensor_split(
 
 @functools.singledispatch
 def tensor_canonize_bond(
-    T1, T2, absorb="right", gauges=None, gauge_smudge=1e-6, **split_opts
+    T1: "Tensor",
+    T2: "Tensor",
+    absorb="right",
+    gauges=None,
+    gauge_smudge=1e-6,
+    **split_opts,
 ):
     r"""Inplace 'canonization' of two tensors. This gauges the bond between
     the two such that ``T1`` is isometric::
@@ -731,8 +736,8 @@ def choose_local_compress_gauge_settings(
 
 @functools.singledispatch
 def tensor_compress_bond(
-    T1,
-    T2,
+    T1: "Tensor",
+    T2: "Tensor",
     reduced=True,
     absorb="both",
     gauges=None,
@@ -890,7 +895,11 @@ def tensor_compress_bond(
 
 
 @functools.singledispatch
-def tensor_balance_bond(t1, t2, smudge=1e-6):
+def tensor_balance_bond(
+    t1: "Tensor",
+    t2: "Tensor",
+    smudge=1e-6
+):
     """Gauge the bond between two tensors such that the norm of the 'columns'
     of the tensors on each side is the same for each index of the bond.
 
@@ -942,7 +951,11 @@ def tensor_multifuse(ts, inds, gauges=None):
         t.fuse_({inds[0]: inds})
 
 
-def tensor_make_single_bond(t1, t2, gauges=None):
+def tensor_make_single_bond(
+    t1: "Tensor",
+    t2: "Tensor",
+    gauges=None
+):
     """If two tensors share multibonds, fuse them together and return the left
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
     Inplace operation.
@@ -959,7 +972,12 @@ def tensor_make_single_bond(t1, t2, gauges=None):
     return left, shared[0], right
 
 
-def tensor_fuse_squeeze(t1, t2, squeeze=True, gauges=None):
+def tensor_fuse_squeeze(
+    t1: "Tensor",
+    t2: "Tensor",
+    squeeze=True,
+    gauges=None,
+):
     """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
     of the shared dimenion(s) is 1, squeeze it. Inplace operation.
     """
@@ -975,7 +993,14 @@ def tensor_fuse_squeeze(t1, t2, squeeze=True, gauges=None):
             t2 *= s0_1_2
 
 
-def new_bond(T1, T2, size=1, name=None, axis1=0, axis2=0):
+def new_bond(
+    T1: "Tensor",
+    T2: "Tensor",
+    size=1,
+    name=None,
+    axis1=0,
+    axis2=0,
+):
     """Inplace addition of a new bond between tensors ``T1`` and ``T2``. The
     size of the new bond can be specified, in which case the new array parts
     will be filled with zeros.
@@ -1059,7 +1084,12 @@ def array_direct_product(X, Y, sum_axes=()):
     return pX + pY
 
 
-def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
+def tensor_direct_product(
+    T1: "Tensor",
+    T2: "Tensor",
+    sum_inds=(),
+    inplace=False,
+):
     """Direct product of two Tensors. Any axes included in ``sum_inds`` must be
     the same size and will be summed over rather than concatenated. Summing
     over contractions of TensorNetworks equates to contracting a TensorNetwork
@@ -1103,7 +1133,11 @@ def tensor_direct_product(T1, T2, sum_inds=(), inplace=False):
     return new_T
 
 
-def tensor_network_sum(tnA, tnB, inplace=False):
+def tensor_network_sum(
+    tnA: "TensorNetwork",
+    tnB: "TensorNetwork",
+    inplace=False,
+):
     """Sum of two tensor networks, whose indices should match exactly, using
     direct products.
 
@@ -1142,7 +1176,10 @@ def tensor_network_sum(tnA, tnB, inplace=False):
     return tnAB
 
 
-def bonds(t1, t2):
+def bonds(
+    t1: "Tensor",
+    t2: "Tensor",
+):
     """Getting any indices connecting the Tensor(s) or TensorNetwork(s) ``t1``
     and ``t2``.
     """
@@ -1159,14 +1196,20 @@ def bonds(t1, t2):
     return ix1 & ix2
 
 
-def bonds_size(t1, t2):
+def bonds_size(
+    t1: "Tensor",
+    t2: "Tensor",
+):
     """Get the size of the bonds linking tensors or tensor networks ``t1`` and
     ``t2``.
     """
     return t1.inds_size(bonds(t1, t2))
 
 
-def group_inds(t1, t2):
+def group_inds(
+    t1: "Tensor",
+    t2: "Tensor",
+):
     """Group bonds into left only, shared, and right only. If ``t1`` or ``t2``
     are ``TensorNetwork`` objects, then only outer indices are considered.
 
@@ -1210,7 +1253,12 @@ def group_inds(t1, t2):
     return left_inds, shared_inds, right_inds
 
 
-def connect(t1, t2, ax1, ax2):
+def connect(
+    t1: "Tensor",
+    t2: "Tensor",
+    ax1,
+    ax2,
+):
     """Connect two tensors by setting a shared index for the specified
     dimensions. This is an inplace operation that will also affect any tensor
     networks viewing these tensors.
@@ -3314,7 +3362,7 @@ for meth_name, op in [
 
 
 def _tensor_network_gate_inds_basic(
-    tn,
+    tn: "TensorNetwork",
     G,
     inds,
     ng,
@@ -3348,6 +3396,7 @@ def _tensor_network_gate_inds_basic(
         TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
 
     if contract is False:
+        # we just attach gate to the network, no contraction:
         #
         #       │   │      <- site_ix
         #       GGGGG
@@ -3362,10 +3411,11 @@ def _tensor_network_gate_inds_basic(
     tids = tn._get_tids_from_inds(inds, "any")
 
     if (contract is True) or (len(tids) == 1):
+        # everything is contracted, no need to split anything:
         #
-        #       │╱  │╱
-        #     ──GGGGG──
-        #      ╱   ╱
+        #       │╱│╱
+        #     ──GGG──
+        #      ╱ ╱
         #
         tn.reindex_(reindex_map)
 
@@ -3484,7 +3534,7 @@ def _tensor_network_gate_inds_basic(
 
 
 def _tensor_network_gate_inds_lazy_split(
-    tn,
+    tn: "TensorNetwork",
     G,
     inds,
     ng,
@@ -3559,7 +3609,7 @@ _VALID_GATE_CONTRACT = _BASIC_GATE_CONTRACT | _SPLIT_GATE_CONTRACT
 
 
 def tensor_network_gate_inds(
-    self,
+    self: "TensorNetwork",
     G,
     inds,
     contract=False,
@@ -3568,7 +3618,7 @@ def tensor_network_gate_inds(
     inplace=False,
     **compress_opts,
 ):
-    """Apply the 'gate' ``G`` to indices ``inds``, propagating them to the
+    r"""Apply the 'gate' ``G`` to indices ``inds``, propagating them to the
     outside, as if applying ``G @ x``.
 
     Parameters
@@ -3727,7 +3777,7 @@ def tensor_network_gate_inds(
             )
 
     if basic:
-        # no gate splitting involved
+        # no splitting of the *gate on its own* involved
         _tensor_network_gate_inds_basic(
             tn, G, inds, ng, tags, contract, isparam, info, **compress_opts
         )

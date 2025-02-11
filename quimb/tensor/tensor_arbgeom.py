@@ -25,7 +25,12 @@ def prod(xs):
     return functools.reduce(mul, xs)
 
 
-def tensor_network_align(*tns, ind_ids=None, trace=False, inplace=False):
+def tensor_network_align(
+    *tns: "TensorNetworkGen",
+    ind_ids=None,
+    trace=False,
+    inplace=False,
+):
     r"""Align an arbitrary number of tensor networks in a stack-like geometry::
 
         a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a
@@ -101,8 +106,8 @@ def tensor_network_align(*tns, ind_ids=None, trace=False, inplace=False):
 
 
 def tensor_network_apply_op_vec(
-    A,
-    x,
+    A: "TensorNetworkGenOperator",
+    x: "TensorNetworkGenVector",
     which_A="lower",
     contract=False,
     fuse_multibonds=True,
@@ -202,8 +207,8 @@ def tensor_network_apply_op_vec(
 
 
 def tensor_network_apply_op_op(
-    A,
-    B,
+    A: "TensorNetworkGenOperator",
+    B: "TensorNetworkGenOperator",
     which_A="lower",
     which_B="upper",
     contract=False,
@@ -308,7 +313,7 @@ def tensor_network_apply_op_op(
     return B
 
 
-def create_lazy_edge_map(tn, site_tags=None):
+def create_lazy_edge_map(tn: "TensorNetworkGen", site_tags=None):
     """Given a tensor network, where each tensor is in exactly one group or
     'site', compute which sites are connected to each other, without checking
     each pair.
@@ -358,8 +363,8 @@ def create_lazy_edge_map(tn, site_tags=None):
 
 
 def tensor_network_ag_sum(
-    tna,
-    tnb,
+    tna: "TensorNetworkGen",
+    tnb: "TensorNetworkGen",
     site_tags=None,
     negate=False,
     compress=False,
@@ -3169,7 +3174,12 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     )
 
 
-def _handle_rehearse(rehearse, tn, optimize, **kwargs):
+def _handle_rehearse(
+    rehearse,
+    tn: TensorNetwork,
+    optimize,
+    **kwargs,
+):
     if rehearse is True:
         tree = tn.contraction_tree(optimize, **kwargs)
         return {
@@ -3224,17 +3234,17 @@ def _compute_expecs_maybe_in_parallel(
     return functools.reduce(add, expecs.values())
 
 
-def _tn_local_expectation(tn, *args, **kwargs):
+def _tn_local_expectation(tn: TensorNetworkGenVector, *args, **kwargs):
     """Define as function for pickleability."""
     return tn.local_expectation(*args, **kwargs)
 
 
-def _tn_local_expectation_cluster(tn, *args, **kwargs):
+def _tn_local_expectation_cluster(tn: TensorNetworkGenVector, *args, **kwargs):
     """Define as function for pickleability."""
     return tn.local_expectation_cluster(*args, **kwargs)
 
 
-def _tn_local_expectation_exact(tn, *args, **kwargs):
+def _tn_local_expectation_exact(tn: TensorNetworkGenVector, *args, **kwargs):
     """Define as function for pickleability."""
     return tn.local_expectation_exact(*args, **kwargs)
 
