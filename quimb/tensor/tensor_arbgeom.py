@@ -431,6 +431,112 @@ def tensor_network_ag_sum(
     return tna
 
 
+def tensor_network_ag_gate(
+    self: "TensorNetworkGen",
+    G,
+    where,
+    contract=False,
+    tags=None,
+    propagate_tags=False,
+    which=None,
+    info=None,
+    inplace=False,
+    **compress_opts,
+):
+    r"""Apply a gate to this vector tensor network at sites ``where``. This is
+    essentially a wrapper around
+    :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds` apart from
+    ``where`` can be specified as a list of sites, and tags can be optionally,
+    intelligently propagated to the new gate tensor.
+
+    .. math::
+
+        | \psi \rangle \rightarrow G_\mathrm{where} | \psi \rangle
+
+    Parameters
+    ----------
+    G : array_ike
+        The gate array to apply, should match or be factorable into the shape
+        ``(*phys_dims, *phys_dims)``.
+    where : node or sequence[node]
+        The sites to apply the gate to.
+    contract : {False, True, 'split', 'reduce-split', 'split-gate',
+                'swap-split-gate', 'auto-split-gate'}, optional
+        How to apply the gate, see
+        :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
+    tags : str or sequence of str, optional
+        Tags to add to the new gate tensor.
+    propagate_tags : {False, True, 'register', 'sites'}, optional
+        Whether to propagate tags to the new gate tensor::
+
+        - False: no tags are propagated
+        - True: all tags are propagated
+        - 'register': only site tags corresponding to ``where`` are
+            added.
+        - 'sites': all site tags on the current sites are propgated,
+            resulting in a lightcone like tagging.
+
+    info : None or dict, optional
+        Used to store extra optional information such as the singular
+        values if not absorbed.
+    inplace : bool, optional
+        Whether to perform the gate operation inplace on the tensor network
+        or not.
+    compress_opts
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
+        ``contract`` methods that involve splitting. Ignored otherwise.
+
+    Returns
+    -------
+    TensorNetworkGenVector
+
+    See Also
+    --------
+    TensorNetwork.gate_inds
+    """
+    check_opt("propagate_tags", propagate_tags, _VALID_GATE_PROPAGATE)
+
+    tn = self if inplace else self.copy()
+
+    if which is None:
+        site_ind_fn = tn.site_ind
+    elif which == "upper":
+        site_ind_fn = tn.upper_ind
+    elif which == "lower":
+        site_ind_fn = tn.lower_ind
+    else:
+        raise ValueError("`which` should be None, 'upper' or 'lower'.")
+
+    if not isinstance(where, (tuple, list)):
+        where = (where,)
+    inds = tuple(map(site_ind_fn, where))
+
+    # potentially add tags from current tensors to the new ones,
+    # only do this if we are lazily adding the gate tensor(s)
+    if (contract in _LAZY_GATE_CONTRACT) and (
+        propagate_tags in (True, "sites")
+    ):
+        old_tags = oset.union(*(t.tags for t in tn._inds_get(*inds)))
+        if propagate_tags == "sites":
+            old_tags = tn.filter_valid_site_tags(old_tags)
+
+        tags = tags_to_oset(tags)
+        tags.update(old_tags)
+
+    # perform the actual gating
+    tn.gate_inds_(
+        G, inds, contract=contract, tags=tags, info=info, **compress_opts
+    )
+
+    # possibly add tags based on where the gate was applied
+    if propagate_tags == "register":
+        for ix, site in zip(inds, where):
+            (t,) = tn._inds_get(ix)
+            t.add_tag(tn.site_tag(site))
+
+    return tn
+
+
 class TensorNetworkGen(TensorNetwork):
     """A tensor network which notionally has a single tensor per 'site',
     though these could be labelled arbitrarily could also be linked in an
@@ -1058,102 +1164,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
         gate_with_op_lazy, inplace=True
     )
 
-    def gate(
-        self,
-        G,
-        where,
-        contract=False,
-        tags=None,
-        propagate_tags=False,
-        info=None,
-        inplace=False,
-        **compress_opts,
-    ):
-        r"""Apply a gate to this vector tensor network at sites ``where``. This
-        is essentially a wrapper around
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds` apart from
-        ``where`` can be specified as a list of sites, and tags can be
-        optionally, intelligently propagated to the new gate tensor.
-
-        .. math::
-
-            | \psi \rangle \rightarrow G_\mathrm{where} | \psi \rangle
-
-        Parameters
-        ----------
-        G : array_ike
-            The gate array to apply, should match or be factorable into the
-            shape ``(*phys_dims, *phys_dims)``.
-        where : node or sequence[node]
-            The sites to apply the gate to.
-        contract : {False, True, 'split', 'reduce-split', 'split-gate',
-                    'swap-split-gate', 'auto-split-gate'}, optional
-            How to apply the gate, see
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
-        tags : str or sequence of str, optional
-            Tags to add to the new gate tensor.
-        propagate_tags : {False, True, 'register', 'sites'}, optional
-            Whether to propagate tags to the new gate tensor::
-
-                - False: no tags are propagated
-                - True: all tags are propagated
-                - 'register': only site tags corresponding to ``where`` are
-                  added.
-                - 'sites': all site tags on the current sites are propgated,
-                  resulting in a lightcone like tagging.
-
-        info : None or dict, optional
-            Used to store extra optional information such as the singular
-            values if not absorbed.
-        inplace : bool, optional
-            Whether to perform the gate operation inplace on the tensor network
-            or not.
-        compress_opts
-            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
-            ``contract`` methods that involve splitting. Ignored otherwise.
-
-        Returns
-        -------
-        TensorNetworkGenVector
-
-        See Also
-        --------
-        TensorNetwork.gate_inds
-        """
-        check_opt("propagate_tags", propagate_tags, _VALID_GATE_PROPAGATE)
-
-        tn = self if inplace else self.copy()
-
-        if not isinstance(where, (tuple, list)):
-            where = (where,)
-        inds = tuple(map(tn.site_ind, where))
-
-        # potentially add tags from current tensors to the new ones,
-        # only do this if we are lazily adding the gate tensor(s)
-        if (contract in _LAZY_GATE_CONTRACT) and (
-            propagate_tags in (True, "sites")
-        ):
-            old_tags = oset.union(*(t.tags for t in tn._inds_get(*inds)))
-            if propagate_tags == "sites":
-                old_tags = tn.filter_valid_site_tags(old_tags)
-
-            tags = tags_to_oset(tags)
-            tags.update(old_tags)
-
-        # perform the actual gating
-        tn.gate_inds_(
-            G, inds, contract=contract, tags=tags, info=info, **compress_opts
-        )
-
-        # possibly add tags based on where the gate was applied
-        if propagate_tags == "register":
-            for ix, site in zip(inds, where):
-                (t,) = tn._inds_get(ix)
-                t.add_tag(tn.site_tag(site))
-
-        return tn
-
-    gate_ = functools.partialmethod(gate, inplace=True)
+    gate = tensor_network_ag_gate
+    gate_ = functools.partialmethod(tensor_network_ag_gate, inplace=True)
 
     def gate_simple_(
         self,
@@ -3031,6 +3043,19 @@ class TensorNetworkGenOperator(TensorNetworkGen):
 
         if which == "lower":
             return self[site].ind_size(self.lower_ind(site))
+
+    gate_upper = functools.partialmethod(tensor_network_ag_gate, which="upper")
+    gate_upper_ = functools.partialmethod(
+        tensor_network_ag_gate,
+        which="upper",
+        inplace=True,
+    )
+    gate_lower = functools.partialmethod(tensor_network_ag_gate, which="lower")
+    gate_lower_ = functools.partialmethod(
+        tensor_network_ag_gate,
+        which="lower",
+        inplace=True,
+    )
 
     def gate_upper_with_op_lazy(
         self,
