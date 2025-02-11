@@ -2960,10 +2960,8 @@ class Tensor:
             raise ValueError(f"Can't find index {ind} on this tensor.")
 
         t = self if inplace else self.copy()
-        flipper = tuple(
-            slice(None, None, -1) if i == ind else slice(None) for i in t.inds
-        )
-        t.modify(apply=lambda x: x[flipper])
+        ax = t.inds.index(ind)
+        t.modify(apply=lambda x: do("flip", x, ax))
         return t
 
     flip_ = functools.partialmethod(flip, inplace=True)
