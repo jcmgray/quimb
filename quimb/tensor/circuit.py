@@ -1415,6 +1415,14 @@ def parse_to_gate(
             )
         return gate_id
 
+    if isinstance(gate_id, tuple):
+        # if given a tuple just unpack it
+        if gate_args:
+            raise ValueError(
+                "You cannot specify ``gate_args`` when supplying a tuple."
+            )
+        gate_id, gate_args = gate_id[0], gate_id[1:]
+
     if hasattr(gate_id, "shape") and not isinstance(gate_id, str):
         # raw gate (numpy strings have a shape - ignore those)
 
@@ -1663,8 +1671,7 @@ class Circuit:
 
         if self._ket_site_ind_id == self._bra_site_ind_id:
             raise ValueError(
-                "The 'ket' and 'bra' site ind ids clash : "
-                "'{}' and '{}".format(
+                "The 'ket' and 'bra' site ind ids clash : '{}' and '{}".format(
                     self._ket_site_ind_id, self._bra_site_ind_id
                 )
             )
@@ -1833,7 +1840,7 @@ class Circuit:
 
             N = 0
             for gate in gates:
-                gate = parse_to_gate(*gate)
+                gate = parse_to_gate(gate)
                 if gate.qubits:
                     N = max(N, max(gate.qubits) + 1)
                 if gate.controls:
@@ -4639,9 +4646,7 @@ class CircuitMPS(Circuit):
             )
 
         for gate in gates:
-            if not isinstance(gate, Gate):
-                gate = parse_to_gate(*gate)
-
+            gate = parse_to_gate(gate)
             self._apply_gate(gate, **gate_opts)
 
             if progbar and (gate.total_qubit_count >= 2):
