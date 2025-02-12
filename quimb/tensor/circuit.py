@@ -6,6 +6,7 @@ TODO:
 - [ ] multi qubit gates via MPO for MPS simulation
 """
 
+import cmath
 import functools
 import itertools
 import math
@@ -419,6 +420,8 @@ register_constant_gate("S", qu.S_gate(), 1)
 register_constant_gate("SDG", qu.S_gate().H, 1)
 register_constant_gate("T", qu.T_gate(), 1)
 register_constant_gate("TDG", qu.T_gate().H, 1)
+register_constant_gate("SX", cmath.rect(1, 0.25 * math.pi) * qu.Xsqrt(), 1)
+register_constant_gate("SXDG", cmath.rect(1, -0.25 * math.pi) * qu.Xsqrt().H, 1)
 register_constant_gate("X_1_2", qu.Xsqrt(), 1, "X_1/2")
 register_constant_gate("Y_1_2", qu.Ysqrt(), 1, "Y_1/2")
 register_constant_gate("Z_1_2", qu.Zsqrt(), 1, "Z_1/2")
@@ -2037,6 +2040,12 @@ class Circuit:
 
     def tdg(self, i, gate_round=None, **kwargs):
         self.apply_gate("TDG", i, gate_round=gate_round, **kwargs)
+
+    def sx(self, i, gate_round=None, **kwargs):
+        self.apply_gate("SX", i, gate_round=gate_round, **kwargs)
+
+    def sxdg(self, i, gate_round=None, **kwargs):
+        self.apply_gate("SXDG", i, gate_round=gate_round, **kwargs)
 
     def x_1_2(self, i, gate_round=None, **kwargs):
         self.apply_gate("X_1_2", i, gate_round=gate_round, **kwargs)
