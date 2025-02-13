@@ -278,6 +278,7 @@ class TestCircuit:
             ("givens", 2, 1),
             ("givens2", 2, 2),
             ("xx_plus_yy", 2, 2),
+            ("xx_minus_yy", 2, 2),
             ("su4", 2, 15),
         ]
         random.shuffle(g_nq_np)
