@@ -845,6 +845,37 @@ def givens2_param_gen(params):
 register_param_gate("GIVENS2", givens2_param_gen, num_qubits=2)
 
 
+def xx_plus_yy_param_gen(params):
+    theta, beta = params[0], params[1]
+
+    with backend_like(theta):
+        # get a real backend zero
+        zero = 0.0 * theta
+        half_theta = 0.5 * theta
+
+        a = do("complex", do("cos", half_theta), zero)
+        b = do("exp", do("complex", zero, beta)) * do(
+            "complex", do("sin", half_theta), zero
+        )
+        b_conj = do("exp", do("complex", zero, -beta)) * do(
+            "complex", do("sin", half_theta), zero
+        )
+
+        # get a complex backend zero and backend one
+        zero = do("complex", zero, zero)
+        one = zero + 1.0
+
+        data = (
+            (((one, zero), (zero, zero)), ((zero, a), (-1j * b, zero))),
+            (((zero, -1j * b_conj), (a, zero)), ((zero, zero), (zero, one))),
+        )
+
+        return recursive_stack(data)
+
+
+register_param_gate("XXPLUSYY", xx_plus_yy_param_gen, num_qubits=2)
+
+
 def rxx_param_gen(params):
     r"""Parametrized two qubit XX-rotation.
 
@@ -2291,6 +2322,20 @@ class Circuit:
     ):
         self.apply_gate(
             "GIVENS2",
+            theta,
+            phi,
+            i,
+            j,
+            gate_round=gate_round,
+            parametrize=parametrize,
+            **kwargs,
+        )
+
+    def xx_plus_yy(
+        self, theta, phi, i, j, gate_round=None, parametrize=False, **kwargs
+    ):
+        self.apply_gate(
+            "XXPLUSYY",
             theta,
             phi,
             i,
