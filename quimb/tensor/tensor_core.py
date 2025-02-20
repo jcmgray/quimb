@@ -3300,15 +3300,35 @@ def COPY_tree_tensors(d, inds, tags=None, dtype=float, ssa_path=None):
 def _make_promote_array_func(op, meth_name):
     @functools.wraps(getattr(np.ndarray, meth_name))
     def _promote_array_func(self, other):
-        """Use standard array func, but make sure Tensor inds match."""
+        """Use standard array func, but auto match up indices."""
         if isinstance(other, Tensor):
-            if set(self.inds) != set(other.inds):
-                raise ValueError(
-                    "The indicies of these two tensors do not "
-                    f"match: {self.inds} != {other.inds}"
-                )
+            # auto match up indices - i.e. broadcast dimensions
+            left_expand = []
+            right_expand = []
 
-            otherT = other.transpose(*self.inds)
+            for ix in self.inds:
+                if ix not in other.inds:
+                    right_expand.append(ix)
+            for ix in other.inds:
+                if ix not in self.inds:
+                    left_expand.append(ix)
+
+            # new_ind is an inplace operation -> track if we need to copy
+            copied = False
+            for ix in left_expand:
+                if not copied:
+                    self = self.copy()
+                    copied = True
+                self.new_ind(ix, axis=-1)
+
+            copied = False
+            for ix in right_expand:
+                if not copied:
+                    other = other.copy()
+                    copied = True
+                other.new_ind(ix)
+
+            otherT = other.transpose(*self.inds, inplace=copied)
 
             return Tensor(
                 data=op(self.data, otherT.data),

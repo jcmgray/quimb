@@ -126,8 +126,11 @@ class TestBasicTensorOperations:
         b = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags="red")
         if mismatch:
             b.modify(inds=(0, 1, 3))
-            with pytest.raises(ValueError):
-                op(a, b)
+            c = op(a, b)
+            assert_allclose(c.data, op(
+                a.data.reshape(2, 3, 4, 1),
+                b.data.reshape(2, 3, 1, 4))
+            )
         else:
             c = op(a, b)
             assert_allclose(c.data, op(a.data, b.data))

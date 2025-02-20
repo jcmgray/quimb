@@ -11,6 +11,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- [`Tensor`](quimb.tensor.tensor_core.Tensor): make binary operations (`+, -, *, /, **`) automatically align and broadcast indices. This would previously error.
 - [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure): add a `seed` kwarg
 - belief propagation, implement DIIS (direct inversion in the iterative subspace)
 - belief propagation, unify various aspects such as message normalization and distance.
