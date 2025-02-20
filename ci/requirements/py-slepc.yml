@@ -17,7 +17,7 @@ dependencies:
   - psutil
   - pytest
   - pytest-cov
-  - scipy!=1.15.0,!=1.15.1
+  - scipy<1.15.0
   - slepc=*=*complex*
   - slepc4py<=3.21
   - tqdm
