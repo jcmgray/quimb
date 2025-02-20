@@ -26,6 +26,16 @@ def cached_region_property(name):
 class RegionGraph:
     """A graph of regions, where each region is a set of nodes. For generalized
     belief propagation or cluster expansion methods.
+
+    Parameters
+    ----------
+    regions : Iterable[Sequence[Hashable]]
+        Generating regions.
+    autocomplete : bool, optional
+        Whether to automatically add all intersecting sub-regions, to guarantee
+        a complete region graph.
+    autoprune : bool, optional
+        Whether to automatically remove all regions with a count of zero.
     """
 
     def __init__(self, regions=(), autocomplete=True, autoprune=True):

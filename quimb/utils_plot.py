@@ -64,7 +64,7 @@ def _ensure_dict(k, v):
     # ensure is a dictionaty
     if not isinstance(v, dict):
         v = {"y": v}
-    v["y"] = np.asarray(v["y"])
+    v["y"] = np.array(v["y"])
 
     if v["y"].size < 2:
         return None
@@ -73,7 +73,7 @@ def _ensure_dict(k, v):
     if "x" not in v:
         v["x"] = np.arange(v["y"].size)
     else:
-        v["x"] = np.asarray(v["x"])
+        v["x"] = np.array(v["x"])
 
     # set label as data name by default
     v.setdefault("label", k)
@@ -96,6 +96,8 @@ def plot_multi_series_zoom(
     zoom_marker="|",
     zoom_markersize=3,
     xlabel="Iteration",
+    width=8,
+    height=None,
     figsize=None,
     **kwargs,
 ):
@@ -126,7 +128,9 @@ def plot_multi_series_zoom(
         return None, None
 
     if figsize is None:
-        figsize = (8, 2 * nrows)
+        if height is None:
+            height = 2 * nrows**0.8
+        figsize = (width, height)
 
     fig, axs = plt.subplots(
         nrows=nrows,

@@ -3,7 +3,7 @@ import operator
 
 import autoray as ar
 
-import quimb.tensor as qtn
+from quimb.tensor import TensorNetwork, array_contract, bonds
 
 
 def prod(xs):
@@ -81,7 +81,7 @@ class BeliefPropagationCommon:
 
     def __init__(
         self,
-        tn,
+        tn: TensorNetwork,
         *,
         damping=0.0,
         update="sequential",
@@ -443,8 +443,6 @@ def initialize_hyper_messages(
         The initial messages. For every index and tensor id pair, there will
         be a message to and from with keys ``(ix, tid)`` and ``(tid, ix)``.
     """
-    from quimb.tensor.contraction import array_contract
-
     backend = ar.infer_backend(next(t.data for t in tn))
     _sum = ar.get_lib_fn(backend, "sum")
 
@@ -570,7 +568,7 @@ def contract_hyper_messages(
             inputs.append((i,))
 
             # local message overlap correction
-            z = qtn.array_contract(
+            z = array_contract(
                 (messages[tid, ix], messages[ix, tid]),
                 inputs=((0,), (0,)),
                 output=(),
@@ -578,14 +576,14 @@ def contract_hyper_messages(
             zvals.append((z, -1))
 
         # local factor free entropy
-        z = qtn.array_contract(arrays, inputs, output=())
+        z = array_contract(arrays, inputs, output=())
         zvals.append((z, 1))
 
     for ix, tids in tn.ind_map.items():
         arrays = tuple(messages[tid, ix] for tid in tids)
         inputs = tuple((0,) for _ in tids)
         # local variable free entropy
-        z = qtn.array_contract(arrays, inputs, output=())
+        z = array_contract(arrays, inputs, output=())
         zvals.append((z, 1))
 
     return combine_local_contractions(
@@ -648,7 +646,7 @@ def compute_tensor_marginal(tn, tid, messages):
         inputs.append((i,))
         arrays.append(mix)
 
-    m = qtn.array_contract(
+    m = array_contract(
         arrays=arrays,
         inputs=inputs,
         output=output,
@@ -746,7 +744,7 @@ def create_lazy_community_edge_map(tn, site_tags=None, rank_simplify=True):
                 if rank_simplify:
                     tn_j.rank_simplify_()
 
-            edges[i, j] = tuple(qtn.bonds(tn_i, tn_j))
+            edges[i, j] = tuple(bonds(tn_i, tn_j))
 
     for i, j in edges:
         touch_map[(i, j)] = tuple((j, k) for k in neighbors[j] if k != i)

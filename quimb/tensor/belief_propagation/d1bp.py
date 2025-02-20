@@ -10,7 +10,7 @@ simple investigations.
 
 import autoray as ar
 
-from quimb.tensor import Tensor, rand_uuid
+from quimb.tensor import Tensor, TensorNetwork, rand_uuid
 from quimb.tensor.contraction import array_contract
 from quimb.utils import oset
 
@@ -110,7 +110,7 @@ class D1BP(BeliefPropagationCommon):
 
     def __init__(
         self,
-        tn,
+        tn: TensorNetwork,
         *,
         messages=None,
         damping=0.0,
