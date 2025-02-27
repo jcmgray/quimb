@@ -1,25 +1,25 @@
-import pytest
-import operator
 import importlib
+import operator
 
-import numpy as np
-from numpy.testing import assert_allclose
-import scipy.sparse.linalg as spla
 import autoray as ar
+import numpy as np
+import pytest
+import scipy.sparse.linalg as spla
+from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor import (
-    bonds,
     MPS_rand_state,
-    oset,
-    rand_tensor,
-    tensor_contract,
-    tensor_direct_product,
     Tensor,
     TensorNetwork,
     TensorNetwork1D,
     TNLinearOperator1D,
+    bonds,
+    oset,
+    rand_tensor,
+    tensor_contract,
+    tensor_direct_product,
 )
 from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
 
@@ -52,7 +52,7 @@ class TestBasicTensorOperations:
             Tensor(x, inds=[0, 2], tags="blue")
 
         assert repr(a) == (
-            "Tensor(shape=(2, 3, 4), " "inds=(0, 1, 2), tags=oset(['blue']))"
+            "Tensor(shape=(2, 3, 4), inds=(0, 1, 2), tags=oset(['blue']))"
         )
         assert str(a) == (
             "Tensor(shape=(2, 3, 4), inds=(0, 1, 2), "
@@ -127,9 +127,9 @@ class TestBasicTensorOperations:
         if mismatch:
             b.modify(inds=(0, 1, 3))
             c = op(a, b)
-            assert_allclose(c.data, op(
-                a.data.reshape(2, 3, 4, 1),
-                b.data.reshape(2, 3, 1, 4))
+            assert_allclose(
+                c.data,
+                op(a.data.reshape(2, 3, 4, 1), b.data.reshape(2, 3, 1, 4)),
             )
         else:
             c = op(a, b)
@@ -1562,8 +1562,8 @@ class TestTensorNetwork:
         plt.close(fig)
 
     def test_pickle(self):
-        import tempfile
         import os
+        import tempfile
 
         pytest.importorskip("joblib")
 
@@ -1608,9 +1608,7 @@ class TestTensorNetwork:
             assert psi.H @ psi == pytest.approx(x_exp, rel=1e-4)
         else:
             assert all(n1 == pytest.approx(value) for n1 in enorms)
-            assert (psi.H @ psi) * 10 ** (2 * psi.exponent) == pytest.approx(
-                x_exp
-            )
+            assert (psi.H @ psi) == pytest.approx(x_exp)
 
     @pytest.mark.parametrize("append", [None, "*"])
     def test_mangle_inner(self, append):
@@ -1625,9 +1623,10 @@ class TestTensorNetwork:
 
     @pytest.mark.parametrize("mode", ["manual", "dense", "mps", "tree"])
     def test_hyperind_resolve(self, mode):
-        import networkx as nx
-        import random
         import collections
+        import random
+
+        import networkx as nx
 
         # create a random interaction ising model
         G = nx.watts_strogatz_graph(10, 4, 0.5, seed=666)

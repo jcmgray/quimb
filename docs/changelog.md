@@ -8,6 +8,7 @@ Release notes for `quimb`.
 **Breaking Changes**
 
 - move belief propagation to `quimb.tensor.belief_propagation`
+- calling `tn.contract()` when an non-zero value has been accrued into `tn.exponent` now automatically re-absorbs that exponent.
 
 **Enhancements:**
 
@@ -19,8 +20,9 @@ Release notes for `quimb`.
 - belief propagation, add a `contract_every` option.
 - HV1BP: vectorize both contraction and message initialization
 - add [`qu.plot_multi_series_zoom`](quimb.utils_plot.plot_multi_series_zoom) for plotting multiple series with a zoomed inset, useful for various convergence plots such as BP
-- add `info` option to [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple) for tracking extra information such as number of iterations and max gauge difffi
+- add `info` option to [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple) for tracking extra information such as number of iterations and max gauge diffs
 - [`Tensor.gate`](quimb.tensor.tensor_core.Tensor.gate): add `transposed` option
+- [`TensorNetwork.contract`](quimb.tensor.tensor_core.TensorNetwork.contract): add `strip_exponent` option for return the mantissa and exponent (log10) separately.
 
 **Bug fixes:**
 

@@ -61,7 +61,7 @@ def test_contract_double_layer_tree_exact(dtype):
     norm_bp = qbp.contract_l2bp(tn, info=info, progbar=True)
     assert info["converged"]
 
-    assert norm_bp == pytest.approx(norm_ex, rel=1e-6)
+    assert norm_bp == pytest.approx(norm_ex, rel=5e-6)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])

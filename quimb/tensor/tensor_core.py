@@ -214,6 +214,8 @@ def tensor_contract(
     backend=None,
     preserve_tensor=False,
     drop_tags=False,
+    strip_exponent=False,
+    exponent=None,
     **contract_opts,
 ):
     """Contract a collection of tensors into a scalar or tensor, automatically
@@ -268,6 +270,11 @@ def tensor_contract(
     drop_tags : bool, optional
         Whether to drop all tags from the output tensor. By default the output
         tensor will keep the union of all tags from the input tensors.
+    strip_exponent : bool, optional
+        If `True`, return the exponent of the result, log10, as well as the
+        rescaled 'mantissa'. Useful for very large or small values.
+    exponent : float, optional
+        If supplied, a base exponent to add to the result exponent.
     contract_opts
         Passed to ``cotengra.array_contract``.
 
@@ -300,20 +307,40 @@ def tensor_contract(
         inds,
         inds_out,
         optimize=optimize,
+        strip_exponent=strip_exponent,
         backend=backend,
         **contract_opts,
     )
 
+    if strip_exponent:
+        # mantissa and exponent returned separately
+        data_out, result_exponent = data_out
+
+        if exponent is not None:
+            # custom base exponent supplied
+            result_exponent = result_exponent + exponent
+
+    elif exponent is not None:
+        # custom exponent but not stripping, so we need to scale the result
+        data_out = data_out * 10**exponent
+
     if not inds_out and not preserve_tensor:
-        return maybe_realify_scalar(data_out)
-
-    if drop_tags:
-        tags_out = None
+        # return a scalar, possibly casting to real
+        # but only if numpy with v. small imag part
+        result = maybe_realify_scalar(data_out)
     else:
-        # union of all tags
-        tags_out = oset_union(t.tags for t in tensors)
+        if drop_tags:
+            tags_out = None
+        else:
+            # union of all tags
+            tags_out = oset_union(t.tags for t in tensors)
 
-    return Tensor(data=data_out, inds=inds_out, tags=tags_out)
+        result = Tensor(data=data_out, inds=inds_out, tags=tags_out)
+
+    if strip_exponent:
+        return result, result_exponent
+
+    return result
 
 
 # generate a random base to avoid collisions on difference processes ...
@@ -8736,6 +8763,8 @@ class TensorNetwork(object):
         backend=None,
         preserve_tensor=False,
         max_bond=None,
+        strip_exponent=False,
+        exponent=True,
         inplace=False,
         **opts,
     ):
@@ -8788,6 +8817,14 @@ class TensorNetwork(object):
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
+        strip_exponent : bool, optional
+            If contracting the entire tensor network, whether to strip a log10
+            exponent and return it separately. This is useful for very large or
+            small values.
+        exponent : float, optional
+            The current exponent to scale the whole contraction by. If ``True``
+            this taken from `tn.exponent`. If `False` then this is ignored.
+            If a float, this is the exponent to use.
         inplace : bool, optional
             Whether to perform the contraction inplace. This is only valid
             if not all tensors are contracted (which doesn't produce a TN).
@@ -8806,6 +8843,7 @@ class TensorNetwork(object):
         --------
         contract_tags, contract_cumulative
         """
+        # for visibility we put these in the function signature
         opts["output_inds"] = output_inds
         opts["optimize"] = optimize
         opts["get"] = get
@@ -8823,21 +8861,42 @@ class TensorNetwork(object):
                 raise NotImplementedError
 
             return self.contract_compressed(
-                max_bond=max_bond, inplace=inplace, **opts
+                max_bond=max_bond,
+                inplace=inplace,
+                **opts,
             )
 
         # this checks whether certain TN classes have a manually specified
         #     contraction pattern (e.g. 1D along the line)
         if self._CONTRACT_STRUCTURED:
             if (tags is ...) or isinstance(tags, slice):
-                return self.contract_structured(tags, inplace=inplace, **opts)
+                return self.contract_structured(
+                    tags,
+                    inplace=inplace,
+                    **opts,
+                )
 
         # contracting everything to single output
         if all_tags and not inplace:
-            return tensor_contract(*self.tensor_map.values(), **opts)
+
+            if exponent is True:
+                exponent = self.exponent
+            elif exponent is False:
+                exponent = 0.0
+
+            return tensor_contract(
+                *self.tensor_map.values(),
+                strip_exponent=strip_exponent,
+                exponent=exponent,
+                **opts
+            )
 
         # contract some or all tensors, but keeping tensor network
-        return self.contract_tags(tags, inplace=inplace, **opts)
+        return self.contract_tags(
+            tags,
+            inplace=inplace,
+            **opts
+        )
 
     contract_ = functools.partialmethod(contract, inplace=True)
 

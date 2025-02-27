@@ -3,7 +3,7 @@ channels:
 dependencies:
   - autoray>=0.6.12
   - blas=*=openblas
-  - cotengra>=0.6.1
+  - cotengra>=0.7.1
   - coverage
   - cytoolz
   - joblib

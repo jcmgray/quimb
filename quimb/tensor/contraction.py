@@ -284,7 +284,12 @@ def array_contract(
     if backend is None:
         backend = get_contract_backend()
     return ctg.array_contract(
-        arrays, inputs, output, optimize=optimize, backend=backend, **kwargs
+        arrays,
+        inputs,
+        output,
+        optimize=optimize,
+        backend=backend,
+        **kwargs,
     )
 
 
