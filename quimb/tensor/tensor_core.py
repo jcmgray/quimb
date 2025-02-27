@@ -1355,6 +1355,7 @@ def maybe_unwrap(
     t,
     preserve_tensor_network=False,
     preserve_tensor=False,
+    strip_exponent=False,
     equalize_norms=False,
     output_inds=None,
 ):
@@ -1373,6 +1374,9 @@ def maybe_unwrap(
     preserve_tensor : bool, optional
         If ``True``, then don't unwrap a ``Tensor`` to a scalar even if it has
         no indices.
+    strip_exponent : bool, optional
+        If ``True``, then return the overall exponent of the contraction, in
+        log10, as well as the 'mantissa' tensor or scalar.
     equalize_norms : bool, optional
         If ``True``, then equalize the norms of all tensors in the tensor
         network before unwrapping.
@@ -1381,29 +1385,50 @@ def maybe_unwrap(
 
     Returns
     -------
-    TensorNetwork, Tensor or Number
+    TensorNetwork, Tensor or scalar
     """
+    exponent = 0.0
+
     if isinstance(t, TensorNetwork):
         if equalize_norms is True:
-            # this also redistributes the any collected norm exponent
-            t.equalize_norms_()
+            if strip_exponent:
+                # accumulate into the exponent
+                t.equalize_norms_(1.0)
+            else:
+                # this also redistributes the any collected norm exponent
+                t.equalize_norms_()
 
         if preserve_tensor_network or (t.num_tensors != 1):
             return t
 
+        if strip_exponent:
+            # extract from tn
+            exponent += t.exponent
+
         # else get the single tensor
         (t,) = t.tensor_map.values()
 
+    # now we have Tensor
     if output_inds is not None and t.inds != output_inds:
         t.transpose_(*output_inds)
 
+    if strip_exponent:
+        tnorm = t.norm()
+        t /= tnorm
+        exponent += do("log10", tnorm)
+
     if preserve_tensor or t.ndim != 0:
         # return as a tensor
-        return t
+        result = t
+    else:
+        # else return as a scalar, maybe dropping imaginary part
+        result = maybe_realify_scalar(t.data)
 
-    # else return as a scalar, maybe dropping imaginary part
-    return maybe_realify_scalar(t.data)
+    if strip_exponent:
+        # return mantissa and exponent separately
+        return result, exponent
 
+    return result
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
@@ -7531,7 +7556,10 @@ class TensorNetwork(object):
         remove : bool, optional
             Whether to remove the gauges from the store after inserting them.
         smudge : float, optional
-            A small value to add to the gauge vectors to avoid singularities.
+            A small value to add to the gauge vectors to avoid singularities
+            when inserting.
+        power : float, optional
+            A power to raise the gauge vectors to when inserting.
 
         Returns
         -------
@@ -7611,6 +7639,10 @@ class TensorNetwork(object):
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
             gauged.
+        smudge : float, optional
+            A small value to add to the gauge vectors to avoid singularities.
+        power : float, optional
+            A power to raise the gauge vectors to when inserting.
         ungauge_outer : bool, optional
             Whether to ungauge the outer bonds.
         ungauge_inner : bool, optional
@@ -7679,7 +7711,8 @@ class TensorNetwork(object):
         compress_matrices=True,
         compress_exclude=None,
         compress_opts=None,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         gauges=None,
         gauge_smudge=1e-6,
         callback_pre_contract=None,
@@ -7718,6 +7751,11 @@ class TensorNetwork(object):
         if (canonize_distance == -1) and (gauges is None):
             gauges = True
             canonize_distance = 0
+
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            equalize_norms = strip_exponent
 
         if gauges is True:
             gauges = {}
@@ -7939,6 +7977,7 @@ class TensorNetwork(object):
             tn,
             preserve_tensor_network=inplace,
             preserve_tensor=preserve_tensor,
+            strip_exponent=strip_exponent,
             equalize_norms=equalize_norms,
             output_inds=output_inds,
         )
@@ -8083,7 +8122,8 @@ class TensorNetwork(object):
         compress_matrices=True,
         compress_exclude=None,
         compress_opts=None,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         gauges=None,
         gauge_smudge=1e-6,
         callback_pre_contract=None,
@@ -8279,6 +8319,7 @@ class TensorNetwork(object):
             compress_span=compress_span,
             compress_matrices=compress_matrices,
             compress_exclude=compress_exclude,
+            strip_exponent=strip_exponent,
             equalize_norms=equalize_norms,
             gauges=gauges,
             gauge_smudge=gauge_smudge,
@@ -8652,6 +8693,8 @@ class TensorNetwork(object):
         optimize=None,
         get=None,
         backend=None,
+        strip_exponent=False,
+        equalize_norms="auto",
         preserve_tensor=False,
         inplace=False,
         **contract_opts,
@@ -8701,6 +8744,14 @@ class TensorNetwork(object):
         backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
             Which backend to use to perform the contraction. Supplied to
             `cotengra`.
+        strip_exponent : bool, optional
+            Whether the strip an overall exponent, log10, from the *final*
+            contraction. If a TensorNetwork is returned, this exponent is
+            accumulated in the `exponent` attribute. If a Tensor or scalar is
+            returned, the exponent is returned separately.
+        equalize_norms : bool or "auto", optional
+            Whether to equalize the norms of the tensors *during* the
+            contraction. By default ("auto") this follows `strip_exponent`.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
@@ -8731,6 +8782,11 @@ class TensorNetwork(object):
                 "(Change this to a no-op maybe?)"
             )
 
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            equalize_norms = strip_exponent
+
         # whether we should let tensor_contract return a raw scalar
         preserve_tensor = preserve_tensor or inplace or (tn.num_tensors >= 1)
 
@@ -8740,16 +8796,46 @@ class TensorNetwork(object):
             optimize=optimize,
             get=get,
             backend=backend,
+            strip_exponent=equalize_norms,
             preserve_tensor=preserve_tensor,
             **contract_opts,
         )
 
+        if equalize_norms:
+            # exponent already returned separately
+            t, exponent = t
+        elif strip_exponent:
+            # explicitly remove exponent now
+            if isinstance(t, Tensor):
+                tnorm = t.norm()
+            else:
+                # already scalar
+                tnorm = do("abs", t)
+
+            t /= tnorm
+            exponent = do("log10", tnorm)
+        else:
+            exponent = None
+
         if (tn.num_tensors == 0) and (not inplace):
             # contracted all down to single tensor or scalar -> return it
             # (apart from if inplace -> we want to keep the tensor network)
+            if exponent is not None:
+                if strip_exponent:
+                    # return separately
+                    return t, exponent
+
+                # scale by stripped exponent directly
+                t = t * 10**exponent
+
             return t
 
         tn.add_tensor(t, virtual=True)
+
+        if exponent is not None:
+            # scale by stripped exponent lazily
+            tn.exponent += exponent
+
         return tn
 
     contract_tags_ = functools.partialmethod(contract_tags, inplace=True)
@@ -8766,7 +8852,7 @@ class TensorNetwork(object):
         strip_exponent=False,
         exponent=True,
         inplace=False,
-        **opts,
+        **kwargs,
     ):
         """Contract some, or all, of the tensors in this network. This method
         dispatches to ``contract_tags``, ``contract_structured``, or
@@ -8828,7 +8914,7 @@ class TensorNetwork(object):
         inplace : bool, optional
             Whether to perform the contraction inplace. This is only valid
             if not all tensors are contracted (which doesn't produce a TN).
-        opts
+        kwargs
             Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`,
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_compressed`
             .
@@ -8844,36 +8930,44 @@ class TensorNetwork(object):
         contract_tags, contract_cumulative
         """
         # for visibility we put these in the function signature
-        opts["output_inds"] = output_inds
-        opts["optimize"] = optimize
-        opts["get"] = get
-        opts["backend"] = backend
-        opts["preserve_tensor"] = preserve_tensor
+        kwargs["output_inds"] = output_inds
+        kwargs["optimize"] = optimize
+        kwargs["get"] = get
+        kwargs["backend"] = backend
+        kwargs["preserve_tensor"] = preserve_tensor
 
         all_tags = (tags is all) or (tags is ...)
 
         if max_bond is not None:
             if not all_tags:
                 raise NotImplementedError
-            if opts.pop("get", None) is not None:
+            if kwargs.pop("get", None) is not None:
                 raise NotImplementedError
-            if opts.pop("backend", None) is not None:
+            if kwargs.pop("backend", None) is not None:
+                raise NotImplementedError
+            if exponent is not True:
                 raise NotImplementedError
 
             return self.contract_compressed(
                 max_bond=max_bond,
+                strip_exponent=strip_exponent,
                 inplace=inplace,
-                **opts,
+                **kwargs,
             )
 
         # this checks whether certain TN classes have a manually specified
         #     contraction pattern (e.g. 1D along the line)
         if self._CONTRACT_STRUCTURED:
+
+            if exponent is not True:
+                raise NotImplementedError
+
             if (tags is ...) or isinstance(tags, slice):
                 return self.contract_structured(
                     tags,
+                    strip_exponent=strip_exponent,
                     inplace=inplace,
-                    **opts,
+                    **kwargs,
                 )
 
         # contracting everything to single output
@@ -8888,14 +8982,15 @@ class TensorNetwork(object):
                 *self.tensor_map.values(),
                 strip_exponent=strip_exponent,
                 exponent=exponent,
-                **opts
+                **kwargs
             )
 
         # contract some or all tensors, but keeping tensor network
         return self.contract_tags(
             tags,
+            strip_exponent=strip_exponent,
             inplace=inplace,
-            **opts
+            **kwargs
         )
 
     contract_ = functools.partialmethod(contract, inplace=True)
@@ -8905,9 +9000,10 @@ class TensorNetwork(object):
         tags_seq,
         output_inds=None,
         preserve_tensor=False,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         inplace=False,
-        **opts,
+        **contract_opts,
     ):
         """Cumulative contraction of tensor network. Contract the first set of
         tags, then that set with the next set, then both of those with the next
@@ -8927,7 +9023,7 @@ class TensorNetwork(object):
             is a scalar (has no indices) or not.
         inplace : bool, optional
             Whether to perform the contraction inplace.
-        opts
+        contract_opts
             Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`.
 
         Returns
@@ -8943,12 +9039,22 @@ class TensorNetwork(object):
         tn = self if inplace else self.copy()
         c_tags = oset()
 
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            equalize_norms = strip_exponent
+
         for tags in tags_seq:
             # accumulate tags from each contractions
             c_tags |= tags_to_oset(tags)
 
             # peform the next contraction
-            tn.contract_tags_(c_tags, which="any", **opts)
+            tn.contract_tags_(
+                c_tags,
+                which="any",
+                equalize_norms=equalize_norms,
+                **contract_opts
+            )
 
             if tn.num_tensors == 1:
                 # nothing more to contract
@@ -8958,6 +9064,7 @@ class TensorNetwork(object):
             tn,
             preserve_tensor_network=inplace,
             preserve_tensor=preserve_tensor,
+            strip_exponent=strip_exponent,
             equalize_norms=equalize_norms,
             output_inds=output_inds,
         )
