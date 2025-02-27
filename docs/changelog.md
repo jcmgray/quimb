@@ -7,8 +7,8 @@ Release notes for `quimb`.
 
 **Breaking Changes**
 
-- move belief propagation to `quimb.tensor.belief_propagation`
-- calling `tn.contract()` when an non-zero value has been accrued into `tn.exponent` now automatically re-absorbs that exponent.
+- move belief propagation to [`quimb.tensor.belief_propagation`](quimb.tensor.belief_propagation)
+- calling [`tn.contract()`](quimb.tensor.tensor_core.TensorNetwork.contract) when an non-zero value has been accrued into `tn.exponent` now automatically re-absorbs that exponent.
 
 **Enhancements:**
 

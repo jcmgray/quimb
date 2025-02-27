@@ -274,7 +274,7 @@ def tensor_contract(
         If `True`, return the exponent of the result, log10, as well as the
         rescaled 'mantissa'. Useful for very large or small values.
     exponent : float, optional
-        If supplied, a base exponent to add to the result exponent.
+        If supplied, an overall base exponent to scale the result by.
     contract_opts
         Passed to ``cotengra.array_contract``.
 
@@ -3593,8 +3593,8 @@ def _tensor_network_gate_inds_basic(
         trn = tr_L @ tr_Q
 
     # if singular values are returned (``absorb=None``) check if we should
-    #     return them via ``info``, e.g. for ``SimpleUpdate`
-    if maybe_svals and info is not None:
+    #     return them further via ``info``, e.g. for ``SimpleUpdate`
+    if maybe_svals and (info is not None):
         s = next(iter(maybe_svals)).data
         info["singular_values", bix] = s
 
@@ -7189,9 +7189,9 @@ class TensorNetwork(object):
         tol : float, optional
             The convergence tolerance for the singular values.
         smudge : float, optional
-            The smudge factor to add to the singular values when gauging.
+            A small value to add to the singular values when gauging.
         power : float, optional
-            The power to raise the singular values to when gauging.
+            A power to raise the singular values to when gauging.
         damping : float, optional
             The damping factor to apply to the gauging updates.
         gauges : dict, optional
@@ -8218,8 +8218,14 @@ class TensorNetwork(object):
             Whether to compress pairs of tensors that are effectively matrices.
         compress_exclude : set[int], optional
             An explicit set of tensor ids to exclude from compression.
-        equalize_norms : bool or float, optional
-            Whether to equalize the norms of the tensors after each operation.
+        strip_exponent : bool, optional
+            Whether the strip an overall exponent, log10, from the *final*
+            contraction. If a TensorNetwork is returned, this exponent is
+            accumulated in the `exponent` attribute. If a Tensor or scalar is
+            returned, the exponent is returned separately.
+        equalize_norms : bool or "auto", optional
+             Whether to equalize the norms of the tensors *during* the
+            contraction. By default ("auto") this follows `strip_exponent`.
             The overall scaling is accumulated, log10, into `tn.exponent`. If
             `True`, at the end this exponent is redistributed. If a float,
             this is the target norm to equalize tensors to, e.g. `1.0`, and the
@@ -8846,11 +8852,10 @@ class TensorNetwork(object):
         output_inds=None,
         optimize=None,
         get=None,
-        backend=None,
-        preserve_tensor=False,
         max_bond=None,
         strip_exponent=False,
-        exponent=True,
+        preserve_tensor=False,
+        backend=None,
         inplace=False,
         **kwargs,
     ):
@@ -8897,20 +8902,17 @@ class TensorNetwork(object):
               with detailed information such as flop cost. The symbol-map is
               also added to the ``quimb_symbol_map`` attribute.
 
-        backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
-            Which backend to use to perform the contraction. Supplied to
-            `cotengra`.
+        strip_exponent : bool, optional
+            Whether the strip an overall exponent, log10, from the *final*
+            contraction. If a TensorNetwork is returned, this exponent is
+            accumulated in the `exponent` attribute. If a Tensor or scalar is
+            returned, the exponent is returned separately.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
-        strip_exponent : bool, optional
-            If contracting the entire tensor network, whether to strip a log10
-            exponent and return it separately. This is useful for very large or
-            small values.
-        exponent : float, optional
-            The current exponent to scale the whole contraction by. If ``True``
-            this taken from `tn.exponent`. If `False` then this is ignored.
-            If a float, this is the exponent to use.
+        backend : {'auto', 'numpy', 'jax', 'cupy', 'tensorflow', ...}, optional
+            Which backend to use to perform the contraction. Supplied to
+            `cotengra`.
         inplace : bool, optional
             Whether to perform the contraction inplace. This is only valid
             if not all tensors are contracted (which doesn't produce a TN).
@@ -8945,8 +8947,6 @@ class TensorNetwork(object):
                 raise NotImplementedError
             if kwargs.pop("backend", None) is not None:
                 raise NotImplementedError
-            if exponent is not True:
-                raise NotImplementedError
 
             return self.contract_compressed(
                 max_bond=max_bond,
@@ -8959,9 +8959,6 @@ class TensorNetwork(object):
         #     contraction pattern (e.g. 1D along the line)
         if self._CONTRACT_STRUCTURED:
 
-            if exponent is not True:
-                raise NotImplementedError
-
             if (tags is ...) or isinstance(tags, slice):
                 return self.contract_structured(
                     tags,
@@ -8973,15 +8970,10 @@ class TensorNetwork(object):
         # contracting everything to single output
         if all_tags and not inplace:
 
-            if exponent is True:
-                exponent = self.exponent
-            elif exponent is False:
-                exponent = 0.0
-
             return tensor_contract(
                 *self.tensor_map.values(),
                 strip_exponent=strip_exponent,
-                exponent=exponent,
+                exponent=self.exponent,
                 **kwargs
             )
 
@@ -8999,9 +8991,9 @@ class TensorNetwork(object):
         self,
         tags_seq,
         output_inds=None,
-        preserve_tensor=False,
         strip_exponent=False,
         equalize_norms="auto",
+        preserve_tensor=False,
         inplace=False,
         **contract_opts,
     ):
@@ -9018,6 +9010,14 @@ class TensorNetwork(object):
             The indices to specify as outputs of the contraction. If not given,
             and the tensor network has no hyper-indices, these are computed
             automatically as every index appearing once.
+        strip_exponent : bool, optional
+            Whether the strip an overall exponent, log10, from the *final*
+            contraction. If a TensorNetwork is returned, this exponent is
+            accumulated in the `exponent` attribute. If a Tensor or scalar is
+            returned, the exponent is returned separately.
+        equalize_norms : bool or "auto", optional
+            Whether to equalize the norms of the tensors *during* the
+            contraction. By default ("auto") this follows `strip_exponent`.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
