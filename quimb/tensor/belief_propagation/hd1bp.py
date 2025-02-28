@@ -10,10 +10,12 @@ TODO:
 """
 
 import autoray as ar
+
 import quimb.tensor as qtn
 
 from .bp_common import (
     BeliefPropagationCommon,
+    combine_local_contractions,
     compute_all_index_marginals_from_messages,
     contract_hyper_messages,
     initialize_hyper_messages,
@@ -266,7 +268,7 @@ class HD1BP(BeliefPropagationCommon):
             mdiff = self._distance_fn(old_m, new_m)
 
             if self.damping:
-                new_m = self.fn_damping(old_m, new_m)
+                new_m = self._damping_fn(old_m, new_m)
 
             # # post-damp distance
             # mdiff = self._distance_fn(old_m, new_m)
@@ -336,6 +338,101 @@ class HD1BP(BeliefPropagationCommon):
         return contract_hyper_messages(
             self.tn,
             self.messages,
+            strip_exponent=strip_exponent,
+            check_zero=check_zero,
+            backend=self.backend,
+        )
+
+    def normalize_messages(self):
+        """Normalize all messages such that the 'region contraction' of a
+        single hyper index is 1.
+        """
+        for ind, tids in self.tn.ind_map.items():
+            ms = [self.messages[tid, ind] for tid in tids]
+            overlap = qtn.array_contract(ms, [(0,) for _ in ms], [])
+            overlap **= 1 / len(ms)
+            for tid, m in zip(tids, ms):
+                self.messages[tid, ind] = m / overlap
+
+    def get_cluster(self, r, virtual=True, autocomplete=True):
+        """Get the tensor network of a region ``r``, with all boundary
+        messages attached.
+
+        Parameters
+        ----------
+        r : sequence of int or str
+            The region to get, given as a sequence of indices or tensor ids.
+        virtual : bool, optional
+            Whether the view the original tensors (`virtual=True`, the default)
+            or take copies (`virtual=False`).
+        autocomplete : bool, optional
+            Whether to automatically include all indices attached to the
+            tensors in the region, or just the ones given in ``r``.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        rtids = set()
+        rinds = set()
+        for x in r:
+            if isinstance(x, int):
+                rtids.add(x)
+                if autocomplete:
+                    rinds.update(self.tn.tensor_map[x].inds)
+            else:
+                rinds.add(x)
+
+        tnr = self.tn._select_tids(rtids, virtual=virtual)
+        for ind in rinds:
+            # attach all messages coming from tensors outside the cluster
+            for ntid in self.tn.ind_map[ind]:
+                if ntid not in rtids:
+                    tnr |= qtn.Tensor(
+                        data=self.messages[ntid, ind], inds=(ind,)
+                    )
+
+        return tnr
+
+    def contract_gloop_expand(
+        self,
+        gloops=None,
+        strip_exponent=False,
+        check_zero=True,
+        optimize="auto-hq",
+        progbar=False,
+        **contract_otps,
+    ):
+        from .regions import RegionGraph
+
+        # if we normalized messages we can ignore all index-only regions
+        self.normalize_messages()
+
+        if isinstance(gloops, int):
+            gloops = tuple(self.tn.gen_gloops(gloops))
+
+        rg = RegionGraph(gloops)
+
+        if progbar:
+            import tqdm
+
+            regions = tqdm.tqdm(rg.regions)
+        else:
+            regions = rg.regions
+
+        zvals = []
+        for r in regions:
+            # XXX: autoreduce intersecting clusters to gloops?
+            cr = rg.get_count(r)
+            # either we autocomplete above or we do it here per region
+            tnr = self.get_cluster(r, autocomplete=True)
+            zr = tnr.contract(
+                output_inds=(), optimize=optimize, **contract_otps
+            )
+            zvals.append((zr, cr))
+
+        return combine_local_contractions(
+            zvals,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
             backend=self.backend,

@@ -72,8 +72,7 @@ class NetworkPath:
         new = NetworkPath.__new__(NetworkPath)
         new._tids = self._tids + (tid,)
         new._inds = self._inds + (ind,)
-        if self._key is not None:
-            new._key = self._key | {tid, ind}
+        new._key = None if self._key is None else self._key | {tid, ind}
         return new
 
 
@@ -321,6 +320,76 @@ def get_tree_span(
     return seq
 
 
+def get_local_patch(
+    tn,
+    tids,
+    max_distance,
+    include=None,
+    exclude=None,
+):
+    """Get the local patch of tids that is within ``max_distance`` of
+    the given ``tids``. This is like an unordered version of ``get_tree_span``.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to get the local patch from.
+    tids : sequence of int
+        The tensor ids to start from.
+    max_distance : int
+        The maximum distance from ``tids`` to include, in terms of graph
+        distance. 0 corresponds to the original ``tids``, 1 to nearest
+        neighbors and so on.
+    include : sequence of int, optional
+        If specified, only tids from this set can be included in the patch.
+    exclude : sequence of int, optional
+        If specified, tids from this set cannot be included in the patch.
+
+    Returns
+    -------
+    tuple[int]
+    """
+    if include is None and exclude is None:
+
+        def isvalid(tid):
+            return True
+
+    else:
+        if include is None:
+            include = set(tn.tensor_map)
+        else:
+            include = set(include)
+
+        if exclude is None:
+            exclude = set()
+        else:
+            exclude = set(exclude)
+
+        def isvalid(tid):
+            return (tid in include) and (tid not in exclude)
+
+    d = 0
+    if isinstance(tids, int):
+        # allow single tid to be passed
+        patch = {tids}
+    else:
+        patch = set(tids)
+
+    boundary = tuple(patch)
+    while d < max_distance:
+        # expand outwards
+        next_boundary = set()
+        for tid in boundary:
+            for tid_n in tn._get_neighbor_tids(tid):
+                if isvalid(tid_n):
+                    patch.add(tid_n)
+                    next_boundary.add(tid_n)
+        boundary = tuple(next_boundary)
+        d += 1
+
+    return tuple(sorted(patch))
+
+
 def get_path_between_tids(tn, tida, tidb):
     """Find a shortest path between ``tida`` and ``tidb`` in this tensor
     network. Returns a ``NetworkPath`` if a path is found, otherwise ``None``.
@@ -490,8 +559,6 @@ def gen_paths_loops(
     `NetworkPath` objects, allowing one to differentiate between e.g. a double
     loop and a 'figure of eight' loop. Dangling and hyper indices are ignored.
 
-    Currently ignores dangling and hyper indices.
-
     Parameters
     ----------
     tn : TensorNetwork
@@ -629,48 +696,27 @@ def gen_paths_loops(
                 queue.append(path.extend(next_ind, next_tid))
 
 
-def gen_regions(tn, max_region_size=None, tids=None, which="all"):
-    """Generate sets of tids that represent 'regions' where every node is
-    connected to at least two other region nodes, i.e. 2-degree connected
-    subgraphs.
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        The tensor network to find regions in.
-    max_region_size : None or int
-        Set the maximum number of tensors that can appear in a region. If
-        ``None``, wait until any valid region is found and set that as the
-        maximum size.
-    tids : None or sequence of int, optional
-        If supplied, only yield regions containing these tids, see
-        ``which``.
-    which : {'all', 'any'}, optional
-        Only if ``tids`` is specified, this determines how to filter
-        regions. If 'all', only yield regions containing *all* of the tids
-        in ``tids``, if 'any', yield regions containing *any* of the tids
-        in ``tids``.
-
-    Yields
-    ------
-    tuple[int]
+def gen_patches(tn, max_size, tids=None, grow_from="all"):
+    """Generate sets of tids that represent 'patches' of the tensor network,
+    where each patch is a connected subgraph of the tensor network. Unlike
+    generalized loops, patches can contain dangling nodes.
     """
     if tids is None:
         # find regions anywhere
         tids = tn.tensor_map.keys()
-        which = "any"
+        grow_from = "any"
     elif isinstance(tids, int):
         # handle single tid region
         tids = (tids,)
 
-    if which == "all":
+    if grow_from == "all":
         # take `tids` as single initial region
         queue = collections.deque((frozenset(tids),))
-    elif which == "any":
+    elif grow_from == "any":
         # take each tid as an initial region
         queue = collections.deque(frozenset([tid]) for tid in tids)
     else:
-        raise ValueError("`which` must be 'all' or 'any'.")
+        raise ValueError("`grow_from` must be 'all' or 'any'.")
 
     # cache neighbors for speed
     neighbormap = {}
@@ -678,36 +724,141 @@ def gen_regions(tn, max_region_size=None, tids=None, which="all"):
 
     while queue:
         region = queue.popleft()
-        inner = {}
-        outer = set()
+
+        if len(region) <= max_size:
+            # is a valid patch
+            yield tuple(sorted(region))
+
+            if len(region) < max_size:
+                # is valid to be extended
+                # first get all atch neighbors
+                outer = set()
+                for tid in region:
+                    try:
+                        neighbors = neighbormap[tid]
+                    except KeyError:
+                        neighbors = tn._get_neighbor_tids([tid])
+                        neighbormap[tid] = neighbors
+
+                    for ntid in neighbors:
+                        if ntid not in region:
+                            outer.add(ntid)
+
+                for ntid in outer:
+                    # then extend this patch with each new combination
+                    nregion = region | {ntid}
+                    if nregion not in seen:
+                        queue.append(nregion)
+                        seen.add(nregion)
+
+
+def gen_gloops(tn, max_size=None, tids=None, grow_from="all"):
+    """Generate sets of tids that represent 'generalized loops' where every
+    node is connected to at least two bonds, i.e. 2-degree connected subgraphs.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to find loops in.
+    max_size : None or int
+        Set the maximum number of tensors that can appear in a region. If
+        ``None``, wait until any valid region is found and set that as the
+        maximum size.
+    tids : None or sequence of int, optional
+        If supplied, only yield loops containing these tids, see
+        ``grow_from``.
+    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+        Only if ``tids`` is specified, this determines how to filter
+        loops. If 'all', only yield loops containing *all* of the tids
+        in ``tids``, if 'any', yield loops containing *any* of the tids
+        in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to
+        be dangling, i.e. 1-degree connected. This is useful for computing
+        local expectations where the operator insertion breaks the loop
+        assumption locally.
+
+    Yields
+    ------
+    tuple[int]
+    """
+    if tids is None:
+        # find loops everywhere
+        tids = tn.tensor_map.keys()
+        grow_from = "any"
+    elif isinstance(tids, int):
+        # handle single tid region
+        tids = (tids,)
+
+    if grow_from in ("all", "alldangle"):
+        # take `tids` as single initial region
+        queue = collections.deque((frozenset(tids),))
+    elif grow_from in ("any", "anydangle"):
+        # take each tid as an initial region
+        queue = collections.deque(frozenset([tid]) for tid in tids)
+    else:
+        raise ValueError("`grow_from` must be 'all' or 'any'.")
+
+    if "dangle" in grow_from:
+        # target tids are allowed to be dangling
+        dangle_tids = set(tids)
+    else:
+        dangle_tids = set()
+
+    # cache neighbors for speed
+    tid2inds = {}
+    seen = set()
+
+    while queue:
+        region = queue.popleft()
+
+        inds_once = set()
+        inds_more = set()
+        tids_next = set()
 
         for tid in region:
             try:
-                neighbors = neighbormap[tid]
+                inds = tid2inds[tid]
             except KeyError:
-                neighbors = tn._get_neighbor_tids([tid])
-                neighbormap[tid] = neighbors
+                inds = tid2inds[tid] = tn.tensor_map[tid].inds
 
-            for ntid in neighbors:
-                if ntid in region:
-                    # count inner connections to check for dangling nodes
-                    inner[tid] = inner.setdefault(tid, 0) + 1
-                    inner[ntid] = inner.setdefault(ntid, 0) + 1
+            for ind in inds:
+                if ind in inds_once:
+                    # already seen -> is a bond
+                    inds_more.add(ind)
                 else:
-                    # check outer connections for extending region
-                    outer.add(ntid)
+                    inds_once.add(ind)
 
-        if inner and all(c >= 4 for c in inner.values()):
+        valid_gloop = True
+        for tid in region:
+
+            # count number of connections each node has within region
+            num_inner_connections = 0
+            for ind in tid2inds[tid]:
+                if ind in inds_more:
+                    # bond within region
+                    num_inner_connections += 1
+                else:
+                    # bond to outside -> add neighbors to queue
+                    for ntid in tn.ind_map[ind]:
+                        if ntid != tid:
+                            tids_next.add(ntid)
+
+            valid_gloop &= (
+                # site is allowed to dangle
+                tid in dangle_tids
+                # or it is connected by at least two bonds
+                or num_inner_connections >= 2
+            )
+
+        if valid_gloop:
             # valid region: no node is connected by a single bond only
-            # (bonds are double counted in above so 4 == 2-connected)
-            if max_region_size is None:
+            if max_size is None:
                 # automatically set maximum region size
-                max_region_size = len(region)
+                max_size = len(region)
             yield tuple(sorted(region))
 
-        if (max_region_size is None) or len(region) < max_region_size:
+        if (max_size is None) or len(region) < max_size:
             # continue searching
-            for ntid in outer:
+            for ntid in tids_next:
                 # possible extensions
                 nregion = region | {ntid}
                 if nregion not in seen:
@@ -739,6 +890,46 @@ def gen_loops(tn, max_loop_length=None):
     inputs = {tid: t.inds for tid, t in tn.tensor_map.items()}
     hg = get_hypergraph(inputs, accel="auto")
     return hg.compute_loops(max_loop_length=max_loop_length)
+
+
+def get_loop_union(
+    tn,
+    tids,
+    max_size=None,
+    grow_from="all",
+):
+    """Find the union, in terms of tids, of all generliazed loops that pass
+    through either all or at least one of the given tids, depending on
+    `grow_from`.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to find the loop union region in.
+    tids : sequence of int
+        The tensor ids to consider.
+    max_size : None or int, optional
+        The maximum number of tensors that can appear in the region. If
+        ``None``, wait until any valid region is found and set that as the
+        maximum size.
+    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+        Only if ``tids`` is specified, this determines how to filter
+        loops. If 'all', only take loops containing *all* of the tids
+        in ``tids``, if 'any', yield loops containing *any* of the tids
+        in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to be
+        dangling, i.e. 1-degree connected.
+
+    Returns
+    -------
+    tuple[int]
+    """
+    gloops = gen_gloops(
+        tn,
+        max_size=max_size,
+        tids=tids,
+        grow_from=grow_from,
+    )
+    return tuple(sorted({tid for r in gloops for tid in r}))
 
 
 def gen_inds_connected(tn, max_length):

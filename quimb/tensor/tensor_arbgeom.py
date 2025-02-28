@@ -789,20 +789,20 @@ class TensorNetworkGen(TensorNetwork):
             for tid in self.tensor_map
         }
 
-    def gen_regions_sites(self, max_region_size=None, sites=None):
-        """Generate sets of sites that represent 'regions' where every node is
-        connected to at least two other region nodes. This is a simple wrapper
-        around ``TensorNewtork.gen_regions`` that works with the sites
-        rather than ``tids``.
+    def gen_gloops_sites(self, max_size=None, sites=None, grow_from="all"):
+        """Generate sets of sites that represent 'generalized loops' where
+        every node is connected to at least two other loop nodes. This is a
+        simple wrapper around ``TensorNewtork.gen_gloops`` that works with the
+        sites rather than ``tids``.
 
         Parameters
         ----------
-        max_region_size : None or int
-            Set the maximum number of tensors that can appear in a region. If
-            ``None``, wait until any valid region is found and set that as the
+        max_size : None or int
+            Set the maximum number of tensors that can appear in a loop. If
+            ``None``, wait until any valid loop is found and set that as the
             maximum size.
         tags : None or sequence of str
-            If supplied, only consider regions containing these tids.
+            If supplied, only consider loops containing these tids.
 
         Yields
         ------
@@ -816,10 +816,12 @@ class TensorNetworkGen(TensorNetwork):
 
         tid2site = self._get_tid_to_site_map()
 
-        for region in self.gen_regions(
-            max_region_size=max_region_size, tids=tids
+        for gloop in self.gen_gloops(
+            max_size=max_size,
+            tids=tids,
+            grow_from=grow_from,
         ):
-            yield tuple(tid2site[tid] for tid in region)
+            yield tuple(tid2site[tid] for tid in gloop)
 
     def reset_cached_properties(self):
         """Reset any cached properties, one should call this when changing the
@@ -875,6 +877,276 @@ class TensorNetworkGen(TensorNetwork):
             nfactor *= lnorm
 
         return nfactor
+
+    def get_local_sloops(
+        self,
+        *,
+        where=None,
+        sloops=None,
+        intersect=False,
+        grow_from="all",
+        strict_size=True,
+        info=None,
+    ):
+        r"""Parse the `sloops` argument to get the relevant simple loops for
+        the given `where` sites. If `sloops` is an integer, auto generate loops
+        locally, otherwise filter the given loops to only include those
+        relevant to `where`. Simple loops are loops where each site is
+        connected to exactly two other sites.
+        """
+        if isinstance(sloops, int):
+            max_loop_length = sloops
+            sloops = None
+        else:
+            max_loop_length = None
+
+        if info is None:
+            info = {}
+
+        tags = tuple(map(self.site_tag, where))
+        tids = self._get_tids_from_tags(tags, "any")
+
+        # always include as base region target sites + any bonds internal to
+        # those sites
+        r0 = list(tids)
+        r0_seen = set()
+        for tid in tids:
+            t = self.tensor_map[tid]
+            for ix in t.inds:
+                if ix in r0_seen:
+                    # internal bond
+                    r0.append(ix)
+                else:
+                    r0_seen.add(ix)
+        r0 = frozenset(r0)
+
+        if sloops is None:
+            # find loops automatically
+            # first find loop paths that pass through any of sites
+            sloops = tuple(
+                self.gen_paths_loops(
+                    max_loop_length=max_loop_length,
+                    intersect=intersect,
+                    tids=tids,
+                )
+            )
+
+            if grow_from == "all":
+                # further refine to loops that pass through all sites only
+                sloops = tuple(
+                    loop
+                    for loop in sloops
+                    if all(tid in loop.tids for tid in tids)
+                )
+
+        else:
+            # have explicit loop specification, maybe as a larger set ->
+            # need to select only the loops covering whole of `where`
+            sloops = tuple(sloops)
+
+            if "lookup" in info and hash(sloops) == info["lookup_hash"]:
+                # want to share info across different expectations and also
+                # different sets of loops -> but if the loop set has changed
+                # then "lookup" specifically is probably incomplete
+                lookup = info["lookup"]
+            else:
+                # build cache of which coordinates are in which loop to avoid
+                # quadratic loop checking cost doing every time
+                lookup = {}
+                tid2site = self._get_tid_to_site_map()
+                for loop in sloops:
+                    for tid in loop.tids:
+                        site = tid2site[tid]
+                        lookup.setdefault(site, set()).add(loop)
+
+                info["lookup"] = lookup
+                info["lookup_hash"] = hash(sloops)
+
+            if grow_from == "all":
+                # get all loops which contain *all* sites in `where`
+                sloops = set.intersection(*(lookup[coo] for coo in where))
+            elif grow_from == "any":
+                # get all loops which contain *any* site in `where`
+                sloops = set.union(*(lookup[coo] for coo in where))
+            else:
+                raise ValueError(
+                    f"Invalid `grow_from` value: {grow_from}."
+                    "Should be 'all' or 'any'."
+                )
+
+        if grow_from == "any":
+            # loops only guaranteed to include any 1 site from `where`
+            #     -> always include base sites as its own region
+            #     -> make sure every loop includes base region
+            clusters = (r0, *(r0.union(r) for r in sloops))
+        else:
+            # gloops guaranteed to include all sites from `where`, but might
+            # not include the base region if its not a valid cluster on its own
+            clusters = (r0, *map(frozenset, sloops))
+
+        if strict_size and (max_loop_length is not None):
+            # only allow clusters below max_loop_length *including* base region
+            clusters = (
+                r0,
+                *(
+                    r
+                    for r in clusters
+                    if sum(isinstance(x, int) for x in r) <= max_loop_length
+                ),
+            )
+
+        return clusters
+
+    def get_local_gloops(
+        self,
+        *,
+        tids=None,
+        where=None,
+        gloops=None,
+        grow_from="all",
+        strict_size=True,
+        info=None,
+    ):
+        r"""Parse the `gloops` argument to get the relevant generalized loops
+        for the given `where` sites. If `gloops` is an integer, auto generate
+        loops locally, otherwise filter the given loops to only include those
+        relevant to `where`.
+
+        An example loop with where=("A", "B"), for `grow_from='all'`::
+
+             |   |
+            -o---o-
+             |   |
+            -A---B-
+             |   |
+
+        Setting `grow_from='any'` in would also generates loops like::
+
+             |   |
+            -o---o-
+             |   |   |
+            -o---A---B-
+             |   |   |
+
+        where only site A is part of the original, generating loop, but both
+        A and B are part of the returned cluster.
+
+        Parameters
+        ----------
+        tids : sequence[int], optional
+            The tensor ids to consider. Either this or `where` must be
+            supplied.
+        where : sequence[hashable], optional
+            The sites to consider. Either this or `tids` must be supplied.
+        info : dict
+            A dictionary to store information across different calls.
+        gloops : None, int, or sequence of sequence of hashable, optional
+            The gloops to consider. If ``None``, auto generate local gloops
+            up to the smallest non-trivial cluster size. If an integer,
+            generate gloops locally with up to that size. If a sequence of
+            sequences, use those gloops.
+        grow_from : {"all", "any"}, optional
+            Whether to generate gloops that originally contain all or just
+            any of the target sites in `where`. The base sites are always
+            included in all returned gloops, even if they were not part of
+            the supplied or auto-generated cluster.
+
+        Returns
+        -------
+        tuple[frozenset[hashable]]
+        """
+        if tids is None and where is None:
+            raise ValueError("Either `tids` or `where` must be supplied.")
+
+        if isinstance(gloops, int):
+            max_size = gloops
+            gloops = None
+        else:
+            max_size = None
+
+        if info is None:
+            info = {}
+
+        if gloops is None:
+            # auto generate gloops locally
+            if where is not None:
+                # sites given as coordinates
+                r0 = frozenset(where)
+                gloops = tuple(
+                    self.gen_gloops_sites(
+                        max_size=max_size,
+                        sites=where,
+                        grow_from=grow_from,
+                    )
+                )
+            else:
+                # sites given as tensor ids
+                r0 = frozenset(tids)
+                gloops = tuple(
+                    self.gen_gloops(
+                        max_size=max_size,
+                        tids=tids,
+                        grow_from=grow_from,
+                    )
+                )
+        else:
+            if tids:
+                raise NotImplementedError(
+                    "Supplying `tids` and `gloops` is not yet supported."
+                )
+
+            r0 = frozenset(where)
+
+            # gloops already given, get the ones relevant to `where`
+            gloops = tuple(gloops)
+
+            if not gloops:
+                # always include base sites
+                gloops = (tuple(where),)
+
+            if "lookup" in info and hash(gloops) == info["lookup_hash"]:
+                # want to share info across different expectations and also
+                # different sets of gloops -> but if the cluster set has
+                # changed then "lookup" specifically is probably incomplete
+                lookup = info["lookup"]
+            else:
+                # build cache of which coordinates are in which cluster to
+                # avoid quadratic cluster checking cost doing every time
+                lookup = {}
+                for cluster in gloops:
+                    for site in cluster:
+                        lookup.setdefault(site, set()).add(cluster)
+
+                info["lookup"] = lookup
+                info["lookup_hash"] = hash(gloops)
+
+            if grow_from == "all":
+                # get all gloops which contain *all* sites in `where`
+                gloops = set.intersection(*(lookup[coo] for coo in where))
+            elif grow_from == "any":
+                # get all gloops which contain *any* site in `where`
+                gloops = set.union(*(lookup[coo] for coo in where))
+            else:
+                raise ValueError(
+                    f"Invalid `grow_from` value: {grow_from}."
+                    "Should be 'all' or 'any'."
+                )
+
+        if grow_from == "any":
+            # gloops only guaranteed to include any 1 site from `where`
+            #     -> always include base sites as its own region
+            #     -> make sure every cluster includes base region
+            clusters = (r0, *(r0.union(r) for r in gloops))
+        else:
+            # gloops guaranteed to include all sites from `where`, but might
+            # not include the base region if its not a valid cluster on its own
+            clusters = (r0, *map(frozenset, gloops))
+
+        if strict_size and (max_size is not None):
+            # only allow clusters below max_size *including* base region
+            clusters = (r0, *(r for r in clusters if len(r) <= max_size))
+
+        return clusters
 
 
 def gauge_product_boundary_vector(
@@ -955,7 +1227,24 @@ def gauge_product_boundary_vector(
     return tn
 
 
-def region_remove_dangling(sites, neighbors, where=()):
+def gloop_remove_dangling(sites, neighbors, where=()):
+    """Given cluster `sites` and edges given by the `neighbors` mapping, remove
+    all sites that are not connected to at least two other sites, reducing it
+    in this way to a generalised loop.
+
+    Parameters
+    ----------
+    sites : sequence[hashable]
+        The sites in the original cluster.
+    neighbors : dict[hashable, sequence[hashable]]
+        The neighbors of each site.
+    where : sequence[hashable], optional
+        The sites to keep, even if they are dangling.
+
+    Returns
+    -------
+    frozenset[hashable]
+    """
     sites = list(sites)
     i = 0
     while i < len(sites):
@@ -971,6 +1260,24 @@ def region_remove_dangling(sites, neighbors, where=()):
                 i = -1
         i += 1
     return frozenset(sites)
+
+
+def sloop_remove_dangling(path, neighbor_inds, where_tids):
+    loop = set(path)
+    while True:
+        for x in loop:
+            if isinstance(x, int) and (x not in where_tids):
+                ninds = [ix for ix in neighbor_inds[x] if ix in loop]
+                if len(ninds) <= 1:
+                    # dangling tid and index -> remove
+                    loop.remove(x)
+                    loop.difference_update(ninds)
+                    # go back to beginning
+                    break
+        else:
+            # checked all without finding anything
+            break
+    return frozenset(loop)
 
 
 _VALID_GATE_PROPAGATE = {"sites", "register", False, True}
@@ -1240,21 +1547,56 @@ class TensorNetworkGenVector(TensorNetworkGen):
         self,
         G,
         where,
-        max_distance=0,
-        fillin=0,
+        max_distance=1,
+        mode="graphdistance",
+        fillin=False,
         gauges=None,
+        connect_path=True,
         **fit_opts,
     ):
+        """Apply gate ``G`` to sites ``where`` by directly fitting a local
+        patch of tensors, optionally gauging the boudary of this local patch
+        first.
+
+        Parameters
+        ----------
+        G : array_like
+            The gate to be applied.
+        where : node or sequence[node]
+            The sites to apply the gate to.
+        max_distance : int, optional
+            The maximum distance from ``where`` to select tensors up to.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``where``, of
+            size up to ``max_distance``, ensuring no dangling tensors.
+        fillin : bool or int, optional
+            Whether to fill in the local patch with additional tensors, or not.
+            `fillin` tensors are those connected by two or more bonds to the
+            original local patch, the process is repeated int(fillin) times.
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            used.
+        connect_path : bool, optional
+            If the sites in ``where `` are a non-adjacent pair, whether to set
+            the initial patch as a path that connects them.
+        fit_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.fit`.
+        """
+
         # select a local neighborhood of tensors
-        tids = self._get_tids_from_tags(
-            tuple(map(self.site_tag, where)), "any"
-        )
-        if len(tids) == 2:
+        tags = tuple(map(self.site_tag, where))
+        tids = self._get_tids_from_tags(tags, "any")
+
+        if connect_path and (len(tids) == 2):
             tids = self.get_path_between_tids(*tids).tids
 
         k = self._select_local_tids(
             tids,
             max_distance=max_distance,
+            mode=mode,
             fillin=fillin,
             virtual=True,
         )
@@ -1262,14 +1604,18 @@ class TensorNetworkGenVector(TensorNetworkGen):
         if gauges:
             outer, inner = k.gauge_simple_insert(gauges)
 
+        # target TN with gate applied
         Gk = k.gate(G, where)
+
+        # perform fit!
         k.fit_(Gk, **fit_opts)
 
+        # ungauge
         if gauges:
             k.gauge_simple_remove(outer, inner)
 
         if gauges is not None:
-            k.gauge_all_simple_(gauges=gauges)
+            k.gauge_all_simple_(gauges=gauges, touched_tids=tids)
 
     def make_reduced_density_matrix(
         self,
@@ -1474,7 +1820,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
             "tensordot",
             rho,
             G,
-            axes=(range(2 * ng), (*range(ng, 2 * ng), *range(0, ng))),
+            axes=(
+                tuple(range(2 * ng)),
+                tuple(range(ng, 2 * ng)) + tuple(range(0, ng)),
+            ),
         )
 
         if normalized == "return":
@@ -1553,7 +1902,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         where,
         gauges=None,
         max_distance=0,
+        mode="graphdistance",
         fillin=0,
+        grow_from="all",
         smudge=1e-12,
         power=1.0,
     ):
@@ -1572,13 +1923,21 @@ class TensorNetworkGenVector(TensorNetworkGen):
         max_distance : int, optional
             The maximum graph distance to include tensors neighboring ``where``
             when computing the expectation. The default 0 means only the
-            tensors at sites ``where`` are used, 1 includes there direct
+            tensors at sites ``where`` are used, 1 includes their direct
             neighbors, etc.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``where``, of
+            size up to ``max_distance``, ensuring no dangling tensors.
         fillin : bool or int, optional
             When selecting the local tensors, whether and how many times to
             'fill-in' corner tensors attached multiple times to the local
             region. On a lattice this fills in the corners. See
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        grow_from : {"all", "any"}, optional
+            If mode is 'loopunion', whether each loop should contain *all* of
+            the initial tagged tensors, or just *any* of them (generating a
+            larger region).
         smudge : float, optional
             A small value to add to the gauges before multiplying them in and
             inverting them to avoid numerical issues.
@@ -1603,7 +1962,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         k = self._select_local_tids(
             tids,
             max_distance=max_distance,
+            mode=mode,
             fillin=fillin,
+            grow_from=grow_from,
             virtual=False,
         )
 
@@ -1620,7 +1981,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         optimize="auto-hq",
         normalized=True,
         max_distance=0,
+        mode="graphdistance",
         fillin=0,
+        grow_from="all",
         smudge=1e-12,
         power=1.0,
         get="matrix",
@@ -1650,11 +2013,19 @@ class TensorNetworkGenVector(TensorNetworkGen):
             when computing the expectation. The default 0 means only the
             tensors at sites ``where`` are used, 1 includes there direct
             neighbors, etc.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``where``, of
+            size up to ``max_distance``, ensuring no dangling tensors.
         fillin : bool or int, optional
             When selecting the local tensors, whether and how many times to
             'fill-in' corner tensors attached multiple times to the local
             region. On a lattice this fills in the corners. See
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        grow_from : {"all", "any"}, optional
+            If mode is 'loopunion', whether each loop should contain *all* of
+            the initial tagged tensors, or just *any* of them (generating a
+            larger region).
         smudge : float, optional
             A small value to add to the gauges before multiplying them in and
             inverting them to avoid numerical issues.
@@ -1675,7 +2046,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             where,
             gauges=gauges,
             max_distance=max_distance,
+            mode=mode,
             fillin=fillin,
+            grow_from=grow_from,
             smudge=smudge,
             power=power,
         )
@@ -1695,7 +2068,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         where,
         normalized=True,
         max_distance=0,
+        mode="graphdistance",
         fillin=False,
+        grow_from="all",
         gauges=None,
         smudge=0.0,
         power=1.0,
@@ -1740,11 +2115,19 @@ class TensorNetworkGenVector(TensorNetworkGen):
             when computing the expectation. The default 0 means only the
             tensors at sites ``where`` are used, 1 includes there direct
             neighbors, etc.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``where``, of
+            size up to ``max_distance``, ensuring no dangling tensors.
         fillin : bool or int, optional
             When selecting the local tensors, whether and how many times to
             'fill-in' corner tensors attached multiple times to the local
             region. On a lattice this fills in the corners. See
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        grow_from : {"all", "any"}, optional
+            If mode is 'loopunion', whether each loop should contain *all* of
+            the initial tagged tensors, or just *any* of them (generating a
+            larger region).
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
@@ -1773,7 +2156,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             where,
             gauges=gauges,
             max_distance=max_distance,
+            mode=mode,
             fillin=fillin,
+            grow_from=grow_from,
             smudge=smudge,
             power=power,
         )
@@ -1809,7 +2194,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         terms,
         *,
         max_distance=0,
+        mode="graphdistance",
         fillin=False,
+        grow_from="all",
         normalized=True,
         gauges=None,
         optimize="auto",
@@ -1853,11 +2240,19 @@ class TensorNetworkGenVector(TensorNetworkGen):
             when computing the expectation. The default 0 means only the
             tensors at sites ``where`` are used, 1 includes there direct
             neighbors, etc.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``where``, of
+            size up to ``max_distance``, ensuring no dangling tensors.
         fillin : bool or int, optional
             When selecting the local tensors, whether and how many times to
             'fill-in' corner tensors attached multiple times to the local
             region. On a lattice this fills in the corners. See
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.select_local`.
+        grow_from : {"all", "any"}, optional
+            If mode is 'loopunion', whether each loop should contain *all* of
+            the initial tagged tensors, or just *any* of them (generating a
+            larger region).
         normalized : bool, optional
             Whether to locally normalize the result, i.e. divide by the
             expectation value of the identity. This implies that a different
@@ -1908,7 +2303,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             progbar=progbar,
             normalized=normalized,
             max_distance=max_distance,
+            mode=mode,
             fillin=fillin,
+            grow_from=grow_from,
             gauges=gauges,
             optimize=optimize,
             rehearse=rehearse,
@@ -1922,17 +2319,22 @@ class TensorNetworkGenVector(TensorNetworkGen):
         "compute_local_expectation_cluster",
     )
 
-    def local_expectation_loop_expansion(
+    def local_expectation_sloop_expand(
         self,
         G,
         where,
-        loops=None,
+        sloops=None,
         gauges=None,
-        normalized=True,
-        optimize="auto",
+        *,
+        grow_from="all",
+        strict_size=True,
         intersect=False,
-        use_all_starting_paths=False,
+        autocomplete=True,
+        autoreduce=True,
+        combine="prod",
+        normalized=True,
         info=None,
+        optimize="auto",
         progbar=False,
         **contract_opts,
     ):
@@ -1945,13 +2347,13 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The operator to compute the expectation of.
         where : node or sequence[node]
             The sites to compute the expectation at.
-        loops : None or sequence[NetworkPath], optional
+        sloops : None or sequence[NetworkPath], optional
             The loops to use. If an integer, all loops up to and including that
             length will be used if the loop passes through all sites in
             ``where``. If ``None`` the maximum loop length is set as the
             shortest loop found. If an explicit set of loops is given, only
             these loops are considered, but only if they pass through all sites
-            in ``where``. ``intersect`` is ignored.
+            in ``where``, and ``intersect`` is ignored.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
@@ -1986,68 +2388,28 @@ class TensorNetworkGenVector(TensorNetworkGen):
         info.setdefault("tns", {})
         info.setdefault("expecs", {})
 
-        if isinstance(loops, int):
-            max_loop_length = loops
-            loops = None
+        sloops = self.get_local_sloops(
+            where=where,
+            sloops=sloops,
+            intersect=intersect,
+            grow_from=grow_from,
+            strict_size=strict_size,
+            info=info,
+        )
+
+        rg = RegionGraph(sloops, autocomplete=autocomplete)
+
+        if autoreduce:
+            where_tags = tuple(map(self.site_tag, where))
+            where_tids = self._get_tids_from_tags(where_tags, "any")
+            try:
+                neighbor_inds = info["neighbor_inds"]
+            except KeyError:
+                neighbor_inds = info["neighbor_inds"] = {
+                    tid: t.inds for tid, t in self.tensor_map.items()
+                }
         else:
-            max_loop_length = None
-
-        if len(where) == 1:
-            (tid,) = self._get_tids_from_tags(where[0])
-            paths = [(tid,)]
-        elif len(where) == 2:
-            (tida,) = self._get_tids_from_tags(where[0])
-            (tidb,) = self._get_tids_from_tags(where[1])
-            if use_all_starting_paths:
-                paths = self.get_path_between_tids(tida, tidb, return_all=True)
-            else:
-                paths = [self.get_path_between_tids(tida, tidb)]
-        else:
-            raise NotImplementedError("Only 1 or 2 sites supported.")
-
-        if loops is None:
-            # find all loops that pass through local bonds
-            loops = tuple(
-                self.gen_paths_loops(
-                    max_loop_length=max_loop_length,
-                    intersect=intersect,
-                    paths=paths,
-                )
-            )
-
-        else:
-            # have explicit loop specification, maybe as a larger set ->
-            # need to select only the loops covering whole of `where`
-            loops = tuple(loops)
-
-            if "lookup" in info and hash(loops) == info["lookup_hash"]:
-                # want to share info across different expectations and also
-                # different sets of loops -> but if the loop set has changed
-                # then "lookup" specifically is probably incomplete
-                lookup = info["lookup"]
-            else:
-                # build cache of which coordinates are in which loop to avoid
-                # quadratic loop checking cost doing every time
-                lookup = {}
-                tid2site = self._get_tid_to_site_map()
-                for loop in loops:
-                    for tid in loop.tids:
-                        site = tid2site[tid]
-                        lookup.setdefault(site, set()).add(loop)
-
-                info["lookup"] = lookup
-                info["lookup_hash"] = hash(loops)
-
-            # get all loops which contain *all* sites in `where`
-            loops = set.intersection(*(lookup[coo] for coo in where))
-
-        # XXX: for larger intersecting loops the counting is not quite
-        # right subregion intersections are not all generated above?
-        rg = RegionGraph(loops, autocomplete=False)
-
-        # make sure the tree contribution is included
-        for path0 in paths:
-            rg.add_region(path0)
+            neighbor_inds = where_tids = None
 
         expecs = []
         norms = []
@@ -2063,6 +2425,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             if C == 0:
                 # redundant loop
                 continue
+
+            if autoreduce:
+                # check if we can map loop to a smaller cluster
+                # this is only valid at a BP fixed point
+                loop = sloop_remove_dangling(loop, neighbor_inds, where_tids)
 
             try:
                 # have already computed this term in a different expectation
@@ -2091,41 +2458,26 @@ class TensorNetworkGenVector(TensorNetworkGen):
             norms.append(norm_loop)
             counts.append(C)
 
-        if normalized == "local":
-            # each loop expectation is normalized separately
-            expec = sum(
-                C * expec_loop / norm_loop
-                for C, expec_loop, norm_loop in zip(counts, expecs, norms)
-            )
-        elif normalized == "prod":
-            # each term is normalized by an overall normalization factor
-            expec = prod(e**C for C, e in zip(counts, expecs))
-            norm = prod(n**C for C, n in zip(counts, norms))
-            expec = expec / norm
-        elif normalized:
-            # each term is normalized by an simulteneous normalization factor
-            expec = sum(C * e for C, e in zip(counts, expecs))
-            norm = sum(C * n for C, n in zip(counts, norms))
-            expec = expec / norm
-        else:
-            # no normalization
-            expec = sum(
-                C * expec_loop for C, expec_loop in zip(counts, expecs)
-            )
+        return _combine_expansion_expectations(
+            expecs, counts, norms, combine=combine, normalized=normalized
+        )
 
-        return expec
-
-    def compute_local_expectation_loop_expansion(
+    def compute_local_expectation_sloop_expand(
         self,
         terms,
-        loops=None,
-        *,
+        sloops=None,
         gauges=None,
-        normalized=True,
-        optimize="auto",
-        info=None,
+        *,
+        grow_from="all",
+        strict_size=True,
         intersect=False,
+        autocomplete=True,
+        autoreduce=True,
+        combine="prod",
+        normalized=True,
+        info=None,
         return_all=False,
+        optimize="auto",
         executor=None,
         progbar=False,
         **contract_opts,
@@ -2133,36 +2485,45 @@ class TensorNetworkGenVector(TensorNetworkGen):
         info = info if info is not None else {}
 
         return _compute_expecs_maybe_in_parallel(
-            fn=_tn_local_expectation_loop_expansion,
+            fn=_tn_local_expectation_sloop_expand,
             tn=self,
             terms=terms,
-            loops=loops,
+            sloops=sloops,
+            gauges=gauges,
+            grow_from=grow_from,
+            strict_size=strict_size,
             intersect=intersect,
+            autocomplete=autocomplete,
+            autoreduce=autoreduce,
+            combine=combine,
+            normalized=normalized,
+            info=info,
             return_all=return_all,
+            optimize=optimize,
             executor=executor,
             progbar=progbar,
-            normalized=normalized,
-            gauges=gauges,
-            optimize=optimize,
-            info=info,
             **contract_opts,
         )
 
-    def local_expectation_cluster_expansion(
+    def local_expectation_gloop_expand(
         self,
         G,
         where,
-        clusters=None,
+        gloops=None,
         gauges=None,
+        combine="prod",
         normalized=True,
         autocomplete=True,
         autoreduce=True,
+        grow_from="all",
+        strict_size=True,
         optimize="auto",
         info=None,
+        progbar=False,
         **contract_opts,
     ):
         """Compute the expectation of operator ``G`` at site(s) ``where`` by
-        expanding the expectation in terms of clusters of tensors.
+        expanding the expectation in terms of generalized loops of tensors.
 
         Parameters
         ----------
@@ -2170,22 +2531,39 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The operator to compute the expectation of.
         where : node or sequence[node]
             The sites to compute the expectation at.
-        clusters : None or sequence[sequence[node]], optional
-            The clusters to use. If an integer, all cluster up to and including
-            that size will be used if the cluster contains all sites in
-            ``where``. If ``None`` the maximum cluster size is set as the
-            smallest non-trivial cluster (2-connected subgraph)  found.
-            If an explicit set of clusters is given, only these clusters are
-            considered, but only if they contain all sites in ``where``.
+        gloops : None, int, or sequence[sequence[node]], optional
+            The generalized loops to use. If an integer, generate loops up to
+            and including this size. If ``None`` the maximum loop size is set
+            as the smallest non-trivial loop found. If an explicit set of
+            loops is given, only these loops are considered.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
             gauged.
-        normalized : bool or "local", optional
-            Whether to normalize the result. If "local" each cluster term is
-            normalized separately. If ``True`` each term is normalized using
-            a loop expansion estimate of the norm. If ``False`` no
-            normalization is performed.
+        combine : {"prod", "sum"}, optional
+            How to combine the local expectations of each cluster.
+        normalized : bool, "prod", "local" or "separate", "global", optional
+            Whether and how to normalize the result.
+
+            - True: uses "prod" if combine="prod", "local" if combine="sum".
+            - "prod": shorthand for `combine="prod"` and `normalized=True`.
+            - "local": each cluster within a term is normalized separately.
+            - "separate": the expectation and normalization are computed
+              separately and then combined for each term.
+
+        autocomplete : bool, optional
+            Whether to automatically complete the local region graph by adding
+            all required intersecting regions automatically.
+        autoreduce : bool, optional
+            Whether to reduce any clusters with dangling bonds (which can
+            still be generated as intersecting regions of loops) to generalized
+            loops with dangling bonds removed. Should only be used at a BP
+            fixed point.
+        grow_from : {"all", "any"}, optional
+            If auto generating loops, whether generate only those which contain
+            *all* sites in the term, or just *any*. The loops generated by
+            "any" are a superset of those generated by "all", giving a more
+            accuracte estimate.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use.
         info : dict, optional
@@ -2207,86 +2585,60 @@ class TensorNetworkGenVector(TensorNetworkGen):
         info.setdefault("tns", {})
         info.setdefault("expecs", {})
 
-        if isinstance(clusters, int):
-            max_cluster_size = clusters
-            clusters = None
-        else:
-            max_cluster_size = None
-
-        if clusters is None:
-            clusters = tuple(
-                self.gen_regions_sites(
-                    max_region_size=max_cluster_size,
-                    sites=where,
-                )
-            )
-        else:
-            clusters = tuple(clusters)
-
-            if not clusters:
-                # always include base sites
-                clusters = (tuple(where),)
-
-            if "lookup" in info and hash(clusters) == info["lookup_hash"]:
-                # want to share info across different expectations and also
-                # different sets of clusters -> but if the cluster set has
-                # changed then "lookup" specifically is probably incomplete
-                lookup = info["lookup"]
-            else:
-                # build cache of which coordinates are in which cluster to
-                # avoid quadratic cluster checking cost doing every time
-                lookup = {}
-                for cluster in clusters:
-                    for site in cluster:
-                        lookup.setdefault(site, set()).add(cluster)
-
-                info["lookup"] = lookup
-                info["lookup_hash"] = hash(clusters)
-
-            # get all clusters which contain *all* sites in `where`
-            clusters = set.intersection(*(lookup[coo] for coo in where))
+        gloops = self.get_local_gloops(
+            where=where,
+            gloops=gloops,
+            grow_from=grow_from,
+            strict_size=strict_size,
+            info=info,
+        )
+        rg = RegionGraph(gloops, autocomplete=autocomplete)
 
         if autoreduce:
-            neighbors = self.get_site_neighbor_map()
+            try:
+                neighbors = info["neighbors"]
+            except KeyError:
+                neighbors = info["neighbors"] = self.get_site_neighbor_map()
         else:
             neighbors = None
-
-        rg = RegionGraph(clusters, autocomplete=autocomplete)
-
-        # make sure the tree contribution is included
-        rg.add_region(where)
 
         expecs = []
         norms = []
         counts = []
 
-        for cluster in rg.regions:
-            C = rg.get_count(cluster)
+        if progbar:
+            regions = Progbar(rg.regions)
+        else:
+            regions = rg.regions
+
+        for r in regions:
+            C = rg.get_count(r)
             if C == 0:
                 # redundant cluster
                 continue
 
             if autoreduce:
                 # check if we can map cluster to a smaller generalized loop
-                cluster = region_remove_dangling(cluster, neighbors, where)
+                # this is only valid at a BP fixed point
+                r = gloop_remove_dangling(r, neighbors, where)
 
             try:
                 # have already computed this term in a different expectation
-                # e.g. with different set of clusters
-                expec_cluster, norm_cluster = info["expecs"][cluster, where]
+                # e.g. with different set of gloops
+                expec_r, norm_r = info["expecs"][r, where]
             except KeyError:
                 # get the gauged cluster tn
                 try:
-                    tnl = info["tns"][cluster]
+                    tnr = info["tns"][r]
                 except KeyError:
-                    tags = tuple(map(self.site_tag, cluster))
+                    tags = tuple(map(self.site_tag, r))
                     # take copy as inserting gauges
-                    tnl = self.select_any(tags, virtual=False)
-                    tnl.gauge_simple_insert(gauges)
-                    info["tns"][cluster] = tnl
+                    tnr = self.select_any(tags, virtual=False)
+                    tnr.gauge_simple_insert(gauges)
+                    info["tns"][r] = tnr
 
                 # compute the expectation with exact contraction
-                expec_cluster, norm_cluster = tnl.local_expectation_exact(
+                expec_r, norm_r = tnr.local_expectation_exact(
                     G,
                     where,
                     normalized="return",
@@ -2294,33 +2646,19 @@ class TensorNetworkGenVector(TensorNetworkGen):
                     **contract_opts,
                 )
                 # store for efficient calls with multiple cluster sets
-                info["expecs"][cluster, where] = expec_cluster, norm_cluster
+                info["expecs"][r, where] = expec_r, norm_r
 
-            expecs.append(expec_cluster)
-            norms.append(norm_cluster)
+            expecs.append(expec_r)
+            norms.append(norm_r)
             counts.append(C)
 
-        if normalized == "local":
-            # each loop expectation is normalized separately
-            expec = sum(C * e / n for C, e, n in zip(counts, expecs, norms))
-        elif normalized == "prod":
-            expec = prod(e**C for C, e in zip(counts, expecs))
-            norm = prod(n**C for C, n in zip(counts, norms))
-            expec = expec / norm
-        elif normalized:
-            # each term is normalized by an simulteneous normalization factor
-            expec = sum(C * e for C, e in zip(counts, expecs))
-            norm = sum(C * n for C, n in zip(counts, norms))
-            expec = expec / norm
-        else:
-            # no normalization
-            expec = sum(C * e for C, e in zip(counts, expecs))
+        return _combine_expansion_expectations(
+            expecs, counts, norms, combine=combine, normalized=normalized
+        )
 
-        return expec
-
-    def norm_cluster_expansion(
+    def norm_gloop_expand(
         self,
-        clusters=None,
+        gloops=None,
         autocomplete=False,
         autoreduce=True,
         gauges=None,
@@ -2329,22 +2667,23 @@ class TensorNetworkGenVector(TensorNetworkGen):
         **contract_opts,
     ):
         """Compute the norm of this tensor network by expanding it in terms of
-        clusters of tensors.
+        generalized loops of tensors.
         """
-        from quimb.tensor.belief_propagation import RegionGraph
+        from quimb.tensor.belief_propagation import (
+            RegionGraph,
+            combine_local_contractions,
+        )
 
-        if isinstance(clusters, int):
-            max_cluster_size = clusters
-            clusters = None
+        if isinstance(gloops, int):
+            max_size = gloops
+            gloops = None
         else:
-            max_cluster_size = None
+            max_size = None
 
-        if clusters is None:
-            clusters = tuple(
-                self.gen_regions_sites(max_region_size=max_cluster_size)
-            )
+        if gloops is None:
+            gloops = tuple(self.gen_gloops_sites(max_size=max_size))
         else:
-            clusters = tuple(clusters)
+            gloops = tuple(gloops)
 
         psi = self.copy()
 
@@ -2357,7 +2696,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         else:
             neighbors = None
 
-        rg = RegionGraph(clusters, autocomplete=autocomplete)
+        rg = RegionGraph(gloops, autocomplete=autocomplete)
         for site in psi.sites:
             if site not in rg.lookup:
                 # site is not covered by any cluster -> might be tree like
@@ -2368,7 +2707,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         else:
             regions = rg.regions
 
-        local_norms = []
+        zvals = []
         for region in regions:
             C = rg.get_count(region)
             if C == 0:
@@ -2376,7 +2715,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
             if autoreduce:
                 # check if we can map cluster to a smaller generalized loop
-                region = region_remove_dangling(region, neighbors)
+                region = gloop_remove_dangling(region, neighbors)
 
                 if not region:
                     # region is tree like -> contributes 1.0
@@ -2387,18 +2726,22 @@ class TensorNetworkGenVector(TensorNetworkGen):
             kr.gauge_simple_insert(gauges)
 
             lni = (kr.H | kr).contract(optimize=optimize, **contract_opts)
-            local_norms.append(do("log10", lni) * C)
+            zvals.append((lni, C))
 
-        return (10 ** sum(local_norms) * nfactor) ** 0.5
+        return (combine_local_contractions(zvals) * nfactor) ** 0.5
 
-    def compute_local_expectation_cluster_expansion(
+    def compute_local_expectation_gloop_expand(
         self,
         terms,
-        clusters=None,
+        gloops=None,
         *,
         gauges=None,
+        combine="prod",
         normalized=True,
         autocomplete=True,
+        autoreduce=True,
+        grow_from="all",
+        strict_size=True,
         optimize="auto",
         info=None,
         return_all=False,
@@ -2406,12 +2749,80 @@ class TensorNetworkGenVector(TensorNetworkGen):
         progbar=False,
         **contract_opts,
     ):
-        info = info if info is not None else {}
+        """Contract many local expectations using generalized loop expansion.
+
+        Parameters
+        ----------
+        terms : dict[node or tuple[node], array_like]
+            The terms to compute the expectation of, with keys being the
+            site(s) and values being the local operators as plain arrays.
+        gloops : None, int, or sequence[sequence[node]], optional
+            The generalized loops to use. If an integer, generate loops up to
+            and including this size. If ``None`` the maximum loop size is set
+            as the smallest non-trivial loop found. If an explicit set of
+            loops is given, only these loops are considered.
+        gauges : dict[str, array_like], optional
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            used.
+        combine : {"prod", "sum"}, optional
+            How to combine the local expectations of each cluster.
+        normalized : bool, "prod", "local" or "separate", "global", optional
+            Whether and how to normalize the result.
+
+            - True: uses "prod" if combine="prod", "local" if combine="sum".
+            - "prod": shorthand for `combine="prod"` and `normalized=True`.
+            - "local": each cluster within a term is normalized separately.
+            - "separate": the expectation and normalization are computed
+              separately and then combined for each term.
+            - "global": a single normalization factor is computed and used for
+              all terms.
+
+        autocomplete : bool, optional
+            Whether to automatically complete the local region graph by adding
+            all required intersecting regions automatically.
+        autoreduce : bool, optional
+            Whether to reduce any clusters with dangling bonds (which can
+            still be generated as intersecting regions of loops) to generalized
+            loops with dangling bonds removed. Should only be used at a BP
+            fixed point.
+        grow_from : {"all", "any"}, optional
+            If auto generating loops, whether generate only those which contain
+            *all* sites in the term, or just *any*. The loops generated by
+            "any" are a superset of those generated by "all", giving a more
+            accuracte estimate.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        info : dict, optional
+            A dictionary to store intermediate results in to avoid recomputing
+            them. This is useful when computing various expectations with
+            different sets of loops. This should only be reused when both the
+            tensor network and gauges remain the same.
+        return_all : bool, optional
+            Whether to return all results, or just the summed expectation.
+        executor : Executor, optional
+            If supplied compute the terms in parallel using this executor.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        expecs : float or dict[node or tuple[node], float]
+            If ``return_all==False``, return the summed expectation value of
+            the given terms. Otherwise, return a dictionary mapping each term's
+            location to the expectation value.
+        """
+        if info is None:
+            info = {}
 
         if normalized == "global":
-            nfactor = self.norm_cluster_expansion(
-                clusters=clusters,
+            nfactor = self.norm_gloop_expand(
+                gloops=gloops,
                 autocomplete=autocomplete,
+                autoreduce=autoreduce,
                 gauges=gauges,
                 optimize=optimize,
                 **contract_opts,
@@ -2422,18 +2833,22 @@ class TensorNetworkGenVector(TensorNetworkGen):
             tn = self
 
         return _compute_expecs_maybe_in_parallel(
-            fn=_tn_local_expectation_cluster_expansion,
+            fn=_tn_local_expectation_gloop_expand,
             tn=tn,
             terms=terms,
-            clusters=clusters,
-            return_all=return_all,
-            executor=executor,
-            progbar=progbar,
+            gloops=gloops,
+            combine=combine,
             normalized=normalized,
             gauges=gauges,
             autocomplete=autocomplete,
+            autoreduce=autoreduce,
+            grow_from=grow_from,
+            strict_size=strict_size,
             optimize=optimize,
             info=info,
+            return_all=return_all,
+            executor=executor,
+            progbar=progbar,
             **contract_opts,
         )
 
@@ -3274,11 +3689,59 @@ def _tn_local_expectation_exact(tn: TensorNetworkGenVector, *args, **kwargs):
     return tn.local_expectation_exact(*args, **kwargs)
 
 
-def _tn_local_expectation_loop_expansion(tn, *args, **kwargs):
+def _tn_local_expectation_sloop_expand(
+    tn: TensorNetworkGenVector, *args, **kwargs
+):
     """Define as function for pickleability."""
-    return tn.local_expectation_loop_expansion(*args, **kwargs)
+    return tn.local_expectation_sloop_expand(*args, **kwargs)
 
 
-def _tn_local_expectation_cluster_expansion(tn, *args, **kwargs):
+def _tn_local_expectation_gloop_expand(
+    tn: TensorNetworkGenVector, *args, **kwargs
+):
     """Define as function for pickleability."""
-    return tn.local_expectation_cluster_expansion(*args, **kwargs)
+    return tn.local_expectation_gloop_expand(*args, **kwargs)
+
+
+def _combine_expansion_expectations(
+    expecs, counts, norms, combine="prod", normalized=True
+):
+    # now we combine the local expectations and normalizations
+    if normalized == "prod":
+        # allow this as legacy shorthand for combine="prod"
+        combine = "prod"
+        normalized = True
+
+    if combine == "prod":
+        from .belief_propagation import combine_local_contractions
+
+        vals = [(e, C) for e, C in zip(expecs, counts)]
+        if normalized:
+            # local and separate normalization are equivalent for prod
+            vals.extend((n, -C) for n, C in zip(norms, counts))
+
+        expec = combine_local_contractions(vals)
+
+    elif combine == "sum":
+        if normalized is True:
+            # default to "local" normalization
+            normalized = "local"
+
+        if normalized == "local":
+            expec = sum(C * e / n for C, e, n in zip(counts, expecs, norms))
+        elif normalized == "separate":
+            expec = sum(C * e for C, e in zip(counts, expecs))
+            norm = sum(C * n for C, n in zip(counts, norms))
+            expec = expec / norm
+        elif not normalized:
+            expec = sum(C * e for C, e in zip(counts, expecs))
+        else:
+            raise ValueError(
+                f"normalized={normalized} should be one of "
+                "{True, False, 'local', 'separate'} "
+                " when combine='sum'."
+            )
+    else:
+        raise ValueError(f"combine={combine} should be 'prod' or 'sum'.")
+
+    return expec

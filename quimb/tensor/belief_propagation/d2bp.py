@@ -227,7 +227,7 @@ class D2BP(BeliefPropagationCommon):
             mdiff = self._distance_fn(old_m, new_m)
 
             if self.damping:
-                new_m = self.fn_damping(old_m, new_m)
+                new_m = self._damping_fn(old_m, new_m)
 
             # # post-damp distance
             # mdiff = self._distance_fn(old_m, new_m)
@@ -381,9 +381,9 @@ class D2BP(BeliefPropagationCommon):
             check_zero=check_zero,
         )
 
-    def contract_cluster_expansion(
+    def contract_gloop_expand(
         self,
-        clusters=None,
+        gloops=None,
         autocomplete=True,
         optimize="auto-hq",
         strip_exponent=False,
@@ -394,20 +394,20 @@ class D2BP(BeliefPropagationCommon):
     ):
         self.normalize_message_pairs()
 
-        if isinstance(clusters, int):
-            max_cluster_size = clusters
-            clusters = None
+        if isinstance(gloops, int):
+            max_size = gloops
+            gloops = None
         else:
-            max_cluster_size = None
+            max_size = None
 
-        if clusters is None:
-            clusters = tuple(
-                self.tn.gen_regions(max_region_size=max_cluster_size)
+        if gloops is None:
+            gloops = tuple(
+                self.tn.gen_gloops(max_size=max_size)
             )
         else:
-            clusters = tuple(clusters)
+            gloops = tuple(gloops)
 
-        rg = RegionGraph(clusters, autocomplete=autocomplete)
+        rg = RegionGraph(gloops, autocomplete=autocomplete)
 
         for tid in self.tn.tensor_map:
             rg.add_region([tid])

@@ -91,9 +91,12 @@ from .networking import (
     gen_all_paths_between_tids,
     gen_inds_connected,
     gen_loops,
+    gen_patches,
     gen_paths_loops,
-    gen_regions,
+    gen_gloops,
+    get_local_patch,
     get_path_between_tids,
+    get_loop_union,
     get_tree_span,
     isconnected,
     istree,
@@ -5156,26 +5159,80 @@ class TensorNetwork(object):
         self,
         tids,
         max_distance=1,
+        mode="graphdistance",
         fillin=False,
+        grow_from="all",
         reduce_outer=None,
-        inwards=False,
         virtual=True,
         include=None,
         exclude=None,
     ):
-        span = self.get_tree_span(
-            tids,
-            max_distance=max_distance,
-            include=include,
-            exclude=exclude,
-            inwards=inwards,
-        )
-        local_tids = oset(tids)
-        for s in span:
-            local_tids.add(s[0])
-            local_tids.add(s[1])
+        """Select a local region of tensors, based on graph distance or union
+        of loops, from an initial set of tensor ids.
+
+        Parameters
+        ----------
+        tids : sequence of str
+            The initial tensor ids.
+        max_distance : int, optional
+            The maximum distance to the initial tagged region, or if using
+            'loopunion' mode, the maximum size of any loop.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``tids``.
+        fillin : bool or int, optional
+            Whether to fill in the local patch with additional tensors, or not.
+            `fillin` tensors are those connected by two or more bonds to the
+            original local patch, the process is repeated int(fillin) times.
+        grow_from : {"all", "any"}, optional
+            If mode is 'loopunion', whether each loop should contain *all* of
+            the initial tids, or just *any* of them (generating a larger
+            region).
+        reduce_outer : {'sum', 'svd', 'svd-sum', 'reflect'}, optional
+            Whether and how to reduce any outer indices of the selected region.
+        virtual : bool, optional
+            Whether the returned tensor network should be a view of the tensors
+            or a copy.
+        include : None or sequence of int, optional
+            If given, only include tensor from this set of tids.
+        exclude : None or sequence of int, optional
+            If given, always exclude tensors from this set of tids.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        if mode == "graphdistance":
+            # get all tids up to max_distance graph distance away
+            local_tids = self.get_local_patch(
+                tids,
+                max_distance=max_distance,
+                include=include,
+                exclude=exclude,
+            )
+        elif mode == "loopunion":
+            if include is not None or exclude is not None:
+                raise ValueError(
+                    "`include` and `exclude` not "
+                    "supported for `loopunion` mode yet."
+                )
+            local_tids = self.get_loop_union(
+                tids,
+                max_size=max_distance,
+                grow_from=grow_from,
+            )
+        else:
+            raise ValueError(
+                "`mode` must be `graphdistance` or `loopunion`."
+            )
 
         for _ in range(int(fillin)):
+            # find any tids that are connected to the local region by two or
+            # more bonds and include them, repeat process `fillin` times
+
+            if not isinstance(local_tids, oset):
+                local_tids = oset(local_tids)
+
             connectivity = frequencies(
                 tid_n
                 for tid in local_tids
@@ -5244,7 +5301,9 @@ class TensorNetwork(object):
         tags,
         which="all",
         max_distance=1,
+        mode="graphdistance",
         fillin=False,
+        grow_from="all",
         reduce_outer=None,
         virtual=True,
         include=None,
@@ -5260,7 +5319,12 @@ class TensorNetwork(object):
         which : {'all', 'any', '!all', '!any'}, optional
             Whether to require matching all or any of the tags.
         max_distance : int, optional
-            The maximum distance to the initial tagged region.
+            The maximum distance to the initial tagged region, or if using
+            'loopunion' mode, the maximum size of any loop.
+        mode : {'graphdistance', 'loopunion'}, optional
+            How to select the local tensors, either by graph distance or by
+            selecting the union of all loopy regions containing ``where``, of
+            size up to ``max_distance``, ensuring no dangling tensors.
         fillin : bool or int, optional
             Once the local region has been selected based on graph distance,
             whether and how many times to 'fill-in' corners by adding tensors
@@ -5270,12 +5334,16 @@ class TensorNetwork(object):
                   fillin=0       fillin=1       fillin=2
 
                  | | | | |      | | | | |      | | | | |
-                -o-o-x-o-o-    -o-x-x-x-o-    -x-x-x-x-x-
+                -o-o-X-o-o-    -o-X-X-X-o-    -X-X-X-X-X-
                  | | | | |      | | | | |      | | | | |
-                -o-x-x-x-o-    -x-x-x-x-x-    -x-x-x-x-x-
+                -o-X-X-X-o-    -X-X-X-X-X-    -X-X-X-X-X-
                  | | | | |      | | | | |      | | | | |
-                -x-x-R-x-x-    -x-x-R-x-x-    -x-x-R-x-x-
+                -X-X-R-X-X-    -X-X-R-X-X-    -X-X-R-X-X-
 
+        grow_from : {"all", "any"}, optional
+            If mode is 'loopunion', whether each loop should contain *all* of
+            the initial tagged tensors, or just *any* of them (generating a
+            larger region).
         reduce_outer : {'sum', 'svd', 'svd-sum', 'reflect'}, optional
             Whether and how to reduce any outer indices of the selected region.
         virtual : bool, optional
@@ -5299,7 +5367,9 @@ class TensorNetwork(object):
         return self._select_local_tids(
             tids=self._get_tids_from_tags(tags, which),
             max_distance=max_distance,
+            mode=mode,
             fillin=fillin,
+            grow_from=grow_from,
             reduce_outer=reduce_outer,
             virtual=virtual,
             include=include,
@@ -6745,6 +6815,15 @@ class TensorNetwork(object):
 
         return neighbors
 
+    def get_tid_neighbor_map(self):
+        """Get a mapping of each tensor id to the tensor ids of its neighbors."""
+        neighbor_map = {tid: [] for tid in self.tensor_map}
+        for ix, tids in self.ind_map.items():
+            for tida, tidb in itertools.combinations(tids, 2):
+                neighbor_map[tida].append(tidb)
+                neighbor_map[tidb].append(tida)
+        return neighbor_map
+
     def _get_neighbor_inds(self, inds):
         """Get the indices connected to the index(es) at ``inds``.
 
@@ -6795,9 +6874,12 @@ class TensorNetwork(object):
     gen_all_paths_between_tids = gen_all_paths_between_tids
     gen_inds_connected = gen_inds_connected
     gen_loops = gen_loops
+    gen_patches = gen_patches
     gen_paths_loops = gen_paths_loops
-    gen_regions = gen_regions
+    gen_gloops = gen_gloops
+    get_local_patch = get_local_patch
     get_path_between_tids = get_path_between_tids
+    get_loop_union = get_loop_union
     get_tree_span = get_tree_span
     isconnected = isconnected
     istree = istree
@@ -7475,9 +7557,9 @@ class TensorNetwork(object):
         self,
         tids,
         max_distance=1,
+        mode="graphdistance",
         max_iterations="max_distance",
         method="canonize",
-        inwards=False,
         include=None,
         exclude=None,
         **gauge_local_opts,
@@ -7491,7 +7573,7 @@ class TensorNetwork(object):
         tn_loc = self._select_local_tids(
             tids,
             max_distance=max_distance,
-            inwards=inwards,
+            mode=mode,
             virtual=True,
             include=include,
             exclude=exclude,

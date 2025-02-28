@@ -173,7 +173,10 @@ class HD1GBP(BeliefPropagationCommon):
                 # check for convergence
                 try:
                     m_old = self.messages[parent, child]
-                    mdiff = self._distance_fn(m.data, m_old.data)
+                    # XXX: need to handle index alignment here to compare
+                    # using _distance_fn:
+                    # mdiff = self._distance_fn(m_old.data, m.data)
+                    mdiff = (m_old - m).norm()
                 except KeyError:
                     mdiff = 1.0
                 max_mdiff = max(mdiff, max_mdiff)
@@ -186,13 +189,16 @@ class HD1GBP(BeliefPropagationCommon):
         #     note that the raw, undamped `new_messages` are used in the
         #     denominator of the message computations, and so kept 'as is'
         for pair in self.new_messages:
-            if self.damping == 0.0 or pair not in self.messages:
+            if pair not in self.messages:
+                # no old message yet
                 self.messages[pair] = self.new_messages[pair]
             else:
-                self.messages[pair] = self.fn_damping(
+                self.messages[pair] = self._damping_fn(
                     self.messages[pair],
                     self.new_messages[pair],
                 )
+
+        # self.new_messages.clear()
 
         return {
             "nconv": nconv,

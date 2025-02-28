@@ -178,7 +178,7 @@ class L1BP(BeliefPropagationCommon):
             mdiff = self._distance_fn(data, tm.data)
 
             if self.damping:
-                data = self.fn_damping(data, tm.data)
+                data = self._damping_fn(data, tm.data)
 
             # # post-damp distance
             # mdiff = self._distance_fn(data, tm.data)

@@ -180,7 +180,7 @@ class D1BP(BeliefPropagationCommon):
             mdiff = self._distance_fn(old_m, new_m)
 
             if self.damping:
-                new_m = self.fn_damping(old_m, new_m)
+                new_m = self._damping_fn(old_m, new_m)
 
             # # post-damp distance
             # mdiff = self._distance_fn(old_m, new_m)
@@ -341,7 +341,7 @@ class D1BP(BeliefPropagationCommon):
 
         return combine_local_contractions(
             zvals,
-            self.backend,
+            backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
             mantissa=self.sign,
@@ -406,9 +406,9 @@ class D1BP(BeliefPropagationCommon):
             exponent=self.exponent,
         )
 
-    def contract_cluster_expansion(
+    def contract_gloop_expand(
         self,
-        clusters=None,
+        gloops=None,
         autocomplete=True,
         strip_exponent=False,
         check_zero=True,
@@ -417,20 +417,18 @@ class D1BP(BeliefPropagationCommon):
     ):
         from .regions import RegionGraph
 
-        if isinstance(clusters, int):
-            max_cluster_size = clusters
-            clusters = None
+        if isinstance(gloops, int):
+            max_size = gloops
+            gloops = None
         else:
-            max_cluster_size = None
+            max_size = None
 
-        if clusters is None:
-            clusters = tuple(
-                self.tn.gen_regions(max_region_size=max_cluster_size)
-            )
+        if gloops is None:
+            gloops = tuple(self.tn.gen_gloops(max_size=max_size))
         else:
-            clusters = tuple(clusters)
+            gloops = tuple(gloops)
 
-        rg = RegionGraph(clusters, autocomplete=autocomplete)
+        rg = RegionGraph(gloops, autocomplete=autocomplete)
 
         zvals = []
         for r in rg.regions:

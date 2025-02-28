@@ -129,14 +129,21 @@ class BeliefPropagationCommon:
     @damping.setter
     def damping(self, damping):
         if callable(damping):
-            self.fn_damping = self._damping = damping
+            self._damping_fn = self._damping = damping
         else:
             self._damping = damping
 
-            def fn_damping(old, new):
-                return damping * old + (1 - damping) * new
+            if damping == 0.0:
 
-            self.fn_damping = fn_damping
+                def _damping_fn(old, new):
+                    return new
+
+            else:
+
+                def _damping_fn(old, new):
+                    return damping * old + (1 - damping) * new
+
+            self._damping_fn = _damping_fn
 
     @property
     def normalize(self):
@@ -415,6 +422,29 @@ class BeliefPropagationCommon:
             return self.mdiffs[-1]
         except IndexError:
             return float("nan")
+
+    def iterate(self, tol=1e-6):
+        """Perform a single iteration of belief propagation. Subclasses should
+        implement this method, returning either `max_mdiff` or a dictionary
+        containing `max_mdiff` and any other relevant information:
+
+            {
+                "nconv": nconv,
+                "ncheck": ncheck,
+                "max_mdiff": max_mdiff,
+            }
+
+        """
+        raise NotImplementedError
+
+    def contract(
+        self,
+        strip_exponent=False,
+        check_zero=True,
+        **kwargs,
+    ):
+        """Contract the tensor network and return the resulting value."""
+        raise NotImplementedError
 
     def __repr__(self):
         return f"{self.__class__.__name__}(n={self.n}, mdiff={self.mdiff:.3g})"
@@ -761,3 +791,18 @@ def create_lazy_community_edge_map(tn, site_tags=None, rank_simplify=True):
                 pass
 
     return edges, neighbors, local_tns, touch_map
+
+
+def auto_add_indices(tn, regions):
+    """Make sure all indices incident to any tensor in each region are
+    included in the region.
+    """
+    new_regions = []
+    for r in regions:
+        new_r = set(r)
+        tids = [x for x in new_r if isinstance(x, int)]
+        for tid in tids:
+            t = tn.tensor_map[tid]
+            new_r.update(t.inds)
+        new_regions.append(frozenset(new_r))
+    return new_regions
