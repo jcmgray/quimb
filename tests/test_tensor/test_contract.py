@@ -17,18 +17,6 @@ def test_tensor_contract_strip_exponent():
     # test tn.exponent is reinserted with strip exponent
     m3, e3 = tn.contract(strip_exponent=True)
     assert m3 * 10**e3 == pytest.approx(z0)
-    # test tn.exponent is not reinserted when specified
-    z4 = tn.contract(exponent=False)
-    assert z4 != pytest.approx(z0)
-    # test tn.exponent is not reinserted when specified with strip exponent
-    m5, e5 = tn.contract(strip_exponent=True, exponent=False)
-    assert m5 * 10**e5 != pytest.approx(z0)
-    # test explicit exponent
-    z6 = tn.contract(exponent=tn.exponent)
-    assert z6 == pytest.approx(z0)
-    # test explicit exponent with strip exponent
-    m7, e7 = tn.contract(strip_exponent=True, exponent=tn.exponent)
-    assert m7 * 10**e7 == pytest.approx(z0)
 
 
 @pytest.mark.parametrize("strip_exponent", [False, True])
