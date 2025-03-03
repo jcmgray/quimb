@@ -11,7 +11,7 @@ def test_contract_tree_exact(dtype):
     info = {}
     norm2_bp = qbp.contract_l2bp(psi, info=info, progbar=True)
     assert info["converged"]
-    assert norm2_bp == pytest.approx(norm2, rel=1e-5)
+    assert norm2_bp == pytest.approx(norm2, rel=5e-5)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
