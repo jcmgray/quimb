@@ -916,7 +916,7 @@ def tensor_compress_bond(
     if gauges is not None:
         tn.gauge_simple_remove(outer=outer)
         g = s[0].data
-        fact = g[0]
+        fact = do("linalg.norm", g)
         g = g / fact
         gauges[bix] = g
         fact_1_2 = fact**0.5
