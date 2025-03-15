@@ -18,6 +18,7 @@ from .bp_common import (
     BeliefPropagationCommon,
     combine_local_contractions,
     normalize_message_pair,
+    process_loop_series_expansion_weights,
 )
 from .hd1bp import (
     compute_all_tensor_messages_tree,
@@ -303,6 +304,98 @@ class D1BP(BeliefPropagationCommon):
             t.vector_reduce_(ix, self.messages[ix, tid])
         return tnr
 
+    def get_cluster_excited(self, tids):
+        """Get the local tensor network for ``tids`` with BP messages inserted
+        on the boundary and excitation projectors inserted on the inner bonds.
+        See https://arxiv.org/abs/2409.03108 for more details.
+        """
+        stn = self.tn._select_tids(tids, virtual=False)
+
+        for ix, tids in tuple(stn.ind_map.items()):
+            if ix in stn._inner_inds:
+                # insert inner excitation projector
+                tidl, tidr = tids
+                ml = self.messages[ix, tidl]
+                mr = self.messages[ix, tidr]
+                # form outer product
+                p0 = ar.do("einsum", "i,j->ij", ml, mr)
+                # subtract from identity
+                pe = ar.do("eye", ar.do("shape", p0)[0]) - p0
+                # absorb into one of tensors
+                stn.tensor_map[tidr].gate_(pe, ix)
+            else:
+                # insert boundary message
+                tid, = tids
+                m = self.messages[ix, tid]
+                t = stn.tensor_map[tid]
+                t.vector_reduce_(ix, m)
+
+        return stn
+
+    def contract_loop_series_expansion(
+        self,
+        gloops=None,
+        multi_excitation_correct=True,
+        tol_correction=1e-12,
+        maxiter_correction=100,
+        strip_exponent=False,
+        optimize="auto-hq",
+        **contract_opts,
+    ):
+        """Contract the tensor network using the same procedure as
+        in https://arxiv.org/abs/2409.03108 - "Loop Series Expansions for
+        Tensor Networks".
+
+        Parameters
+        ----------
+        gloops : int or iterable of tuples, optional
+            The gloop sizes to use. If an integer, then generate all gloop
+            sizes up to this size. If a tuple, then use these gloops.
+        multi_excitation_correct : bool, optional
+            Whether to use the multi-excitation correction. If ``True``, then
+            the free energy is refined iteratively until self consistent.
+        tol_correction : float, optional
+            The tolerance for the multi-excitation correction.
+        maxiter_correction : int, optional
+            The maximum number of iterations for the multi-excitation
+            correction.
+        strip_exponent : bool, optional
+            Whether to strip the exponent from the final result. If ``True``
+            then the returned result is ``(mantissa, exponent)``.
+        optimize : str or PathOptimizer, optional
+            The path optimizer to use when contracting the messages.
+        contract_opts
+            Other options supplied to ``TensorNetwork.contract``.
+        """
+        self.normalize_message_pairs()
+        # accrues BP estimate into self.sign and self.exponent
+        self.normalize_tensors()
+
+        if isinstance(gloops, int):
+            gloops = tuple(self.tn.gen_gloops(max_size=gloops))
+        else:
+            gloops = tuple(gloops)
+
+        weights = {}
+        for gloop in gloops:
+            # get local tensor network with boundary
+            # messages and exctiation projectors
+            etn = self.get_cluster_excited(gloop)
+            # contract it to get local weight!
+            weights[tuple(gloop)] = etn.contract(
+                optimize=optimize, **contract_opts
+            )
+
+        return process_loop_series_expansion_weights(
+            weights,
+            mantissa=self.sign,
+            exponent=self.exponent,
+            multi_excitation_correct=multi_excitation_correct,
+            tol_correction=tol_correction,
+            maxiter_correction=maxiter_correction,
+            strip_exponent=strip_exponent,
+        )
+
     def local_tensor_contract(self, tid):
         """Contract the messages around tensor ``tid``."""
         t = self.tn.tensor_map[tid]
@@ -413,8 +506,12 @@ class D1BP(BeliefPropagationCommon):
         strip_exponent=False,
         check_zero=True,
         optimize="auto-hq",
+        combine="prod",
         **contract_opts,
     ):
+        """Contract the tensor network using generalized loop cluster
+        expansion.
+        """
         from .regions import RegionGraph
 
         if isinstance(gloops, int):
@@ -428,6 +525,11 @@ class D1BP(BeliefPropagationCommon):
         else:
             gloops = tuple(gloops)
 
+        if combine == "sum":
+            # make sure each contraction has the same BP-scaled environment
+            self.normalize_message_pairs()
+            self.normalize_tensors()
+
         rg = RegionGraph(gloops, autocomplete=autocomplete)
 
         zvals = []
@@ -437,6 +539,12 @@ class D1BP(BeliefPropagationCommon):
             zr = tnr.contract(optimize=optimize, **contract_opts)
 
             zvals.append((zr, c))
+
+        if combine == "sum":
+            mantissa = self.sign * sum(zr * cr for zr, cr in zvals)
+            if strip_exponent:
+                return mantissa, self.exponent
+            return mantissa * 10 ** self.exponent
 
         return combine_local_contractions(
             zvals,

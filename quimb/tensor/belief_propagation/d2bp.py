@@ -1,4 +1,6 @@
 import contextlib
+import functools
+import operator
 
 import autoray as ar
 
@@ -9,8 +11,24 @@ from .bp_common import (
     BeliefPropagationCommon,
     combine_local_contractions,
     normalize_message_pair,
+    process_loop_series_expansion_weights,
 )
 from .regions import RegionGraph
+
+
+def _parse_global_gloops(tn, gloops=None):
+    if isinstance(gloops, int):
+        max_size = gloops
+        gloops = None
+    else:
+        max_size = None
+
+    if gloops is None:
+        gloops = tuple(tn.gen_gloops(max_size=max_size))
+    else:
+        gloops = tuple(gloops)
+
+    return gloops
 
 
 class D2BP(BeliefPropagationCommon):
@@ -322,6 +340,43 @@ class D2BP(BeliefPropagationCommon):
             self.messages[ix, tida] = _reshape(nml, ml.shape)
             self.messages[ix, tidb] = _reshape(nmr, mr.shape)
 
+    def local_tensor_contract(self, tid):
+        """Contract the local region of the tensor at ``tid``."""
+        t = self.tn.tensor_map[tid]
+        arrays = [t.data, ar.do("conj", t.data)]
+        k_input = []
+        b_input = []
+        m_inputs = []
+        for i, ix in enumerate(t.inds, 1):
+            k_input.append(i)
+            if ix in self.output_inds:
+                b_input.append(i)
+            else:
+                b_input.append(-i)
+                m_inputs.append((-i, i))
+                arrays.append(self.messages[ix, tid])
+
+        inputs = (tuple(k_input), tuple(b_input), *m_inputs)
+        output = ()
+        return qtn.array_contract(arrays, inputs, output, **self.contract_opts)
+
+    def normalize_tensors(self, strip_exponent=True):
+        """Normalize the tensors in the tensor network such that their 2-norm
+        is 1. If ``strip_exponent`` is ``True`` then accrue the phase and
+        exponent (log10) into the ``sign`` and ``exponent`` attributes of the
+        D2BP object (the default), contract methods can then reinsert these
+        factors when returning the final result.
+        """
+        for tid, t in self.tn.tensor_map.items():
+            tval = self.local_tensor_contract(tid)
+            tabs = ar.do("abs", tval)
+            tsgn = tval / tabs
+            tlog = ar.do("log10", tabs)
+            t /= (tsgn * tabs) ** 0.5
+            if strip_exponent:
+                self.sign = tsgn * self.sign
+                self.exponent = tlog + self.exponent
+
     def contract(
         self,
         strip_exponent=False,
@@ -341,25 +396,8 @@ class D2BP(BeliefPropagationCommon):
         """
         zvals = []
 
-        for tid, t in self.tn.tensor_map.items():
-            arrays = [t.data, ar.do("conj", t.data)]
-            k_input = []
-            b_input = []
-            m_inputs = []
-            for i, ix in enumerate(t.inds, 1):
-                k_input.append(i)
-                if ix in self.output_inds:
-                    b_input.append(i)
-                else:
-                    b_input.append(-i)
-                    m_inputs.append((-i, i))
-                    arrays.append(self.messages[ix, tid])
-
-            inputs = (tuple(k_input), tuple(b_input), *m_inputs)
-            output = ()
-            tval = qtn.array_contract(
-                arrays, inputs, output, **self.contract_opts
-            )
+        for tid in self.tn.tensor_map:
+            tval = self.local_tensor_contract(tid)
             zvals.append((tval, 1))
 
         for ix, tids in self.tn.ind_map.items():
@@ -377,9 +415,292 @@ class D2BP(BeliefPropagationCommon):
         return combine_local_contractions(
             zvals,
             backend=self.backend,
+            mantissa=self.sign,
+            exponent=self.exponent,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
         )
+
+    def get_cluster_excited(
+        self,
+        tids=None,
+        partial_trace_map=(),
+        exclude=(),
+    ):
+        """Get the local norm tensor network for ``tids`` with BP messages
+        inserted on the boundary and excitation projectors inserted on the
+        inner bonds. See arxiv.org/abs/2409.03108 for more details.
+
+        Parameters
+        ----------
+        tids : iterable of hashable
+            The tensor ids to include in the cluster.
+        partial_trace_map : dict[str, str], optional
+            A remapping of ket indices to bra indices to perform an effective
+            partial trace.
+        exclude : iterable of str, optional
+            A set of bond indices to exclude from inserting excitation
+            projectors on, e.g. when forming a reduced density matrix.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        stn = self.tn._select_tids(tids)
+
+        kixmaps = {tid: {} for tid in stn.tensor_map}
+        bixmaps = {tid: {} for tid in stn.tensor_map}
+        exc_ixs = {}
+        bms = []
+        ems = []
+
+        for ix, tids in stn.ind_map.items():
+            if ix in self.output_inds:
+                # physical traced index
+                if ix in partial_trace_map:
+                    (tid,) = tids
+                    bixmaps[tid][ix] = partial_trace_map[ix]
+
+            elif ix in exclude:
+                # excluded bond -> simply rename bra
+                bix = qtn.rand_uuid()
+                for tid in tids:
+                    bixmaps[tid][ix] = bix
+
+            elif ix in stn._inner_inds:
+                # internal index
+                for tid in tids:
+                    kix = qtn.rand_uuid()
+                    bix = qtn.rand_uuid()
+                    kixmaps[tid][ix] = kix
+                    bixmaps[tid][ix] = bix
+                    # store labels for excitation projector
+                    exc_ixs.setdefault(ix, {})[tid] = (kix, bix)
+                ems.append((ix, tids))
+
+            else:
+                # boundary index
+                (tid,) = tids
+                kix = qtn.rand_uuid()
+                bix = qtn.rand_uuid()
+                kixmaps[tid][ix] = kix
+                bixmaps[tid][ix] = bix
+                bms.append((ix, tid))
+
+        tn = qtn.TensorNetwork()
+
+        # add bra and ket tensors
+        for tid in stn.tensor_map:
+            t = stn.tensor_map[tid]
+            tn |= t.reindex(kixmaps[tid])
+            tn |= t.conj().reindex(bixmaps[tid])
+
+        # add boundary message tensors
+        for ix, tid in bms:
+            data = self.messages[ix, tid]
+            inds = (kixmaps[tid][ix], bixmaps[tid][ix])
+            tn |= qtn.Tensor(data, inds)
+
+        # add inner exitation projector message tensors
+        with ar.backend_like(self.backend):
+            for ix, tids in ems:
+                tidl, tidr = tids
+                ml = self.messages[ix, tidl]
+                mr = self.messages[ix, tidr]
+
+                # form outer product
+                p0 = ar.do("einsum", "i,j->ij", ml.reshape(-1), mr.reshape(-1))
+                # subtract from identity
+                pe = ar.do("eye", ar.do("shape", p0)[0]) - p0
+                # reshape back into 4-tensor
+                pe = ar.do(
+                    "reshape",
+                    pe,
+                    ar.do("shape", ml) + ar.do("shape", mr),
+                )
+                inds = (*exc_ixs[ix][tidl], *exc_ixs[ix][tidr])
+                tn |= qtn.Tensor(pe, inds)
+
+        return tn
+
+    def contract_loop_series_expansion(
+        self,
+        gloops=None,
+        multi_excitation_correct=True,
+        tol_correction=1e-12,
+        maxiter_correction=100,
+        strip_exponent=False,
+        optimize="auto-hq",
+        **contract_opts,
+    ):
+        """Contract the norm of the tensor network using the same procedure as
+        in https://arxiv.org/abs/2409.03108 - "Loop Series Expansions for
+        Tensor Networks".
+
+        Parameters
+        ----------
+        gloops : int or iterable of tuples, optional
+            The gloop sizes to use. If an integer, then generate all gloop
+            sizes up to this size. If a tuple, then use these gloops.
+        multi_excitation_correct : bool, optional
+            Whether to use the multi-excitation correction. If ``True``, then
+            the free energy is refined iteratively until self consistent.
+        tol_correction : float, optional
+            The tolerance for the multi-excitation correction.
+        maxiter_correction : int, optional
+            The maximum number of iterations for the multi-excitation
+            correction.
+        strip_exponent : bool, optional
+            Whether to strip the exponent from the final result. If ``True``
+            then the returned result is ``(mantissa, exponent)``.
+        optimize : str or PathOptimizer, optional
+            The path optimizer to use when contracting the messages.
+        contract_opts
+            Other options supplied to ``TensorNetwork.contract``.
+        """
+        self.normalize_message_pairs()
+        # accrues BP estimate into self.sign and self.exponent
+        self.normalize_tensors()
+
+        gloops = _parse_global_gloops(self.tn, gloops)
+
+        weights = {}
+        for gloop in gloops:
+            # get local tensor network with boundary
+            # messages and excitation projectors inserted
+            etn = self.get_cluster_excited(gloop)
+            # contract it to get local weight!
+            weights[tuple(gloop)] = etn.contract(
+                optimize=optimize, **contract_opts
+            )
+
+        return process_loop_series_expansion_weights(
+            weights,
+            mantissa=self.sign,
+            exponent=self.exponent,
+            multi_excitation_correct=multi_excitation_correct,
+            tol_correction=tol_correction,
+            maxiter_correction=maxiter_correction,
+            strip_exponent=strip_exponent,
+        )
+
+    def partial_trace_loop_series_expansion(
+        self,
+        where,
+        gloops=None,
+        normalized=True,
+        grow_from="alldangle",
+        strict_size=True,
+        multi_excitation_correct=True,
+        optimize="auto-hq",
+        **contract_opts,
+    ):
+        """Compute the reduced density matrix for the sites specified by
+        ``where`` using the loop series expansion method from
+        https://arxiv.org/abs/2409.03108 - "Loop Series Expansions for Tensor
+        Networks".
+
+        Parameters
+        ----------
+        where : sequence[hashable]
+            The sites to from the reduced density matrix of.
+        gloops : int or iterable of tuples, optional
+            The generalized loops to use, or an integer to automatically
+            generate all up to a certain size. If none use the smallest non-
+            trivial size.
+        normalized : bool, optional
+            Whether to normalize the final density matrix.
+        grow_from : {'alldangle', 'all', 'any'}, optional
+            How to grow the generalized loops from the specified ``where``:
+
+            - 'alldangle': clusters up to max size, where target sites are
+              allowed to dangle.
+            - 'all': clusters where loop, up to max size, has to include *all*
+              target sites.
+            - 'any': clusters where loop, up to max size, can include *any* of
+              the target sites. Remaining target sites are added as extras.
+
+            By default 'alldangle'.
+        strict_size : bool, optional
+            Whether to enforce the maximum size of the generalized loops, only
+            relevant for `grow_from="any"`.
+        multi_excitation_correct : bool, optional
+            Whether to use the multi-excitation correction. If ``True``, then
+            the free energy is refined iteratively until self consistent.
+        optimize : str or PathOptimizer, optional
+            The path optimizer to use when contracting the messages.
+        contract_opts
+            Other options supplied to ``TensorNetwork.contract``.
+        """
+        self.normalize_message_pairs()
+        self.normalize_tensors()
+
+        tags = [self.tn.site_tag(coo) for coo in where]
+        tids = self.tn._get_tids_from_tags(tags, "any")
+
+        # get a mapping of ket indices to bra indices on target sites
+        kix = [self.tn.site_ind(coo) for coo in where]
+        bix = [qtn.rand_uuid() for _ in where]
+        partial_trace_map = dict(zip(kix, bix))
+        output_inds = (*kix, *bix)
+
+        # generate the generalized loops relevant to the target sites
+        gloops = self.tn.get_local_gloops(
+            tids=tids,
+            gloops=gloops,
+            grow_from=grow_from,
+            strict_size=strict_size,
+        )
+
+        # get internal indices of the base region to exclude
+        # from inserting excited space projectors on
+        inner_bonds = self.tn._select_tids(tids).inner_inds()
+
+        # get loop excited reduced density matrices
+        rho_es = {}
+        for gloop in gloops:
+            etn = self.get_cluster_excited(
+                gloop, exclude=inner_bonds, partial_trace_map=partial_trace_map
+            )
+            rho_e = etn.contract(
+                output_inds=output_inds, optimize=optimize, **contract_opts
+            )
+            rho_e = rho_e.to_dense(kix, bix)
+            rho_es[gloop] = rho_e
+
+        if multi_excitation_correct:
+            # trace of each density matrix is its corresponding
+            # loops contribution to the norm free energy
+            weights = {
+                gloop: ar.do("trace", rho_e) for gloop, rho_e in rho_es.items()
+            }
+            # remove the BP contribution (= minimal region)
+            weights.pop(frozenset(tids))
+            # compute exponential suppresion factors
+            corrections = process_loop_series_expansion_weights(
+                weights, return_all=True
+            )
+            # add back in the BP contribution
+            corrections[frozenset(tids)] = 1.0
+
+            # weighted sum
+            rho = functools.reduce(
+                operator.add,
+                (
+                    rho_e * corrections[gloop]
+                    for gloop, rho_e in rho_es.items()
+                ),
+            )
+        else:
+            rho = functools.reduce(operator.add, rho_es.values())
+
+        if normalized:
+            rho /= ar.do("trace", rho)
+        elif (self.sign, self.exponent) != (1.0, 0.0):
+            # have been accrued into by normalize_tensors most likely
+            rho *= self.sign * 10**self.exponent
+
+        return rho
 
     def contract_gloop_expand(
         self,
@@ -394,18 +715,7 @@ class D2BP(BeliefPropagationCommon):
     ):
         self.normalize_message_pairs()
 
-        if isinstance(gloops, int):
-            max_size = gloops
-            gloops = None
-        else:
-            max_size = None
-
-        if gloops is None:
-            gloops = tuple(
-                self.tn.gen_gloops(max_size=max_size)
-            )
-        else:
-            gloops = tuple(gloops)
+        gloops = _parse_global_gloops(self.tn, gloops)
 
         rg = RegionGraph(gloops, autocomplete=autocomplete)
 
@@ -417,8 +727,6 @@ class D2BP(BeliefPropagationCommon):
         info.setdefault("contractions", {})
         contractions = info["contractions"]
 
-        zvals = []
-
         if progbar:
             import tqdm
 
@@ -426,6 +734,7 @@ class D2BP(BeliefPropagationCommon):
         else:
             it = rg.regions
 
+        zvals = []
         for region in it:
             counting_factor = rg.get_count(region)
 
@@ -435,26 +744,15 @@ class D2BP(BeliefPropagationCommon):
             try:
                 zr = contractions[region]
             except KeyError:
-                k = self.tn._select_tids(region, virtual=False)
-                b = k.conj()
-                # apply gauge by contracting messages into ket layer
-                for oix in k.outer_inds():
-                    if oix in self.output_inds:
-                        continue
-                    (tid,) = k.ind_map[oix]
-                    m = self.messages[oix, tid]
-                    t = k.tensor_map[tid]
-                    t.gate_(m, oix)
-                zr = (k | b).contract(
-                    optimize=optimize,
-                    **contract_opts,
-                )
+                tnr = self.get_cluster_norm(region)
+                zr = tnr.contract(optimize=optimize, **contract_opts)
                 contractions[region] = zr
-
             zvals.append((zr, counting_factor))
 
         return combine_local_contractions(
             zvals,
+            mantissa=self.sign,
+            exponent=self.exponent,
             backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
@@ -646,6 +944,220 @@ class D2BP(BeliefPropagationCommon):
                 for cix in (*lix, ix, *rix):
                     if cix not in self.output_inds:
                         self.build_expr(cix)
+
+    def get_cluster_norm(
+        self,
+        tids,
+        partial_trace_map=(),
+    ):
+        """Get the local norm tensor network for ``tids`` with BP messages
+        inserted on the boundary. Optionally open some physical indices up to
+        perform an effective partial trace.
+
+        Parameters
+        ----------
+        tids : iterable of hashable
+            The tensor ids to include in the cluster.
+        partial_trace_map : dict[str, str], optional
+            A remapping of ket indices to bra indices to perform an effective
+            partial trace.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        k = self.tn._select_tids(tids, virtual=False)
+        b = k.conj()
+
+        if partial_trace_map:
+            # open up the bra indices
+            b.reindex_(partial_trace_map)
+
+        for ix in k.outer_inds():
+            if (ix not in partial_trace_map) and (ix not in self.output_inds):
+                # dangling index -> absorb message into ket
+                (tid,) = k.ind_map[ix]
+                t = k.tensor_map[tid]
+                t.gate_(self.messages[ix, tid], ix)
+
+        return b | k
+
+    def partial_trace(
+        self,
+        where,
+        normalized=True,
+        tids_region=None,
+        get="matrix",
+        bra_ind_id=None,
+        optimize="auto-hq",
+        **contract_opts,
+    ):
+        """Get the reduced density matrix for the sites specified by ``where``,
+        with the remaining network approximated by messages on the boundary.
+
+        Parameters
+        ----------
+        where : sequence[hashable]
+            The sites to from the reduced density matrix of.
+        get : {'tn', 'tensor', 'array', 'matrix'}, optional
+            The type of object to return. If 'tn', return the uncontracted
+            tensor network object. If 'tensor', return the labelled density
+            operator as a `Tensor`. If 'array', return the unfused raw array
+            with 2 * len(where) dimensions. If 'matrix', fuse the ket and bra
+            indices and return this 2D matrix.
+        bra_ind_id : str, optional
+            If ``get="tn"``, how to label the bra indices. If None, use the
+            default based on the current site_ind_id.
+        optimize : str or PathOptimizer, optional
+            The path optimizer to use when contracting the tensor network.
+        contract_opts
+            Other options supplied to ``TensorNetwork.contract``.
+
+        Returns
+        -------
+        TensorNetwork or Tensor or array
+        """
+        # get a mapping of ket indices to bra indices on target sites
+        if bra_ind_id is None:
+            bra_ind_id = "b" + self.tn.site_ind_id[1:]
+        bra_ind_starmap = bra_ind_id.count("{}") > 1
+        kix = [self.tn.site_ind(coo) for coo in where]
+        if bra_ind_starmap:
+            bix = [bra_ind_id.format(*coo) for coo in where]
+        else:
+            bix = [bra_ind_id.format(coo) for coo in where]
+        output_inds = (*kix, *bix)
+        partial_trace_map = dict(zip(kix, bix))
+
+        # get target region
+        tags = [self.tn.site_tag(coo) for coo in where]
+
+        if tids_region is None:
+            tids_region = self.tn._get_tids_from_tags(tags, "any")
+        tn = self.get_cluster_norm(
+            tids_region, partial_trace_map=partial_trace_map
+        )
+
+        if get == "tn":
+            return tn
+
+        t = tn.contract(
+            output_inds=output_inds, optimize=optimize, **contract_opts
+        )
+
+        if normalized:
+            t /= t.trace(kix, bix)
+
+        if get == "tensor":
+            return t
+        elif get == "array":
+            return t.data
+        elif get == "matrix":
+            return t.to_dense(kix, bix)
+        else:
+            raise ValueError(f"Unknown get option: {get}")
+
+    def partial_trace_gloop_expand(
+        self,
+        where,
+        gloops=None,
+        combine="sum",
+        normalized=True,
+        grow_from="alldangle",
+        strict_size=True,
+        optimize="auto-hq",
+        **contract_opts,
+    ):
+        """Compute a reduced density matrix for the sites specified by
+        ``where`` using the generalized loop cluster expansion.
+
+        Parameters
+        ----------
+        where : sequence[hashable]
+            The sites to from the reduced density matrix of.
+        gloops : int or iterable of tuples, optional
+            The generalized loops to use, or an integer to automatically
+            generate all up to a certain size. If none use the smallest non-
+            trivial size.
+        combine : {'sum', 'prod'}, optional
+            How to combine the contributions from each generalized loop. If
+            'sum', use coefficient weighted addition. If 'prod', use power
+            weighted multiplication.
+        normalized : bool or {"local", "separate"}, optional
+            Whether to normalize the density matrix. If True or "local",
+            normalize each cluster density matrix by its trace. If "separate",
+            normalize the final density matrix by its trace (usually less
+            accurate). If False, do not normalize.
+        grow_from : {'alldangle', 'all', 'any'}, optional
+            How to grow the generalized loops from the specified ``where``:
+
+            - 'alldangle': clusters up to max size, where target sites are
+              allowed to dangle.
+            - 'all': clusters where loop, up to max size, has to include *all*
+              target sites.
+            - 'any': clusters where loop, up to max size, can include *any* of
+              the target sites. Remaining target sites are added as extras.
+
+            By default 'alldangle'.
+        strict_size : bool, optional
+            Whether to enforce the maximum size of the generalized loops, only
+            relevant for `grow_from="any"`.
+        optimize : str or PathOptimizer, optional
+            The path optimizer to use when contracting the tensor network.
+        contract_opts
+            Other options supplied to ``TensorNetwork.contract``.
+        """
+        tags = [self.tn.site_tag(coo) for coo in where]
+        tids = self.tn._get_tids_from_tags(tags, "any")
+
+        if normalized is True:
+            normalized = "local"
+
+        gloops = self.tn.get_local_gloops(
+            tids=tids,
+            gloops=gloops,
+            grow_from=grow_from,
+            strict_size=strict_size,
+        )
+
+        rg = RegionGraph(gloops)
+
+        rhos = []
+        for region in rg.regions:
+            cr = rg.get_count(region)
+            rho_r = self.partial_trace(
+                where,
+                tids_region=region,
+                normalized=False,
+                get="matrix",
+                optimize=optimize,
+                **contract_opts,
+            )
+
+            if normalized == "local":
+                rho_r /= ar.do("trace", rho_r)
+
+            rhos.append((rho_r, cr))
+
+        if combine == "sum":
+            rho = functools.reduce(
+                operator.add, (cr * rho_r for rho_r, cr in rhos)
+            )
+        elif combine == "prod":
+            rho = functools.reduce(
+                operator.mul, (rho_r**cr for rho_r, cr in rhos)
+            )
+        else:
+            raise ValueError(f"Unknown combine option: {combine}")
+
+        if (normalized == "separate") or (normalized and combine == "prod"):
+            rho /= ar.do("trace", rho)
+
+        if (not normalized) and ((self.sign, self.exponent) != (1.0, 0.0)):
+            # have been accrued into by normalize_tensors most likely
+            rho *= self.sign * 10**self.exponent
+
+        return rho
 
 
 def contract_d2bp(

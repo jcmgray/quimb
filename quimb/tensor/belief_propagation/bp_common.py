@@ -1,4 +1,5 @@
 import functools
+import math
 import operator
 
 import autoray as ar
@@ -806,3 +807,45 @@ def auto_add_indices(tn, regions):
             new_r.update(t.inds)
         new_regions.append(frozenset(new_r))
     return new_regions
+
+
+def process_loop_series_expansion_weights(
+    weights,
+    mantissa=1.0,
+    exponent=0.0,
+    multi_excitation_correct=True,
+    maxiter_correction=100,
+    tol_correction=1e-14,
+    strip_exponent=False,
+    return_all=False,
+):
+    """Assuming a normalized BP fixed point, take a series of loop weights, and
+    iteratively compute the free energy by requiring self-consistency with
+    exponential suppression factors. See https://arxiv.org/abs/2409.03108.
+    """
+    # this is the single exictation approximation
+    f_uncorrected = -sum(weights.values())
+
+    if multi_excitation_correct:
+        # iteratively compute a self consistent free energy
+        fold = float("inf")
+        f = f_uncorrected
+        for _ in range(maxiter_correction):
+            f = -sum(
+                wl * math.exp(len(gloop) * f) for gloop, wl in weights.items()
+            )
+            if abs(f - fold) < tol_correction:
+                break
+            fold = f
+    else:
+        f = f_uncorrected
+
+    if return_all:
+        return {gloop: math.exp(len(gloop) * f) for gloop in weights}
+
+    mantissa = mantissa * (1 - f)
+
+    if strip_exponent:
+        return mantissa, exponent
+
+    return mantissa * 10**exponent
