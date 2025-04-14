@@ -1827,15 +1827,15 @@ class Circuit:
         self.clear_storage()
 
     @classmethod
-    def from_qsim_str(cls, contents, **circuit_opts):
+    def from_qsim_str(cls, contents, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from a 'qsim' string."""
         info = parse_qsim_str(contents)
         qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"])
+        qc.apply_gates(info["gates"], progbar=progbar)
         return qc
 
     @classmethod
-    def from_qsim_file(cls, fname, **circuit_opts):
+    def from_qsim_file(cls, fname, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from a 'qsim' file.
 
         The qsim file format is described here:
@@ -1843,15 +1843,15 @@ class Circuit:
         """
         info = parse_qsim_file(fname)
         qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"])
+        qc.apply_gates(info["gates"], progbar=progbar)
         return qc
 
     @classmethod
-    def from_qsim_url(cls, url, **circuit_opts):
+    def from_qsim_url(cls, url, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from a 'qsim' url."""
         info = parse_qsim_url(url)
         qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"])
+        qc.apply_gates(info["gates"], progbar=progbar)
         return qc
 
     from_qasm = deprecated(from_qsim_str, "from_qasm", "from_qsim_str")
@@ -1861,27 +1861,27 @@ class Circuit:
     from_qasm_url = deprecated(from_qsim_url, "from_qasm_url", "from_qsim_url")
 
     @classmethod
-    def from_openqasm2_str(cls, contents, **circuit_opts):
+    def from_openqasm2_str(cls, contents, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 string."""
         info = parse_openqasm2_str(contents)
         qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"])
+        qc.apply_gates(info["gates"], progbar)
         return qc
 
     @classmethod
-    def from_openqasm2_file(cls, fname, **circuit_opts):
+    def from_openqasm2_file(cls, fname, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 file."""
         info = parse_openqasm2_file(fname)
         qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"])
+        qc.apply_gates(info["gates"], progbar=progbar)
         return qc
 
     @classmethod
-    def from_openqasm2_url(cls, url, **circuit_opts):
+    def from_openqasm2_url(cls, url, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 url."""
         info = parse_openqasm2_url(url)
         qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"])
+        qc.apply_gates(info["gates"], progbar=progbar)
         return qc
 
     @classmethod
