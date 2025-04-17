@@ -383,14 +383,17 @@ def tensor_network_1d_compress_dm(
     # construct dense left environments
     left_envs = {}
     left_envs[1] = norm.select(site_tags[0]).contract(
-        optimize=optimize, drop_tags=True
+        preserve_tensor=True,
+        drop_tags=True,
+        optimize=optimize,
     )
     for i in range(2, N):
         left_envs[i] = tensor_contract(
             left_envs[i - 1],
             *norm.select_tensors(site_tags[i - 1]),
-            optimize=optimize,
+            preserve_tensor=True,
             drop_tags=True,
+            optimize=optimize,
         )
 
     # build projectors and right environments
@@ -446,16 +449,25 @@ def tensor_network_1d_compress_dm(
             right_bra_tensors.append(right_env_bra)
 
         right_env_ket = tensor_contract(
-            *right_ket_tensors, optimize=optimize, drop_tags=True
+            *right_ket_tensors,
+            preserve_tensor=True,
+            drop_tags=True,
+            optimize=optimize,
         )
         # TODO: could compute this just as conjugated and relabelled ket env
         right_env_bra = tensor_contract(
-            *right_bra_tensors, optimize=optimize, drop_tags=True
+            *right_bra_tensors,
+            preserve_tensor=True,
+            drop_tags=True,
+            optimize=optimize,
         )
 
     # form the final site
     U0 = tensor_contract(
-        *ket.select_tensors(site_tags[0]), right_env_ket, optimize=optimize
+        *ket.select_tensors(site_tags[0]),
+        right_env_ket,
+        optimize=optimize,
+        preserve_tensor=True,
     )
 
     if normalize:
@@ -817,7 +829,7 @@ def tensor_network_1d_compress_zipup_first(
 
 
 def _tn1d_fit_sum_sweep_1site(
-    tn_fit,
+    tn_fit: TensorNetwork,
     tn_overlaps,
     site_tags,
     max_bond=None,

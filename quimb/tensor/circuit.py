@@ -3256,7 +3256,7 @@ class Circuit:
             return nm_lc
 
         # NB. the tree isn't *neccesarily* the same each time due to the post
-        #     slicing full simplify, however there is also the lower level
+        #     projection full simplify, however there is also the lower level
         #     contraction path cache if the structure generated *is* the same
         #     so still pretty efficient to just overwrite
         tree = nm_lc.contraction_tree(

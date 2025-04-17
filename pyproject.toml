@@ -85,8 +85,8 @@ source = "vcs"
 version-file = "quimb/_version.py"
 
 [tool.pytest.ini_options]
-testpaths = "tests"
-filterwarnings = "once"
+testpaths = ["tests"]
+filterwarnings = ["once"]
 
 [tool.coverage.run]
 omit = ["*/quimb/experimental/*"]
