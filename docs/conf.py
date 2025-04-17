@@ -111,6 +111,7 @@ def linkcode_resolve(domain, info):
     Determine the URL corresponding to Python object
     """
     import quimb
+    import quimb.tensor  # needs to be imported
     import inspect
 
     if domain != "py":
