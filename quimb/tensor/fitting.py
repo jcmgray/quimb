@@ -253,8 +253,8 @@ def conjugate_gradient(A, b, x0=None, tol=1e-5, maxiter=1000):
     maxiter : int, optional
         Maximum number of iterations.
 
-    Returns:
-    --------
+    Returns
+    -------
     x : array_like
         The solution vector.
     """
