@@ -1,10 +1,4 @@
-"""Tools for quantum circuit simulation using tensor networks.
-
-TODO:
-- [ ] gate-by-gate sampling
-- [ ] sub-MPO apply for MPS simulation
-- [ ] multi qubit gates via MPO for MPS simulation
-"""
+"""Tools for quantum circuit simulation using tensor networks."""
 
 import cmath
 import functools
@@ -421,7 +415,9 @@ register_constant_gate("SDG", qu.S_gate().H, 1)
 register_constant_gate("T", qu.T_gate(), 1)
 register_constant_gate("TDG", qu.T_gate().H, 1)
 register_constant_gate("SX", cmath.rect(1, 0.25 * math.pi) * qu.Xsqrt(), 1)
-register_constant_gate("SXDG", cmath.rect(1, -0.25 * math.pi) * qu.Xsqrt().H, 1)
+register_constant_gate(
+    "SXDG", cmath.rect(1, -0.25 * math.pi) * qu.Xsqrt().H, 1
+)
 register_constant_gate("X_1_2", qu.Xsqrt(), 1, "X_1/2")
 register_constant_gate("Y_1_2", qu.Ysqrt(), 1, "Y_1/2")
 register_constant_gate("Z_1_2", qu.Zsqrt(), 1, "Z_1/2")
@@ -1345,9 +1341,23 @@ class Gate:
         controls = kwargs.get("controls", self._controls)
         round = kwargs.get("round", self._round)
         parametrize = kwargs.get("parametrize", self._parametrize)
-        return self.__class__(
-            label, params, qubits, controls, round, parametrize
-        )
+
+        if params == "raw":
+            return self.from_raw(
+                U=self._array,
+                qubits=qubits,
+                controls=controls,
+                round=round,
+            )
+        else:
+            return self.__class__(
+                label=label,
+                params=params,
+                qubits=qubits,
+                controls=controls,
+                round=round,
+                parametrize=parametrize,
+            )
 
     def build_array(self):
         """Build the array representation of the gate. For controlled gates
