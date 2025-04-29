@@ -93,6 +93,7 @@ from .networking import (
     gen_loops,
     gen_patches,
     gen_paths_loops,
+    gen_sloops,
     gen_gloops,
     get_local_patch,
     get_path_between_tids,
@@ -6879,6 +6880,7 @@ class TensorNetwork(object):
     gen_loops = gen_loops
     gen_patches = gen_patches
     gen_paths_loops = gen_paths_loops
+    gen_sloops = gen_sloops
     gen_gloops = gen_gloops
     get_local_patch = get_local_patch
     get_path_between_tids = get_path_between_tids

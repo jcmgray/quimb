@@ -1,11 +1,13 @@
 """Classes and algorithms related to arbitrary geometry tensor networks."""
 
 import functools
+import itertools
+import warnings
 from operator import add, mul
 
 from autoray import dag, do
 
-from ..utils import check_opt, deprecated, ensure_dict
+from ..utils import LRU, check_opt, deprecated, ensure_dict
 from ..utils import progbar as Progbar
 from .contraction import get_symbol
 from .tensor_core import (
@@ -789,7 +791,13 @@ class TensorNetworkGen(TensorNetwork):
             for tid in self.tensor_map
         }
 
-    def gen_gloops_sites(self, max_size=None, sites=None, grow_from="all"):
+    def gen_gloops_sites(
+        self,
+        max_size=None,
+        sites=None,
+        grow_from="all",
+        num_joins=1,
+    ):
         """Generate sets of sites that represent 'generalized loops' where
         every node is connected to at least two other loop nodes. This is a
         simple wrapper around ``TensorNewtork.gen_gloops`` that works with the
@@ -801,8 +809,8 @@ class TensorNetworkGen(TensorNetwork):
             Set the maximum number of tensors that can appear in a loop. If
             ``None``, wait until any valid loop is found and set that as the
             maximum size.
-        tags : None or sequence of str
-            If supplied, only consider loops containing these tids.
+        sites : None or sequence[hashable]
+            If supplied, only consider loops containing these sites.
 
         Yields
         ------
@@ -820,6 +828,7 @@ class TensorNetworkGen(TensorNetwork):
             max_size=max_size,
             tids=tids,
             grow_from=grow_from,
+            num_joins=num_joins,
         ):
             yield tuple(tid2site[tid] for tid in gloop)
 
@@ -883,9 +892,10 @@ class TensorNetworkGen(TensorNetwork):
         *,
         where=None,
         sloops=None,
+        num_joins=1,
         intersect=False,
         grow_from="all",
-        strict_size=True,
+        strict_size=False,
         info=None,
     ):
         r"""Parse the `sloops` argument to get the relevant simple loops for
@@ -895,10 +905,22 @@ class TensorNetworkGen(TensorNetwork):
         connected to exactly two other sites.
         """
         if isinstance(sloops, int):
+            # auto generate sloops locally
             max_loop_length = sloops
             sloops = None
+            if strict_size is True:
+                # generate sloops up to size `max_loop_length`, but filter out
+                # any which are larger once the target size are included
+                strict_size = max_loop_length
         else:
+            # filter out from set of manually supplied sloops
             max_loop_length = None
+            if strict_size is True:
+                warnings.warn(
+                    "If manually supplying a set of sloops, `strict_size` "
+                    "should be an integer, not a boolean - ignoring.",
+                )
+                strict_size = False
 
         if info is None:
             info = {}
@@ -906,8 +928,8 @@ class TensorNetworkGen(TensorNetwork):
         tags = tuple(map(self.site_tag, where))
         tids = self._get_tids_from_tags(tags, "any")
 
-        # always include as base region target sites + any bonds internal to
-        # those sites
+        # always include as base region target
+        # sites + any bonds internal to those sites
         r0 = list(tids)
         r0_seen = set()
         for tid in tids:
@@ -924,8 +946,9 @@ class TensorNetworkGen(TensorNetwork):
             # find loops automatically
             # first find loop paths that pass through any of sites
             sloops = tuple(
-                self.gen_paths_loops(
+                self.gen_sloops(
                     max_loop_length=max_loop_length,
+                    num_joins=num_joins,
                     intersect=intersect,
                     tids=tids,
                 )
@@ -941,7 +964,7 @@ class TensorNetworkGen(TensorNetwork):
 
         else:
             # have explicit loop specification, maybe as a larger set ->
-            # need to select only the loops covering whole of `where`
+            # need to select only the loops covering all or any  of `where`
             sloops = tuple(sloops)
 
             if "lookup" in info and hash(sloops) == info["lookup_hash"]:
@@ -962,17 +985,18 @@ class TensorNetworkGen(TensorNetwork):
                 info["lookup"] = lookup
                 info["lookup_hash"] = hash(sloops)
 
-            if grow_from == "all":
-                # get all loops which contain *all* sites in `where`
-                sloops = set.intersection(*(lookup[coo] for coo in where))
-            elif grow_from == "any":
-                # get all loops which contain *any* site in `where`
-                sloops = set.union(*(lookup[coo] for coo in where))
-            else:
-                raise ValueError(
-                    f"Invalid `grow_from` value: {grow_from}."
-                    "Should be 'all' or 'any'."
-                )
+            if sloops:
+                if grow_from == "all":
+                    # get all loops which contain *all* sites in `where`
+                    sloops = set.intersection(*(lookup[coo] for coo in where))
+                elif grow_from == "any":
+                    # get all loops which contain *any* site in `where`
+                    sloops = set.union(*(lookup[coo] for coo in where))
+                else:
+                    raise ValueError(
+                        f"Invalid `grow_from` value: {grow_from}."
+                        "Should be 'all' or 'any'."
+                    )
 
         if grow_from == "any":
             # loops only guaranteed to include any 1 site from `where`
@@ -984,14 +1008,14 @@ class TensorNetworkGen(TensorNetwork):
             # not include the base region if its not a valid cluster on its own
             clusters = (r0, *map(frozenset, sloops))
 
-        if strict_size and (max_loop_length is not None):
+        if strict_size:
             # only allow clusters below max_loop_length *including* base region
             clusters = (
                 r0,
                 *(
                     r
                     for r in clusters
-                    if sum(isinstance(x, int) for x in r) <= max_loop_length
+                    if sum(isinstance(x, int) for x in r) <= strict_size
                 ),
             )
 
@@ -1004,7 +1028,8 @@ class TensorNetworkGen(TensorNetwork):
         where=None,
         gloops=None,
         grow_from="all",
-        strict_size=True,
+        num_joins=1,
+        strict_size=False,
         info=None,
     ):
         r"""Parse the `gloops` argument to get the relevant generalized loops
@@ -1029,7 +1054,8 @@ class TensorNetworkGen(TensorNetwork):
              |   |   |
 
         where only site A is part of the original, generating loop, but both
-        A and B are part of the returned cluster.
+        A and B are part of the returned cluster. For `"alldangle"` the same
+        cluster would be generated but its size would be considered 5.
 
         Parameters
         ----------
@@ -1061,8 +1087,18 @@ class TensorNetworkGen(TensorNetwork):
         if isinstance(gloops, int):
             max_size = gloops
             gloops = None
+            if strict_size is True:
+                # generate gloops up to size `max_loop_length`, but filter out
+                # any which are larger once the target size are included
+                strict_size = max_size
         else:
             max_size = None
+            if strict_size is True:
+                warnings.warn(
+                    "If manually supplying a set of gloops, `strict_size` "
+                    "should be an integer, not a boolean - ignoring.",
+                )
+                strict_size = False
 
         if info is None:
             info = {}
@@ -1077,6 +1113,7 @@ class TensorNetworkGen(TensorNetwork):
                         max_size=max_size,
                         sites=where,
                         grow_from=grow_from,
+                        num_joins=num_joins,
                     )
                 )
             else:
@@ -1087,6 +1124,7 @@ class TensorNetworkGen(TensorNetwork):
                         max_size=max_size,
                         tids=tids,
                         grow_from=grow_from,
+                        num_joins=num_joins,
                     )
                 )
         else:
@@ -1142,9 +1180,9 @@ class TensorNetworkGen(TensorNetwork):
             # not include the base region if its not a valid cluster on its own
             clusters = (r0, *map(frozenset, gloops))
 
-        if strict_size and (max_size is not None):
+        if strict_size:
             # only allow clusters below max_size *including* base region
-            clusters = (r0, *(r for r in clusters if len(r) <= max_size))
+            clusters = (r0, *(r for r in clusters if len(r) <= strict_size))
 
         return clusters
 
@@ -1482,6 +1520,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         renorm=True,
         smudge=1e-12,
         power=1.0,
+        info=None,
         **gate_opts,
     ):
         """Apply a gate to this vector tensor network at sites ``where``, using
@@ -1532,7 +1571,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             power=power,
             ungauge_inner=False,
         ):
-            info = {}
+            if info is None:
+                info = {}
+
             tn_where.gate_(G, where, info=info, **gate_opts)
 
             # inner ungauging is performed by tracking the new singular values
@@ -2326,8 +2367,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         sloops=None,
         gauges=None,
         *,
+        num_joins=1,
         grow_from="all",
-        strict_size=True,
+        strict_size=False,
         intersect=False,
         autocomplete=True,
         autoreduce=True,
@@ -2335,6 +2377,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         normalized=True,
         info=None,
         optimize="auto",
+        tn_cache_maxsize=512,
         progbar=False,
         **contract_opts,
     ):
@@ -2358,6 +2401,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
             gauged.
+        intersect : bool, optional
+            If ``loops`` is not an explicit set of loops, whether to consider
+            self intersecting loops in the search for loops passing through
+            ``where``.
         normalized : bool or "local", optional
             Whether to normalize the result. If "local" each loop term is
             normalized separately. If ``True`` each term is normalized using
@@ -2370,10 +2417,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             them. This is useful when computing various expectations with
             different sets of loops. This should only be reused when both the
             tensor network and gauges remain the same.
-        intersect : bool, optional
-            If ``loops`` is not an explicit set of loops, whether to consider
-            self intersecting loops in the search for loops passing through
-            ``where``.
+        tn_cache_maxsize : int, optional
+            The maximum size of the cache for the locally gauged tensor
+            networks used in computing the local expectations.
         contract_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
@@ -2382,22 +2428,21 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         expec : scalar
         """
-        from quimb.tensor.belief_propagation import RegionGraph
+        from quimb.tensor.belief_propagation import gen_region_counts
 
         info = info if info is not None else {}
-        info.setdefault("tns", {})
+        info.setdefault("tns", LRU(tn_cache_maxsize))
         info.setdefault("expecs", {})
 
         sloops = self.get_local_sloops(
             where=where,
             sloops=sloops,
+            num_joins=num_joins,
             intersect=intersect,
             grow_from=grow_from,
             strict_size=strict_size,
             info=info,
         )
-
-        rg = RegionGraph(sloops, autocomplete=autocomplete)
 
         if autoreduce:
             where_tags = tuple(map(self.site_tag, where))
@@ -2415,17 +2460,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
         norms = []
         counts = []
 
+        loop_counts = gen_region_counts(sloops, autocomplete=autocomplete)
         if progbar:
-            regions = Progbar(rg.regions)
-        else:
-            regions = rg.regions
+            loop_counts = Progbar(loop_counts)
 
-        for loop in regions:
-            C = rg.get_count(loop)
-            if C == 0:
-                # redundant loop
-                continue
-
+        for loop, C in loop_counts:
             if autoreduce:
                 # check if we can map loop to a smaller cluster
                 # this is only valid at a BP fixed point
@@ -2468,8 +2507,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         sloops=None,
         gauges=None,
         *,
+        num_joins=1,
         grow_from="all",
-        strict_size=True,
+        strict_size=False,
         intersect=False,
         autocomplete=True,
         autoreduce=True,
@@ -2484,6 +2524,15 @@ class TensorNetworkGenVector(TensorNetworkGen):
     ):
         info = info if info is not None else {}
 
+        if (sloops is None) or isinstance(sloops, int):
+            sloops = tuple(
+                self.gen_sloops(
+                    sloops,
+                    num_joins=num_joins,
+                    intersect=intersect,
+                )
+            )
+
         return _compute_expecs_maybe_in_parallel(
             fn=_tn_local_expectation_sloop_expand,
             tn=self,
@@ -2492,7 +2541,6 @@ class TensorNetworkGenVector(TensorNetworkGen):
             gauges=gauges,
             grow_from=grow_from,
             strict_size=strict_size,
-            intersect=intersect,
             autocomplete=autocomplete,
             autoreduce=autoreduce,
             combine=combine,
@@ -2516,9 +2564,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
         autocomplete=True,
         autoreduce=True,
         grow_from="all",
-        strict_size=True,
+        num_joins=1,
+        strict_size=False,
         optimize="auto",
         info=None,
+        tn_cache_maxsize=512,
         progbar=False,
         **contract_opts,
     ):
@@ -2571,6 +2621,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
             them. This is useful when computing various expectations with
             different sets of loops. This should only be reused when both the
             tensor network and gauges remain the same.
+        tn_cache_maxsize : int, optional
+            The maximum size of the cache for the locally gauged tensor
+            networks used in computing the local expectations.
         contract_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
@@ -2579,20 +2632,20 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         expec : scalar
         """
-        from quimb.tensor.belief_propagation import RegionGraph
+        from quimb.tensor.belief_propagation import gen_region_counts
 
         info = info if info is not None else {}
-        info.setdefault("tns", {})
+        info.setdefault("tns", LRU(tn_cache_maxsize))
         info.setdefault("expecs", {})
 
         gloops = self.get_local_gloops(
             where=where,
             gloops=gloops,
             grow_from=grow_from,
+            num_joins=num_joins,
             strict_size=strict_size,
             info=info,
         )
-        rg = RegionGraph(gloops, autocomplete=autocomplete)
 
         if autoreduce:
             try:
@@ -2606,17 +2659,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
         norms = []
         counts = []
 
+        region_counts = gen_region_counts(gloops, autocomplete=autocomplete)
         if progbar:
-            regions = Progbar(rg.regions)
-        else:
-            regions = rg.regions
+            region_counts = Progbar(region_counts)
 
-        for r in regions:
-            C = rg.get_count(r)
-            if C == 0:
-                # redundant cluster
-                continue
-
+        for r, C in region_counts:
             if autoreduce:
                 # check if we can map cluster to a smaller generalized loop
                 # this is only valid at a BP fixed point
@@ -2670,8 +2717,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
         generalized loops of tensors.
         """
         from quimb.tensor.belief_propagation import (
-            RegionGraph,
             combine_local_contractions,
+            gen_region_counts,
         )
 
         if isinstance(gloops, int):
@@ -2696,23 +2743,16 @@ class TensorNetworkGenVector(TensorNetworkGen):
         else:
             neighbors = None
 
-        rg = RegionGraph(gloops, autocomplete=autocomplete)
-        for site in psi.sites:
-            if site not in rg.lookup:
-                # site is not covered by any cluster -> might be tree like
-                rg.add_region({site})
+        region_counts = gen_region_counts(
+            itertools.chain(gloops, ((site,) for site in psi.sites)),
+            autocomplete=autocomplete,
+        )
 
         if progbar:
-            regions = Progbar(rg.regions)
-        else:
-            regions = rg.regions
+            region_counts = Progbar(region_counts)
 
         zvals = []
-        for region in regions:
-            C = rg.get_count(region)
-            if C == 0:
-                continue
-
+        for region, C in region_counts:
             if autoreduce:
                 # check if we can map cluster to a smaller generalized loop
                 region = gloop_remove_dangling(region, neighbors)
@@ -2741,7 +2781,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         autocomplete=True,
         autoreduce=True,
         grow_from="all",
-        strict_size=True,
+        strict_size=False,
         optimize="auto",
         info=None,
         return_all=False,

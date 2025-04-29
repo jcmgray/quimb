@@ -512,7 +512,7 @@ class D1BP(BeliefPropagationCommon):
         """Contract the tensor network using generalized loop cluster
         expansion.
         """
-        from .regions import RegionGraph
+        from .regions import gen_region_counts
 
         if isinstance(gloops, int):
             max_size = gloops
@@ -530,11 +530,8 @@ class D1BP(BeliefPropagationCommon):
             self.normalize_message_pairs()
             self.normalize_tensors()
 
-        rg = RegionGraph(gloops, autocomplete=autocomplete)
-
         zvals = []
-        for r in rg.regions:
-            c = rg.get_count(r)
+        for r, c in gen_region_counts(gloops, autocomplete=autocomplete):
             tnr = self.get_cluster(r)
             zr = tnr.contract(optimize=optimize, **contract_opts)
 

@@ -1,5 +1,6 @@
 import contextlib
 import functools
+import itertools
 import operator
 
 import autoray as ar
@@ -13,7 +14,7 @@ from .bp_common import (
     normalize_message_pair,
     process_loop_series_expansion_weights,
 )
-from .regions import RegionGraph
+from .regions import gen_region_counts
 
 
 def _parse_global_gloops(tn, gloops=None):
@@ -590,7 +591,7 @@ class D2BP(BeliefPropagationCommon):
         gloops=None,
         normalized=True,
         grow_from="alldangle",
-        strict_size=True,
+        strict_size=False,
         multi_excitation_correct=True,
         optimize="auto-hq",
         **contract_opts,
@@ -651,6 +652,8 @@ class D2BP(BeliefPropagationCommon):
             grow_from=grow_from,
             strict_size=strict_size,
         )
+        # the base (BP) region, including target sites only
+        r0 = frozenset(tids)
 
         # get internal indices of the base region to exclude
         # from inserting excited space projectors on
@@ -666,6 +669,10 @@ class D2BP(BeliefPropagationCommon):
                 output_inds=output_inds, optimize=optimize, **contract_opts
             )
             rho_e = rho_e.to_dense(kix, bix)
+
+            if (normalized == "local") and gloop != r0:
+                rho_e /= 1 + ar.do("trace", rho_e)
+
             rho_es[gloop] = rho_e
 
         if multi_excitation_correct:
@@ -675,13 +682,13 @@ class D2BP(BeliefPropagationCommon):
                 gloop: ar.do("trace", rho_e) for gloop, rho_e in rho_es.items()
             }
             # remove the BP contribution (= minimal region)
-            weights.pop(frozenset(tids))
+            weights.pop(r0)
             # compute exponential suppresion factors
             corrections = process_loop_series_expansion_weights(
                 weights, return_all=True
             )
             # add back in the BP contribution
-            corrections[frozenset(tids)] = 1.0
+            corrections[r0] = 1.0
 
             # weighted sum
             rho = functools.reduce(
@@ -717,30 +724,23 @@ class D2BP(BeliefPropagationCommon):
 
         gloops = _parse_global_gloops(self.tn, gloops)
 
-        rg = RegionGraph(gloops, autocomplete=autocomplete)
-
-        for tid in self.tn.tensor_map:
-            rg.add_region([tid])
-
         if info is None:
             info = {}
         info.setdefault("contractions", {})
         contractions = info["contractions"]
 
+        region_counts = gen_region_counts(
+            itertools.chain(gloops, ((tid,) for tid in self.tn.tensor_map)),
+            autocomplete=autocomplete,
+        )
+
         if progbar:
             import tqdm
 
-            it = tqdm.tqdm(rg.regions)
-        else:
-            it = rg.regions
+            region_counts = tqdm.tqdm(region_counts)
 
         zvals = []
-        for region in it:
-            counting_factor = rg.get_count(region)
-
-            if counting_factor == 0:
-                continue
-
+        for region, counting_factor in region_counts:
             try:
                 zr = contractions[region]
             except KeyError:
@@ -1064,7 +1064,7 @@ class D2BP(BeliefPropagationCommon):
         combine="sum",
         normalized=True,
         grow_from="alldangle",
-        strict_size=True,
+        strict_size=False,
         optimize="auto-hq",
         **contract_opts,
     ):
@@ -1120,11 +1120,8 @@ class D2BP(BeliefPropagationCommon):
             strict_size=strict_size,
         )
 
-        rg = RegionGraph(gloops)
-
         rhos = []
-        for region in rg.regions:
-            cr = rg.get_count(region)
+        for region, cr in gen_region_counts(gloops):
             rho_r = self.partial_trace(
                 where,
                 tids_region=region,

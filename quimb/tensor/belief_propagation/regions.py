@@ -1,5 +1,4 @@
-"""Region graph functionality - for GBP and cluster expansions.
-"""
+"""Region graph functionality - for GBP and cluster expansions."""
 
 import functools
 import itertools
@@ -38,7 +37,15 @@ class RegionGraph:
         Whether to automatically remove all regions with a count of zero.
     """
 
-    def __init__(self, regions=(), autocomplete=True, autoprune=True):
+    def __init__(
+        self,
+        regions=(),
+        autocomplete=True,
+        autoprune=True,
+    ):
+        regions = tuple(map(frozenset, regions))
+        self.base_nodes = frozenset.intersection(*regions)
+
         self.lookup = {}
         self.parents = {}
         self.children = {}
@@ -52,8 +59,7 @@ class RegionGraph:
             self.autoprune()
 
     def reset_info(self):
-        """Remove all cached region properties.
-        """
+        """Remove all cached region properties."""
         self.info.clear()
 
     @property
@@ -63,12 +69,21 @@ class RegionGraph:
     def get_overlapping(self, region):
         """Get all regions that intersect with the given region."""
         region = frozenset(region)
-        return {
-            other_region
-            for node in region
-            for other_region in self.lookup[node]
-            if other_region != region
-        }
+
+        if self.base_nodes:
+            # all regions are overlapping
+            return {
+                other_region
+                for other_region in self.regions
+                if other_region != region
+            }
+        else:
+            return {
+                other_region
+                for node in region
+                for other_region in self.lookup[node]
+                if other_region != region
+            }
 
     def add_region(self, region):
         """Add a new region and update parent-child relationships.
@@ -124,8 +139,7 @@ class RegionGraph:
         self.reset_info()
 
     def remove_region(self, region):
-        """Remove a region and update parent-child relationships.
-        """
+        """Remove a region and update parent-child relationships."""
         # remove from lookup
         for node in region:
             self.lookup[node].remove(region)
@@ -144,9 +158,16 @@ class RegionGraph:
 
     def autocomplete(self):
         """Add all missing intersecting sub-regions."""
-        for r in self.regions:
-            for other in self.get_overlapping(r):
-                self.add_region(r & other)
+        if self.base_nodes:
+            # all regions are overlapping
+            rs = self.regions
+            for i in range(len(rs)):
+                for j in range(i + 1, len(rs)):
+                    self.add_region(rs[i] & rs[j])
+        else:
+            for r in self.regions:
+                for other in self.get_overlapping(r):
+                    self.add_region(r & other)
 
     def autoprune(self):
         """Remove all regions with a count of zero."""
@@ -367,9 +388,9 @@ class RegionGraph:
                 d.line(
                     centers[region],
                     centers[child],
-                    linewidth=.5,
+                    linewidth=0.5,
                     linestyle="-",
-                    color=(.5, .5, .5),
+                    color=(0.5, 0.5, 0.5),
                     alpha=0.5,
                     arrowhead={},
                 )
@@ -381,3 +402,106 @@ class RegionGraph:
             f"<RegionGraph(regions={len(self.regions)}, "
             f"total_count={self.get_total_count()})>"
         )
+
+
+def trie_add(trie, region):
+    """Add a region to a trie data structure. This will create a nested
+    dictionary structure where each node in the region corresponds to a
+    key in the dictionary. The final leaf node will have a special key
+    "__leaf__" that contains the original region.
+    """
+    try:
+        canonical_ordered = sorted(region)
+    except TypeError:
+        canonical_ordered = sorted(region, key=repr)
+
+    t = trie
+    for node in canonical_ordered:
+        t = t.setdefault(node, {})
+    t["__leaf__"] = region
+
+
+def trie_gen_subsets(trie, region):
+    """Given a trie of regions, lazily generate all strict subsets
+    (descendants) of the given region.
+    """
+    regionset = set(region)
+    queue = [trie]
+    while queue:
+        t = queue.pop()
+        rsub = t.get("__leaf__", None)
+        if rsub is not None and rsub != region:
+            yield rsub
+        queue.extend(t for node, t in t.items() if node in regionset)
+
+
+def gen_region_counts(regions, autocomplete=True, autoprune=True):
+    """Lazily generate all intersecting regions and their counts. This is
+    faster that constructing the full RegionGraph, using a trie to get
+    all subsets (descendants) of each region.
+
+    Parameters
+    ----------
+    regions : Iterable[Sequence[Hashable]]
+        Generating regions.
+    autocomplete : bool, optional
+        Whether to automatically add all intersecting sub-regions, to guarantee
+        a complete region graph.
+    autoprune : bool, optional
+        Whether to automatically remove all regions with a count of zero.
+        Default is True.
+
+    Yields
+    ------
+    region : frozenset
+        The region for which the count is being calculated.
+    count : int
+        The count of the region, which is the correct weighting to apply when
+        summing over all regions to avoid overcounting.
+    """
+    # remove redundant nodes that appear in all regions
+    # (we just re-add these when yielding)
+    regions = tuple(map(frozenset, regions))
+    base_region = frozenset.intersection(*regions)
+    if base_region:
+        regions = tuple(r - base_region for r in regions)
+
+    counts = {}
+    # for intersections
+    lookup = {}
+    # for subsets
+    trie = {}
+
+    for ri in regions:
+        counts[ri] = 0
+        trie_add(trie, ri)
+
+        if autocomplete:
+            # simultenously get previous overlapping regions ...
+            rjs = set()
+            for node in ri:
+                others = lookup.setdefault(node, [])
+                for rj in others:
+                    rjs.add(rj)
+                # ... as well as then inserting current region
+                others.append(ri)
+
+            # find intersections with all previous overlapping
+            for rj in rjs:
+                rij = ri & rj
+                if rij not in counts:
+                    counts[rij] = 0
+                    trie_add(trie, rij)
+
+    # by ordering by size, we ensure visiting all ancestors first
+    for ri in sorted(counts, key=len, reverse=True):
+        # finalize current level (1 - count of all ancestors)
+        ci = 1 - counts[ri]
+        if ci == 0 and autoprune:
+            # redundant node, contributes no more
+            continue
+
+        yield ri | base_region, ci
+
+        for rj in trie_gen_subsets(trie, ri):
+            counts[rj] += ci

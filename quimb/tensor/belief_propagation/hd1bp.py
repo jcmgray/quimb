@@ -403,7 +403,7 @@ class HD1BP(BeliefPropagationCommon):
         progbar=False,
         **contract_otps,
     ):
-        from .regions import RegionGraph
+        from .regions import gen_region_counts
 
         # if we normalized messages we can ignore all index-only regions
         self.normalize_messages()
@@ -411,19 +411,16 @@ class HD1BP(BeliefPropagationCommon):
         if isinstance(gloops, int):
             gloops = tuple(self.tn.gen_gloops(gloops))
 
-        rg = RegionGraph(gloops)
+        region_counts = gen_region_counts(gloops)
 
         if progbar:
             import tqdm
 
-            regions = tqdm.tqdm(rg.regions)
-        else:
-            regions = rg.regions
+            region_counts = tqdm.tqdm(region_counts)
 
         zvals = []
-        for r in regions:
+        for r, cr in region_counts:
             # XXX: autoreduce intersecting clusters to gloops?
-            cr = rg.get_count(r)
             # either we autocomplete above or we do it here per region
             tnr = self.get_cluster(r, autocomplete=True)
             zr = tnr.contract(

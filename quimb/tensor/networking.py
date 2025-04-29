@@ -7,30 +7,28 @@ import functools
 import itertools
 import math
 
-from ..utils import oset
+from ..utils import oset, unique
 
 
-class NetworkPath:
-    """A simple class to represent a path through a tensor network, storing
-    both the tensor identifies (`tids`) and indices (`inds`) it passes through.
+class NetworkPatch:
+    """A simple class to represent a patch of tensors and indices, storing
+    both the tensor identifies (`tids`) and indices (`inds`) it contains.
     """
 
     __slots__ = ("_tids", "_inds", "_key")
 
-    def __init__(self, tids, inds=()):
-        self._tids = tuple(tids)
-        self._inds = tuple(inds)
-        if len(self._tids) != len(self._inds) + 1:
-            raise ValueError("tids should be one longer than inds")
+    def __init__(self, tids, inds):
+        self._tids = oset(tids)
+        self._inds = oset(inds)
         self._key = None
 
     @classmethod
-    def from_sequence(self, it):
+    def from_sequence(cls, it):
         tids = []
         inds = []
         for x in it:
             (tids if isinstance(x, int) else inds).append(x)
-        return NetworkPath(tids, inds)
+        return cls(tids, inds)
 
     @property
     def tids(self):
@@ -40,12 +38,50 @@ class NetworkPath:
     def inds(self):
         return self._inds
 
+    def __iter__(self):
+        return itertools.chain(self._tids, self._inds)
+
     @property
     def key(self):
         # build lazily as don't always need
         if self._key is None:
-            self._key = frozenset(self._tids + self._inds)
+            self._key = frozenset(self)
         return self._key
+
+    def merge(self, other):
+        return NetworkPatch(
+            tids=itertools.chain(self._tids, other._tids),
+            inds=itertools.chain(self._inds, other._inds),
+        )
+
+    def __contains__(self, x):
+        return x in self.key
+
+    def __hash__(self):
+        return hash(self.key)
+
+    def __eq__(self, other):
+        if not isinstance(other, NetworkPatch):
+            return NotImplemented
+        return self.key == other.key
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self._tids}, {self._inds})"
+
+
+class NetworkPath(NetworkPatch):
+    """A simple class to represent a path through a tensor network, storing
+    both the tensor identifies (`tids`) and indices (`inds`) it passes through.
+    """
+
+    __slots__ = NetworkPatch.__slots__
+
+    def __init__(self, tids, inds=()):
+        self._tids = tuple(tids)
+        self._inds = tuple(inds)
+        if len(self._tids) != len(self._inds) + 1:
+            raise ValueError("tids should be one longer than inds")
+        self._key = None
 
     def __len__(self):
         return len(self._inds)
@@ -57,15 +93,6 @@ class NetworkPath:
             yield ind
         # always one more tid
         yield self._tids[-1]
-
-    def __contains__(self, x):
-        return x in self.key
-
-    def __hash__(self):
-        return hash(self.key)
-
-    def __repr__(self):
-        return f"NetworkPath({self._tids}, {self._inds})"
 
     def extend(self, ind, tid):
         """Get a new path by extending this one with a new index and tensor id."""
@@ -696,6 +723,76 @@ def gen_paths_loops(
                 queue.append(path.extend(next_ind, next_tid))
 
 
+def gen_sloops(
+    tn,
+    max_loop_length=None,
+    num_joins=1,
+    intersect=False,
+    tids=None,
+    inds=None,
+    paths=None,
+):
+    if num_joins < 1:
+        return ()
+
+    base_loops = gen_paths_loops(
+        tn,
+        max_loop_length=max_loop_length,
+        intersect=intersect,
+        tids=tids,
+        inds=inds,
+        paths=paths,
+    )
+
+    if num_joins == 1:
+        # just return the base loops
+        return base_loops
+
+    # will reuse
+    current_patches = tuple(base_loops)
+
+    if (tids is None) and (inds is None) and (paths is None):
+        # loops are already global
+        base_loops = current_patches
+    else:
+        # need to merge local base loops with global loops
+        # XXX: do this with the tids in current_patches, every join
+        base_loops = tuple(
+            gen_paths_loops(
+                tn, max_loop_length=max_loop_length, intersect=intersect
+            )
+        )
+
+    # efficient lookup of overlapping loop tids
+    lookup = {}
+    for sl in base_loops:
+        for tid in unique(sl.tids):
+            lookup.setdefault(tid, []).append(sl)
+
+    for _ in range(num_joins - 1):
+        next_patches = set()
+        for p in current_patches:
+            once = set()
+            twice = set()
+
+            # for each tensor
+            for tid in unique(p.tids):
+                # lookup possible base loops to merge with
+                for po in lookup[tid]:
+                    if po in once:
+                        twice.add(po)
+                    else:
+                        once.add(po)
+
+            for po in twice:
+                # merge and add!
+                next_patches.add(p.merge(po))
+
+        current_patches = tuple(next_patches)
+
+    return current_patches
+
+
 def gen_patches(tn, max_size, tids=None, grow_from="all"):
     """Generate sets of tids that represent 'patches' of the tensor network,
     where each patch is a connected subgraph of the tensor network. Unlike
@@ -752,34 +849,7 @@ def gen_patches(tn, max_size, tids=None, grow_from="all"):
                         seen.add(nregion)
 
 
-def gen_gloops(tn, max_size=None, tids=None, grow_from="all"):
-    """Generate sets of tids that represent 'generalized loops' where every
-    node is connected to at least two bonds, i.e. 2-degree connected subgraphs.
-
-    Parameters
-    ----------
-    tn : TensorNetwork
-        The tensor network to find loops in.
-    max_size : None or int
-        Set the maximum number of tensors that can appear in a region. If
-        ``None``, wait until any valid region is found and set that as the
-        maximum size.
-    tids : None or sequence of int, optional
-        If supplied, only yield loops containing these tids, see
-        ``grow_from``.
-    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
-        Only if ``tids`` is specified, this determines how to filter
-        loops. If 'all', only yield loops containing *all* of the tids
-        in ``tids``, if 'any', yield loops containing *any* of the tids
-        in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to
-        be dangling, i.e. 1-degree connected. This is useful for computing
-        local expectations where the operator insertion breaks the loop
-        assumption locally.
-
-    Yields
-    ------
-    tuple[int]
-    """
+def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
     if tids is None:
         # find loops everywhere
         tids = tn.tensor_map.keys()
@@ -829,7 +899,6 @@ def gen_gloops(tn, max_size=None, tids=None, grow_from="all"):
 
         valid_gloop = True
         for tid in region:
-
             # count number of connections each node has within region
             num_inner_connections = 0
             for ind in tid2inds[tid]:
@@ -865,6 +934,97 @@ def gen_gloops(tn, max_size=None, tids=None, grow_from="all"):
                     # many ways to construct a region -> only check one
                     queue.append(nregion)
                     seen.add(nregion)
+
+
+def gen_gloops(
+    tn,
+    max_size=None,
+    tids=None,
+    grow_from="all",
+    num_joins=1,
+):
+    """Generate sets of tids that represent 'generalized loops' where every
+    node is connected to at least two bonds, i.e. 2-degree connected subgraphs.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to find loops in.
+    max_size : None or int
+        Set the maximum number of tensors that can appear in a region. If
+        ``None``, wait until any valid region is found and set that as the
+        maximum size.
+    tids : None or sequence of int, optional
+        If supplied, only yield loops containing these tids, see
+        ``grow_from``.
+    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+        Only if ``tids`` is specified, this determines how to filter
+        loops. If 'all', only yield loops containing *all* of the tids
+        in ``tids``, if 'any', yield loops containing *any* of the tids
+        in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to
+        be dangling, i.e. 1-degree connected. This is useful for computing
+        local expectations where the operator insertion breaks the loop
+        assumption locally.
+
+    Yields
+    ------
+    tuple[int]
+    """
+    if num_joins < 1:
+        return ()
+
+    base_gloops = _gen_gloops_single(
+        tn,
+        max_size=max_size,
+        tids=tids,
+        grow_from=grow_from,
+    )
+
+    if num_joins == 1:
+        # just return the base loops
+        return base_gloops
+
+    # will reuse
+    current_patches = tuple(map(frozenset, base_gloops))
+
+    if tids is None:
+        # loops are already global
+        base_gloops = current_patches
+    else:
+        # need to merge local base loops with global loops
+        # XXX: do this with the tids in current_patches, every join
+        base_gloops = tuple(
+            map(frozenset, _gen_gloops_single(tn, max_size=max_size))
+        )
+
+    # efficient lookup of overlapping gloop tids
+    lookup = {}
+    for gl in base_gloops:
+        for tid in gl:
+            lookup.setdefault(tid, []).append(gl)
+
+    for _ in range(num_joins - 1):
+        next_patches = set()
+        for gl in current_patches:
+            once = set()
+            twice = set()
+
+            # for each tensor
+            for tid in gl:
+                # lookup possible base loops to merge with
+                for glo in lookup[tid]:
+                    if glo in once:
+                        twice.add(glo)
+                    else:
+                        once.add(glo)
+
+            for glo in twice:
+                # merge and add!
+                next_patches.add(gl | glo)
+
+        current_patches = tuple(next_patches)
+
+    return current_patches
 
 
 def gen_loops(tn, max_loop_length=None):
@@ -923,7 +1083,7 @@ def get_loop_union(
     -------
     tuple[int]
     """
-    gloops = gen_gloops(
+    gloops = _gen_gloops_single(
         tn,
         max_size=max_size,
         tids=tids,

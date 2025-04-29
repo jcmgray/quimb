@@ -84,7 +84,7 @@ from .hd1bp import HD1BP, contract_hd1bp, sample_hd1bp
 from .hv1bp import HV1BP, contract_hv1bp, sample_hv1bp
 from .l1bp import L1BP, contract_l1bp
 from .l2bp import L2BP, compress_l2bp, contract_l2bp
-from .regions import RegionGraph
+from .regions import RegionGraph, gen_region_counts
 
 __all__ = (
     "combine_local_contractions",
@@ -98,6 +98,7 @@ __all__ = (
     "contract_l2bp",
     "D1BP",
     "D2BP",
+    "gen_region_counts",
     "HD1BP",
     "HV1BP",
     "initialize_hyper_messages",
