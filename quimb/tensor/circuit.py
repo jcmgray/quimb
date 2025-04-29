@@ -1342,7 +1342,7 @@ class Gate:
         round = kwargs.get("round", self._round)
         parametrize = kwargs.get("parametrize", self._parametrize)
 
-        if params == "raw":
+        if isinstance(params, str) and (params == "raw"):
             return self.from_raw(
                 U=self._array,
                 qubits=qubits,
