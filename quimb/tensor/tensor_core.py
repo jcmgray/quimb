@@ -480,6 +480,7 @@ def tensor_split(
     stags=None,
     bond_ind=None,
     right_inds=None,
+    matrix_svals=False,
 ):
     """Decompose this tensor into two tensors.
 
@@ -560,9 +561,15 @@ def tensor_split(
         Add these new tags to the singular value tensor.
     bond_ind : str, optional
         Explicitly name the new bond, else a random one will be generated.
+        If ``matrix_svals=True`` then this should be a tuple of two indices,
+        one for the left and right bond respectively.
     right_inds : sequence of str, optional
         Explicitly give the right indices, otherwise they will be worked out.
         This is a minor performance feature.
+    matrix_svals : bool, optional
+        If ``True``, return the singular values as a diagonal 2D array or
+        Tensor, otherwise return them as a 1D array. This is only relevant if
+        returning the singular value in some form.
 
     Returns
     -------
@@ -609,7 +616,10 @@ def tensor_split(
             array = TT.data
 
     if get == "values":
-        return _SPLIT_VALUES_FNS[method](array)
+        s = _SPLIT_VALUES_FNS[method](array)
+        if matrix_svals:
+            s = do("diag", s)
+        return s
 
     opts = _parse_split_opts(
         method, cutoff, absorb, max_bond, cutoff_mode, renorm
@@ -627,19 +637,38 @@ def tensor_split(
 
     if get == "arrays":
         if absorb is None:
+            if matrix_svals:
+                s = do("diag", s)
             return left, s, right
         return left, right
 
-    bond_ind = rand_uuid() if bond_ind is None else bond_ind
+    if matrix_svals:
+        if bond_ind is None:
+            bond_ind_l = rand_uuid()
+            bond_ind_r = rand_uuid()
+        else:
+            bond_ind_l, bond_ind_r = bond_ind
+    else:
+        if bond_ind is None:
+            bond_ind = rand_uuid()
+        bond_ind_l = bond_ind_r = bond_ind
+
+
     ltags = T.tags | tags_to_oset(ltags)
     rtags = T.tags | tags_to_oset(rtags)
 
-    Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=ltags)
-    Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=rtags)
+    Tl = Tensor(data=left, inds=(*left_inds, bond_ind_l), tags=ltags)
+    Tr = Tensor(data=right, inds=(bond_ind_r, *right_inds), tags=rtags)
 
     if absorb is None:
+        # need to also wrap the singular values as a tensor
         stags = T.tags | tags_to_oset(stags)
-        Ts = Tensor(data=s, inds=(bond_ind,), tags=stags)
+        if matrix_svals:
+            s = do("diag", s)
+            Ts = Tensor(data=s, inds=(bond_ind_l, bond_ind_r), tags=stags)
+        else:
+            Ts = Tensor(data=s, inds=(bond_ind,), tags=stags)
+
         tensors = (Tl, Ts, Tr)
     else:
         tensors = (Tl, Tr)

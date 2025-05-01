@@ -23,6 +23,7 @@ Release notes for `quimb`.
 - add `info` option to [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple) for tracking extra information such as number of iterations and max gauge diffs
 - [`Tensor.gate`](quimb.tensor.tensor_core.Tensor.gate): add `transposed` option
 - [`TensorNetwork.contract`](quimb.tensor.tensor_core.TensorNetwork.contract): add `strip_exponent` option for return the mantissa and exponent (log10) separately. Compatible with [`contract_tags`](quimb.tensor.tensor_core.TensorNetwork.contract_tags), [`contract_cumulative`](quimb.tensor.tensor_core.TensorNetwork.contract_cumulative), [`contract_compressed`](quimb.tensor.tensor_core.TensorNetwork.contract_compressed) sub modes.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add `matrix_svals` option, if `True` any returned singular values are put into the diagonal of a matrix (by default, `False`, they are returned as a vector).
 
 **Bug fixes:**
 

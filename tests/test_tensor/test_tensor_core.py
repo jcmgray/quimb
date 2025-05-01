@@ -455,6 +455,27 @@ class TestTensorFunctions:
             )
         assert (a_split ^ ...).almost_equals(a)
 
+    @pytest.mark.parametrize("matrix_svals", [False, True])
+    def test_split_tensor_return_svals(self, matrix_svals):
+        t = rand_tensor((2, 3, 4, 5), inds=("a", "b", "c", "d"))
+
+        _, svals, _ = t.split(
+            ["a", "d"], get="arrays", absorb=None, matrix_svals=matrix_svals
+        )
+        if matrix_svals:
+            assert svals.shape == (10, 10)
+        else:
+            assert svals.shape == (10,)
+
+        tn = t.split(["a", "d"], absorb=None, matrix_svals=matrix_svals)
+        assert tn.num_tensors == 3
+        if matrix_svals:
+            assert not tn.get_hyperinds()
+        else:
+            assert tn.get_hyperinds()
+        tc = tn.contract(output_inds=t.inds)
+        assert_allclose(tc.data, t.data)
+
     @pytest.mark.parametrize("method", ["svd", "eig"])
     def test_singular_values(self, method):
         psim = Tensor(np.eye(2) * 2**-0.5, inds="ab")
