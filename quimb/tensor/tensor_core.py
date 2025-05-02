@@ -2063,6 +2063,13 @@ class Tensor:
         Returns
         -------
         Tensor
+
+        Examples
+        --------
+
+            t = qtn.rand_tensor((2, 3, 4), ('a', 'b', 'c'))
+            t.new_ind_pair_diag_('b', 'x', 'y')
+            # Tensor(shape=(2, 3, 3, 4), inds=('a', 'x', 'y', 'c'), tags=oset([]))
         """
         t = self if inplace else self.copy()
 
