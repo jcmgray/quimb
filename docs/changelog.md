@@ -9,6 +9,7 @@ Release notes for `quimb`.
 
 - move belief propagation to [`quimb.tensor.belief_propagation`](quimb.tensor.belief_propagation)
 - calling [`tn.contract()`](quimb.tensor.tensor_core.TensorNetwork.contract) when an non-zero value has been accrued into `tn.exponent` now automatically re-absorbs that exponent.
+- binary tensor operations that would previously have errored now will align and broadcast
 
 **Enhancements:**
 
