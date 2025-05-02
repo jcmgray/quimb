@@ -2043,6 +2043,56 @@ class Tensor:
         new_ind_pair_with_identity, inplace=True
     )
 
+    def new_ind_pair_diag(self, ind, new_left_ind, new_right_ind, inplace=False):
+        """Expand an existing index ``ind`` of this tensor into a new pair of
+        indices ``(new_left_ind, new_right_ind)`` each of matching size, such
+        that the old tensor is the diagonal of the new tensor. The new indices
+        are inserted at the position of ``ind``.
+
+        Parameters
+        ----------
+        ind : str
+            Name of the index to expand.
+        new_left_ind : str
+            Name of the new left index.
+        new_right_ind : str
+            Name of the new right index.
+        inplace : bool, optional
+            Whether to perform the expansion inplace.
+
+        Returns
+        -------
+        Tensor
+        """
+        t = self if inplace else self.copy()
+
+        data = t.data
+        shape = t.shape
+        ax = t.inds.index(ind)
+
+        d = shape[ax]
+        shp_before = shape[:ax]
+        shp_after = shape[ax + 1 :]
+        new_shp = shp_before + (d, d) + shp_after
+        new_data = do("zeros", new_shp, like=data)
+
+        drange = do("arange", d, like=data)
+        selector = (
+            tuple(slice(None) for _ in shp_before)
+            + (drange, drange)
+            + tuple(slice(None) for _ in shp_after)
+        )
+        new_data[selector] = data
+
+        new_inds = (
+            t.inds[:ax] + (new_left_ind, new_right_ind) + t.inds[ax + 1 :]
+        )
+
+        t.modify(data=new_data, inds=new_inds)
+        return t
+
+    new_ind_pair_diag_ = functools.partialmethod(new_ind_pair_diag, inplace=True)
+
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices)."""
         t = self if inplace else self.copy()

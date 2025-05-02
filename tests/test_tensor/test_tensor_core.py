@@ -728,6 +728,27 @@ class TestTensorFunctions:
         assert t.inds == ("a", "b", "switch", "c", "d")
         assert t.isel({"switch": 1}).data.sum() == pytest.approx(6)
 
+    def test_new_ind_pair_diag(self):
+        data = np.array([1, 2, 3])
+        inds = ["a"]
+        t = Tensor(data=data, inds=inds)
+        new_left_ind = "b"
+        new_right_ind = "c"
+        expanded_tensor = t.new_ind_pair_diag(
+            "a", new_left_ind, new_right_ind, inplace=False
+        )
+        assert t.inds == ("a",)
+        assert_allclose(t.data, data)
+        assert expanded_tensor.inds == ("b", "c")
+        assert expanded_tensor.shape == (3, 3)
+        expected_data = np.zeros((3, 3))
+        np.fill_diagonal(expected_data, data)
+        assert_allclose(expanded_tensor.data, expected_data)
+        t.new_ind_pair_diag_("a", new_left_ind, new_right_ind)
+        assert t.inds == ("b", "c")
+        assert t.shape == (3, 3)
+        assert_allclose(t.data, expected_data)
+
     def test_idxmin(self):
         data = np.arange(24).reshape(2, 3, 4)
         t = Tensor(data, inds=["a", "b", "c"])
