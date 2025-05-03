@@ -2048,14 +2048,16 @@ def classical_ising_sqrtS_matrix(beta, j=1.0, asymm=None):
     network.
     """
     if (j < 0.0) and (asymm is not None):
-        Slr = eigh_truncated(classical_ising_S_matrix(beta=beta, j=j))
-        S_1_2 = {
-            "l": Slr[0],
-            "lT": Slr[0].T,
-            "r": Slr[-1],
-            "rT": Slr[-1].T,
-        }[asymm]
+        if asymm == "l":
+            S_1_2 = classical_ising_S_matrix(beta=beta, j=j)
+        elif asymm == "r":
+            S_1_2 = eye(2, dtype=float)
+        else:
+            raise ValueError(
+                f"Invalid asymm value '{asymm}', must be 'l' or 'r'."
+            )
     else:
+        # make it symmetric explicitly
         S_1_2 = (
             np.array(
                 [
@@ -2409,7 +2411,7 @@ def TN2D_classical_ising_partition_function(
                 # this is logic for handling negative j without imag tensors
                 # i.e. add the left factor if the first instance of bond, right
                 # factor if second. If j > 0.0 this doesn't matter anyhow
-                asymms += ("l" if pair not in bonds else "rT",)
+                asymms += ("l" if pair not in bonds else "r",)
                 inds.append(bonds[pair])
 
         site_is_output = (ni, nj) in outputs
@@ -2555,7 +2557,7 @@ def TN3D_classical_ising_partition_function(
                 # this is logic for handling negative j without imag tensors
                 # i.e. add the left factor if the first instance of bond, right
                 # factor if second. If j > 0.0 this doesn't matter anyhow
-                asymms += ("l" if pair not in bonds else "rT",)
+                asymms += ("l" if pair not in bonds else "r",)
                 inds.append(bonds[pair])
 
         site_is_output = (ni, nj, nk) in outputs
