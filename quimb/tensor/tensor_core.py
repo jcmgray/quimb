@@ -3796,24 +3796,24 @@ def tensor_network_gate_inds(
                 'swap-split-gate', 'auto-split-gate'}, optional
         How to apply the gate:
 
-            - False: gate is added to network lazily and nothing is contracted,
-              tensor network structure is thus not maintained.
-            - True: gate is contracted eagerly with all tensors involved,
-              tensor network structure is thus only maintained if gate acts on
-              a single site only.
-            - 'split': contract all involved tensors then split the result back
-              into two.
-            - 'reduce-split': factor the two physical indices into 'R-factors'
-              using QR decompositions on the original site tensors, then
-              contract the gate, split it and reabsorb each side. Much cheaper
-              than ``'split'``.
-            - 'split-gate': lazily add the gate as with ``False``, but split
-              the gate tensor spatially.
-            - 'swap-split-gate': lazily add the gate as with ``False``, but
-              split the gate as if an extra SWAP has been applied.
-            - 'auto-split-gate': lazily add the gate as with ``False``, but
-              maybe apply one of the above options depending on whether they
-              result in a rank reduction.
+        - ``False``: gate is added to network lazily and nothing is contracted,
+          tensor network structure is thus not maintained.
+        - ``True``: gate is contracted eagerly with all tensors involved,
+          tensor network structure is thus only maintained if gate acts on a
+          single site only.
+        - ``'split'``: contract all involved tensors then split the result back
+          into two.
+        - ``'reduce-split'``: factor the two physical indices into 'R-factors'
+          using QR decompositions on the original site tensors, then contract
+          the gate, split it and reabsorb each side. Cheaper than ``'split'``
+          when the tensors on either side have at least 3 bonds.
+        - ``'split-gate'``: lazily add the gate as with ``False``, but split
+          the gate tensor spatially.
+        - ``'swap-split-gate'``: lazily add the gate as with ``False``, but
+          split the gate as if an extra SWAP has been applied.
+        - ``'auto-split-gate'``: lazily add the gate as with ``False``, but
+          maybe apply one of the above options depending on whether they result
+          in a rank reduction.
 
         The named methods are relevant for two site gates only, for single site
         gates they use the ``contract=True`` option which also maintains the
@@ -3871,7 +3871,7 @@ def tensor_network_gate_inds(
          ╱   ╱           ╱     ╱           ╱     ╱           ╱   ╱
         <QR> <LQ>                            <SVD>
 
-    For one site gates when one of these 'split' methods is supplied
+    For one site gates when one of the above 'split' methods is supplied
     ``contract=True`` is assumed.
 
     ``contract='split-gate'``::
