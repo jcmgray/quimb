@@ -11,11 +11,11 @@ the tensor network can locally have arbitrary structure and outer indices.
 
 from ..utils import ensure_dict
 from .tensor_arbgeom import create_lazy_edge_map
-from .tensor_core import choose_local_compress_gauge_settings
+from .tensor_core import TensorNetwork, choose_local_compress_gauge_settings
 
 
 def tensor_network_ag_compress_projector(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -76,13 +76,36 @@ def tensor_network_ag_compress_projector(
     if canonize:
         # optionally precondition the uncontracted network
         canonize_opts = ensure_dict(canonize_opts)
-        tn.gauge_all_(
-            equalize_norms=equalize_norms,
-            **canonize_opts
-        )
+        gauges = canonize_opts.pop("gauges", {})
+
+
+        if canonize == "layered":
+            # get all tids for a single site
+            tid0s = tn._get_tids_from_tags(site_tags[0])
+            # get a tree span out of this region, and then group into layers
+            # depending on which initial region tid they are connected to
+            groups = [{tid} for tid in tid0s]
+            for tida, tidb, _ in tn.get_tree_span(tid0s, inwards=False):
+                next(g for g in groups if tidb in g).add(tida)
+
+            # select each layer and gauge it separately
+            tns = [tn._select_tids(group) for group in groups]
+            for stn in tns:
+                stn.gauge_all_simple_(gauges=gauges, **canonize_opts)
+
+        else:
+            # # global gauge
+            tn.gauge_all_simple_(gauges=gauges, **canonize_opts)
+
+        tn_calc = tn.copy()
+        # have to insert gauges back into target before we insert projectors
+        tn.gauge_simple_insert(gauges)
+    else:
+        tn_calc = tn.copy()
+        gauges = None
 
     # then compute projectors using local information
-    tn_calc = tn.copy()
+
     for taga, tagb in edges:
         tn_calc.insert_compressor_between_regions_(
             [taga],
@@ -92,6 +115,7 @@ def tensor_network_ag_compress_projector(
             insert_into=tn,
             new_ltags=[taga],
             new_rtags=[tagb],
+            gauges=gauges,
             optimize=optimize,
             **compress_opts,
         )
@@ -111,7 +135,7 @@ def tensor_network_ag_compress_projector(
 
 
 def tensor_network_ag_compress_local_early(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -233,7 +257,7 @@ def tensor_network_ag_compress_local_early(
 
 
 def tensor_network_ag_compress_local_late(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -326,7 +350,7 @@ def tensor_network_ag_compress_local_late(
 
 
 def tensor_network_ag_compress_superorthogonal(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -405,7 +429,7 @@ def tensor_network_ag_compress_superorthogonal(
 
 
 def tensor_network_ag_compress_l2bp(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -496,7 +520,7 @@ _TNAG_COMPRESS_METHODS = {
 
 
 def tensor_network_ag_compress(
-    tn,
+    tn: TensorNetwork,
     max_bond,
     cutoff=1e-10,
     method="local-early",

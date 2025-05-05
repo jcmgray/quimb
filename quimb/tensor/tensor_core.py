@@ -9558,6 +9558,9 @@ class TensorNetwork(object):
         new_ltags=None,
         new_rtags=None,
         bond_ind=None,
+        gauges=None,
+        gauge_smudge=0.0,
+        gauge_power=1.0,
         optimize="auto-hq",
         inplace=False,
         **compress_opts,
@@ -9615,8 +9618,13 @@ class TensorNetwork(object):
         tn = self if (inplace or (insert_into is not None)) else self.copy()
 
         # get views of the left and right regions - 'X' and 'Y'
-        ltn = tn.select(ltags, which=select_which)
-        rtn = tn.select(rtags, which=select_which)
+        ltn = tn.select(ltags, which=select_which, virtual=False)
+        rtn = tn.select(rtags, which=select_which, virtual=False)
+
+        if gauges is not None:
+            (ltn | rtn).gauge_simple_insert(
+                gauges, smudge=gauge_smudge, power=gauge_power
+            )
 
         # get the connecting indices and corresponding sizes
         bix = bonds(ltn, rtn)
