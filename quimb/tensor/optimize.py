@@ -14,12 +14,13 @@ from autoray import astype, get_dtype_name, to_numpy
 
 from ..core import prod
 from ..utils import (
+    ExponentialGeometricRollingDiffMean,
     ensure_dict,
     tree_flatten,
     tree_map,
     tree_unflatten,
 )
-from ..utils_plot import default_to_neutral_style
+from ..utils_plot import default_to_neutral_style, plot_multi_series_zoom
 from .interface import get_jax
 from .tensor_core import (
     TensorNetwork,
@@ -1316,6 +1317,8 @@ class TNOptimizer:
         self.loss_best = float("inf")
         self.loss_target = loss_target
         self.losses = []
+        self.loss_diffs = []
+        self.lgrdm = ExponentialGeometricRollingDiffMean()
         self._n = 0
         self._pbar = None
 
@@ -1367,6 +1370,8 @@ class TNOptimizer:
         arrays = self.vectorizer.unpack()
         self.loss = self.handler.value(arrays).item()
         self.losses.append(self.loss)
+        self.lgrdm.update(float(self.loss))
+        self.loss_diffs.append(self.lgrdm.value)
         self._n += 1
         self._maybe_update_pbar()
         self._check_loss_target()
@@ -1381,6 +1386,8 @@ class TNOptimizer:
         self._n += 1
         self.loss = result.item()
         self.losses.append(self.loss)
+        self.lgrdm.update(float(self.loss))
+        self.loss_diffs.append(self.lgrdm.value)
         vec_grad = self.vectorizer.pack(grads, "grad")
         self._maybe_update_pbar()
         self._check_loss_target()
@@ -1394,13 +1401,13 @@ class TNOptimizer:
         hp_arrays = self.handler.hessp(primals, tangents)
         self._n += 1
         self.losses.append(self.loss)
+        self.lgrdm.update(float(self.loss))
+        self.loss_diffs.append(self.lgrdm.value)
         self._maybe_update_pbar()
         return self.vectorizer.pack(hp_arrays, "hp")
 
     def __repr__(self):
-        return (
-            f"<TNOptimizer(d={self.d}, " f"backend={self._autodiff_backend})>"
-        )
+        return f"<TNOptimizer(d={self.d}, backend={self._autodiff_backend})>"
 
     @property
     def d(self):
@@ -1815,34 +1822,9 @@ class TNOptimizer:
         ax : matplotlib.axes.Axes
             The axes object.
         """
-        import matplotlib.pyplot as plt
-        from matplotlib.colors import hsv_to_rgb
-
-        ys = np.array(self.losses)
-        xs = np.arange(ys.size)
-
-        fig, ax = plt.subplots()
-        ax.plot(xs, ys, ".-")
-        if xscale == "symlog":
-            ax.set_xscale(xscale, linthresh=xscale_linthresh)
-            ax.axvline(xscale_linthresh, color=(0.5, 0.5, 0.5), ls="-", lw=0.5)
-        else:
-            ax.set_xscale(xscale)
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Loss")
-
-        if hlines:
-            hlines = dict(hlines)
-            for i, (label, value) in enumerate(hlines.items()):
-                color = hsv_to_rgb([(0.1 * i) % 1.0, 0.9, 0.9])
-                ax.axhline(value, color=color, ls="--", label=label)
-                ax.text(1, value, label, color=color, va="bottom", ha="left")
-
-        if zoom is not None:
-            if zoom == "auto":
-                zoom = min(50, ys.size // 2)
-
-            iax = ax.inset_axes([0.5, 0.5, 0.5, 0.5])
-            iax.plot(xs[-zoom:], ys[-zoom:], ".-")
-
-        return fig, ax
+        return plot_multi_series_zoom(
+            {
+                "losses": self.losses,
+                "loss_diffs": self.loss_diffs,
+            },
+        )

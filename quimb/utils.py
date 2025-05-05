@@ -489,18 +489,27 @@ class LRU(collections.OrderedDict):
 
 
 class ExponentialGeometricRollingDiffMean:
+    """Track the absolute rolling mean of diffs between values, weighted in a
+    exponentially decaying geometric fashion.
+    """
     def __init__(self, factor=1 / 3, initial=1.0):
+        self.y_prev = None
         self.x_prev = None
-        self.dx = None
+        self.dy = None
         self.value = initial
         self.factor = factor
 
-    def update(self, x):
-        if self.x_prev is not None:
+    def update(self, y, x=None):
+        if self.y_prev is not None:
             # get the absolute change
-            self.dx = abs(x - self.x_prev)
+            self.dy = abs(y - self.y_prev)
+            # get the step size
+            if (x is not None) and (self.x_prev is not None):
+                self.dy /= abs(x - self.x_prev)
             # compute
-            self.value = self.value ** (1 - self.factor) * self.dx**self.factor
+            self.value = self.value ** (1 - self.factor) * self.dy**self.factor
+
+        self.y_prev = y
         self.x_prev = x
 
 
