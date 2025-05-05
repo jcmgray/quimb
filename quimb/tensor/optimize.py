@@ -876,13 +876,14 @@ class ADAM:
     Adapted from ``autograd/misc/optimizers.py``.
     """
 
-    def __init__(self):
+    def __init__(self, cautious=False):
         from scipy.optimize import OptimizeResult
 
         self.OptimizeResult = OptimizeResult
         self._i = 0
         self._m = None
         self._v = None
+        self._cautious = cautious
 
     def get_m(self, x):
         if self._m is None:
@@ -925,7 +926,20 @@ class ADAM:
             v = (1 - beta2) * (g**2) + beta2 * v  # second moment estimate.
             mhat = m / (1 - beta1**self._i)  # bias correction.
             vhat = v / (1 - beta2**self._i)
-            x = x - learning_rate * mhat / (np.sqrt(vhat) + eps)
+
+            # update vector
+            u = mhat / (np.sqrt(vhat) + eps)
+
+            if self._cautious:
+                # get mask where update matches gradient
+                phi = (u * g) > 0.0
+                # rescale for zeroed out elements
+                eps = learning_rate * phi.size / (phi.sum() + 1)
+                # apply update with mask and modified learning rate
+                x = x - eps * phi * u
+            else:
+                # apply update
+                x = x - learning_rate * u
 
             if bounds is not None:
                 x = np.clip(x, bounds[:, 0], bounds[:, 1])
@@ -937,6 +951,14 @@ class ADAM:
         return self.OptimizeResult(
             x=x, fun=fun(x), jac=g, nit=self._i, nfev=self._i, success=True
         )
+
+
+class CADAM(ADAM):
+    """Cautious ADAM - https://arxiv.org/abs/2411.16085.
+    """
+
+    def __init__(self):
+        super().__init__(cautious=True)
 
 
 class NADAM:
@@ -1100,6 +1122,7 @@ _STOC_GRAD_METHODS = {
     "sgd": SGD,
     "rmsprop": RMSPROP,
     "adam": ADAM,
+    "cadam": CADAM,
     "nadam": NADAM,
     "adabelief": ADABELIEF,
 }
