@@ -5,38 +5,12 @@ import operator
 import autoray as ar
 
 from quimb.tensor import TensorNetwork, array_contract, bonds
+from quimb.utils import RollingDiffMean
 
 
 def prod(xs):
     """Product of all elements in ``xs``."""
     return functools.reduce(operator.mul, xs)
-
-
-class RollingDiffMean:
-    """Tracker for the absolute rolling mean of diffs between values, to
-    assess effective convergence of BP above actual message tolerance.
-    """
-
-    def __init__(self, size=16):
-        self.size = size
-        self.diffs = []
-        self.last_x = None
-        self.dxsum = 0.0
-
-    def update(self, x):
-        if self.last_x is not None:
-            dx = x - self.last_x
-            self.diffs.append(dx)
-            self.dxsum += dx / self.size
-        if len(self.diffs) > self.size:
-            dx = self.diffs.pop(0)
-            self.dxsum -= dx / self.size
-        self.last_x = x
-
-    def absmeandiff(self):
-        if len(self.diffs) < self.size:
-            return float("inf")
-        return abs(self.dxsum)
 
 
 class BeliefPropagationCommon:

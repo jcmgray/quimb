@@ -186,6 +186,10 @@ def plot_multi_series_zoom(
             ax.yaxis.set_major_formatter(
                 mpl.ticker.ScalarFormatter(useOffset=False)
             )
+        elif yscale == "asinh":
+            ax.yaxis.set_major_locator(
+                mpl.ticker.AsinhLocator(1, numticks=6)
+            )
         else:
             ax.set_yscale(yscale)
 

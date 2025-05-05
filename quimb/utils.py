@@ -1,5 +1,6 @@
 """Misc utility functions."""
 
+import math
 import collections
 import functools
 import itertools
@@ -486,6 +487,39 @@ class LRU(collections.OrderedDict):
         if len(self) > self.maxsize:
             oldest = next(iter(self))
             del self[oldest]
+
+
+class RollingDiffMean:
+    """Tracker for the absolute rolling mean of diffs between values, to
+    assess effective convergence.
+    """
+
+    def __init__(self, size=16):
+        self.size = size
+        self.diffs = []
+        self.last_y = None
+        self.dxsum = 0.0
+
+    def update(self, y):
+        y = float(y)
+
+        if not math.isfinite(y):
+            # just ignore non-finite values
+            return
+
+        if self.last_y is not None:
+            dy = y - self.last_y
+            self.diffs.append(dy)
+            self.dxsum += dy / self.size
+        if len(self.diffs) > self.size:
+            dy = self.diffs.pop(0)
+            self.dxsum -= dy / self.size
+        self.last_y = y
+
+    def absmeandiff(self):
+        if len(self.diffs) < self.size:
+            return float("inf")
+        return abs(self.dxsum)
 
 
 class ExponentialGeometricRollingDiffMean:
