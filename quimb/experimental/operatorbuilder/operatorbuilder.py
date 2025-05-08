@@ -1537,12 +1537,11 @@ def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
     H = SparseOperatorBuilder()
     sites, edges = parse_edges_to_unique(edges)
 
-    if t != 0.0:
-        for cooa, coob in edges:
-            # hopping
-            for s in "↑↓":
-                H += -t, ("+", (s, cooa)), ("-", (s, coob))
-                H += -t, ("+", (s, coob)), ("-", (s, cooa))
+    for cooa, coob in edges:
+        # hopping
+        for s in "↑↓":
+            H += -t, ("+", (s, cooa)), ("-", (s, coob))
+            H += -t, ("+", (s, coob)), ("-", (s, cooa))
 
     for coo in sites:
         # interaction
@@ -1556,7 +1555,7 @@ def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
     return H
 
 
-def fermi_hubbard_spinless_from_edges(edges, t=1.0, mu=0.0):
+def fermi_hubbard_spinless_from_edges(edges, t=1.0, V=0.0, mu=0.0):
     """ """
     H = SparseOperatorBuilder()
     sites, edges = parse_edges_to_unique(edges)
@@ -1565,6 +1564,9 @@ def fermi_hubbard_spinless_from_edges(edges, t=1.0, mu=0.0):
         # hopping
         H += -t, ("+", cooa), ("-", coob)
         H += -t, ("+", coob), ("-", cooa)
+
+        # nearest neighbor interaction
+        H += V, ("n", cooa), ("n", coob)
 
     # chemical potential
     for coo in sites:
