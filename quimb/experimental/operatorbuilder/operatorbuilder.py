@@ -780,7 +780,7 @@ class SparseOperatorBuilder:
             print("".join(s), f"{coeff:+}")
 
     def build_state_machine_greedy(self):
-        # XXX: optimal method : https://arxiv.org/abs/2006.02056
+        # XXX: upgrade to optimal method : https://arxiv.org/abs/2006.02056
 
         import networkx as nx
 
@@ -807,20 +807,22 @@ class SparseOperatorBuilder:
             # place the coefficient somewhere unique at the end
             G.add_edge(a, b, op=op, weight=1, coeff=None)
             edges_to_terms.setdefault((a, b), set()).add(t)
-            terms_to_edges.setdefault(t, []).append((a, b))
+            terms_to_edges.setdefault(t, set()).add((a, b))
 
         def check_right():
             # check if can **right share**
             # - check all existing potential next nodes
-            # - current op must match or not exist
             # - right strings must match
             # - must be single output node
+            # - current op must match or not exist
             for rail in range(num_rails[reg + 1]):
                 cand_node = (reg + 1, rail)
                 if G.out_degree(cand_node) > 1:
+                    # can't share if there's not a single output string
                     continue
 
                 if G.nodes[cand_node]["out_string"] != string[reg + 1 :]:
+                    # output string must match
                     continue
 
                 e = (current_node, cand_node)
@@ -832,11 +834,12 @@ class SparseOperatorBuilder:
                         continue
                     G.edges[e]["weight"] += 1
                     edges_to_terms.setdefault(e, set()).add(t)
-                    terms_to_edges.setdefault(t, []).append(e)
+                    terms_to_edges.setdefault(t, set()).add(e)
                     return cand_node
 
                 # XXX: if we can right share, don't need to do anything
                 # more since whole remaining string is shared?
+                # -> possibly, to track term congestion for coeff placement
 
         def check_left():
             # check if can **left share**
@@ -849,7 +852,7 @@ class SparseOperatorBuilder:
                     if G.edges[e]["op"] == op:
                         G.edges[e]["weight"] += 1
                         edges_to_terms.setdefault(e, set()).add(t)
-                        terms_to_edges.setdefault(t, []).append(e)
+                        terms_to_edges.setdefault(t, set()).add(e)
                         return cand_node
 
         def create_new():
@@ -857,6 +860,16 @@ class SparseOperatorBuilder:
             next_node = (reg + 1, num_rails[reg + 1])
             num_rails[reg + 1] += 1
             new_edge(current_node, next_node)
+
+            if G.out_degree(current_node) > 1:
+                # no longer valid out_string, for all ancestor nodes
+                G.nodes[current_node]["out_string"] = None
+                for prev_node in nx.ancestors(G, current_node):
+                    G.nodes[prev_node]["out_string"] = None
+
+            # the new node is always a single output node so far
+            G.nodes[next_node]["out_string"] = string[reg + 1 :]
+
             return next_node
 
         for t, (term, coeff) in enumerate(self._term_store.items()):
@@ -879,12 +892,6 @@ class SparseOperatorBuilder:
                         # have to create new node
                         current_node = create_new()
 
-                if G.out_degree(current_node) <= 1:
-                    # record what the right matching string is
-                    G.nodes[current_node]["out_string"] = string[reg + 1 :]
-                else:
-                    G.nodes[current_node]["out_string"] = None
-
             if coeff != 1.0:
                 # record that we still need to place coeff somewhere
                 coeffs_to_place[t] = coeff
@@ -904,20 +911,27 @@ class SparseOperatorBuilder:
 
         def place_coeff(edge, coeff):
             G.edges[edge]["coeff"] = coeff
-            edge_scores.pop(edge)
+
             # every term passing through this edge is multiplied by this coeff
-            for t in edges_to_terms[edge]:
+            for t in edges_to_terms.pop(edge):
                 new_coeff = coeffs_to_place.pop(t, 1.0) / coeff
                 if new_coeff != 1.0:
                     # if another term doesn't have matching coeff, still need
                     # to place the updated coeff
                     coeffs_to_place[t] = new_coeff
 
+                # # remove edge as candidate for placing other coefficients
+                # terms_to_edges[t].remove(edge)
+            edge_scores.pop(edge)
+
         while coeffs_to_place:
             # get the remaining term with the maximum congestion
             t = max(coeffs_to_place, key=term_scores.get)
-            # get the least conjested edge it passes through
-            best = min(terms_to_edges[t], key=edge_scores.get)
+            # get the least congested edge it passes through
+            best = min(
+                (e for e in terms_to_edges[t] if e in edge_scores),
+                key=edge_scores.get,
+            )
             # place it and update everything
             place_coeff(best, coeffs_to_place[t])
 
@@ -927,15 +941,22 @@ class SparseOperatorBuilder:
         self,
         method="greedy",
         figsize="auto",
+        G=None,
     ):
+        """Draw the fintie state machine for this operator, as if buildling
+        the MPO.
+        """
         import math
+
         from matplotlib import pyplot as plt
+
         from quimb.schematic import auto_colors
 
-        if method == "greedy":
-            G = self.build_state_machine_greedy()
-        else:
-            raise ValueError(f"Unknown method {method}")
+        if G is None:
+            if method == "greedy":
+                G = self.build_state_machine_greedy()
+            else:
+                raise ValueError(f"Unknown method {method}")
 
         def labelled_arrow(ax, p1, p2, label, color, width):
             angle = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
@@ -988,7 +1009,7 @@ class SparseOperatorBuilder:
             width = math.log2(1 + data["weight"])
             label = data["op"]
             if data.get("coeff", None) is not None:
-                label += f" * {data['coeff']}"
+                label += f" * {data['coeff']:.4g}"
             label += "\n"
             labelled_arrow(ax, n1, n2, label, color, width)
 
