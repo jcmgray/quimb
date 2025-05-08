@@ -35,8 +35,8 @@ DONE::
 
 """
 
-import operator
 import functools
+import operator
 
 import numpy as np
 from numba import njit
@@ -336,6 +336,12 @@ _OPMAP = {
     "h": {0: (0, 1.0)},
 }
 
+_OPCOMPLEX = {
+    op
+    for op, mat in _OPMAP.items()
+    if any(isinstance(coeff, complex) for _, (_, coeff) in mat.items())
+}
+
 
 @functools.lru_cache(maxsize=None)
 def get_mat(op, dtype=None):
@@ -436,7 +442,8 @@ class SparseOperatorBuilder:
         self._term_store = {}
         self._sites_used = set()
         self._hilbert_space = hilbert_space
-        self._coupling_map = None
+        self._coupling_maps = {}
+        self._has_complex_terms = False
         for term in terms:
             self.add_term(*term)
 
@@ -474,13 +481,42 @@ class SparseOperatorBuilder:
             self._hilbert_space = HilbertSpace(self.sites_used)
         return self._hilbert_space
 
-    @property
-    def coupling_map(self):
-        if self._coupling_map is None:
-            self._coupling_map = build_coupling_numba(
-                self._term_store, self.hilbert_space.site_to_reg
+    def calc_dtype(self, dtype=None):
+        if dtype is None:
+            # choose automatically
+            if self._has_complex_terms:
+                dtype = np.complex128
+            else:
+                dtype = np.float64
+        else:
+            if np.issubdtype(dtype, np.float64):
+                dtype = np.float64
+            elif np.issubdtype(dtype, np.complex128):
+                dtype = np.complex128
+            elif np.issubdtype(dtype, np.complex64):
+                dtype = np.complex64
+            elif np.issubdtype(dtype, np.float32):
+                dtype = np.float32
+            else:
+                raise TypeError(f"Unsupported dtype {dtype}.")
+
+        return dtype
+
+    def build_coupling_map(self, dtype=None):
+        """Build and cache the coupling map for the specified dtype."""
+        dtype = self.calc_dtype(dtype)
+
+        try:
+            coupling_map = self._coupling_maps[dtype]
+        except KeyError:
+            coupling_map = build_coupling_numba(
+                self._term_store,
+                self.site_to_reg,
+                dtype=dtype,
             )
-        return self._coupling_map
+            self._coupling_maps[dtype] = coupling_map
+
+        return coupling_map
 
     def site_to_reg(self, site):
         """Get the register / linear index of coordinate ``site``."""
@@ -523,8 +559,8 @@ class SparseOperatorBuilder:
         if coeff == 0.0:
             # null-term
             return
-
-        # print(coeff, ops, '->')
+        elif np.iscomplexobj(coeff):
+            self._has_complex_terms = True
 
         # collect operators acting on the same site
         collected = {}
@@ -544,25 +580,29 @@ class SparseOperatorBuilder:
 
             if op is None:
                 # null-term ('e.g. '++' or '--')
-                # print('null-term')
-                # print()
                 return
 
             if op != "I":
                 # only need to record non-identity operators
                 simplified_ops.append((op, site))
 
+                if op in _OPCOMPLEX:
+                    # if we have complex operators, need to use complex dtype
+                    self._has_complex_terms = True
+
+        # if we have already seen this exact term, just add the coeff
         key = tuple(simplified_ops)
-
-        # print(coeff, key)
-        # print()
-
         new_coeff = self._term_store.pop(key, 0.0) + coeff
         if new_coeff != 0.0:
+            # but only if it doesn't cancel to zero
             self._term_store[key] = new_coeff
 
     def __iadd__(self, term):
         self.add_term(*term)
+        return self
+
+    def __isub__(self, term):
+        self.add_term(-term[0], *term[1:])
         return self
 
     def jordan_wigner_transform(self):
@@ -597,7 +637,7 @@ class SparseOperatorBuilder:
             else:
                 self.add_term(coeff, *term)
 
-    def build_coo_data(self, *k, parallel=False):
+    def build_coo_data(self, *k, dtype=None, parallel=False):
         """Build the raw data for a sparse matrix in COO format. Optionally
         in a reduced k basis and in parallel.
 
@@ -629,11 +669,17 @@ class SparseOperatorBuilder:
         """
         hs = self.hilbert_space
         bits = hs.get_bitbasis(*k)
-        coupling_map = self.coupling_map
-        coo, cis, cjs = build_coo_numba(bits, coupling_map, parallel=parallel)
+        dtype = self.calc_dtype(dtype)
+        coupling_map = self.build_coupling_map(dtype=dtype)
+        coo, cis, cjs = build_coo_numba(
+            bits,
+            coupling_map,
+            dtype=dtype,
+            parallel=parallel,
+        )
         return coo, cis, cjs, bits.size
 
-    def build_sparse_matrix(self, *k, stype="csr", parallel=False):
+    def build_sparse_matrix(self, *k, stype="csr", parallel=False, dtype=None):
         """Build a sparse matrix in the given format. Optionally in a reduced
         k basis and in parallel.
 
@@ -658,17 +704,21 @@ class SparseOperatorBuilder:
         """
         import scipy.sparse as sp
 
-        coo, cis, cjs, N = self.build_coo_data(*k, parallel=parallel)
+        coo, cis, cjs, N = self.build_coo_data(
+            *k,
+            dtype=dtype,
+            parallel=parallel,
+        )
         A = sp.coo_matrix((coo, (cis, cjs)), shape=(N, N))
         if stype != "coo":
             A = A.asformat(stype)
         return A
 
-    def build_dense(self):
+    def build_dense(self, dtype=None):
         """Get the dense (`numpy.ndarray`) matrix representation of this
         operator.
         """
-        A = self.build_sparse_matrix(stype="coo")
+        A = self.build_sparse_matrix(stype="coo", dtype=dtype)
         return A.toarray()
 
     def build_local_terms(self):
@@ -696,7 +746,7 @@ class SparseOperatorBuilder:
                 Hk[sites] += hk
         return Hk
 
-    def config_coupling(self, config):
+    def config_coupling(self, config, dtype=None):
         """Get a list of other configurations coupled to ``config`` by this
         operator, and the corresponding coupling coefficients. This is for
         use with VMC for example.
@@ -716,7 +766,8 @@ class SparseOperatorBuilder:
         bit_to_config = self.hilbert_space.bit_to_config
         config_to_bit = self.hilbert_space.config_to_bit
         b = config_to_bit(config)
-        bjs, coeffs = coupled_bits_numba(b, self.coupling_map)
+        coupling_map = self.build_coupling_map(dtype=dtype)
+        bjs, coeffs = coupled_bits_numba(b, coupling_map)
         return [bit_to_config(bj) for bj in bjs], coeffs
 
     def show(self, filler="."):
@@ -956,8 +1007,9 @@ class SparseOperatorBuilder:
         plt.show()
         plt.close(fig)
 
-    def build_mpo(self, method="greedy", **mpo_opts):
+    def build_mpo(self, method="greedy", dtype=None, **mpo_opts):
         import numpy as np
+
         import quimb as qu
         import quimb.tensor as qtn
 
@@ -966,8 +1018,9 @@ class SparseOperatorBuilder:
         else:
             raise ValueError(f"Unknown method {method}.")
 
+        dtype = self.calc_dtype(dtype)
         Wts = [
-            np.zeros((dl, dr, 2, 2), dtype=float)
+            np.zeros((dl, dr, 2, 2), dtype=dtype)
             for dl, dr in qu.utils.pairwise(G.graph["num_rails"])
         ]
 
@@ -1251,7 +1304,7 @@ def build_bitmap(configs):
     return {b: i for i, b in enumerate(configs)}
 
 
-def build_coupling_numba(term_store, site_to_reg):
+def build_coupling_numba(term_store, site_to_reg, dtype=None):
     """Create a sparse nested dictionary of how each term couples each
     local site configuration to which other local site configuration, and
     with what coefficient, suitable for use with numba.
@@ -1272,7 +1325,18 @@ def build_coupling_numba(term_store, site_to_reg):
     from numba.core import types
     from numba.typed import Dict
 
-    ty_xj = types.Tuple((types.int64, types.float64))
+    if (dtype is None) or np.issubdtype(dtype, np.float64):
+        ty_coeff = types.float64
+    elif np.issubdtype(dtype, np.complex128):
+        ty_coeff = types.complex128
+    elif np.issubdtype(dtype, np.complex64):
+        ty_coeff = types.complex64
+    elif np.issubdtype(dtype, np.float32):
+        ty_coeff = types.float32
+    else:
+        raise ValueError(f"Unknown dtype {dtype}")
+
+    ty_xj = types.Tuple((types.int64, ty_coeff))
     ty_xi = types.DictType(types.int64, ty_xj)
     ty_site = types.DictType(types.int64, ty_xi)
     coupling_map = Dict.empty(types.int64, ty_site)
@@ -1414,7 +1478,7 @@ def coupled_bits_numba(bi, coupling_map):
 
 
 @njit(nogil=True)
-def _build_coo_numba_core(bits, coupling_map, bitmap=None):
+def _build_coo_numba_core(bits, coupling_map, bitmap=None, dtype=np.float64):
     # the bit map is needed if we only have a partial set of `bits`, which
     # might couple to other bits that are not in `bits` -> we need to look up
     # the linear register of the coupled bit
@@ -1422,7 +1486,7 @@ def _build_coo_numba_core(bits, coupling_map, bitmap=None):
         bitmap = {bi: ci for ci, bi in enumerate(bits)}
 
     buf_size = len(bits)
-    data = np.empty(buf_size, dtype=np.float64)
+    data = np.empty(buf_size, dtype=dtype)
     cis = np.empty(buf_size, dtype=np.int64)
     cjs = np.empty(buf_size, dtype=np.int64)
     buf_ptr = 0
@@ -1458,7 +1522,7 @@ def _build_coo_numba_core(bits, coupling_map, bitmap=None):
     return data[:buf_ptr], cis[:buf_ptr], cjs[:buf_ptr]
 
 
-def build_coo_numba(bits, coupling_map, parallel=False):
+def build_coo_numba(bits, coupling_map, dtype=None, parallel=False):
     """Build an operator in COO form, using the basis ``bits`` and the
      ``coupling_map``, optionally multithreaded.
 
@@ -1485,7 +1549,7 @@ def build_coo_numba(bits, coupling_map, parallel=False):
         The column indices of the non-zero elements.
     """
     if not parallel:
-        return _build_coo_numba_core(bits, coupling_map)
+        return _build_coo_numba_core(bits, coupling_map, dtype=dtype)
 
     from quimb import get_thread_pool
 
@@ -1500,7 +1564,11 @@ def build_coo_numba(bits, coupling_map, parallel=False):
     n_thread_workers = pool._max_workers
 
     # need a global mapping of bits to linear indices
-    kws = dict(coupling_map=coupling_map, bitmap=build_bitmap(bits))
+    kws = {
+        "coupling_map": coupling_map,
+        "bitmap": build_bitmap(bits),
+        "dtype": dtype,
+    }
 
     # launch the threads! note we distribtue in cyclic fashion as the sparsity
     # can be concentrated in certain ranges and we want each thread to have
