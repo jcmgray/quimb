@@ -2669,6 +2669,7 @@ class TensorNetwork2D(TensorNetworkGen):
         dense=False,
         compress_opts=None,
         envs=None,
+        equalize_norms=False,
         **contract_boundary_opts,
     ):
         """Compute the 1D boundary tensor networks describing the environments
@@ -2702,6 +2703,10 @@ class TensorNetwork2D(TensorNetworkGen):
             :func:`~quimb.tensor.tensor_core.tensor_compress_bond`.
         envs : dict, optional
             An existing dictionary to store the environments in.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the boundary tensors after each
+            contraction, gathering the overall scaling coefficient, log10, in
+            ``tn.exponent``.
         contract_boundary_opts
             Other options to pass to
             :meth:`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_boundary_from`.
@@ -2735,6 +2740,10 @@ class TensorNetwork2D(TensorNetworkGen):
             iprev = i - sweep.step
             if dense:
                 tn ^= (x_tag(iprevprev), x_tag(iprev))
+
+                if equalize_norms:
+                    tn.equalize_norms_(equalize_norms)
+
             else:
                 tn.contract_boundary_from_(
                     xrange=(
@@ -2750,6 +2759,7 @@ class TensorNetwork2D(TensorNetworkGen):
                     canonize=canonize,
                     layer_tags=layer_tags,
                     compress_opts=compress_opts,
+                    equalize_norms=equalize_norms,
                     **contract_boundary_opts,
                 )
 

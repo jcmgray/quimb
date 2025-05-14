@@ -2578,7 +2578,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
     def ptr(self, *_, **__):
         raise AttributeError(
-            "`mps.ptr` has been renamed " "to `mps.partial_trace_to_mpo`."
+            "`mps.ptr` has been renamed to `mps.partial_trace_to_mpo`."
         )
 
     def partial_trace_to_dense_canonical(
