@@ -89,15 +89,15 @@ from .networking import (
     compute_hierarchical_ssa_path,
     compute_shortest_distances,
     gen_all_paths_between_tids,
+    gen_gloops,
     gen_inds_connected,
     gen_loops,
     gen_patches,
     gen_paths_loops,
     gen_sloops,
-    gen_gloops,
     get_local_patch,
-    get_path_between_tids,
     get_loop_union,
+    get_path_between_tids,
     get_tree_span,
     isconnected,
     istree,
@@ -653,7 +653,6 @@ def tensor_split(
             bond_ind = rand_uuid()
         bond_ind_l = bond_ind_r = bond_ind
 
-
     ltags = T.tags | tags_to_oset(ltags)
     rtags = T.tags | tags_to_oset(rtags)
 
@@ -955,11 +954,7 @@ def tensor_compress_bond(
 
 
 @functools.singledispatch
-def tensor_balance_bond(
-    t1: "Tensor",
-    t2: "Tensor",
-    smudge=1e-6
-):
+def tensor_balance_bond(t1: "Tensor", t2: "Tensor", smudge=1e-6):
     """Gauge the bond between two tensors such that the norm of the 'columns'
     of the tensors on each side is the same for each index of the bond.
 
@@ -1011,11 +1006,7 @@ def tensor_multifuse(ts, inds, gauges=None):
         t.fuse_({inds[0]: inds})
 
 
-def tensor_make_single_bond(
-    t1: "Tensor",
-    t2: "Tensor",
-    gauges=None
-):
+def tensor_make_single_bond(t1: "Tensor", t2: "Tensor", gauges=None):
     """If two tensors share multibonds, fuse them together and return the left
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
     Inplace operation.
@@ -1133,7 +1124,7 @@ def array_direct_product(X, Y, sum_axes=()):
         else:
             if d1 != d2:
                 raise ValueError(
-                    "Can only add sum tensor " "indices of the same size."
+                    "Can only add sum tensor indices of the same size."
                 )
             padX.append((0, 0))
             padY.append((0, 0))
@@ -1462,6 +1453,7 @@ def maybe_unwrap(
         return result, exponent
 
     return result
+
 
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
@@ -2043,7 +2035,9 @@ class Tensor:
         new_ind_pair_with_identity, inplace=True
     )
 
-    def new_ind_pair_diag(self, ind, new_left_ind, new_right_ind, inplace=False):
+    def new_ind_pair_diag(
+        self, ind, new_left_ind, new_right_ind, inplace=False
+    ):
         """Expand an existing index ``ind`` of this tensor into a new pair of
         indices ``(new_left_ind, new_right_ind)`` each of matching size, such
         that the old tensor is the diagonal of the new tensor. The new indices
@@ -2099,7 +2093,9 @@ class Tensor:
         t.modify(data=new_data, inds=new_inds)
         return t
 
-    new_ind_pair_diag_ = functools.partialmethod(new_ind_pair_diag, inplace=True)
+    new_ind_pair_diag_ = functools.partialmethod(
+        new_ind_pair_diag, inplace=True
+    )
 
     def conj(self, inplace=False):
         """Conjugate this tensors data (does nothing to indices)."""
@@ -2933,7 +2929,7 @@ class Tensor:
         # NOTE: for compatibility with TN.norm, we accept contract_opts
         norm = norm_fro(self.data)
         if squared:
-            return norm ** 2
+            return norm**2
         return norm
 
     def overlap(self, other, **contract_opts):
@@ -4359,7 +4355,7 @@ class TensorNetwork(object):
             tid = tid_or_tags
         else:
             # get the tensor ids from the tags
-            tid, = self._get_tids_from_tags(tid_or_tags, which=which)
+            (tid,) = self._get_tids_from_tags(tid_or_tags, which=which)
 
         t = self.tensor_map.pop(tid)
 
@@ -4670,7 +4666,7 @@ class TensorNetwork(object):
             # both are already copies
             virtual=True,
             # mangling already avoids clashes
-            check_collisions=not mangle_append
+            check_collisions=not mangle_append,
         )
 
         if return_all:
@@ -4692,7 +4688,7 @@ class TensorNetwork(object):
         norm2 = tn_norm.contract(output_inds=(), **contract_opts)
         if squared:
             return norm2
-        return norm2 ** 0.5
+        return norm2**0.5
 
     def make_overlap(
         self,
@@ -5334,9 +5330,7 @@ class TensorNetwork(object):
                 grow_from=grow_from,
             )
         else:
-            raise ValueError(
-                "`mode` must be `graphdistance` or `loopunion`."
-            )
+            raise ValueError("`mode` must be `graphdistance` or `loopunion`.")
 
         for _ in range(int(fillin)):
             # find any tids that are connected to the local region by two or
@@ -7573,7 +7567,7 @@ class TensorNetwork(object):
             if pbar is not None:
                 pbar.update()
                 pbar.set_description(
-                    f"max|dS|={max_sdiff:.2e}, " f"nfact={nfact:.2f}"
+                    f"max|dS|={max_sdiff:.2e}, nfact={nfact:.2f}"
                 )
 
             unconverged = (tol == 0.0) or (max_sdiff > tol)
@@ -8820,8 +8814,7 @@ class TensorNetwork(object):
 
         if d != db:
             raise ValueError(
-                f"This operator has dimension {d} but needs "
-                f"dimension {db}."
+                f"This operator has dimension {d} but needs dimension {db}."
             )
 
         # reindex one tensor, and add a new A tensor joining the bonds
@@ -9153,7 +9146,6 @@ class TensorNetwork(object):
         # this checks whether certain TN classes have a manually specified
         #     contraction pattern (e.g. 1D along the line)
         if self._CONTRACT_STRUCTURED:
-
             if (tags is ...) or isinstance(tags, slice):
                 return self.contract_structured(
                     tags,
@@ -9164,20 +9156,16 @@ class TensorNetwork(object):
 
         # contracting everything to single output
         if all_tags and not inplace:
-
             return tensor_contract(
                 *self.tensor_map.values(),
                 strip_exponent=strip_exponent,
                 exponent=self.exponent,
-                **kwargs
+                **kwargs,
             )
 
         # contract some or all tensors, but keeping tensor network
         return self.contract_tags(
-            tags,
-            strip_exponent=strip_exponent,
-            inplace=inplace,
-            **kwargs
+            tags, strip_exponent=strip_exponent, inplace=inplace, **kwargs
         )
 
     contract_ = functools.partialmethod(contract, inplace=True)
@@ -9248,7 +9236,7 @@ class TensorNetwork(object):
                 c_tags,
                 which="any",
                 equalize_norms=equalize_norms,
-                **contract_opts
+                **contract_opts,
             )
 
             if tn.num_tensors == 1:

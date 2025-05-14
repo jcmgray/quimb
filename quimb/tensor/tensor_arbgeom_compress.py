@@ -78,7 +78,6 @@ def tensor_network_ag_compress_projector(
         canonize_opts = ensure_dict(canonize_opts)
         gauges = canonize_opts.pop("gauges", {})
 
-
         if canonize == "layered":
             # get all tids for a single site
             tid0s = tn._get_tids_from_tags(site_tags[0])

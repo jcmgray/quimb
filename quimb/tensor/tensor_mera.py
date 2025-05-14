@@ -1,23 +1,21 @@
-"""Tools for building and computing with MERA.
-"""
+"""Tools for building and computing with MERA."""
 
-from math import log2
 import itertools
+from math import log2
 
 import numpy as np
 
 import quimb as qu
-from .tensor_core import rand_uuid, IsoTensor, TensorNetwork
+
 from .tensor_1d import TensorNetwork1D, TensorNetwork1DVector
+from .tensor_core import IsoTensor, TensorNetwork, rand_uuid
 
 
 def is_power_of_2(x):
     return ((x & (x - 1)) == 0) and x > 0
 
 
-class MERA(TensorNetwork1DVector,
-           TensorNetwork1D,
-           TensorNetwork):
+class MERA(TensorNetwork1DVector, TensorNetwork1D, TensorNetwork):
     r"""The Multi-scale Entanglement Renormalization Ansatz (MERA) state::
 
             ...     ...     ...     ...     ...     ...
@@ -50,12 +48,20 @@ class MERA(TensorNetwork1DVector,
         with an indentity.
     """
 
-    _EXTRA_PROPS = ('_site_ind_id', '_site_tag_id', 'cyclic', '_L')
+    _EXTRA_PROPS = ("_site_ind_id", "_site_tag_id", "cyclic", "_L")
     _CONTRACT_STRUCTURED = False
 
-    def __init__(self, L, uni=None, iso=None, phys_dim=2, dangle=False,
-                 site_ind_id="k{}", site_tag_id="I{}", **tn_opts):
-
+    def __init__(
+        self,
+        L,
+        uni=None,
+        iso=None,
+        phys_dim=2,
+        dangle=False,
+        site_ind_id="k{}",
+        site_tag_id="I{}",
+        **tn_opts,
+    ):
         # short-circuit for copying MERA
         if isinstance(L, MERA):
             super().__init__(L)
@@ -73,10 +79,10 @@ class MERA(TensorNetwork1DVector,
 
         nlayers = round(log2(L))
 
-        if hasattr(uni, 'shape'):
+        if hasattr(uni, "shape"):
             uni = (uni,)
 
-        if hasattr(iso, 'shape'):
+        if hasattr(iso, "shape"):
             iso = (iso,)
 
         unis = itertools.cycle(uni)
@@ -86,7 +92,6 @@ class MERA(TensorNetwork1DVector,
             u_ind_id = site_ind_id
 
             for i in range(nlayers):
-
                 # index id connecting to layer below
                 l_ind_id = u_ind_id
                 # index id connecting to isos to unis
@@ -98,7 +103,6 @@ class MERA(TensorNetwork1DVector,
                 eff_L = L // 2**i
 
                 for j in range(0, eff_L, 2):
-
                     # generate the unitary:
                     #  ul | | ur
                     #     UNI
@@ -110,11 +114,14 @@ class MERA(TensorNetwork1DVector,
 
                     tags = ("_UNI", f"_LAYER{i}")
                     if i == 0:
-                        tags += (site_tag_id.format(j),
-                                 site_tag_id.format(j + 1))
+                        tags += (
+                            site_tag_id.format(j),
+                            site_tag_id.format(j + 1),
+                        )
 
-                    yield IsoTensor(next(unis), inds=inds,
-                                    tags=tags, left_inds=(ll, lr))
+                    yield IsoTensor(
+                        next(unis), inds=inds, tags=tags, left_inds=(ll, lr)
+                    )
 
                     # generate the isometry (offset by one effective site):
                     #      | ui
@@ -127,14 +134,20 @@ class MERA(TensorNetwork1DVector,
                     tags = ("_ISO", f"_LAYER{i}")
 
                     if i < nlayers - 1 or dangle:
-                        yield IsoTensor(next(isos), inds=inds,
-                                        tags=tags, left_inds=(ll, lr))
+                        yield IsoTensor(
+                            next(isos),
+                            inds=inds,
+                            tags=tags,
+                            left_inds=(ll, lr),
+                        )
                     else:
                         # don't leave dangling index at top
                         iso_f = next(isos)
                         yield IsoTensor(
                             np.eye(iso_f.shape[0], dtype=iso_f.dtype) / 2**0.5,
-                            inds=inds[:-1], tags=tags, left_inds=(ll, lr)
+                            inds=inds[:-1],
+                            tags=tags,
+                            left_inds=(ll, lr),
                         )
 
         super().__init__(gen_mera_tensors(), virtual=True)
@@ -144,17 +157,16 @@ class MERA(TensorNetwork1DVector,
             for j in range(L):
                 # get isometries in the same layer
                 for t in self.select_neighbors(j):
-                    if f'_LAYER{i}' in t.tags:
-                        t.add_tag(f'I{j}')
+                    if f"_LAYER{i}" in t.tags:
+                        t.add_tag(f"I{j}")
 
                 # get unitaries in layer above
                 for t in self.select_neighbors(j):
-                    if f'_LAYER{i + 1}' in t.tags:
-                        t.add_tag(f'I{j}')
+                    if f"_LAYER{i + 1}" in t.tags:
+                        t.add_tag(f"I{j}")
 
     @classmethod
     def rand(cls, L, max_bond=None, phys_dim=2, dtype=float, **mera_opts):
-
         d = phys_dim
         if max_bond is None:
             max_bond = d
@@ -191,8 +203,7 @@ class MERA(TensorNetwork1DVector,
 
     @classmethod
     def rand_invar(cls, L, phys_dim=2, dtype=float, **mera_opts):
-        """Generate a random translational and scale invariant MERA.
-        """
+        """Generate a random translational and scale invariant MERA."""
         d = phys_dim
 
         iso = qu.rand_iso(d**2, d, dtype=dtype)

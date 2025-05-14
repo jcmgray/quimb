@@ -1,8 +1,8 @@
 """Functions for generating specific, e.g. ansatz, circuits."""
 
+import itertools
 import math
 import random
-import itertools
 
 from .. import rand, seed_rand
 

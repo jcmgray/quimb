@@ -5,7 +5,7 @@ import itertools
 import numpy as np
 from autoray import do
 
-from ..utils import ensure_dict, continuous_progbar, deprecated
+from ..utils import continuous_progbar, deprecated, ensure_dict
 from ..utils import progbar as Progbar
 from .array_ops import norm_fro
 from .tensor_arbgeom_tebd import LocalHamGen
@@ -146,8 +146,8 @@ class LocalHam1D(LocalHamGen):
         split_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
         """
-        from .tensor_core import Tensor
         from .tensor_1d import MatrixProductOperator
+        from .tensor_core import Tensor
 
         mpo = MatrixProductOperator.new(
             L=self.L,

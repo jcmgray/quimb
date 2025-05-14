@@ -1,19 +1,18 @@
-"""DMRG-like variational algorithms, but in tensor network language.
-"""
+"""DMRG-like variational algorithms, but in tensor network language."""
 
 import itertools
 import warnings
 
 import numpy as np
 
-from ..utils import progbar
 from ..core import prod
-from ..linalg.base_linalg import eigh, IdentityLinearOperator
+from ..linalg.base_linalg import IdentityLinearOperator, eigh
+from ..utils import progbar
 from .tensor_core import (
     Tensor,
-    tensor_contract,
     TNLinearOperator,
     asarray,
+    tensor_contract,
 )
 
 

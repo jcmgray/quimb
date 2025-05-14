@@ -1,5 +1,5 @@
-"""Functionailty for drawing tensor networks.
-"""
+"""Functionailty for drawing tensor networks."""
+
 import collections
 import importlib
 import textwrap

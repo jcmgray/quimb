@@ -1,15 +1,14 @@
-"""Functions relating to tensor network contraction.
-"""
+"""Functions relating to tensor network contraction."""
+
+import collections
+import contextlib
 import functools
 import itertools
 import threading
-import contextlib
-import collections
 
 import cotengra as ctg
 
-
-_CONTRACT_STRATEGY = 'greedy'
+_CONTRACT_STRATEGY = "greedy"
 _TEMP_CONTRACT_STRATEGIES = collections.defaultdict(list)
 
 
@@ -313,8 +312,8 @@ def array_contract_path(*args, optimize=None, **kwargs):
         optimize = get_contract_strategy()
     return ctg.array_contract_path(*args, optimize=optimize, **kwargs)
 
-def array_contract_pathinfo(*args, **kwargs):
 
+def array_contract_pathinfo(*args, **kwargs):
     import opt_einsum as oe
 
     tree = array_contract_tree(*args, **kwargs)
@@ -338,4 +337,3 @@ def array_contract_pathinfo(*args, **kwargs):
         path = ((0,),)
 
     return oe.contract_path(eq, *shapes, shapes=True, optimize=path)[1]
-
