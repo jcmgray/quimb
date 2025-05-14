@@ -4338,7 +4338,21 @@ class TensorNetwork(object):
         return len(self.ind_map)
 
     def pop_tensor(self, tid_or_tags, which="all") -> Tensor:
-        """Remove tensor with ``tid`` from this network, and return it."""
+        """Remove a tensor from this network, and return it.
+
+        Parameters
+        ----------
+        tid_or_tags : int or str or sequence of str
+            The tensor id or tag(s) to match.
+        which : {'all', 'any'}, optional
+            If supplying tags, whether to match all or any of the tags.
+            Default is 'all'.
+
+        Returns
+        -------
+        Tensor
+            The tensor that was removed.
+        """
         # pop the tensor itself
 
         if isinstance(tid_or_tags, int):
