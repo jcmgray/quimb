@@ -7,6 +7,8 @@ def compute_all_marginals_via_slicing(
     tn,
     output_inds,
     optimize="auto-hq",
+    strip_exponent=False,
+    progbar=False,
     **contract_kwargs,
 ):
 
@@ -14,7 +16,13 @@ def compute_all_marginals_via_slicing(
     arrays = tn.arrays
 
     w = {}
+    Z = None
     symbol_map = tn.get_symbol_map()
+
+    if progbar:
+        from tqdm import tqdm
+
+        output_inds = tqdm(output_inds)
 
     for ix in output_inds:
 
@@ -34,11 +42,26 @@ def compute_all_marginals_via_slicing(
         wv = [0.0 for i in range(tree_v.size_dict[symbol])]
 
         for s in range(tree_v.nslices):
+            # what index combination is this slice
+            key = tree_v.slice_key(s)
+
+            if (Z is not None) and key[symbol] == 1:
+                # we can compute this from the total count
+                continue
 
             # contract the slice
-            p, exponent = tree_v.contract_slice(
-                arrays, s, **contract_kwargs, strip_exponent=True
-            )
+            if strip_exponent:
+                p, exponent = tree_v.contract_slice(
+                    arrays, s, **contract_kwargs, strip_exponent=True
+                )
+            else:
+                p = tree_v.contract_slice(
+                    arrays, s, **contract_kwargs
+                )
+                exponent = 0.0
+
+            p = float(p)
+            exponent = float(exponent)
 
             if overall_exponent is None:
                 # set overall exponent from first slice...
@@ -47,11 +70,17 @@ def compute_all_marginals_via_slicing(
             # ... correct subsequent slices relative to first
             rel_exponent = exponent - overall_exponent
 
-            # what index combination is this slice
-            key = tree_v.slice_key(s)
-
             # add result to correct index position
             wv[key[symbol]] += p * 10 ** rel_exponent
+
+
+        if Z is None:
+            # completed first index, can compute Z
+            Z = sum(wv)
+            w["Z"] = Z
+        else:
+            # can use total to infer the 1 value
+            wv[1] = Z - wv[0]
 
         w[ix] = (wv, overall_exponent)
 

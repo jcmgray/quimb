@@ -7,7 +7,7 @@ import random
 import numpy as np
 import autoray as ar
 
-from quimb.utils import default_to_neutral_style
+from quimb.utils_plot import default_to_neutral_style
 from quimb import format_number_with_error
 
 
@@ -20,16 +20,14 @@ def sample_bitstring_from_prob_ndarray(p, rng):
 
 
 def shuffled(it):
-    """Return a copy of ``it`` in random order.
-    """
+    """Return a copy of ``it`` in random order."""
     it = list(it)
     random.shuffle(it)
     return it
 
 
 class NoContext:
-    """A convenience context manager that does nothing.
-    """
+    """A convenience context manager that does nothing."""
 
     def __enter__(self):
         pass
@@ -51,26 +49,25 @@ class MovingStatistics:
         self._vsum = 0.0
 
     def update(self, x):
-
         # update mean
         self.xs.append(x)
         if len(self.xs) > self.window_size:
             xr = self.xs.pop(0)
         else:
             xr = 0.0
-        self._xsum += (x - xr)
+        self._xsum += x - xr
 
         # update approx variance
-        v = (x - self.mean)**2
+        v = (x - self.mean) ** 2
         self.vs.append(v)
         if len(self.vs) > self.window_size:
             vr = self.vs.pop(0)
         else:
             vr = 0.0
-        self._vsum += (v - vr)
+        self._vsum += v - vr
 
     @property
-    def mean(self) :
+    def mean(self):
         N = len(self.xs)
         if N == 0:
             return 0.0
@@ -97,23 +94,26 @@ class MovingStatistics:
 
 # --------------------------------------------------------------------------- #
 
+
 class DenseSampler:
     """Sampler that explicitly constructs the full probability distribution.
     Useful for debugging small problems.
     """
 
     def __init__(self, psi=None, seed=None, **contract_opts):
-        if psi is not None:
-            self._set_psi(psi)
-        contract_opts.setdefault('optimize', 'auto-hq')
+        contract_opts.setdefault("optimize", "auto-hq")
         self.contract_opts = contract_opts
         self.rng = np.random.default_rng(seed)
+        if psi is not None:
+            self._set_psi(psi)
 
     def _set_psi(self, psi):
         psi_dense = psi.contract(
-            ..., output_inds=psi.site_inds, **self.contract_opts,
+            ...,
+            output_inds=psi.site_inds,
+            **self.contract_opts,
         ).data
-        self.p = (abs(psi_dense.ravel())**2)
+        self.p = abs(psi_dense.ravel()) ** 2
         self.p /= self.p.sum()
         self.sites = psi.sites
         self.shape = tuple(psi.ind_size(ix) for ix in psi.site_inds)
@@ -123,10 +123,15 @@ class DenseSampler:
         flat_idx = self.rng.choice(self.flat_indexes, p=self.p)
         omega = self.p[flat_idx]
         config = np.unravel_index(flat_idx, self.shape)
+
+        if np.sum(config) != len(self.shape) // 2:
+            # reject if not half filling
+            return self.sample()
+
         return dict(zip(self.sites, config)), omega
 
     def update(self, **kwargs):
-        self._set_psi(kwargs['psi'])
+        self._set_psi(kwargs["psi"])
 
 
 class DirectTNSampler:
@@ -166,7 +171,7 @@ class DirectTNSampler:
         self.tid2ind = {}
         for site in self.tn.sites:
             ix = self.tn.site_ind(site)
-            tid, = self.tn._get_tids_from_inds(ix)
+            (tid,) = self.tn._get_tids_from_inds(ix)
             self.tid2ind[tid] = ix
             self.ind2site[ix] = site
 
@@ -189,23 +194,27 @@ class DirectTNSampler:
         else:
             self.omegas = self.probs = None
 
-    def plot(self,):
+    def plot(
+        self,
+    ):
         from matplotlib import pyplot as plt
+
         fig, ax = plt.subplots(figsize=(4, 4))
         mins = min(self.omegas)
         maxs = max(self.omegas)
-        ax.plot([mins, maxs], [mins, maxs], color='red')
-        ax.scatter(self.probs, self.omegas, marker='.', alpha=0.5)
-        ax.set_xlabel('$\pi(x)$')
-        ax.set_ylabel('$\omega(x)$')
-        ax.set_xscale('log')
-        ax.set_yscale('log')
-        ax.grid(True, c=(0.97 ,0.97, 0.97), which='major')
+        ax.plot([mins, maxs], [mins, maxs], color="red")
+        ax.scatter(self.probs, self.omegas, marker=".", alpha=0.5)
+        ax.set_xlabel("$\pi(x)$")
+        ax.set_ylabel("$\omega(x)$")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.grid(True, c=(0.97, 0.97, 0.97), which="major")
         ax.set_axisbelow(True)
 
+        return fig, ax
+
     def calc_groups(self, **kwargs):
-        """Calculate how to group the sites into marginals.
-        """
+        """Calculate how to group the sites into marginals."""
         self.groups = self.tn.compute_hierarchical_grouping(
             max_group_size=self.max_group_size,
             tids=tuple(self.tid2ind),
@@ -245,11 +254,10 @@ class DirectTNSampler:
                 optimize=self.get_optimize(),
                 output_inds=output_inds,
                 cutoff=0.0,
-                compress_opts=dict(absorb='both'),
+                compress_opts=dict(absorb="both"),
             )
 
     def sample(self):
-
         config = {}
 
         tnm = self.tn.copy()
@@ -262,10 +270,9 @@ class DirectTNSampler:
 
         tnm.apply_to_arrays(ar.lazy.array)
         with ar.lazy.shared_intermediates():
-        # with NoContext():
+            # with NoContext():
 
             for _ in range(self.sweeps):
-
                 # random.shuffle(self.groups)
                 omega = 1.0
 
@@ -285,8 +292,8 @@ class DirectTNSampler:
                     tg = self.contract(tnm, inds)
 
                     # convert into normalized prob and sample a config
-                    prob_g = ar.do('abs', tg.data.compute())**2
-                    prob_g /= ar.do('sum', prob_g)
+                    prob_g = ar.do("abs", tg.data.compute()) ** 2
+                    prob_g /= ar.do("sum", prob_g)
                     config_g = sample_bitstring_from_prob_ndarray(
                         prob_g, self.rng
                     )
@@ -294,7 +301,6 @@ class DirectTNSampler:
 
                     # re-project the tensors according to the sampled config
                     for tid, ix, bi in zip(group, inds, config_g):
-
                         # the 'measurement' for this tensor
                         # bi = int(bi)
 
@@ -311,10 +317,10 @@ class DirectTNSampler:
 
         if self.track:
             self.omegas.append(omega)
-            self.probs.append(abs(tg.data[config_g].compute())**2)
+            self.probs.append(abs(tg.data[config_g].compute()) ** 2)
 
         # final chosen marginal is prob of whole config
-        return config, omega # tg.data[config_g].compute()
+        return config, omega  # tg.data[config_g].compute()
 
 
 def compute_amplitude(tn, config, chi, optimize):
@@ -323,7 +329,7 @@ def compute_amplitude(tn, config, chi, optimize):
         optimize=optimize,
         max_bond=chi,
         cutoff=0.0,
-        compress_opts={'absorb': 'both'},
+        compress_opts={"absorb": "both"},
         inplace=True,
     )
 
@@ -337,27 +343,29 @@ def compute_amplitudes(tn, configs, chi, optimize):
         for config in configs:
             amps.append(compute_amplitude(tnlz, config, chi, optimize))
 
-    amps = ar.do('stack', amps)
+    amps = ar.do("stack", amps)
     return amps.compute()
 
 
 def compute_local_energy(ham, tn, config, chi, optimize):
-    """
-    """
+    """ """
     c_configs, c_coeffs = ham.config_coupling(config)
     amps = compute_amplitudes(tn, [config] + c_configs, chi, optimize)
-    c_coeffs = ar.do('array', c_coeffs, like=amps)
-    return ar.do('sum', amps[1:] * c_coeffs) / amps[0]
+    c_coeffs = ar.do("array", c_coeffs, like=amps)
+    return ar.do("sum", amps[1:] * c_coeffs) / amps[0]
 
 
 def draw_config(edges, config):
     import networkx as nx
+
     G = nx.Graph(edges)
     pos = nx.kamada_kawai_layout(G)
     nx.draw(G, node_color=[config[node] for node in G.nodes], pos=pos)
 
 
 class ClusterSampler:
+
+    autocorrelated = False
 
     def __init__(
         self,
@@ -373,7 +381,7 @@ class ClusterSampler:
         self.contract_opts = (
             {} if contract_opts is None else dict(contract_opts)
         )
-        self.contract_opts.setdefault('optimize', 'auto-hq')
+        self.contract_opts.setdefault("optimize", "auto-hq")
         if psi is not None:
             self._set_psi(psi)
 
@@ -387,13 +395,12 @@ class ClusterSampler:
 
         self.tid2site = {}
         for site in self._psi.sites:
-            tid, = self._psi._get_tids_from_tags(site)
+            (tid,) = self._psi._get_tids_from_tags(site)
             self.tid2site[tid] = site
         self.ordering = self._psi.compute_hierarchical_ordering()
 
     def sample(self):
-        """
-        """
+        """ """
         config = {}
         psi = self._psi.copy()
 
@@ -421,15 +428,18 @@ class ClusterSampler:
                 k.gauge_simple_insert(gauges)
 
             # contract the approx reduced density matrix diagonal
-            pk = (k.H & k).contract(
-                ...,
-                output_inds=[ind],  # directly extract diagonal
-                **self.contract_opts,
-            ).data
+            pk = (
+                (k.H & k)
+                .contract(
+                    output_inds=[ind],  # directly extract diagonal
+                    **self.contract_opts,
+                )
+                .data.real
+            )
 
             # normalize and sample a state for this site
             pk /= pk.sum()
-            idx = self.rng.choice(np.arange(2), p=pk)
+            idx = self.rng.choice(np.arange(2), p=ar.to_numpy(pk))
             config[site] = idx
 
             # track the probability chain
@@ -443,7 +453,8 @@ class ClusterSampler:
                 psi._gauge_local_tids(
                     [tid],
                     max_distance=(self.max_distance + 1),
-                    method='simple', gauges=gauges
+                    method="simple",
+                    gauges=gauges,
                 )
 
         return config, omega
@@ -454,10 +465,68 @@ class ClusterSampler:
         pass
 
     def update(self, **kwargs):
+        self._set_psi(kwargs["psi"])
+
+
+class BPFGSampler:
+
+    autocorrelated = False
+
+    def __init__(self, psi=None, **kwargs):
+        from quimb.experimental.vbp import (
+            run_belief_propagation, sample_belief_propagation
+        )
+        self._run = run_belief_propagation
+        self._sample = sample_belief_propagation
+        self.kwargs = kwargs
+
+        self.fg = None
+        self.messages = None
+        self.ind2site = None
+
+        if psi is not None:
+            self._set_psi(psi)
+
+    def _set_psi(self, psi):
+        self.fg = psi.copy()
+        self.fg.apply_to_arrays(lambda x: abs(x)**2)
+
+        if self.messages is None:
+            self.messages, _ = self._run(self.fg)
+
+        if self.ind2site is None:
+            self.ind2site = {psi.site_ind(site): site for site in psi.sites}
+
+    def candidate(self):
+        config, _, omega = self._sample(
+            self.fg,
+            output_inds=self.ind2site.keys(),
+            messages=self.messages,
+            **self.kwargs,
+        )
+
+        config = {
+            self.ind2site[ix]: val
+            for ix, val in config.items()
+        }
+
+        return config, omega
+
+    def accept(self, config):
+        self.config = config
+
+    def sample(self):
+        config, omega = self.candidate()
+        self.accept(config)
+        return config, omega
+
+    def update(self, **kwargs):
         self._set_psi(kwargs['psi'])
 
 
 class ExchangeSampler:
+
+    autocorrelated = True
 
     def __init__(self, edges, seed=None):
         self.edges = tuple(sorted(edges))
@@ -495,6 +564,8 @@ class ExchangeSampler:
 
 class HamiltonianSampler:
 
+    autocorrelated = True
+
     def __init__(self, ham, seed=None):
         self.ham = ham
         self.rng = np.random.default_rng(seed)
@@ -508,13 +579,13 @@ class HamiltonianSampler:
 
     def candidate(self):
         generate = True
+        configs, _ = self.ham.config_coupling(self.config)
         while generate:
             # XXX: could do this much more efficiently with a single random
             # term
-            configs, _ = self.ham.config_coupling(self.config)
             i = self.rng.integers(len(configs))
             new_config = configs[i]
-            generate = (new_config == self.config)
+            generate = new_config == self.config
         return new_config, 1.0
 
     def accept(self, config):
@@ -530,15 +601,15 @@ class HamiltonianSampler:
 
 
 class MetropolisHastingsSampler:
-    """
-    """
+    """ """
 
     def __init__(
         self,
         sub_sampler,
         amplitude_factory=None,
         initial=None,
-        burn_in=0,
+        burn=0,
+        skip=0,
         seed=None,
         track=False,
     ):
@@ -559,14 +630,15 @@ class MetropolisHastingsSampler:
         self.rng = np.random.default_rng(self.seed)
         self.accepted = 0
         self.total = 0
-        self.burn_in = burn_in
+        self.burn = burn
+        self.skip = skip
 
         # should we record the history?
         self.track = track
         if self.track:
-            self.omegas = array.array('d')
-            self.probs = array.array('d')
-            self.acceptances = array.array('d')
+            self.omegas = array.array("d")
+            self.probs = array.array("d")
+            self.acceptances = array.array("d")
         else:
             self.omegas = self.probs = self.acceptances = None
 
@@ -597,18 +669,21 @@ class MetropolisHastingsSampler:
                 self.probs.append(nprob)
                 self.acceptances.append(acceptance)
 
-            if (self.rng.uniform() < acceptance):
+            if self.rng.uniform() < acceptance:
                 self.config = nconfig
                 self.omega = nomega
                 self.prob = nprob
                 self.accepted += 1
                 self.sub_sampler.accept(nconfig)
 
-                if (self.total > self.burn_in):
+                if (
+                    (self.total > self.burn) and
+                    (self.total % (self.skip + 1) == 0)
+                ):
                     return self.config, self.omega
 
     def update(self, **kwargs):
-        self.prob_fn = kwargs['amplitude_factory'].prob
+        self.prob_fn = kwargs["amplitude_factory"].prob
         self.sub_sampler.update(**kwargs)
 
     @default_to_neutral_style
@@ -658,7 +733,7 @@ def auto_share_multicall(func, arrays, configs):
     with ar.lazy.shared_intermediates():
         lzarrays_all = [
             # different variants provided as first dimension
-            ar.lazy.array(x) if hasattr(x, 'shape') else
+            ar.lazy.array(x) if hasattr(x, "shape") else
             # different variants provided as a sequence
             list(map(ar.lazy.array, x))
             for x in arrays
@@ -681,7 +756,6 @@ def auto_share_multicall(func, arrays, configs):
 
 
 class ComposePartial:
-
     __slots__ = (
         "f",
         "f_args",
@@ -698,8 +772,7 @@ class ComposePartial:
     def __call__(self, *args, **kwargs):
         y = self.g(*args, **kwargs)
         f_args = (
-            y if isinstance(v, ar.lazy.LazyArray) else v
-            for v in self.f_args
+            y if isinstance(v, ar.lazy.LazyArray) else v for v in self.f_args
         )
         return self.f(*f_args, **self.f_kwargs)
 
@@ -708,12 +781,10 @@ _partial_compose_cache = {}
 
 
 def get_compose_partial(f, f_args, f_kwargs, g):
-
     key = (
         f,
         tuple(
-            '__placeholder__' if isinstance(v, ar.lazy.LazyArray)
-            else v
+            "__placeholder__" if isinstance(v, ar.lazy.LazyArray) else v
             for v in f_args
         ),
         tuple(sorted(f_kwargs.items())),
@@ -723,7 +794,9 @@ def get_compose_partial(f, f_args, f_kwargs, g):
     try:
         fg = _partial_compose_cache[key]
     except KeyError:
-        fg = _partial_compose_cache[key] = ComposePartial(f, f_args, f_kwargs, g)
+        fg = _partial_compose_cache[key] = ComposePartial(
+            f, f_args, f_kwargs, g
+        )
     except TypeError:
         fg = ComposePartial(f, f_args, f_kwargs, g)
 
@@ -735,13 +808,14 @@ def fuse_unary_ops_(Z):
     seen = set()
     while queue:
         node = queue.pop()
-        if (
-            len(node._deps) == 1 and
-            any(isinstance(v, ar.lazy.LazyArray) for v in node.args)
+        if len(node._deps) == 1 and any(
+            isinstance(v, ar.lazy.LazyArray) for v in node.args
         ):
-            dep, = node._deps
+            (dep,) = node._deps
             if dep._nchild == 1 and dep._fn:
-                node._fn = get_compose_partial(node._fn, node._args, node._kwargs, dep._fn)
+                node._fn = get_compose_partial(
+                    node._fn, node._args, node._kwargs, dep._fn
+                )
                 node._args = dep._args
                 node._kwargs = dep._kwargs
                 node._deps = dep._deps
@@ -754,9 +828,27 @@ def fuse_unary_ops_(Z):
                 seen.add(dep)
 
 
+def setup_single_amplitude_fn(contract_fn=None, **contract_opts):
+
+    def single_amplitude_fn(psi, config):
+        psi_c = psi.isel({
+            psi.site_ind(site): val
+            for site, val in config.items()}
+        )
+
+        if contract_fn is None:
+            return psi_c.contract(..., output_inds=(), **contract_opts)
+
+        if isinstance(contract_fn, str):
+            return getattr(psi_c, contract_fn)(**contract_opts)
+
+        return contract_fn(psi_c, **contract_opts)
+
+    return single_amplitude_fn
+
+
 
 class AmplitudeFactory:
-
     def __init__(
         self,
         psi=None,
@@ -769,10 +861,11 @@ class AmplitudeFactory:
 
         self.contract_fn = contract_fn
         self.contract_opts = contract_opts
-        if self.contract_opts.get('max_bond', None) is not None:
-            self.contract_opts.setdefault('cutoff', 0.0)
+        if self.contract_opts.get("max_bond", None) is not None:
+            self.contract_opts.setdefault("cutoff", 0.0)
 
         self.autojit_opts = dict(autojit_opts)
+        self.jit_fn = None
 
         if psi is not None:
             self._set_psi(psi)
@@ -781,58 +874,94 @@ class AmplitudeFactory:
         self.hits = 0
         self.queries = 0
 
+    def compute_single_tn(self, config, psi=None):
+        from numpy.testing import assert_allclose
+
+        if self.jit_fn is None:
+            from quimb.experimental.autojittn import autojit_tn
+
+            self.f = setup_single_amplitude_fn(
+                self.contract_fn, **self.contract_opts
+            )
+            self.jit_fn = autojit_tn(self.f, **self.autojit_opts)
+
+        if psi is None:
+            psi = self.psi
+
+        c = self.f(psi, config)
+
+        # cj = self.jit_fn(psi, config)
+        # print(psi.geometry_hash())
+        # print(c / cj)
+        # assert_allclose(c, cj, rtol=1e-4)
+
+        return c
+
+        # if psi is None:
+        #     psi = self.psi
+
+        # psi_c = psi.isel({
+        #     psi.site_ind(site): val
+        #     for site, val in config.items()}
+        # )
+
+        # if self.contract_fn is None:
+        #     return psi_c.contract(..., output_inds=(), **self.contract_opts)
+        # return self.contract_fn(psi_c, **self.contract_opts)
+
     def _set_psi(self, psi):
-        psi0 = psi.copy()
+        # psi0 = psi.copy()
 
-        self.arrays = []
-        self.sitemap = {}
-        variables = []
+        self.psi = psi.copy()
 
-        for site in psi0.sites:
-            ix = psi0.site_ind(site)
-            t, = psi0._inds_get(ix)
+        # self.arrays = []
+        # self.sitemap = {}
+        # variables = []
 
-            # want variable index first
-            t.moveindex_(ix, 0)
-            self.sitemap[site] = len(self.arrays)
-            self.arrays.append(t.data)
+        # for site in psi0.sites:
+        #     ix = psi0.site_ind(site)
+        #     (t,) = psi0._inds_get(ix)
 
-            # insert lazy variable for sliced tensor
-            variable = ar.lazy.Variable(t.shape[1:], backend='autoray.lazy')
-            variables.append(variable)
-            t.modify(data=variable, inds=t.inds[1:])
+        #     # want variable index first
+        #     t.moveindex_(ix, 0)
+        #     self.sitemap[site] = len(self.arrays)
+        #     self.arrays.append(t.data)
 
-        # trace the function lazily
-        if self.contract_fn is None:
-            Z = psi0.contract(..., output_inds=(), **self.contract_opts)
-        else:
-            Z = self.contract_fn(psi0, **self.contract_opts)
+        #     # insert lazy variable for sliced tensor
+        #     variable = ar.lazy.Variable(t.shape[1:], backend="autoray.lazy")
+        #     variables.append(variable)
+        #     t.modify(data=variable, inds=t.inds[1:])
 
-        # get the functional form of this traced contraction
-        self.f_lazy = Z.get_function(variables)
+        # # trace the function lazily
+        # if self.contract_fn is None:
+        #     Z = psi0.contract(..., output_inds=(), **self.contract_opts)
+        # else:
+        #     Z = self.contract_fn(psi0, **self.contract_opts)
 
-        # this can then itself be traced with concrete arrays
-        self.f = ar.autojit(self.f_lazy, **self.autojit_opts)
+        # # get the functional form of this traced contraction
+        # self.f_lazy = Z.get_function(variables)
 
-    def compute_single(self, config):
-        """Compute the amplitude of ``config``, making use of autojit.
-        """
-        arrays = self.arrays.copy()
-        for site, v in config.items():
-            i = self.sitemap[site]
-            arrays[i] = self.arrays[i][v]
-        return self.f(arrays)
+        # # this can then itself be traced with concrete arrays
+        # self.f = ar.autojit(self.f_lazy, **self.autojit_opts)
 
-    def compute_multi(self, configs):
-        """Compute the amplitudes corresponding to the sequence ``configs``,
-        making use of shared intermediates.
-        """
-        # translate index config to position configs
-        iconfigs = [
-            {self.sitemap[site]: v for site, v in config.items()}
-            for config in configs
-        ]
-        return auto_share_multicall(self.f_lazy, self.arrays, iconfigs)
+    # def compute_single(self, config):
+    #     """Compute the amplitude of ``config``, making use of autojit."""
+    #     arrays = self.arrays.copy()
+    #     for site, v in config.items():
+    #         i = self.sitemap[site]
+    #         arrays[i] = self.arrays[i][v]
+    #     return self.f(arrays)
+
+    # def compute_multi(self, configs):
+    #     """Compute the amplitudes corresponding to the sequence ``configs``,
+    #     making use of shared intermediates.
+    #     """
+    #     # translate index config to position configs
+    #     iconfigs = [
+    #         {self.sitemap[site]: v for site, v in config.items()}
+    #         for config in configs
+    #     ]
+    #     return auto_share_multicall(self.f_lazy, self.arrays, iconfigs)
 
     # def update(self, config, coeff):
     #     """Update the amplitude cache with a new configuration.
@@ -849,45 +978,45 @@ class AmplitudeFactory:
             self.hits += 1
             return self.store[key]
 
-        coeff = self.compute_single(self.psi, config)
+        # coeff = self.compute_single(config)
+        coeff = self.compute_single_tn(config)
 
         self.store[key] = coeff
         return coeff
 
-    def amplitudes(self, configs):
-        """
-        """
-        # first parse out the configurations we need to compute
-        all_keys = []
-        new_keys = []
-        new_configs = []
-        for config in configs:
-            key = tuple(sorted(config.items()))
-            all_keys.append(key)
-            self.queries += 1
-            if key in self.store:
-                self.hits += 1
-            else:
-                new_keys.append(key)
-                new_configs.append(config)
+    # def amplitudes(self, configs):
+    #     """ """
+    #     # first parse out the configurations we need to compute
+    #     all_keys = []
+    #     new_keys = []
+    #     new_configs = []
+    #     for config in configs:
+    #         key = tuple(sorted(config.items()))
+    #         all_keys.append(key)
+    #         self.queries += 1
+    #         if key in self.store:
+    #             self.hits += 1
+    #         else:
+    #             new_keys.append(key)
+    #             new_configs.append(config)
 
-        # compute the new configurations
-        if new_configs:
-            new_coeffs = self.compute_multi(new_configs)
-            for key, coeff in zip(new_keys, new_coeffs):
-                self.store[key] = coeff
+    #     # compute the new configurations
+    #     if new_configs:
+    #         new_coeffs = self.compute_multi(new_configs)
+    #         for key, coeff in zip(new_keys, new_coeffs):
+    #             self.store[key] = coeff
 
-        # return the full set of old and new coefficients
-        return [self.store[key] for key in all_keys]
+    #     # return the full set of old and new coefficients
+    #     return [self.store[key] for key in all_keys]
 
     def prob(self, config):
-        """Calculate the probability of a configuration.
-        """
+        """Calculate the probability of a configuration."""
         coeff = self.amplitude(config)
-        return ar.do("abs", coeff)**2
+        return ar.do("abs", coeff) ** 2
 
-    def clear(self):
+    def update(self, **kwargs):
         self.store.clear()
+        self._set_psi(kwargs['psi'])
 
     def __contains__(self, config):
         return tuple(sorted(config.items())) in self.store
@@ -996,15 +1125,16 @@ class AmplitudeFactory:
 
 
 class GradientAccumulator:
-
     def __init__(self):
         self._grads_logpsi = None
         self._grads_energy = None
         self._batch_energy = None
+        self._local_energies = None
         self._num_samples = 0
 
     def _init_storage(self, grads):
         self._batch_energy = 0.0
+        self._local_energies = []
         self._grads_logpsi = [np.zeros_like(g) for g in grads]
         self._grads_energy = [np.zeros_like(g) for g in grads]
 
@@ -1012,9 +1142,12 @@ class GradientAccumulator:
         if self._batch_energy is None:
             self._init_storage(grads_logpsi_sample)
 
+        self._local_energies.append(local_energy)
         self._batch_energy += local_energy
         for g, ge, g_i in zip(
-            self._grads_logpsi, self._grads_energy, grads_logpsi_sample,
+            self._grads_logpsi,
+            self._grads_energy,
+            grads_logpsi_sample,
         ):
             g += g_i
             ge += g_i * local_energy
@@ -1031,25 +1164,63 @@ class GradientAccumulator:
             g.fill(0.0)
             ge.fill(0.0)
         self._batch_energy = 0.0
+        self._local_energies = []
         self._num_samples = 0
         return grads_energy_batch
 
 
-class SGD(GradientAccumulator):
+class MinSR(GradientAccumulator):
 
+    def __init__(self, learning_rate=0.01):
+        self.learning_rate = learning_rate
+        self.vectorizer = None
+        self.gs = []
+        self.es = []
+        super().__init__()
+
+    def update(self, grads_logpsi_sample, local_energy):
+        if self.vectorizer is None:
+            from quimb.tensor.optimize import Vectorizer
+
+            # first call, initialize storage
+            self.vectorizer = Vectorizer(grads_logpsi_sample)
+        self.gs.append(self.vectorizer.pack(grads_logpsi_sample).copy())
+        self.es.append(local_energy)
+
+    def transform_gradients(self):
+        gs = np.stack(self.gs)
+        es = np.array(self.es)
+        Ns = len(es)
+        epsilon = (es - np.mean(es)) / Ns**0.5
+        O = (gs - np.mean(gs, axis=0).reshape(1, -1)) / Ns**0.5
+        Odag = O.conj().T
+
+        # # SR
+        # S = Odag @ O
+        # Sinv = np.linalg.pinv(S, 1e-6, True)
+        # dtheta = Sinv @ Odag @ epsilon
+
+        # MinSR
+        T = O @ Odag
+        Tinv = np.linalg.pinv(T, 1e-6, True)
+        dtheta = Odag @ Tinv @ epsilon
+
+        self.gs.clear()
+        self.es.clear()
+
+        return self.vectorizer.unpack(self.learning_rate * dtheta)
+
+
+class SGD(GradientAccumulator):
     def __init__(self, learning_rate=0.01):
         self.learning_rate = learning_rate
         super().__init__()
 
     def transform_gradients(self):
-        return [
-            self.learning_rate * g
-            for g in self.extract_grads_energy()
-        ]
+        return [self.learning_rate * g for g in self.extract_grads_energy()]
 
 
 class SignDescent(GradientAccumulator):
-
     def __init__(self, learning_rate=0.01):
         self.learning_rate = learning_rate
         super().__init__()
@@ -1062,7 +1233,6 @@ class SignDescent(GradientAccumulator):
 
 
 class RandomSign(GradientAccumulator):
-
     def __init__(self, learning_rate=0.01):
         self.learning_rate = learning_rate
         super().__init__()
@@ -1075,7 +1245,6 @@ class RandomSign(GradientAccumulator):
 
 
 class Adam(GradientAccumulator):
-
     def __init__(
         self,
         learning_rate=0.01,
@@ -1109,19 +1278,15 @@ class Adam(GradientAccumulator):
             # second moment estimate
             v = (1 - self.beta2) * (g**2) + self.beta2 * self._vs[i]
             # bias correction
-            mhat = m / (1 - self.beta1**(self._num_its))
-            vhat = v / (1 - self.beta2**(self._num_its))
+            mhat = m / (1 - self.beta1 ** (self._num_its))
+            vhat = v / (1 - self.beta2 ** (self._num_its))
             deltas.append(
                 self.learning_rate * mhat / (np.sqrt(vhat) + self.eps)
             )
         return deltas
 
 
-from quimb.tensor.optimize import Vectorizer
-
-
 class StochasticReconfigureGradients:
-
     def __init__(self, delta=1e-5):
         self.delta = delta
         self.vectorizer = None
@@ -1129,6 +1294,8 @@ class StochasticReconfigureGradients:
 
     def update(self, grads_logpsi_sample, local_energy):
         if self.vectorizer is None:
+            from quimb.tensor.optimize import Vectorizer
+
             # first call, initialize storage
             self.vectorizer = Vectorizer(grads_logpsi_sample)
         self.gs.append(self.vectorizer.pack(grads_logpsi_sample).copy())
@@ -1147,7 +1314,7 @@ class StochasticReconfigureGradients:
         S -= np.outer(g, g)
 
         # condition by adding to diagonal
-        S.flat[::S.shape[0] + 1] += self.delta
+        S.flat[:: S.shape[0] + 1] += self.delta
 
         # the uncorrected energy gradient / 'force' vector
         y = self.vectorizer.pack(super().extract_grads_energy())
@@ -1157,17 +1324,13 @@ class StochasticReconfigureGradients:
         return self.vectorizer.unpack(x)
 
 
-
 class SR(SGD, StochasticReconfigureGradients):
-
     def __init__(self, learning_rate=0.05, delta=1e-5):
         StochasticReconfigureGradients.__init__(self, delta=delta)
-        SGD().__init__(self, learning_rate=learning_rate)
-
+        SGD.__init__(self, learning_rate=learning_rate)
 
 
 class SRADAM(Adam, StochasticReconfigureGradients):
-
     def __init__(
         self,
         learning_rate=0.01,
@@ -1178,26 +1341,38 @@ class SRADAM(Adam, StochasticReconfigureGradients):
     ):
         StochasticReconfigureGradients.__init__(self, delta=delta)
         Adam.__init__(
-            self, learning_rate=learning_rate,
-            beta1=beta1, beta2=beta2, eps=eps,
+            self,
+            learning_rate=learning_rate,
+            beta1=beta1,
+            beta2=beta2,
+            eps=eps,
         )
 
 
 # --------------------------------------------------------------------------- #
 
-class TNVMC:
 
+def to_torch(x):
+    import torch
+
+    if isinstance(x, torch.Tensor):
+        return x.detach()
+    return torch.tensor(x)
+
+
+class TNVMC:
     def __init__(
         self,
         psi,
         ham,
         sampler,
-        conditioner='auto',
+        conditioner="auto",
         learning_rate=1e-2,
-        optimizer='adam',
+        optimizer="adam",
         optimizer_opts=None,
         track_window_size=1000,
-        **contract_opts
+        callback=None,
+        **contract_opts,
     ):
         from quimb.utils import ensure_dict
 
@@ -1205,14 +1380,12 @@ class TNVMC:
         self.ham = ham
         self.sampler = sampler
 
-        if conditioner == 'auto':
+        if conditioner == "auto":
 
             def conditioner(psi):
                 psi.equalize_norms_(1.0)
 
-        else:
-            self.conditioner = conditioner
-
+        self.conditioner = conditioner
         if self.conditioner is not None:
             # want initial arrays to be in conditioned form so that gradients
             # are approximately consistent across runs (e.g. for momentum)
@@ -1220,32 +1393,42 @@ class TNVMC:
 
         optimizer_opts = ensure_dict(optimizer_opts)
         self.optimizer = {
-            'adam': Adam,
-            'sgd': SGD,
-            'sign': SignDescent,
-            'signu': RandomSign,
-            'sr': SR,
-            'sradam': SRADAM,
+            "adam": Adam,
+            "sgd": SGD,
+            "sign": SignDescent,
+            "signu": RandomSign,
+            "sr": SR,
+            "sradam": SRADAM,
+            "minsr": MinSR,
         }[optimizer.lower()](learning_rate=learning_rate, **optimizer_opts)
         self.contract_opts = contract_opts
 
         self.amplitude_factory = AmplitudeFactory(self.psi, **contract_opts)
-        self.sampler.update(psi=self.psi, amplitude_factory=self.amplitude_factory)
+        self.sampler.update(
+            psi=self.psi,
+            amplitude_factory=self.amplitude_factory
+        )
 
         # tracking information
         self.moving_stats = MovingStatistics(track_window_size)
-        self.local_energies = array.array('d')
-        self.energies = array.array('d')
-        self.energy_errors = array.array('d')
+        self.local_energies = []
+        self.energies = []
+        self.energy_variances = []
+        self.energy_errors = []
         self.num_tensors = self.psi.num_tensors
         self.nsites = self.psi.nsites
         self._progbar = None
+        self.callback = callback
 
     def _compute_log_gradients_torch(self, config):
         import torch
+
         psi_t = self.psi.copy()
         psi_t.apply_to_arrays(lambda x: torch.tensor(x).requires_grad_())
-        c = self.amplitude_factory(psi_t, config)
+
+        config = {k: torch.tensor(v) for k, v in config.items()}
+
+        c = self.amplitude_factory.compute_single_tn(config, psi_t)
         c.backward()
         c = c.item()
         self.amplitude_factory[config] = c
@@ -1270,6 +1453,7 @@ class TNVMC:
                 self.local_energies.append(local_energy)
                 self.moving_stats.update(local_energy)
                 self.energies.append(self.moving_stats.mean)
+                self.energy_variances.append(self.moving_stats.var)
                 self.energy_errors.append(self.moving_stats.err)
 
                 # compute the sample log amplitude gradients
@@ -1281,8 +1465,10 @@ class TNVMC:
                     self._progbar.update()
                     self._progbar.set_description(
                         format_number_with_error(
-                            self.moving_stats.mean,
-                            self.moving_stats.err))
+                            self.moving_stats.mean, self.moving_stats.err
+                        ),
+                        refresh=False,
+                    )
 
             # apply learning rate and other transforms to gradients
             deltas = self.optimizer.transform_gradients()
@@ -1295,8 +1481,15 @@ class TNVMC:
             if self.conditioner is not None:
                 self.conditioner(self.psi)
 
-            self.amplitude_factory.clear()
-            self.sampler.update(psi=self.psi, amplitude_factory=self.amplitude_factory)
+            self.amplitude_factory.update(
+                psi=self.psi,
+            )
+            self.sampler.update(
+                psi=self.psi, amplitude_factory=self.amplitude_factory
+            )
+
+            if self.callback is not None:
+                self.callback(self)
 
     def run(
         self,
@@ -1309,6 +1502,7 @@ class TNVMC:
 
         if progbar:
             from quimb.utils import progbar as Progbar
+
             self._progbar = Progbar(total=total)
 
         try:
@@ -1328,10 +1522,11 @@ class TNVMC:
         from xyzpy import RunningStatistics
 
         rs = RunningStatistics()
-        energies = array.array('d')
+        energies = array.array("d")
 
         if progbar:
             from quimb.utils import progbar as Progbar
+
             pb = Progbar(total=max_samples)
         else:
             pb = None
@@ -1347,7 +1542,10 @@ class TNVMC:
                     pb.update()
                     err = rs.err
                     if err != 0.0:
-                        pb.set_description(format_number_with_error(rs.mean, err))
+                        pb.set_description(
+                            format_number_with_error(rs.mean, err),
+                            refresh=False,
+                        )
 
                 if 0.0 < rs.rel_err < rtol:
                     break

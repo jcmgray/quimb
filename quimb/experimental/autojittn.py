@@ -1,98 +1,86 @@
 """Decorator for automatically just in time compiling tensor network functions.
 
-TODO::
-
-    - [ ] go via an intermediate pytree / array function, that could be shared
-          e.g. with the TNOptimizer class.
-
+TODO:
+- [ ] check and cache on input shapes
 """
 import functools
 
 import autoray as ar
 
+from quimb.tensor.interface import pack, unpack
+
+
+def try_and_get_params(x):
+    if hasattr(x, "get_params"):
+        return x.get_params()
+    return x
 
 
 class AutojittedTN:
-    """Class to hold the ``autojit_tn`` decorated function callable.
-    """
-
-    def __init__(
-        self,
-        fn,
-        decorator=ar.autojit,
-        check_inputs=True,
-        **decorator_opts
-    ):
+    def __init__(self, fn, decorator=ar.autojit, **decorator_opts):
         self.fn = fn
-        self.fn_store = {}
-        self.decorator_opts = decorator_opts
-        self.check_inputs = check_inputs
+        self.jit_fn = None
         self.decorator = decorator
+        self.decorator_opts = decorator_opts
 
-    def setup_fn(self, tn, *args, **kwargs):
-        from quimb.tensor import TensorNetwork
+    def _setup(self, *args, **kwargs):
+        # extract all arrays to flat list, keep reference pytree and skeletons
+        flat, ref_tree = ar.tree_flatten((args, kwargs), get_ref=True)
+        _, skeletons = zip(*map(pack, flat))
+
+        # now decorate the function that takes pytrees of arrays only
 
         @self.decorator(**self.decorator_opts)
-        def fn_jit(arrays):
-            # use separate TN to trace through function
-            jtn = tn.copy()
+        def pyfn(*pytrees):
 
-            # insert the tracing arrays
-            for t, array in zip(jtn, arrays):
-                t.modify(data=array)
+            # inject back into the skeletons
+            flat = [unpack(p, skel) for p, skel in zip(pytrees, skeletons)]
+            args, kwargs = ar.tree_unflatten(flat, ref_tree)
 
-            # run function on TN with tracing arrays
-            result = self.fn(jtn, *args, **kwargs)
+            # call the original function
+            result = self.fn(*args, **kwargs)
 
-            # check for a inplace tn function
-            if isinstance(result, TensorNetwork):
-                if result is not jtn:
-                    raise ValueError(
-                        "If you are compiling a function that returns a"
-                        " tensor network it needs to be inplace.")
-                self.inplace = True
-                return tuple(t.data for t in jtn)
-            else:
-                # function returns raw scalar/array(s)
-                self.inplace = False
+            # flatten the result to check if it needs unpacking
+            flat_out, ref_tree_out = ar.tree_flatten(result, get_ref=True)
+
+            if not any(hasattr(x, "set_params") for x in flat_out):
+                # result doesnt need unpacking -> is a pure pytree
+                self.ref_tree_out = None
+                self.skeletons_out = None
                 return result
 
-        return fn_jit
+            # need to unpack after each call
+            params_out, skeletons_out = zip(*map(pack, flat_out))
+            self.skeletons_out = skeletons_out
+            self.ref_tree_out = ref_tree_out
+            return params_out
 
-    def __call__(self, tn, *args, **kwargs):
+        self.jit_fn = pyfn
 
-        # do we need to generate a new function for these inputs
-        if self.check_inputs:
-            key = (
-                tn.geometry_hash(strict_index_order=True),
-                tuple(args),
-                tuple(sorted(kwargs.items())),
-            )
-        else:
-            # always use the same function
-            key = None
+    def __call__(self, *args, backend=None, **kwargs):
+        if self.jit_fn is None:
+            self._setup(*args, **kwargs)
 
-        if key not in self.fn_store:
-            self.fn_store[key] = self.setup_fn(tn, *args, **kwargs)
-        fn_jit = self.fn_store[key]
+        # extract to sequence of pytrees of arrays
+        pytrees = tuple(
+            try_and_get_params(x) for x in ar.tree_flatten((args, kwargs))
+        )
 
-        # run the compiled function
-        arrays = tuple(t.data for t in tn)
-        out = fn_jit(arrays)
+        # call the traced function
+        result = self.jit_fn(*pytrees, backend=backend)
 
-        if self.inplace:
-            # reinsert output arrays into input TN structure
-            for t, array in zip(tn, out):
-                t.modify(data=array)
-            return tn
+        if self.skeletons_out is None:
+            # no need to unpack
+            return result
 
-        return out
+        # unpack into tensor networks instances etc
+        flat = [unpack(p, skel) for p, skel in zip(result, self.skeletons_out)]
+        return ar.tree_unflatten(flat, self.ref_tree_out)
 
 
 def autojit_tn(
     fn=None,
     decorator=ar.autojit,
-    check_inputs=True,
     **decorator_opts,
 ):
     """Decorate a tensor network function to be just in time compiled / traced.
@@ -104,24 +92,16 @@ def autojit_tn(
     Parameters
     ----------
     fn : callable
-        The function to be decorated. It should take as its first argument a
-        :class:`~quimb.tensor.tensor_core.TensorNetwork` and return either act
-        inplace on it or return a raw scalar or array.
+        The function to be decorated.
     decorator : callable
         The decorator to use to wrap the underlying array function. For example
         ``jax.jit``. Defaults to ``autoray.autojit``.
-    check_inputs : bool, optional
-        Whether to check the inputs to the function every call to see if a new
-        compiled function needs to be generated. If ``False`` the same compiled
-        function will be used for all inputs which might be incorrect. Defaults
-        to ``True``.
     decorator_opts
         Options to pass to the decorator, e.g. ``backend`` for
         ``autoray.autojit``.
     """
     kwargs = {
-        'decorator': decorator,
-        'check_inputs': check_inputs,
+        "decorator": decorator,
         **decorator_opts,
     }
     if fn is None:

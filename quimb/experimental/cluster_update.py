@@ -259,7 +259,7 @@ class ClusterUpdateNNGen(SimpleUpdateGen):
 
         # temporarily gauge it with 'simple' gauges
         with psi_local.gauge_simple_temp(
-            self.gauges,
+            self._gauges,
             smudge=self.gauge_smudge,
         ):
             # fit the gate to the gauged local cluster
@@ -277,7 +277,7 @@ class ClusterUpdateNNGen(SimpleUpdateGen):
             "any",
             max_distance=1,
             method="simple",
-            gauges=self.gauges,
+            gauges=self._gauges,
             smudge=self.gauge_smudge,
         )
 
