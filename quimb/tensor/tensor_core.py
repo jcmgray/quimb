@@ -11210,10 +11210,12 @@ class TensorNetwork(object):
         ----------
         mode : {'dense', 'mps', 'tree'}, optional
             What type of COPY tensor(s) to insert.
-        sorter : None or callable, optional
+        sorter : None, callable, "centrality", or "clustering", optional
             If given, a function to sort the indices that a single hyperindex
             will be turned into. Th function is called like
-            ``tids.sort(key=sorter)``.
+            ``tids.sort(key=sorter)``. "centrality" will sort by the
+            centrality of the tensors, "clustering" will sort using a
+            hierarchical clustering.
         inplace : bool, optional
             Whether to insert the COPY tensors inplace.
 

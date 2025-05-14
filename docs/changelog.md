@@ -28,6 +28,7 @@ Release notes for `quimb`.
 - add [`Tensor.new_ind_pair_diag`](quimb.tensor.tensor_core.Tensor.new_ind_pair_diag) for expanding an existing index into a pair of new indices, such that the diagonal of the new tensor on those indices is the old tensor.
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): add 'cautious' ADAM
 - [`TensorNetwork.pop_tensor`](quimb.tensor.tensor_core.TensorNetwork.pop_tensor): allow `tid` or tags to be specified.
+- add an example notebook for converting hyper tensor networks to normal tensor networks, for approximate contraction.
 
 **Bug fixes:**
 

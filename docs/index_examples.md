@@ -20,5 +20,6 @@
 ./examples/ex_quimb_within_jax_flax_optax
 ./examples/ex_tn_tensor_fitting
 ./examples/ex_circuit_to_mpo
+./examples/ex_htn_to_tn_2d
 ./examples/schematic-demo
 ```

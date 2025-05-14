@@ -2472,7 +2472,11 @@ class TensorNetwork2D(TensorNetworkGen):
         inplace=False,
         **contract_boundary_opts,
     ):
-        """Contract the boundary of this 2D tensor network inwards::
+        r"""Contract the boundary of this 2D tensor network inwards. By
+        default, if contracting to a scalar, this contracts the two shortest
+        opposing sides inwards. If `around` is specified, or depending on
+        `sequence`, it can contract from in any sequence of directions, and in
+        any order like so::
 
             ●──●──●──●       ●──●──●──●       ●──●──●
             │  │  │  │       │  │  │  │       ║  │  │
