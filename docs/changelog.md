@@ -2,8 +2,8 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-10-1)=
-## v1.10.1 (unreleased)
+(whats-new-1-11-0)=
+## v1.11.0 (2025-05-14)
 
 **Breaking Changes**
 
@@ -28,11 +28,19 @@ Release notes for `quimb`.
 - add [`Tensor.new_ind_pair_diag`](quimb.tensor.tensor_core.Tensor.new_ind_pair_diag) for expanding an existing index into a pair of new indices, such that the diagonal of the new tensor on those indices is the old tensor.
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): add 'cautious' ADAM
 - [`TensorNetwork.pop_tensor`](quimb.tensor.tensor_core.TensorNetwork.pop_tensor): allow `tid` or tags to be specified.
-- add an example notebook for converting hyper tensor networks to normal tensor networks, for approximate contraction.
+- add an example notebook for converting hyper tensor networks to normal tensor networks, for approximate contraction - {ref}`example-htn-to-2d`
+- add "SX" and "SXDG" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#277`)
+- add "XXPLUSYY" and "XXPLUSYY" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#279`)
+- add progress bar to various `Circuit` methods ({pull}`#288`)
+- [`quimb.experimental.operatorbuilder`](quimb.experimental.operatorbuilder): fix MPO building for congested operators ({issue}`296` and {issue}`301`), allow arbitrary dtype ({issue}`289`). Fix building of sparse and matrix representations for non-translationally symmetric operators and operators with trivial (all identity) terms.
 
 **Bug fixes:**
 
 - fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) for `cupy` backend arrays ({issue}`276`).
+- fix `linalg.expm` dispatch ({issue}`275`)
+- fix 'dm' 1d compress method for disconnected subgraphs
+- fix docs source lookup in `quimb.tensor` module
+- fix raw gate copying in `Circuit` ({issue}`285`)
 
 
 (whats-new-1-10-0)=
