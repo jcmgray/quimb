@@ -80,8 +80,9 @@ jobs:
     - name: Setup Miniconda
       uses: conda-incubator/setup-miniconda@v3
       with:
-        python-version: ${{ matrix.python-version }}
         miniforge-version: latest
+        conda-remove-defaults: "true"
+        python-version: ${{ matrix.python-version }}
         environment-file: ci/requirements/py-${{ matrix.conda-env }}.yml
 
     - name: Matrix submodule tests with pytest
