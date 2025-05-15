@@ -146,12 +146,12 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
     Returns
     -------
-    coupling_map : numba.typed.Dict
+    coupling_map : numba.typed.List
         A nested numba dictionary of the form
-        ``{term: {reg: {bit_in: (bit_out, coeff), ...}, ...}, ...}``.
+        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
     """
     from numba.core import types
-    from numba.typed import Dict
+    from numba.typed import Dict, List
 
     if (dtype is None) or np.issubdtype(dtype, np.float64):
         ty_coeff = types.float64
@@ -166,11 +166,11 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
     ty_xj = types.Tuple((types.int64, ty_coeff))
     ty_xi = types.DictType(types.int64, ty_xj)
-    ty_site = types.DictType(types.int64, ty_xi)
-    coupling_map = Dict.empty(types.int64, ty_site)
+    # ty_site = types.DictType(types.int64, ty_xi)
+    coupling_map = List()
 
     # for term t ...
-    for t, (term, coeff) in enumerate(term_store.items()):
+    for term, coeff in term_store.items():
         if (len(term) == 0) and (coeff != 1.0):
             # special case: all identity term, if coeff != 1.0, need to add it
             term = [("I", 0)]
@@ -178,6 +178,9 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
             map_to_reg = False
         else:
             map_to_reg = True
+
+        # what sites does this term act non-trivially on?
+        term_to_reg = Dict.empty(types.int64, ty_xi)
 
         first = True
         # which couples sites with product of ops ...
@@ -199,10 +202,6 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
                     # absorb overall coefficient into first coupling
                     cij = coeff * cij
 
-                # what sites does this term act non-trivially on?
-                term_to_reg = coupling_map.setdefault(
-                    t, Dict.empty(types.int64, ty_xi)
-                )
 
                 # at each site, what bits are coupled to which other bits?
                 # and with what coefficient?
@@ -212,6 +211,9 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
                 reg_to_bits[xi] = (xj, cij)
 
             first = False
+
+        # add the term to the coupling map
+        coupling_map.append(term_to_reg)
 
     return coupling_map
 
@@ -463,9 +465,9 @@ class SparseOperatorBuilder:
 
         Returns
         -------
-        coupling_map : numba.typed.Dict
+        coupling_map : numba.typed.List
             A nested numba dictionary of the form
-            ``{term: {reg: {bit_in: (bit_out, coeff), ...}, ...}, ...}``.
+            ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
         """
         dtype = self.calc_dtype(dtype)
 
@@ -498,11 +500,11 @@ class SparseOperatorBuilder:
 
         Returns
         -------
-        coo : array
+        data : array
             The data entries for the sparse matrix in COO format.
-        cis : array
+        rows : array
             The row indices for the sparse matrix in COO format.
-        cjs : array
+        cols : array
             The column indices for the sparse matrix in COO format.
         d : int
             The total number of basis states.
@@ -517,7 +519,7 @@ class SparseOperatorBuilder:
         }
 
         if not parallel:
-            coo, cis, cjs = flatconfig.build_coo_numba_core(**kwargs)
+            data, rows, cols = flatconfig.build_coo_numba_core(**kwargs)
         else:
             # figure out how many threads to use etc.
             from quimb import get_thread_pool
@@ -546,20 +548,20 @@ class SparseOperatorBuilder:
             ]
 
             # gather and concatenate the results (some memory overhead here)
-            coo = []
-            cis = []
-            cjs = []
+            data = []
+            rows = []
+            cols = []
             for f in fs:
                 d, ci, cj = f.result()
-                coo.append(d)
-                cis.append(ci)
-                cjs.append(cj)
+                data.append(d)
+                rows.append(ci)
+                cols.append(cj)
 
-            coo = np.concatenate(coo)
-            cis = np.concatenate(cis)
-            cjs = np.concatenate(cjs)
+            data = np.concatenate(data)
+            rows = np.concatenate(rows)
+            cols = np.concatenate(cols)
 
-        return coo, cis, cjs, self.hilbert_space.size
+        return data, rows, cols, self.hilbert_space.size
 
     def build_sparse_matrix(
         self,
@@ -586,11 +588,11 @@ class SparseOperatorBuilder:
         """
         import scipy.sparse as sp
 
-        coo, cis, cjs, d = self.build_coo_data(
+        data, rows, cols, d = self.build_coo_data(
             dtype=dtype,
             parallel=parallel,
         )
-        A = sp.coo_matrix((coo, (cis, cjs)), shape=(d, d))
+        A = sp.coo_matrix((data, (rows, cols)), shape=(d, d))
         if stype != "coo":
             A = A.asformat(stype)
         return A
@@ -641,14 +643,14 @@ class SparseOperatorBuilder:
 
         return Hk
 
-    def flatconfig_coupling(self, flatconfig, dtype=None):
+    def flatconfig_coupling(self, fc, dtype=None):
         """Get an array of other configurations coupled to the given
-        ``flatconfig`` by this operator, and the corresponding coupling
+        ``fc`` by this operator, and the corresponding coupling
         coefficients. This is for use with VMC for example.
 
         Parameters
         ----------
-        flatconfig : array[np.uint8]
+        fc : array[np.uint8]
             The linear array of the configuration to get the coupling for.
         dtype : numpy.dtype, optional
             The data type of the matrix. If not provided, will be
@@ -659,8 +661,8 @@ class SparseOperatorBuilder:
         """
         dtype = calc_dtype_cached(dtype, self._iscomplex)
         coupling_map = self.build_coupling_map(dtype=dtype)
-        return flatconfig.flatconfig_coupling(
-            flatconfig,
+        return flatconfig.flatconfig_coupling_numba(
+            fc,
             coupling_map=coupling_map,
             dtype=dtype,
         )
@@ -682,8 +684,8 @@ class SparseOperatorBuilder:
         coeffs: list[dtype]
             The corresponding coupling coefficients.
         """
-        flatconfig = self.hilbert_space.config_to_flatconfig(config)
-        bjs, cijs = self.flatconfig_coupling(flatconfig, dtype=dtype)
+        fc = self.hilbert_space.config_to_flatconfig(config)
+        bjs, cijs = self.flatconfig_coupling(fc, dtype=dtype)
         coupled_configs = [
             self.hilbert_space.flatconfig_to_config(bj) for bj in bjs
         ]

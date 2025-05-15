@@ -84,8 +84,8 @@ def build_coo_numba_core_nosymm(
 
     buf_size = D
     data = np.empty(buf_size, dtype=dtype)
-    cis = np.empty(buf_size, dtype=np.int64)
-    cjs = np.empty(buf_size, dtype=np.int64)
+    rows = np.empty(buf_size, dtype=np.int64)
+    cols = np.empty(buf_size, dtype=np.int64)
     buf_ptr = 0
 
     bi = np.empty(n, dtype=np.uint8)
@@ -95,7 +95,66 @@ def build_coo_numba_core_nosymm(
         # reset the starting config
         rank_into_flatconfig_nosymm(bi, ci, n)
 
-        for coupling_t in coupling_map.values():
+        for coupling_t in coupling_map:
+            # for each term in the hamiltonian find which, if
+            # any, config it couples to, & with what coefficient
+
+            # reset coupled config
+            bj[:] = bi
+            # reset coeff
+            hij = 1.0
+
+            # for each operator in the term
+            for reg, coupling_t_reg in coupling_t.items():
+                xi = bi[reg]
+
+                if xi not in coupling_t_reg:
+                    # zero coupling - whole branch dead
+                    break
+
+                # update coeff and config
+                xj, cij = coupling_t_reg[xi]
+                hij *= cij
+                bj[reg] = xj
+            else:
+                # didn't break out of loop -> valid coupled config
+                if buf_ptr >= buf_size:
+                    # need to double our storage
+                    data = np.concatenate((data, np.empty_like(data)))
+                    rows = np.concatenate((rows, np.empty_like(rows)))
+                    cols = np.concatenate((cols, np.empty_like(cols)))
+                    buf_size *= 2
+
+                # convert coupled config back to rank
+                cj = flatconfig_to_rank_nosymm(bj)
+
+                data[buf_ptr] = hij
+                cols[buf_ptr] = ci
+                rows[buf_ptr] = cj
+                buf_ptr += 1
+
+    return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
+
+
+@njit(nogil=nogil)
+def apply_nosymm(
+    x,
+    out,
+    n,
+    coupling_map,
+    world_size=1,
+    world_rank=0,
+):
+    D = 2**n
+
+    bi = np.empty(n, dtype=np.uint8)
+    bj = np.empty(n, dtype=np.uint8)
+
+    for ci in range(world_rank, D, world_size):
+        # reset the starting config
+        rank_into_flatconfig_nosymm(bi, ci, n)
+
+        for coupling_t in coupling_map:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
@@ -113,26 +172,12 @@ def build_coo_numba_core_nosymm(
                 # update coeff and config
                 xj, cij = coupling_t_reg[xi]
                 hij *= cij
-                bj[reg] = xj
+                if xj != xi:
+                    bj[reg] = xj
             else:
                 # didn't break out of loop -> valid coupled config
-                if buf_ptr >= buf_size:
-                    # need to double our storage
-                    data = np.concatenate((data, np.empty_like(data)))
-                    cis = np.concatenate((cis, np.empty_like(cis)))
-                    cjs = np.concatenate((cjs, np.empty_like(cjs)))
-                    buf_size *= 2
-
-                # convert coupled config back to rank
                 cj = flatconfig_to_rank_nosymm(bj)
-
-                data[buf_ptr] = hij
-                cis[buf_ptr] = ci
-                cjs[buf_ptr] = cj
-                buf_ptr += 1
-
-    return data[:buf_ptr], cis[:buf_ptr], cjs[:buf_ptr]
-
+                out[cj] += hij * x[ci]
 
 # --------------------- parity conserved hilbert space ---------------------- #
 
@@ -221,8 +266,8 @@ def build_coo_numba_core_z2(
 
     buf_size = D
     data = np.empty(buf_size, dtype=dtype)
-    cis = np.empty(buf_size, dtype=np.int64)
-    cjs = np.empty(buf_size, dtype=np.int64)
+    rows = np.empty(buf_size, dtype=np.int64)
+    cols = np.empty(buf_size, dtype=np.int64)
     buf_ptr = 0
 
     bi = np.empty(n, dtype=np.uint8)
@@ -232,7 +277,7 @@ def build_coo_numba_core_z2(
         # reset the starting config
         rank_into_flatconfig_z2(bi, ci, n, p)
 
-        for coupling_t in coupling_map.values():
+        for coupling_t in coupling_map:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
@@ -256,19 +301,19 @@ def build_coo_numba_core_z2(
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
-                    cis = np.concatenate((cis, np.empty_like(cis)))
-                    cjs = np.concatenate((cjs, np.empty_like(cjs)))
+                    rows = np.concatenate((rows, np.empty_like(rows)))
+                    cols = np.concatenate((cols, np.empty_like(cols)))
                     buf_size *= 2
 
                 # convert coupled config back to rank
                 cj = flatconfig_to_rank_z2(bj)
 
                 data[buf_ptr] = hij
-                cis[buf_ptr] = ci
-                cjs[buf_ptr] = cj
+                cols[buf_ptr] = ci
+                rows[buf_ptr] = cj
                 buf_ptr += 1
 
-    return data[:buf_ptr], cis[:buf_ptr], cjs[:buf_ptr]
+    return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
 # -------------------- particle conserved hilbert space --------------------- #
@@ -406,8 +451,8 @@ def build_coo_numba_core_u1(
 
     buf_size = D
     data = np.empty(buf_size, dtype=dtype)
-    cis = np.empty(buf_size, dtype=np.int64)
-    cjs = np.empty(buf_size, dtype=np.int64)
+    rows = np.empty(buf_size, dtype=np.int64)
+    cols = np.empty(buf_size, dtype=np.int64)
     buf_ptr = 0
 
     bi = np.empty(n, dtype=np.uint8)
@@ -417,7 +462,7 @@ def build_coo_numba_core_u1(
         # reset the starting config
         rank_into_flatconfig_u1_pascal(bi, ci, n, k, pt)
 
-        for coupling_t in coupling_map.values():
+        for coupling_t in coupling_map:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
@@ -441,19 +486,19 @@ def build_coo_numba_core_u1(
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
-                    cis = np.concatenate((cis, np.empty_like(cis)))
-                    cjs = np.concatenate((cjs, np.empty_like(cjs)))
+                    rows = np.concatenate((rows, np.empty_like(rows)))
+                    cols = np.concatenate((cols, np.empty_like(cols)))
                     buf_size *= 2
 
                 # convert coupled config back to rank
                 cj = flatconfig_to_rank_u1_pascal(bj, n, k, pt)
 
                 data[buf_ptr] = hij
-                cis[buf_ptr] = ci
-                cjs[buf_ptr] = cj
+                cols[buf_ptr] = ci
+                rows[buf_ptr] = cj
                 buf_ptr += 1
 
-    return data[:buf_ptr], cis[:buf_ptr], cjs[:buf_ptr]
+    return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
 # --------------------- doubly conserved hilbert space ---------------------- #
@@ -569,8 +614,8 @@ def build_coo_numba_core_u1u1(
 
     buf_size = D
     data = np.empty(buf_size, dtype=dtype)
-    cis = np.empty(buf_size, dtype=np.int64)
-    cjs = np.empty(buf_size, dtype=np.int64)
+    rows = np.empty(buf_size, dtype=np.int64)
+    cols = np.empty(buf_size, dtype=np.int64)
     buf_ptr = 0
 
     bi = np.empty(n, dtype=np.uint8)
@@ -580,7 +625,7 @@ def build_coo_numba_core_u1u1(
         # reset the starting config
         rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
 
-        for coupling_t in coupling_map.values():
+        for coupling_t in coupling_map:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
@@ -604,19 +649,19 @@ def build_coo_numba_core_u1u1(
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
-                    cis = np.concatenate((cis, np.empty_like(cis)))
-                    cjs = np.concatenate((cjs, np.empty_like(cjs)))
+                    rows = np.concatenate((rows, np.empty_like(rows)))
+                    cols = np.concatenate((cols, np.empty_like(cols)))
                     buf_size *= 2
 
                 # convert coupled config back to rank
                 cj = flatconfig_to_rank_u1u1_pascal(bj, na, ka, nb, kb, pt)
 
                 data[buf_ptr] = hij
-                cis[buf_ptr] = ci
-                cjs[buf_ptr] = cj
+                cols[buf_ptr] = ci
+                rows[buf_ptr] = cj
                 buf_ptr += 1
 
-    return data[:buf_ptr], cis[:buf_ptr], cjs[:buf_ptr]
+    return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
 # ------------------------------- public api -------------------------------- #
@@ -743,9 +788,9 @@ def build_coo_numba_core(
 
     Parameters
     ----------
-    coupling_map : numba.typed.Dict
+    coupling_map : numba.typed.List
         A nested numba dictionary of the form
-        ``{term: {reg: {bit_in: (bit_out, coeff), ...}, ...}, ...}``.
+        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
         The coupling map to defines the operator.
     sector : tuple[int]
         Specifies the sector to convert.
@@ -772,9 +817,9 @@ def build_coo_numba_core(
     -------
     data : ndarray[float64]
         The data for the sparse matrix in COO format.
-    cis : ndarray[int64]
+    rows : ndarray[int64]
         The row indices for the sparse matrix in COO format.
-    cjs : ndarray[int64]
+    cols : ndarray[int64]
         The column indices for the sparse matrix in COO format.
     """
     if symmetry is None:
@@ -818,9 +863,9 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
     ----------
     flatconfig : ndarray[uint8]
         The flat configuration to get the coupled configurations for.
-    coupling_map : numba.typed.Dict
+    coupling_map : numba.typed.List
         A nested numba dictionary of the form
-        ``{term: {reg: {bit_in: (bit_out, coeff), ...}, ...}, ...}``.
+        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
         The coupling map to defines the operator.
     dtype : {np.float64, np.complex128, np.float32, np.float64}, optional
         The dtype to use for the coupled coefficients. Default is np.float64.
@@ -837,7 +882,8 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
     bj = np.empty(flatconfig.size, dtype=np.uint8)
     bjs = np.empty((len(coupling_map), flatconfig.size), dtype=np.uint8)
     cijs = np.empty(len(coupling_map), dtype=dtype)
-    for coupling_t in coupling_map.values():
+
+    for coupling_t in coupling_map:
         hij = 1.0
         bj[:] = flatconfig
         for reg, coupling_t_reg in coupling_t.items():
