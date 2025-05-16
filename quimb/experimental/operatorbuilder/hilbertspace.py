@@ -11,6 +11,7 @@
   of length nsites, for efficient manipulation with numba and numpy.
 
 """
+
 import functools
 import math
 
@@ -131,8 +132,6 @@ def parse_symmetry_and_sector(nsites, symmetry=None, sector=None):
         )
 
     return symmetry, sector
-
-
 
 
 class HilbertSpace:

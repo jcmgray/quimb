@@ -1,4 +1,4 @@
-from .hilbertspace import parse_edges_to_unique
+from .hilbertspace import HilbertSpace, parse_edges_to_unique
 from .operatorbuilder import SparseOperatorBuilder
 
 
@@ -6,6 +6,9 @@ def heisenberg_from_edges(
     edges,
     j=1.0,
     b=0.0,
+    order=None,
+    symmetry=None,
+    sector=None,
     hilbert_space=None,
 ):
     r"""Create a Heisenberg Hamiltonian on the graph defined by ``edges``.
@@ -42,9 +45,19 @@ def heisenberg_from_edges(
         The magnetic field strength(s). If a single float is given, it is used
         taken as a z-field. If a tuple of three floats is given, they are used
         for the x, y, and z fields respectively.
+    order : callable or sequence of hashable objects, optional
+        If provided, use this to order the sites. If a callable, it should be a
+        sorting key. If a sequence, it should be a permutation of the sites,
+        and ``key=order.index`` will be used.
+    symmetry : {None, "Z2", "U1", "U1U1"}, optional
+        The symmetry of the Hilbert space if any. If `None` and a `sector` is
+        provided, the symmetry will be inferred from the sector.
+    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
     hilbert_space : HilbertSpace, optional
         The Hilbert space to use. If not given, one will be constructed
-        automatically from the edges.
+        automatically from the edges. This overrides the ``order``,
+        ``symmetry``, and ``sector`` parameters.
 
     Returns
     -------
@@ -62,6 +75,14 @@ def heisenberg_from_edges(
         bx, by, bz = 0, 0, b
 
     sites, edges = parse_edges_to_unique(edges)
+
+    if hilbert_space is None:
+        hilbert_space = HilbertSpace(
+            sites=sites,
+            order=order,
+            symmetry=symmetry,
+            sector=sector,
+        )
 
     H = SparseOperatorBuilder(hilbert_space=hilbert_space)
 
@@ -84,7 +105,16 @@ def heisenberg_from_edges(
     return H
 
 
-def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
+def fermi_hubbard_from_edges(
+    edges,
+    t=1.0,
+    U=1.0,
+    mu=0.0,
+    order=None,
+    symmetry=None,
+    sector=None,
+    hilbert_space=None,
+):
     r"""Create a Fermi-Hubbard Hamiltonian on the graph defined by ``edges``.
     The Hamiltonian is given by:
 
@@ -125,14 +155,38 @@ def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
         The on-site interaction strength. Default is 1.0.
     mu : float, optional
         The chemical potential. Default is 0.0.
+    order : callable or sequence of hashable objects, optional
+        If provided, use this to order the sites. If a callable, it should be a
+        sorting key. If a sequence, it should be a permutation of the sites,
+        and ``key=order.index`` will be used.
+    symmetry : {None, "Z2", "U1", "U1U1"}, optional
+        The symmetry of the Hilbert space if any. If `None` and a `sector` is
+        provided, the symmetry will be inferred from the sector.
+    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
+    hilbert_space : HilbertSpace, optional
+        The Hilbert space to use. If not given, one will be constructed
+        automatically from the edges. This overrides the ``order``,
+        ``symmetry``, and ``sector`` parameters.
 
     Returns
     -------
     H : SparseOperatorBuilder
         The Hamiltonian as a SparseOperatorBuilder object.
     """
-    H = SparseOperatorBuilder()
     sites, edges = parse_edges_to_unique(edges)
+
+    if hilbert_space is None:
+        hilbert_space = HilbertSpace(
+            sites=[(s, coo) for coo in sites for s in "↑↓"],
+            order=order,
+            symmetry=symmetry,
+            sector=sector,
+        )
+
+    H = SparseOperatorBuilder(
+        hilbert_space=hilbert_space,
+    )
 
     for cooa, coob in edges:
         # hopping
@@ -152,7 +206,16 @@ def fermi_hubbard_from_edges(edges, t=1.0, U=1.0, mu=0.0):
     return H
 
 
-def fermi_hubbard_spinless_from_edges(edges, t=1.0, V=0.0, mu=0.0):
+def fermi_hubbard_spinless_from_edges(
+    edges,
+    t=1.0,
+    V=0.0,
+    mu=0.0,
+    order=None,
+    symmetry=None,
+    sector=None,
+    hilbert_space=None,
+):
     r"""Create a spinless Fermi-Hubbard Hamiltonian on the graph defined by
     ``edges``. The Hamiltonian is given by:
 
@@ -188,14 +251,36 @@ def fermi_hubbard_spinless_from_edges(edges, t=1.0, V=0.0, mu=0.0):
         The nearest neighbor interaction strength. Default is 0.0.
     mu : float, optional
         The chemical potential. Default is 0.0.
+    order : callable or sequence of hashable objects, optional
+        If provided, use this to order the sites. If a callable, it should be a
+        sorting key. If a sequence, it should be a permutation of the sites,
+        and ``key=order.index`` will be used.
+    symmetry : {None, "Z2", "U1", "U1U1"}, optional
+        The symmetry of the Hilbert space if any. If `None` and a `sector` is
+        provided, the symmetry will be inferred from the sector.
+    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
+    hilbert_space : HilbertSpace, optional
+        The Hilbert space to use. If not given, one will be constructed
+        automatically from the edges. This overrides the ``order``,
+        ``symmetry``, and ``sector`` parameters.
 
     Returns
     -------
     H : SparseOperatorBuilder
         The Hamiltonian as a SparseOperatorBuilder object.
     """
-    H = SparseOperatorBuilder()
     sites, edges = parse_edges_to_unique(edges)
+
+    if hilbert_space is None:
+        hilbert_space = HilbertSpace(
+            sites=sites,
+            order=order,
+            symmetry=symmetry,
+            sector=sector,
+        )
+
+    H = SparseOperatorBuilder(hilbert_space=hilbert_space)
 
     for cooa, coob in edges:
         # hopping

@@ -3,7 +3,6 @@
 import numpy as np
 from numba import njit
 
-
 # ----------------------- unconstrained hilbert space ----------------------- #
 
 nogil = True
@@ -99,21 +98,25 @@ def build_coo_numba_core_nosymm(
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
-            # reset coupled config
-            bj[:] = bi
             # reset coeff
             hij = 1.0
+            # reset coupled config
+            for i in range(n):
+                bj[i] = bi[i]
 
             # for each operator in the term
-            for reg, coupling_t_reg in coupling_t.items():
+            for reg, coupling_t_reg in coupling_t:
                 xi = bi[reg]
 
-                if xi not in coupling_t_reg:
-                    # zero coupling - whole branch dead
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
                     break
 
                 # update coeff and config
-                xj, cij = coupling_t_reg[xi]
                 hij *= cij
                 bj[reg] = xj
             else:
@@ -158,26 +161,32 @@ def apply_nosymm(
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
-            # reset coupled config
-            bj[:] = bi
             # reset coeff
             hij = 1.0
+            # reset coupled config
+            for i in range(n):
+                bj[i] = bi[i]
 
             # for each operator in the term
-            for reg, coupling_t_reg in coupling_t.items():
-                xi = bj[reg]
-                if xi not in coupling_t_reg:
-                    # zero coupling - whole branch dead
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
                     break
+
                 # update coeff and config
-                xj, cij = coupling_t_reg[xi]
                 hij *= cij
-                if xj != xi:
-                    bj[reg] = xj
+                bj[reg] = xj
             else:
                 # didn't break out of loop -> valid coupled config
                 cj = flatconfig_to_rank_nosymm(bj)
                 out[cj] += hij * x[ci]
+
 
 # --------------------- parity conserved hilbert space ---------------------- #
 
@@ -281,19 +290,25 @@ def build_coo_numba_core_z2(
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
-            # reset coupled config
-            bj[:] = bi
             # reset coeff
             hij = 1.0
+            # reset coupled config
+            for i in range(n):
+                bj[i] = bi[i]
 
             # for each operator in the term
-            for reg, coupling_t_reg in coupling_t.items():
-                xi = bj[reg]
-                if xi not in coupling_t_reg:
-                    # zero coupling - whole branch dead
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
                     break
+
                 # update coeff and config
-                xj, cij = coupling_t_reg[xi]
                 hij *= cij
                 bj[reg] = xj
             else:
@@ -466,19 +481,25 @@ def build_coo_numba_core_u1(
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
-            # reset coupled config
-            bj[:] = bi
             # reset coeff
             hij = 1.0
+            # reset coupled config
+            for i in range(n):
+                bj[i] = bi[i]
 
             # for each operator in the term
-            for reg, coupling_t_reg in coupling_t.items():
-                xi = bj[reg]
-                if xi not in coupling_t_reg:
-                    # zero coupling - whole branch dead
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
                     break
+
                 # update coeff and config
-                xj, cij = coupling_t_reg[xi]
                 hij *= cij
                 bj[reg] = xj
             else:
@@ -622,26 +643,32 @@ def build_coo_numba_core_u1u1(
     bj = np.empty(n, dtype=np.uint8)
 
     for ci in range(world_rank, D, world_size):
-        # reset the starting config
+        # reset the starting configs
         rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
 
         for coupling_t in coupling_map:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
 
-            # reset coupled config
-            bj[:] = bi
             # reset coeff
             hij = 1.0
+            # reset coupled config
+            for i in range(n):
+                bj[i] = bi[i]
 
             # for each operator in the term
-            for reg, coupling_t_reg in coupling_t.items():
-                xi = bj[reg]
-                if xi not in coupling_t_reg:
-                    # zero coupling - whole branch dead
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
                     break
+
                 # update coeff and config
-                xj, cij = coupling_t_reg[xi]
                 hij *= cij
                 bj[reg] = xj
             else:
@@ -662,6 +689,60 @@ def build_coo_numba_core_u1u1(
                 buf_ptr += 1
 
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
+
+
+@njit(nogil=nogil)
+def apply_u1u1(
+    x,
+    out,
+    na,
+    ka,
+    nb,
+    kb,
+    coupling_map,
+    world_size=1,
+    world_rank=0,
+):
+    pt = build_pascal_table(max(na, nb))
+    D = pt[na, ka] * pt[nb, kb]
+    n = na + nb
+
+    bi = np.empty(n, dtype=np.uint8)
+    bj = np.empty(n, dtype=np.uint8)
+
+    for ci in range(world_rank, D, world_size):
+        # reset the starting config
+        rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
+
+        for coupling_t in coupling_map:
+            # for each term in the hamiltonian find which, if
+            # any, config it couples to, & with what coefficient
+
+            # reset coeff
+            hij = 1.0
+            # reset coupled config
+            for i in range(n):
+                bj[i] = bi[i]
+
+            # for each operator in the term
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
+                    break
+
+                # update coeff and config
+                hij *= cij
+                bj[reg] = xj
+            else:
+                # didn't break out of loop -> valid coupled config
+                cj = flatconfig_to_rank_u1u1_pascal(bj, na, ka, nb, kb, pt)
+                out[cj] += hij * x[ci]
 
 
 # ------------------------------- public api -------------------------------- #
@@ -878,27 +959,36 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
     coeffs : ndarray[dtype]
         The coefficients for each coupled flat configuration.
     """
+    n = flatconfig.size
     buf_ptr = 0
-    bj = np.empty(flatconfig.size, dtype=np.uint8)
-    bjs = np.empty((len(coupling_map), flatconfig.size), dtype=np.uint8)
-    cijs = np.empty(len(coupling_map), dtype=dtype)
+    bj = np.empty(n, dtype=np.uint8)
+    coupled_flatconfigs = np.empty((len(coupling_map), n), dtype=np.uint8)
+    coeffs = np.empty(len(coupling_map), dtype=dtype)
 
     for coupling_t in coupling_map:
+        
+        # reset coeff
         hij = 1.0
-        bj[:] = flatconfig
-        for reg, coupling_t_reg in coupling_t.items():
+        # reset coupled config
+        for i in range(n):
+            bj[i] = flatconfig[i]
+
+        for reg, coupling_t_reg in coupling_t:
             xi = flatconfig[reg]
-            if xi not in coupling_t_reg:
-                # zero coupling - whole branch dead
+            for xin, xj, cij in coupling_t_reg:
+                if xi == xin:
+                    # found a match
+                    break
+            else:
+                # not coupled to anything - break from whole term loop
                 break
             # update coeff and config
-            xj, cij = coupling_t_reg[xi]
             hij *= cij
             bj[reg] = xj
         else:
             # no break - all terms survived
-            bjs[buf_ptr, :] = bj
-            cijs[buf_ptr] = hij
+            coupled_flatconfigs[buf_ptr, :] = bj
+            coeffs[buf_ptr] = hij
             buf_ptr += 1
 
-    return bjs[:buf_ptr], cijs[:buf_ptr]
+    return coupled_flatconfigs[:buf_ptr], coeffs[:buf_ptr]

@@ -4,8 +4,8 @@ import operator
 import numpy as np
 from numba import njit
 
-from .hilbertspace import HilbertSpace
 from . import flatconfig
+from .hilbertspace import HilbertSpace
 
 _OPMAP = {
     "I": {0: (0, 1.0), 1: (1, 1.0)},
@@ -150,23 +150,19 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
         A nested numba dictionary of the form
         ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
     """
-    from numba.core import types
-    from numba.typed import Dict, List
+    from numba.typed import List
 
     if (dtype is None) or np.issubdtype(dtype, np.float64):
-        ty_coeff = types.float64
+        dtype = np.float64
     elif np.issubdtype(dtype, np.complex128):
-        ty_coeff = types.complex128
+        dtype = np.complex128
     elif np.issubdtype(dtype, np.complex64):
-        ty_coeff = types.complex64
+        dtype = np.complex64
     elif np.issubdtype(dtype, np.float32):
-        ty_coeff = types.float32
+        dtype = np.float32
     else:
         raise ValueError(f"Unknown dtype {dtype}")
 
-    ty_xj = types.Tuple((types.int64, ty_coeff))
-    ty_xi = types.DictType(types.int64, ty_xj)
-    # ty_site = types.DictType(types.int64, ty_xi)
     coupling_map = List()
 
     # for term t ...
@@ -180,7 +176,8 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
             map_to_reg = True
 
         # what sites does this term act non-trivially on?
-        term_to_reg = Dict.empty(types.int64, ty_xi)
+        # term_to_reg = Dict.empty(types.int64, ty_xi)
+        coupling_t = List()
 
         first = True
         # which couples sites with product of ops ...
@@ -197,23 +194,17 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
             #     ...10110...    xj=1  with coeff cij
 
             # populate just the term/reg/bit maps we need
+            coupling_t_reg = List()
             for xi, (xj, cij) in _OPMAP[op].items():
                 if first:
                     # absorb overall coefficient into first coupling
                     cij = coeff * cij
-
-
-                # at each site, what bits are coupled to which other bits?
-                # and with what coefficient?
-                reg_to_bits = term_to_reg.setdefault(
-                    reg, Dict.empty(types.int64, ty_xj)
-                )
-                reg_to_bits[xi] = (xj, cij)
-
-            first = False
+                    first = False
+                coupling_t_reg.append((xi, xj, cij))
+            coupling_t.append((reg, coupling_t_reg))
 
         # add the term to the coupling map
-        coupling_map.append(term_to_reg)
+        coupling_map.append(coupling_t)
 
     return coupling_map
 
