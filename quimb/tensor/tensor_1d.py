@@ -1501,6 +1501,15 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         return tn
 
     def count_canonized(self):
+        """Count the number of canonical sites to the left and right of the
+        tensor network. For cyclic TNs, this is always 0.
+
+        Returns
+        -------
+        (int, int)
+            The number of canonical sites to the left and right of the
+            orthogonality center.
+        """
         if self.cyclic:
             return 0, 0
 
@@ -1609,9 +1618,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         taken as the max ``sites`` value plus one (i.e.g the number of arrays
         if ``sites`` is not given).
     shape : str, optional
-        String specifying layout of the tensors. E.g. 'lrp' (the default)
+        String specifying layout of *input* arrays. E.g. 'lrp' (the default)
         indicates the shape corresponds left-bond, right-bond, physical index.
-        End tensors have either 'l' or 'r' dropped from the string.
+        End tensors have either 'l' or 'r' dropped from the string. The
+        arrays will be permuted to 'lrp' order.
     tags : str or sequence of str, optional
         Global tags to attach to all tensors.
     site_ind_id : str
@@ -1668,7 +1678,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         self.cyclic = ops.ndim(arrays[0]) == 3
 
         # this is the perm needed to bring the arrays from
-        # their current `shape`, to the desired 'lrud' order
+        # their current `shape`, to the desired 'lrp' order
         lrp_ord = tuple(map(shape.find, "lrp"))
 
         tensors = []
@@ -1741,9 +1751,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         cyclic : bool, optional
             Whether the MPS should be cyclic (periodic).
         shape : str, optional
-            What specific order to layout the indices in, should be a sequence
-            of ``'l'``, ``'r'``, and ``'p'``, corresponding to left, right, and
-            physical indices respectively.
+            String specifying layout of *input* arrays. E.g. 'lrp' (the
+            default) indicates the shape corresponds left-bond, right-bond,
+            physical index. End tensors have either 'l' or 'r' dropped from the
+            string. The arrays will be permuted to 'lrp' order.
         site_ind_id : str, optional
             How to label the physical site indices.
         site_tag_id : str, optional
@@ -1914,7 +1925,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         Parameters
         ----------
         shape : str, optional
-            A permutation of ``'lrp'`` specifying the desired order of the
+            A permutation of ``'lrp'`` specifying the *desired* order of the
             left, right, and physical indices respectively.
         """
         for i in self.gen_sites_present():
@@ -3779,10 +3790,11 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         taken as the max ``sites`` value plus one (i.e.g the number of arrays
         if ``sites`` is not given).
     shape : str, optional
-        String specifying layout of the tensors. E.g. 'lrud' (the default)
-        indicates the shape corresponds left-bond, right-bond, 'up' physical
-        index, 'down' physical index.
-        End tensors have either 'l' or 'r' dropped from the string.
+        String specifying layout of *input* arrays. E.g. 'lrp' (the
+        default) indicates the shape corresponds left-bond, right-bond,
+        'up' physical index, 'down' physical index. End tensors have either
+        'l' or 'r' dropped from the string. The arrays will be permuted to
+        'lrud' order.
     tags : str or sequence of str, optional
         Global tags to attach to all tensors.
     upper_ind_id : str
@@ -3921,10 +3933,11 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         cyclic : bool, optional
             Whether the MPO should be cyclic (periodic).
         shape : str, optional
-            String specifying layout of the tensors. E.g. 'lrud' (the default)
-            indicates the shape corresponds left-bond, right-bond, 'up'
-            physical index, 'down' physical index. End tensors have either
-            'l' or 'r' dropped from the string.
+            String specifying layout of *input* arrays. E.g. 'lrp' (the
+            default) indicates the shape corresponds left-bond, right-bond,
+            'up' physical index, 'down' physical index. End tensors have either
+            'l' or 'r' dropped from the string. The arrays will be permuted to
+            'lrud' order.
         tags : str or sequence of str, optional
             Global tags to attach to all tensors.
         upper_ind_id : str
@@ -4290,7 +4303,7 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         Parameters
         ----------
         shape : str, optional
-            A permutation of ``'lrud'`` specifying the desired order of the
+            A permutation of ``'lrud'`` specifying the *desired* order of the
             left, right, upper and lower (down) indices respectively.
         """
         for i in self.gen_sites_present():
