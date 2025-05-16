@@ -779,7 +779,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
 
     _EXTRA_PROPS = ("_site_tag_id", "_L")
 
-    def left_canonize_site(self, i, bra=None):
+    def left_canonize_site(self, i, bra=None, create_bond=False):
         r"""Left canonize this TN's ith site, inplace::
 
                 i                i
@@ -793,15 +793,18 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             non-isometric part of the decomposition of site i.
         bra : None or matching TensorNetwork to self, optional
             If set, also update this TN's data with the conjugate canonization.
+        create_bond : bool, optional
+            Whether to create a new bond between the two tensors if none
+            exists. If False, an error will be raised in such a case.
         """
         tl, tr = self[i], self[i + 1]
-        tensor_canonize_bond(tl, tr)
+        tensor_canonize_bond(tl, tr, create_bond=create_bond)
         if bra is not None:
             # TODO: handle left inds
             bra[i].modify(data=conj(tl.data))
             bra[i + 1].modify(data=conj(tr.data))
 
-    def right_canonize_site(self, i, bra=None):
+    def right_canonize_site(self, i, bra=None, create_bond=False):
         r"""Right canonize this TN's ith site, inplace::
 
                   i                i
@@ -813,11 +816,14 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         i : int
             Which site to canonize. The site at i - 1 also absorbs the
             non-isometric part of the decomposition of site i.
-         bra : None or matching TensorNetwork to self, optional
+        bra : None or matching TensorNetwork to self, optional
             If set, also update this TN's data with the conjugate canonization.
+        create_bond : bool, optional
+            Whether to create a new bond between the two tensors if none
+            exists. If False, an error will be raised in such a case.
         """
         tl, tr = self[i - 1], self[i]
-        tensor_canonize_bond(tr, tl)
+        tensor_canonize_bond(tr, tl, create_bond=create_bond)
         if bra is not None:
             # TODO: handle left inds
             bra[i].modify(data=conj(tr.data))
@@ -829,6 +835,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         start=None,
         normalize=False,
         bra=None,
+        create_bond=False,
         inplace=False,
     ):
         r"""Left canonicalize all or a portion of this TN (i.e. sweep the
@@ -851,6 +858,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         bra : MatrixProductState, optional
             If supplied, simultaneously left canonicalize this MPS too,
             assuming it to be the conjugate state.
+        create_bond : bool, optional
+            Whether to create new bonds between the two tensors if none
+            exists. If False, an error will be raised in such a case.
         inplace : bool, optional
             Whether to perform the operation inplace. If ``bra`` is supplied
             then it is always modifed inplace.
@@ -867,7 +877,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             stop = mps.L - 1
 
         for i in range(start, stop):
-            mps.left_canonize_site(i, bra=bra)
+            mps.left_canonize_site(i, bra=bra, create_bond=create_bond)
 
         if normalize:
             factor = mps[-1].norm()
@@ -883,7 +893,13 @@ class TensorNetwork1DFlat(TensorNetwork1D):
     left_canonize = left_canonicalize_
 
     def right_canonicalize(
-        self, stop=None, start=None, normalize=False, bra=None, inplace=False
+        self,
+        stop=None,
+        start=None,
+        normalize=False,
+        bra=None,
+        create_bond=False,
+        inplace=False,
     ):
         r"""Right canonicalize all or a portion of this TN (i.e. sweep the
         orthogonality center to the left). If this is a MPS,
@@ -905,6 +921,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         bra : MatrixProductState, optional
             If supplied, simultaneously right canonicalize this MPS too,
             assuming it to be the conjugate state.
+        create_bond : bool, optional
+            Whether to create new bonds between the two tensors if none
+            exists. If False, an error will be raised in such a case.
         inplace : bool, optional
             Whether to perform the operation inplace. If ``bra`` is supplied
             then it is always modifed inplace.
@@ -921,7 +940,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             stop = 0
 
         for i in range(start, stop, -1):
-            mps.right_canonize_site(i, bra=bra)
+            mps.right_canonize_site(i, bra=bra, create_bond=create_bond)
 
         if normalize:
             factor = mps[0].norm()
@@ -1001,7 +1020,13 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             for i in (start - 1, start, stop, stop - 1):
                 bra[i].modify(data=self[i].data.conj())
 
-    def shift_orthogonality_center(self, current, new, bra=None):
+    def shift_orthogonality_center(
+        self,
+        current,
+        new,
+        bra=None,
+        create_bond=False,
+    ):
         """Move the orthogonality center of this MPS.
 
         Parameters
@@ -1013,13 +1038,16 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         bra : MatrixProductState, optional
             If supplied, simultaneously move the orthogonality center of this
             MPS too, assuming it to be the conjugate state.
+        create_bond : bool, optional
+            Whether to create new bonds between two tensors if none
+            exists. If False, an error will be raised in such a case.
         """
         if new > current:
             for i in range(current, new):
-                self.left_canonize_site(i, bra=bra)
+                self.left_canonize_site(i, bra=bra, create_bond=create_bond)
         else:
             for i in range(current, new, -1):
-                self.right_canonize_site(i, bra=bra)
+                self.right_canonize_site(i, bra=bra, create_bond=create_bond)
 
     def canonicalize(
         self,
@@ -1027,6 +1055,7 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         cur_orthog="calc",
         info=None,
         bra=None,
+        create_bond=False,
         inplace=False,
     ):
         r"""Gauge this MPS into mixed canonical form, implying::
@@ -1063,6 +1092,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         bra : MatrixProductState, optional
             If supplied, simultaneously mixed canonicalize this MPS too,
             assuming it to be the conjugate state.
+        create_bond : bool, optional
+            Whether to create new bonds between two tensors if none
+            exists. If False, an error will be raised in such a case.
         inplace : bool, optional
             Whether to perform the operation inplace. If ``bra`` is supplied
             then it is always modifed inplace.
@@ -1091,12 +1123,16 @@ class TensorNetwork1DFlat(TensorNetwork1D):
                 cmin, cmax = min(cur_orthog), max(cur_orthog)
 
             if i > cmin:
-                mps.shift_orthogonality_center(cmin, i, bra=bra)
+                mps.shift_orthogonality_center(
+                    current=cmin, new=i, bra=bra, create_bond=create_bond
+                )
             else:
                 i = min(j, cmin)
 
             if j < cmax:
-                mps.shift_orthogonality_center(cmax, j, bra=bra)
+                mps.shift_orthogonality_center(
+                    current=cmax, new=j, bra=bra, create_bond=create_bond
+                )
             else:
                 j = max(i, cmax)
 
@@ -1111,7 +1147,9 @@ class TensorNetwork1DFlat(TensorNetwork1D):
     canonicalize_ = functools.partialmethod(canonicalize, inplace=True)
     canonize = canonicalize_
 
-    def left_compress_site(self, i, bra=None, **compress_opts):
+    def left_compress_site(
+        self, i, bra=None, create_bond=False, **compress_opts
+    ):
         """Left compress this 1D TN's ith site, such that the site is then
         left unitary with its right bond (possibly) reduced in dimension.
 
@@ -1121,22 +1159,29 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             Which site to compress.
         bra : None or matching TensorNetwork to self, optional
             If set, also update this TN's data with the conjugate compression.
+        create_bond : bool, optional
+            Whether to create new bonds between the two tensors if none
+            exists. If False, an error will be raised in such a case.
         compress_opts
-            Supplied to :meth:`Tensor.split`.
+            Supplied to :meth:`Tensor.split`. By default absorb is set to
+            ``'right'`` and reduced to ``'left'``. Other notable options are
+            ``max_bond`` and ``cutoff``.
         """
         set_default_compress_mode(compress_opts, self.cyclic)
         compress_opts.setdefault("absorb", "right")
         compress_opts.setdefault("reduced", "left")
 
         tl, tr = self[i], self[i + 1]
-        tensor_compress_bond(tl, tr, **compress_opts)
+        tensor_compress_bond(tl, tr, create_bond=create_bond, **compress_opts)
 
         if bra is not None:
             # TODO: handle left inds
             bra[i].modify(data=conj(tl.data))
             bra[i + 1].modify(data=conj(tr.data))
 
-    def right_compress_site(self, i, bra=None, **compress_opts):
+    def right_compress_site(
+        self, i, bra=None, create_bond=False, **compress_opts
+    ):
         """Right compress this 1D TN's ith site, such that the site is then
         right unitary with its left bond (possibly) reduced in dimension.
 
@@ -1146,22 +1191,34 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             Which site to compress.
         bra : None or matching TensorNetwork to self, optional
             If set, update this TN's data with the conjugate compression.
+        create_bond : bool, optional
+            Whether to create new bonds between the two tensors if none
+            exists. If False, an error will be raised in such a case.
         compress_opts
-            Supplied to :meth:`Tensor.split`.
+            Supplied to :meth:`Tensor.split`. By default absorb is set to
+            ``'left'`` and reduced to ``'right'``. Other notable options are
+            ``max_bond`` and ``cutoff``.
         """
         set_default_compress_mode(compress_opts, self.cyclic)
         compress_opts.setdefault("absorb", "left")
         compress_opts.setdefault("reduced", "right")
 
         tl, tr = self[i - 1], self[i]
-        tensor_compress_bond(tl, tr, **compress_opts)
+        tensor_compress_bond(tl, tr, create_bond=create_bond, **compress_opts)
 
         if bra is not None:
             # TODO: handle left inds
             bra[i].modify(data=conj(tr.data))
             bra[i - 1].modify(data=conj(tl.data))
 
-    def left_compress(self, start=None, stop=None, bra=None, **compress_opts):
+    def left_compress(
+        self,
+        start=None,
+        stop=None,
+        bra=None,
+        create_bond=False,
+        **compress_opts,
+    ):
         """Compress this 1D TN, from left to right, such that it becomes
         left-canonical (unless ``absorb != 'right'``).
 
@@ -1173,8 +1230,12 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             Site to stop compressing at (won't itself be an isometry).
         bra : None or TensorNetwork like this one, optional
             If given, update this TN as well, assuming it to be the conjugate.
+        create_bond : bool, optional
+            Whether to create new bonds between adjacent tensors if none
+            exists. If False, an error will be raised in such a case.
         compress_opts
-            Supplied to :meth:`Tensor.split`.
+            Supplied to :meth:`Tensor.split`. Notably, ``max_bond``,
+            ``cutoff``.
         """
         if start is None:
             start = -1 if self.cyclic else 0
@@ -1182,9 +1243,18 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             stop = self.L - 1
 
         for i in range(start, stop):
-            self.left_compress_site(i, bra=bra, **compress_opts)
+            self.left_compress_site(
+                i, bra=bra, create_bond=create_bond, **compress_opts
+            )
 
-    def right_compress(self, start=None, stop=None, bra=None, **compress_opts):
+    def right_compress(
+        self,
+        start=None,
+        stop=None,
+        bra=None,
+        create_bond=False,
+        **compress_opts,
+    ):
         """Compress this 1D TN, from right to left, such that it becomes
         right-canonical (unless ``absorb != 'left'``).
 
@@ -1196,8 +1266,12 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             Site to stop compressing at (won't itself be an isometry).
         bra : None or TensorNetwork like this one, optional
             If given, update this TN as well, assuming it to be the conjugate.
+        create_bond : bool, optional
+            Whether to create new bonds between adjacent tensors if none
+            exists. If False, an error will be raised in such a case.
         compress_opts
-            Supplied to :meth:`Tensor.split`.
+            Supplied to :meth:`Tensor.split`. Notably, ``max_bond``,
+            ``cutoff``.
         """
         if start is None:
             start = self.L - (0 if self.cyclic else 1)
@@ -1205,49 +1279,63 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             stop = 0
 
         for i in range(start, stop, -1):
-            self.right_compress_site(i, bra=bra, **compress_opts)
+            self.right_compress_site(
+                i, bra=bra, create_bond=create_bond, **compress_opts
+            )
 
-    def compress(self, form=None, **compress_opts):
+    def compress(self, form=None, create_bond=False, **compress_opts):
         """Compress this 1D Tensor Network, possibly into canonical form.
 
         Parameters
         ----------
-        form : {None, 'flat', 'left', 'right'} or int
-            Output form of the TN. ``None`` left canonizes the state first for
-            stability reasons, then right_compresses (default). ``'flat'``
-            tries to distribute the singular values evenly -- state will not
-            be canonical. ``'left'`` and ``'right'`` put the state into left
-            and right canonical form respectively with a prior opposite sweep,
-            or an int will put the state into mixed canonical form at that
-            site.
+        form : None, int, 'right', 'left' or 'flat', optional
+            Output form of the TN. The default `None` currently maps to
+            'right'. `'right'` results in a right canonical TN,
+            with orthogonality center at site 0. `'left'` results in a
+            left canonical TN, with orthogonality center at site L - 1.
+            An integer value specifies the desired orthogonality center.
+            `'flat'` is a non-canonical method that performs a sweep of
+            compressions only (no canonicalization) from both sides.
+        create_bond : bool, optional
+            Whether to create new bonds between adjacent tensors if none
+            exists. If False, an error will be raised in such a case.
         compress_opts
-            Supplied to :meth:`Tensor.split`.
+            Supplied to :meth:`Tensor.split`. Notably, ``max_bond``,
+            ``cutoff``.
         """
         if form is None:
             form = "right"
 
         if isinstance(form, Integral):
             if form < self.L // 2:
-                self.left_canonize()
+                self.left_canonize(create_bond=create_bond)
                 self.right_compress(**compress_opts)
                 self.left_canonize(stop=form)
             else:
-                self.right_canonize()
+                self.right_canonize(create_bond=create_bond)
                 self.left_compress(**compress_opts)
                 self.right_canonize(stop=form)
 
         elif form == "left":
-            self.right_canonize(bra=compress_opts.get("bra", None))
+            self.right_canonize(
+                bra=compress_opts.get("bra", None), create_bond=create_bond
+            )
             self.left_compress(**compress_opts)
 
         elif form == "right":
-            self.left_canonize(bra=compress_opts.get("bra", None))
+            self.left_canonize(
+                bra=compress_opts.get("bra", None), create_bond=create_bond
+            )
             self.right_compress(**compress_opts)
 
         elif form == "flat":
             compress_opts["absorb"] = "both"
-            self.right_compress(stop=self.L // 2, **compress_opts)
-            self.left_compress(stop=self.L // 2, **compress_opts)
+            self.right_compress(
+                stop=self.L // 2, create_bond=create_bond, **compress_opts
+            )
+            self.left_compress(
+                stop=self.L // 2, create_bond=create_bond, **compress_opts
+            )
 
         else:
             raise ValueError(

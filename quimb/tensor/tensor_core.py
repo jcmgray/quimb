@@ -692,6 +692,7 @@ def tensor_canonize_bond(
     absorb="right",
     gauges=None,
     gauge_smudge=1e-6,
+    create_bond=False,
     **split_opts,
 ):
     r"""Inplace 'canonization' of two tensors. This gauges the bond between
@@ -711,6 +712,14 @@ def tensor_canonize_bond(
         The tensor to absorb the R-factor into.
     absorb : {'right', 'left', 'both', None}, optional
         Which tensor to effectively absorb the singular values into.
+    gauges : None or dict, optional
+        If supplied, a dict of bond gauges to perform the canonization with
+        respect to.
+    gauge_smudge : float, optional
+        If gauges are supplied, the smudge to use when gauging.
+    create_bond : bool, optional
+        If ``True``, and there is no bond between the two tensors, create a
+        new bond with size 1 before canonizing. Else raise an error.
     split_opts
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`, with
         modified defaults of ``method=='qr'`` and ``absorb='right'``.
@@ -721,16 +730,26 @@ def tensor_canonize_bond(
         # same as doing reduced compression with no truncation
         split_opts.setdefault("cutoff", 0.0)
         return tensor_compress_bond(
-            T1, T2, gauges=gauges, gauge_smudge=gauge_smudge, **split_opts
+            T1,
+            T2,
+            gauges=gauges,
+            gauge_smudge=gauge_smudge,
+            create_bond=create_bond,
+            **split_opts,
         )
 
     split_opts.setdefault("method", "qr")
     if absorb == "left":
         T1, T2 = T2, T1
 
-    lix, bix, _ = tensor_make_single_bond(T1, T2, gauges=gauges)
+    lix, bix, _ = tensor_make_single_bond(
+        T1, T2, gauges=gauges, create_bond=create_bond
+    )
     if not bix:
-        raise ValueError("The tensors specified don't share an bond.")
+        raise ValueError(
+            "The tensors specified don't share an bond. "
+            "To create one automatically, set `create_bond=True`."
+        )
 
     if (T1.left_inds is not None) and set(T1.left_inds) == set(lix):
         # tensor is already isometric with respect to shared bonds
@@ -801,6 +820,7 @@ def tensor_compress_bond(
     absorb="both",
     gauges=None,
     gauge_smudge=1e-6,
+    create_bond=False,
     info=None,
     **compress_opts,
 ):
@@ -837,14 +857,27 @@ def tensor_compress_bond(
         i.e. the pair are right or left canonical respectively.
     absorb : {'both', 'left', 'right', None}, optional
         Where to absorb the singular values after decomposition.
+    gauges : None or dict, optional
+        If supplied, a dict of bond gauges to perform the compression with
+        respect to.
+    gauge_smudge : float, optional
+        If gauges are supplied, the smudge to use when gauging.
+    create_bond : bool, optional
+        If ``True``, and there is no bond between the two tensors, create a
+        new bond with size 1 before compressing. Else raise an error.
     info : None or dict, optional
         A dict for returning extra information such as the singular values.
     compress_opts :
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
     """
-    lix, bix, rix = tensor_make_single_bond(T1, T2, gauges=gauges)
+    lix, bix, rix = tensor_make_single_bond(
+        T1, T2, gauges=gauges, create_bond=create_bond
+    )
     if not bix:
-        raise ValueError("The tensors specified don't share an bond.")
+        raise ValueError(
+            "The tensors specified don't share an bond. "
+            "To create one automatically, set `create_bond=True`."
+        )
 
     if gauges is not None:
         absorb = None
@@ -1006,16 +1039,48 @@ def tensor_multifuse(ts, inds, gauges=None):
         t.fuse_({inds[0]: inds})
 
 
-def tensor_make_single_bond(t1: "Tensor", t2: "Tensor", gauges=None):
+def tensor_make_single_bond(
+    t1: "Tensor",
+    t2: "Tensor",
+    gauges=None,
+    create_bond=False,
+):
     """If two tensors share multibonds, fuse them together and return the left
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
     Inplace operation.
+
+    Parameters
+    ----------
+    t1 : Tensor
+        The first tensor.
+    t2 : Tensor
+        The second tensor.
+    gauges : dict, optional
+        A dictionary of gauge tensors, which will be updated in place.
+    create : bool, optional
+        If ``True``, create a new bond if none exists.
+
+    Returns
+    -------
+    left : list of str
+        Indices appearing only on the left tensor.
+    bond : str or None
+        The bond index of the tensors, or None if they don't share one and
+        ``create=False``.
+    right : list of str
+        Indices appearing only on the right tensor.
     """
     left, shared, right = group_inds(t1, t2)
     nshared = len(shared)
 
     if nshared == 0:
-        return left, None, right
+        if create_bond:
+            # create a new bond between the tensors
+            bond = rand_uuid()
+            new_bond(t1, t2, name=bond)
+            return left, bond, right
+        else:
+            return left, None, right
 
     if nshared > 1:
         tensor_multifuse((t1, t2), shared, gauges=gauges)
