@@ -2,6 +2,15 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-11-1)=
+## v1.11.1 (unreleased)
+
+**Enhancements:**
+
+- add `create_bond` to [`tensor_canonize_bond`](quimb.tensor.tensor_core.tensor_canonize_bond) and [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond) for optionally creating a new bond between two tensors if they don't already share one. Add as a flag to [`TensorNetwork1DFlat.compress`](quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress) and related functions ({issue}`294`).
+- add [`ensure_bonds_exist`](quimb.tensor.tensor_1d.TensorNetwork1DFlat.ensure_bonds_exist) for ensuring that all bonds in a 1D flat tensor network exist. Use this in the `permute_arrays` methods and optionally in the `expand_bond_dimension` method.
+
+
 (whats-new-1-11-0)=
 ## v1.11.0 (2025-05-14)
 

@@ -1461,11 +1461,27 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         left_inds = Tm1.bonds(self[i - 1])
         return Tm1.singular_values(left_inds, method=method)
 
+    def ensure_bonds_exist(self):
+        """Ensure that all bonds between adjacent sites are present in the
+        tensor network, creating new bonds of size 1 if necessary.
+        """
+        for i in range(self.L - 1):
+            ti = self[i]
+            tj = self[i + 1]
+            if not ti.bonds(tj):
+                ti.new_bond(tj)
+        if self.cyclic:
+            ti = self[-1]
+            tj = self[0]
+            if not ti.bonds(tj):
+                ti.new_bond(tj)
+
     def expand_bond_dimension(
         self,
         new_bond_dim,
         rand_strength=0.0,
         bra=None,
+        create_bond=False,
         inplace=True,
     ):
         """Expand the bond dimensions of this 1D tensor network to at least
@@ -1475,23 +1491,31 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         ----------
         new_bond_dim : int
             Minimum bond dimension to expand to.
-        inplace : bool, optional
-            Whether to perform the expansion in place.
-        bra : MatrixProductState, optional
-            Mirror the changes to ``bra`` inplace, treating it as the conjugate
-            state.
         rand_strength : float, optional
             If ``rand_strength > 0``, fill the new tensor entries with gaussian
             noise of strength ``rand_strength``.
+        bra : MatrixProductState, optional
+            Mirror the changes to ``bra`` inplace, treating it as the conjugate
+            state.
+        create_bond : bool, optional
+            Whether to create new bonds between adjacent tensors if none
+            exists. If ``False``, unconnected sites will remain unconnected.
+        inplace : bool, optional
+            Whether to perform the expansion in place.
 
         Returns
         -------
         MatrixProductState
         """
+        tn = self if inplace else self.copy()
+
+        if create_bond:
+            tn.ensure_bonds_exist()
+
         tn = super().expand_bond_dimension(
             new_bond_dim=new_bond_dim,
             rand_strength=rand_strength,
-            inplace=inplace,
+            inplace=True,
         )
 
         if bra is not None:
@@ -1928,6 +1952,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             A permutation of ``'lrp'`` specifying the *desired* order of the
             left, right, and physical indices respectively.
         """
+        self.ensure_bonds_exist()
+
         for i in self.gen_sites_present():
             inds = {"p": self.site_ind(i)}
             if self.cyclic or i > 0:
@@ -4306,6 +4332,8 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
             A permutation of ``'lrud'`` specifying the *desired* order of the
             left, right, upper and lower (down) indices respectively.
         """
+        self.ensure_bonds_exist()
+
         for i in self.gen_sites_present():
             inds = {"u": self.upper_ind(i), "d": self.lower_ind(i)}
             if self.cyclic or i > 0:

@@ -1293,11 +1293,23 @@ def tensor_network_sum(
 
 
 def bonds(
-    t1: "Tensor",
-    t2: "Tensor",
-):
-    """Getting any indices connecting the Tensor(s) or TensorNetwork(s) ``t1``
+    t1: "Tensor | TensorNetwork",
+    t2: "Tensor | TensorNetwork",
+) -> oset[str]:
+    """Get any indices shared between the Tensor(s) or TensorNetwork(s) ``t1``
     and ``t2``.
+
+    Parameters
+    ----------
+    t1 : Tensor or TensorNetwork
+        The first tensor or tensor network.
+    t2 : Tensor or TensorNetwork
+        The second tensor or tensor network.
+
+    Returns
+    -------
+    bonds : oset[str]
+        The indices shared between ``t1`` and ``t2``.
     """
     if isinstance(t1, Tensor):
         ix1 = oset(t1.inds)
