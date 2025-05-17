@@ -1295,7 +1295,7 @@ def tensor_network_sum(
 def bonds(
     t1: "Tensor | TensorNetwork",
     t2: "Tensor | TensorNetwork",
-) -> oset[str]:
+):
     """Get any indices shared between the Tensor(s) or TensorNetwork(s) ``t1``
     and ``t2``.
 
