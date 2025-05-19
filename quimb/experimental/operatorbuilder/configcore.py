@@ -101,8 +101,8 @@ def build_coo_numba_core_nosymm(
             # reset coeff
             hij = 1.0
             # reset coupled config
-            for i in range(n):
-                bj[i] = bi[i]
+            for q in range(n):
+                bj[q] = bi[q]
 
             # for each operator in the term
             for reg, coupling_t_reg in coupling_t:
@@ -140,7 +140,7 @@ def build_coo_numba_core_nosymm(
 
 
 @njit(nogil=nogil)
-def apply_nosymm(
+def matvec_nosymm(
     x,
     out,
     n,
@@ -164,8 +164,8 @@ def apply_nosymm(
             # reset coeff
             hij = 1.0
             # reset coupled config
-            for i in range(n):
-                bj[i] = bi[i]
+            for q in range(n):
+                bj[q] = bi[q]
 
             # for each operator in the term
             for reg, coupling_t_reg in coupling_t:
@@ -293,8 +293,8 @@ def build_coo_numba_core_z2(
             # reset coeff
             hij = 1.0
             # reset coupled config
-            for i in range(n):
-                bj[i] = bi[i]
+            for q in range(n):
+                bj[q] = bi[q]
 
             # for each operator in the term
             for reg, coupling_t_reg in coupling_t:
@@ -329,6 +329,56 @@ def build_coo_numba_core_z2(
                 buf_ptr += 1
 
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
+
+
+@njit(nogil=nogil)
+def matvec_z2(
+    x,
+    out,
+    n,
+    p,
+    coupling_map,
+    world_size=1,
+    world_rank=0,
+):
+    D = 2 ** (n - 1)
+
+    bi = np.empty(n, dtype=np.uint8)
+    bj = np.empty(n, dtype=np.uint8)
+
+    for ci in range(world_rank, D, world_size):
+        # reset the starting config
+        rank_into_flatconfig_z2(bi, ci, n, p)
+
+        for coupling_t in coupling_map:
+            # for each term in the hamiltonian find which, if
+            # any, config it couples to, & with what coefficient
+
+            # reset coeff
+            hij = 1.0
+            # reset coupled config
+            for q in range(n):
+                bj[q] = bi[q]
+
+            # for each operator in the term
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
+                    break
+
+                # update coeff and config
+                hij *= cij
+                bj[reg] = xj
+            else:
+                # didn't break out of loop -> valid coupled config
+                cj = flatconfig_to_rank_z2(bj)
+                out[cj] += hij * x[ci]
 
 
 # -------------------- particle conserved hilbert space --------------------- #
@@ -484,8 +534,8 @@ def build_coo_numba_core_u1(
             # reset coeff
             hij = 1.0
             # reset coupled config
-            for i in range(n):
-                bj[i] = bi[i]
+            for q in range(n):
+                bj[q] = bi[q]
 
             # for each operator in the term
             for reg, coupling_t_reg in coupling_t:
@@ -520,6 +570,57 @@ def build_coo_numba_core_u1(
                 buf_ptr += 1
 
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
+
+
+@njit(nogil=nogil)
+def matvec_u1(
+    x,
+    out,
+    n,
+    k,
+    coupling_map,
+    world_size=1,
+    world_rank=0,
+):
+    pt = build_pascal_table(n)
+    D = pt[n, k]
+
+    bi = np.empty(n, dtype=np.uint8)
+    bj = np.empty(n, dtype=np.uint8)
+
+    for ci in range(world_rank, D, world_size):
+        # reset the starting config
+        rank_into_flatconfig_u1_pascal(bi, ci, n, k, pt)
+
+        for coupling_t in coupling_map:
+            # for each term in the hamiltonian find which, if
+            # any, config it couples to, & with what coefficient
+
+            # reset coeff
+            hij = 1.0
+            # reset coupled config
+            for q in range(n):
+                bj[q] = bi[q]
+
+            # for each operator in the term
+            for reg, coupling_t_reg in coupling_t:
+                xi = bi[reg]
+
+                for xin, xj, cij in coupling_t_reg:
+                    if xi == xin:
+                        # found a match
+                        break
+                else:
+                    # not coupled to anything - break from whole term loop
+                    break
+
+                # update coeff and config
+                hij *= cij
+                bj[reg] = xj
+            else:
+                # didn't break out of loop -> valid coupled config
+                cj = flatconfig_to_rank_u1_pascal(bj, n, k, pt)
+                out[cj] += hij * x[ci]
 
 
 # --------------------- doubly conserved hilbert space ---------------------- #
@@ -653,8 +754,8 @@ def build_coo_numba_core_u1u1(
             # reset coeff
             hij = 1.0
             # reset coupled config
-            for i in range(n):
-                bj[i] = bi[i]
+            for q in range(n):
+                bj[q] = bi[q]
 
             # for each operator in the term
             for reg, coupling_t_reg in coupling_t:
@@ -692,7 +793,7 @@ def build_coo_numba_core_u1u1(
 
 
 @njit(nogil=nogil)
-def apply_u1u1(
+def matvec_u1u1(
     x,
     out,
     na,
@@ -721,8 +822,8 @@ def apply_u1u1(
             # reset coeff
             hij = 1.0
             # reset coupled config
-            for i in range(n):
-                bj[i] = bi[i]
+            for q in range(n):
+                bj[q] = bi[q]
 
             # for each operator in the term
             for reg, coupling_t_reg in coupling_t:
@@ -927,8 +1028,79 @@ def build_coo_numba_core(
         )
     else:
         raise ValueError(
-            r"Symmetry must be None, 'Z2', 'U1' or 'U1U1'. Got "
-            f"{symmetry} instead."
+            "Symmetry must be None, 'Z2', 'U1' "
+            f"or 'U1U1'. Got {symmetry} instead."
+        )
+
+
+@njit(nogil=nogil)
+def matvec_numba(
+    x,
+    out,
+    coupling_map,
+    sector,
+    symmetry=None,
+    world_size=1,
+    world_rank=0,
+):
+    """Apply the operator defined by the coupling map to the input vector.
+
+    Parameters
+    ----------
+    x : ndarray[float64]
+        The input vector to apply the operator to.
+    out : ndarray[float64]
+        The output vector to store the result.
+    coupling_map : numba.typed.List
+        A nested numba dictionary of the form
+        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
+        The coupling map to defines the operator.
+    sector : tuple[int]
+        Specifies the sector to convert.
+
+        - (n,) for unconstrained hilbert space
+        - (n, parity) for Z2 symmetry
+        - (n, k) for U1 symmetry
+        - (na, ka, nb, kb) for U1U1 symmetry
+
+    symmetry : {None, "Z2", "U1", "U1U1"}, optional
+        Specifies the symmetry to use.
+    world_size : int, optional
+        The number of processes in the world. Default is 1. Only rows
+        corresponding to range(world_rank, D, world_size) will be computed.
+        This is used for parallelization.
+    world_rank : int, optional
+        The rank of the current process. Default is 0. Only rows
+        corresponding to range(world_rank, D, world_size) will be computed.
+        This is used for parallelization.
+    """
+    if symmetry is None:
+        # unconstrained hilbert space
+        (n,) = sector
+        matvec_nosymm(x, out, n, coupling_map, world_size, world_rank)
+    elif symmetry == "Z2":
+        n, p = sector
+        matvec_z2(x, out, n, p, coupling_map, world_size, world_rank)
+    elif symmetry == "U1":
+        n, k = sector
+        matvec_u1(x, out, n, k, coupling_map, world_size, world_rank)
+    elif symmetry == "U1U1":
+        na, ka, nb, kb = sector
+        matvec_u1u1(
+            x,
+            out,
+            na,
+            ka,
+            nb,
+            kb,
+            coupling_map,
+            world_size,
+            world_rank,
+        )
+    else:
+        raise ValueError(
+            "Symmetry must be None, 'Z2', 'U1' "
+            f"or 'U1U1'. Got {symmetry} instead."
         )
 
 
@@ -966,7 +1138,6 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
     coeffs = np.empty(len(coupling_map), dtype=dtype)
 
     for coupling_t in coupling_map:
-        
         # reset coeff
         hij = 1.0
         # reset coupled config

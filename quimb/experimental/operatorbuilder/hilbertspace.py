@@ -8,7 +8,8 @@
   state. This is a dictionary mapping from site to int.
 - *flat configuration*: a flat array of the occupation number or spin state
   of each site in the order given by this Hilbert space. This is a 1D array
-  of length nsites, for efficient manipulation with numba and numpy.
+  of length nsites with dtype np.uint8, for efficient manipulation with numba
+  and numpy.
 
 """
 
@@ -17,7 +18,7 @@ import math
 
 import numpy as np
 
-from . import flatconfig
+from . import configcore
 
 
 def parse_edges_to_unique(edges):
@@ -189,25 +190,28 @@ class HilbertSpace:
 
         if self.symmetry is None:
             self._rank_to_flatconfig = functools.partial(
-                flatconfig.rank_to_flatconfig_nosymm, n=self.nsites
+                configcore.rank_to_flatconfig_nosymm,
+                n=self.nsites,
             )
-            self._flatconfig_to_rank = flatconfig.flatconfig_to_rank_nosymm
+            self._flatconfig_to_rank = configcore.flatconfig_to_rank_nosymm
 
         elif self.symmetry == "Z2":
             self._rank_to_flatconfig = functools.partial(
-                flatconfig.rank_to_flatconfig_z2, n=self.nsites, p=self._sector
+                configcore.rank_to_flatconfig_z2,
+                n=self.nsites,
+                p=self._sector,
             )
-            self._flatconfig_to_rank = flatconfig.flatconfig_to_rank_z2
+            self._flatconfig_to_rank = configcore.flatconfig_to_rank_z2
 
         elif self.symmetry == "U1":
             self._rank_to_flatconfig = functools.partial(
-                flatconfig.rank_to_flatconfig_u1_pascal,
+                configcore.rank_to_flatconfig_u1_pascal,
                 n=self.nsites,
                 k=self.sector,
                 pt=self.get_pascal_table(),
             )
             self._flatconfig_to_rank = functools.partial(
-                flatconfig.flatconfig_to_rank_u1_pascal,
+                configcore.flatconfig_to_rank_u1_pascal,
                 n=self.nsites,
                 k=self.sector,
                 pt=self.get_pascal_table(),
@@ -216,7 +220,7 @@ class HilbertSpace:
         elif self.symmetry == "U1U1":
             (na, ka), (nb, kb) = self.sector
             self._rank_to_flatconfig = functools.partial(
-                flatconfig.rank_to_flatconfig_u1u1_pascal,
+                configcore.rank_to_flatconfig_u1u1_pascal,
                 na=na,
                 ka=ka,
                 nb=nb,
@@ -224,7 +228,7 @@ class HilbertSpace:
                 pt=self.get_pascal_table(),
             )
             self._flatconfig_to_rank = functools.partial(
-                flatconfig.flatconfig_to_rank_u1u1_pascal,
+                configcore.flatconfig_to_rank_u1u1_pascal,
                 na=na,
                 ka=ka,
                 nb=nb,
@@ -288,7 +292,7 @@ class HilbertSpace:
                 nmax = max(self.sector[0][0], self.sector[1][0])
             else:
                 nmax = self.nsites
-            self._pt = flatconfig.build_pascal_table(nmax)
+            self._pt = configcore.build_pascal_table(nmax)
         return self._pt
 
     @property

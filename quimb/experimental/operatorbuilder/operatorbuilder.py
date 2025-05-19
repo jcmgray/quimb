@@ -1,10 +1,22 @@
+"""Given a single definition of hilbert space and set of terms, build out
+various representations of the operator.
+
+This includes:
+
+- Sparse matrix in various formats (CSR, CSC, COO, etc.)
+- Dense matrix
+- Matrix product operator (MPO) for DMRG etc.
+- Dict of k-local terms (for use with PEPS etc.)
+- Coupling function, for use with VMC etc.
+"""
+
 import functools
 import operator
 
 import numpy as np
 from numba import njit
 
-from . import flatconfig
+from . import configcore
 from .hilbertspace import HilbertSpace
 
 _OPMAP = {
@@ -130,6 +142,23 @@ def get_local_range(n, rank, world_size):
         ri += get_local_size(n, rank_below, world_size)
     rf = ri + get_local_size(n, rank, world_size)
     return ri, rf
+
+
+def get_pool_and_world_size(parallel):
+    # figure out how many threads to use etc.
+    from quimb import get_thread_pool
+
+    if parallel is True:
+        n_thread_workers = None
+    elif isinstance(parallel, int):
+        n_thread_workers = parallel
+    else:
+        raise ValueError(f"Unknown parallel option {parallel}.")
+
+    pool = get_thread_pool(n_thread_workers)
+    n_thread_workers = pool._max_workers
+
+    return pool, n_thread_workers
 
 
 def build_coupling_numba(term_store, site_to_reg, dtype=None):
@@ -445,7 +474,7 @@ class SparseOperatorBuilder:
         """
         return calc_dtype_cached(dtype, self._iscomplex)
 
-    def build_coupling_map(self, dtype=None):
+    def get_coupling_map(self, dtype=None):
         """Build and cache the coupling map for the specified dtype.
 
         Parameters
@@ -501,7 +530,7 @@ class SparseOperatorBuilder:
             The total number of basis states.
         """
         dtype = self.calc_dtype(dtype)
-        coupling_map = self.build_coupling_map(dtype=dtype)
+        coupling_map = self.get_coupling_map(dtype=dtype)
         kwargs = {
             "coupling_map": coupling_map,
             "sector": self.hilbert_space.sector_numba,
@@ -510,32 +539,21 @@ class SparseOperatorBuilder:
         }
 
         if not parallel:
-            data, rows, cols = flatconfig.build_coo_numba_core(**kwargs)
+            data, rows, cols = configcore.build_coo_numba_core(**kwargs)
         else:
-            # figure out how many threads to use etc.
-            from quimb import get_thread_pool
-
-            if parallel is True:
-                n_thread_workers = None
-            elif isinstance(parallel, int):
-                n_thread_workers = parallel
-            else:
-                raise ValueError(f"Unknown parallel option {parallel}.")
-
-            pool = get_thread_pool(n_thread_workers)
-            n_thread_workers = pool._max_workers
+            pool, world_size = get_pool_and_world_size(parallel)
 
             # launch the threads! note we distribtue in cyclic fashion as the
             # sparsity can be concentrated in certain ranges and we want each
             # thread to have roughly the same amount of work to do
             fs = [
                 pool.submit(
-                    flatconfig.build_coo_numba_core,
+                    configcore.build_coo_numba_core,
                     world_rank=i,
-                    world_size=n_thread_workers,
+                    world_size=world_size,
                     **kwargs,
                 )
-                for i in range(n_thread_workers)
+                for i in range(world_size)
             ]
 
             # gather and concatenate the results (some memory overhead here)
@@ -606,6 +624,95 @@ class SparseOperatorBuilder:
         A = self.build_sparse_matrix(stype="coo", dtype=dtype)
         return A.toarray()
 
+    def matvec(self, x, out=None, dtype=None, parallel=False):
+        """Apply this operator lazily (i.e. without constructing a sparse
+        matrix) to a vector. This uses less memory but is much slower.
+
+        Parameters
+        ----------
+        x : array
+            The vector to apply the operator to.
+        out : array, optional
+            An array to store the result in. If not provided, a new array
+            will be created.
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically set as the same as the input vector.
+        parallel : bool or int, optional
+            Whether to apply the operator in parallel (multi-threaded). If
+            True, will use number of threads equal to the number of
+            available CPU cores. If False, will use a single thread. If an
+            integer is provided, it will be used as the number of threads to
+            use. Uses `num_threads` more memory but is faster.
+
+        Returns
+        -------
+        out : array
+            The result of applying the operator to the vector.
+        """
+        if dtype is None:
+            dtype = x.dtype
+
+        kwargs = {
+            "coupling_map": self.get_coupling_map(dtype=dtype),
+            "sector": self.hilbert_space.sector_numba,
+            "symmetry": self.hilbert_space.symmetry,
+        }
+
+        if not parallel:
+            if out is None:
+                out = np.zeros_like(x, dtype=dtype)
+            configcore.matvec_numba(x, out, **kwargs)
+            return out
+
+        pool, world_size = get_pool_and_world_size(parallel)
+        out_i = np.zeros_like(x, dtype=dtype, shape=(world_size, x.size))
+
+        fs = [
+            pool.submit(
+                configcore.matvec_numba,
+                x,
+                out_i[i],
+                world_rank=i,
+                world_size=world_size,
+                **kwargs,
+            )
+            for i in range(world_size)
+        ]
+        for f in fs:
+            f.result()
+
+        # sum the results from each thread
+        return np.sum(out_i, axis=0, out=out)
+
+    def aslinearoperator(self, dtype=None, parallel=False):
+        """Get a `scipy.sparse.linalg.LinearOperator` for this operator.
+
+        Parameters
+        ----------
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically determined based on the terms in the operator.
+
+        Returns
+        -------
+        A : scipy.sparse.linalg.LinearOperator
+            The linear operator representation of this operator.
+        """
+        from scipy.sparse.linalg import LinearOperator
+
+        if dtype is None:
+            dtype = self.calc_dtype()
+
+        matvec = functools.partial(
+            self.matvec,
+            dtype=dtype,
+            parallel=parallel,
+        )
+        shape = (self.hilbert_space.size, self.hilbert_space.size)
+
+        return LinearOperator(shape=shape, matvec=matvec, dtype=dtype)
+
     def build_local_terms(self, dtype=None):
         """Get a dictionary of local terms, where each key is a sorted tuple
         of sites, and each value is the local matrix representation of the
@@ -634,14 +741,14 @@ class SparseOperatorBuilder:
 
         return Hk
 
-    def flatconfig_coupling(self, fc, dtype=None):
+    def flatconfig_coupling(self, flatconfig, dtype=None):
         """Get an array of other configurations coupled to the given
-        ``fc`` by this operator, and the corresponding coupling
+        ``flatconfig`` by this operator, and the corresponding coupling
         coefficients. This is for use with VMC for example.
 
         Parameters
         ----------
-        fc : array[np.uint8]
+        flatconfig : array[np.uint8]
             The linear array of the configuration to get the coupling for.
         dtype : numpy.dtype, optional
             The data type of the matrix. If not provided, will be
@@ -649,11 +756,15 @@ class SparseOperatorBuilder:
 
         Returns
         -------
+        coupled_flatconfigs : ndarray[np.uint8]
+            Each distinct flatconfig coupled to ``flatconfig``.
+        coeffs : ndarray[dtype]
+            The corresponding coupling coefficients.
         """
         dtype = calc_dtype_cached(dtype, self._iscomplex)
-        coupling_map = self.build_coupling_map(dtype=dtype)
-        return flatconfig.flatconfig_coupling_numba(
-            fc,
+        coupling_map = self.get_coupling_map(dtype=dtype)
+        return configcore.flatconfig_coupling_numba(
+            flatconfig,
             coupling_map=coupling_map,
             dtype=dtype,
         )
