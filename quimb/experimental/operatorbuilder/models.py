@@ -7,9 +7,10 @@ def heisenberg_from_edges(
     j=1.0,
     b=0.0,
     order=None,
-    symmetry=None,
     sector=None,
+    symmetry=None,
     hilbert_space=None,
+    dtype=None,
 ):
     r"""Create a Heisenberg Hamiltonian on the graph defined by ``edges``.
 
@@ -49,15 +50,18 @@ def heisenberg_from_edges(
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
         and ``key=order.index`` will be used.
+    sector : {None, str, int, ((int, int), (int, int))}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
     symmetry : {None, "Z2", "U1", "U1U1"}, optional
         The symmetry of the Hilbert space if any. If `None` and a `sector` is
-        provided, the symmetry will be inferred from the sector.
-    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
-        The sector of the Hilbert space. If None, no sector is assumed.
+        provided, the symmetry will be inferred from the sector if possible.
     hilbert_space : HilbertSpace, optional
         The Hilbert space to use. If not given, one will be constructed
         automatically from the edges. This overrides the ``order``,
         ``symmetry``, and ``sector`` parameters.
+    dtype : {None, str, type}, optional
+        The data type of the Hamiltonian. If None, a default dtype will be
+        used, np.float64 for real and np.complex128 for complex.
 
     Returns
     -------
@@ -80,11 +84,11 @@ def heisenberg_from_edges(
         hilbert_space = HilbertSpace(
             sites=sites,
             order=order,
-            symmetry=symmetry,
             sector=sector,
+            symmetry=symmetry,
         )
 
-    H = SparseOperatorBuilder(hilbert_space=hilbert_space)
+    H = SparseOperatorBuilder(hilbert_space=hilbert_space, dtype=dtype)
 
     for cooa, coob in edges:
         if jx == jy:
@@ -111,9 +115,10 @@ def fermi_hubbard_from_edges(
     U=1.0,
     mu=0.0,
     order=None,
-    symmetry=None,
     sector=None,
+    symmetry=None,
     hilbert_space=None,
+    dtype=None,
 ):
     r"""Create a Fermi-Hubbard Hamiltonian on the graph defined by ``edges``.
     The Hamiltonian is given by:
@@ -159,15 +164,18 @@ def fermi_hubbard_from_edges(
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
         and ``key=order.index`` will be used.
+    sector : {None, str, int, ((int, int), (int, int))}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
     symmetry : {None, "Z2", "U1", "U1U1"}, optional
         The symmetry of the Hilbert space if any. If `None` and a `sector` is
-        provided, the symmetry will be inferred from the sector.
-    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
-        The sector of the Hilbert space. If None, no sector is assumed.
+        provided, the symmetry will be inferred from the sector if possible.
     hilbert_space : HilbertSpace, optional
         The Hilbert space to use. If not given, one will be constructed
         automatically from the edges. This overrides the ``order``,
         ``symmetry``, and ``sector`` parameters.
+    dtype : {None, str, type}, optional
+        The data type of the Hamiltonian. If None, a default dtype will be
+        used, np.float64 for real and np.complex128 for complex.
 
     Returns
     -------
@@ -180,13 +188,11 @@ def fermi_hubbard_from_edges(
         hilbert_space = HilbertSpace(
             sites=[(s, coo) for coo in sites for s in "↑↓"],
             order=order,
-            symmetry=symmetry,
             sector=sector,
+            symmetry=symmetry,
         )
 
-    H = SparseOperatorBuilder(
-        hilbert_space=hilbert_space,
-    )
+    H = SparseOperatorBuilder(hilbert_space=hilbert_space, dtype=dtype)
 
     for cooa, coob in edges:
         # hopping
@@ -212,9 +218,10 @@ def fermi_hubbard_spinless_from_edges(
     V=0.0,
     mu=0.0,
     order=None,
-    symmetry=None,
     sector=None,
+    symmetry=None,
     hilbert_space=None,
+    dtype=None,
 ):
     r"""Create a spinless Fermi-Hubbard Hamiltonian on the graph defined by
     ``edges``. The Hamiltonian is given by:
@@ -255,15 +262,18 @@ def fermi_hubbard_spinless_from_edges(
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
         and ``key=order.index`` will be used.
+    sector : {None, str, int, ((int, int), (int, int))}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
     symmetry : {None, "Z2", "U1", "U1U1"}, optional
         The symmetry of the Hilbert space if any. If `None` and a `sector` is
-        provided, the symmetry will be inferred from the sector.
-    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
-        The sector of the Hilbert space. If None, no sector is assumed.
+        provided, the symmetry will be inferred from the sector if possible.
     hilbert_space : HilbertSpace, optional
         The Hilbert space to use. If not given, one will be constructed
         automatically from the edges. This overrides the ``order``,
         ``symmetry``, and ``sector`` parameters.
+    dtype : {None, str, type}, optional
+        The data type of the Hamiltonian. If None, a default dtype will be
+        used, np.float64 for real and np.complex128 for complex.
 
     Returns
     -------
@@ -276,11 +286,11 @@ def fermi_hubbard_spinless_from_edges(
         hilbert_space = HilbertSpace(
             sites=sites,
             order=order,
-            symmetry=symmetry,
             sector=sector,
+            symmetry=symmetry,
         )
 
-    H = SparseOperatorBuilder(hilbert_space=hilbert_space)
+    H = SparseOperatorBuilder(hilbert_space=hilbert_space, dtype=dtype)
 
     for cooa, coob in edges:
         # hopping

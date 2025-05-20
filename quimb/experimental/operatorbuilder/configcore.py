@@ -1,7 +1,8 @@
-"""Tools for working with ranked 'flat configs'."""
+"""Tools for ranking, deranking and coupling 'flat configs'."""
 
 import numpy as np
 from numba import njit
+from numba.typed import Dict
 
 nogil = True
 
@@ -15,9 +16,9 @@ def _check_next_coupled_term(
 
     Parameters
     ----------
-    a : int
+    a : uint32
         The index into the stacked terms.
-    b : int
+    b : uint32
         The index into the stacked operators.
     n : int
         The total size of the flat configuration.
@@ -25,17 +26,17 @@ def _check_next_coupled_term(
         The flat configuration to get the coupled configurations for.
     bj : ndarray[uint8]
         The coupled flat configuration to be modified in place.
-    size_term : int
-        The number of operators in the term.
-    sizes_op : ndarray[int]
+    size_term : uint32
+        The number of operators in this term.
+    sizes_op : ndarray[uint8]
         Flat array of number of entries for each operator, indexed by `a`.
-    regs : ndarray[int]
+    regs : ndarray[uint32]
         Flat array of registers in each term, indexed by `a`.
     xis : ndarray[uint8]
         Flat array of input bits for each entry, indexed by `b`.
     xjs : ndarray[uint8]
         Flat array of output bits for each entry, indexed by `b`.
-    cijs : ndarray[float]
+    cijs : ndarray
         Flat array of coefficients for each entry, indexed by `b`.
 
     Returns
@@ -46,7 +47,7 @@ def _check_next_coupled_term(
         The updated index into the stacked operators.
     valid : bool
         True if the coupled config is non-zero, False otherwise.
-    hij : float
+    hij : scalar
         The coefficient for the coupled config.
     """
     # reset coeff
@@ -72,14 +73,16 @@ def _check_next_coupled_term(
                 # must match single input
                 valid = xi == xis[b]
                 if valid:
-                    # found a match
-                    xj = xjs[b]
-                    cij = cijs[b]
+                    # found a match -> midstring update of coeff and config
+                    bj[reg] = xjs[b]
+                    hij *= cijs[b]
             else:
-                # 0 and 1 both match
+                # 0 and 1 both match -> midstring update of coeff and config
                 ib = b + xi
-                xj = xjs[ib]
-                cij = cijs[ib]
+                bj[reg] = xjs[ib]
+                hij *= cijs[ib]
+
+            # # alternative approaches:
 
             # valid = False
             # for each entry in the operator
@@ -92,11 +95,6 @@ def _check_next_coupled_term(
             #         xj = xjs[ib]
             #         cij = cijs[ib]
             #         break
-
-            if valid:
-                # midstring update of coeff and config
-                hij *= cij
-                bj[reg] = xj
 
         # increment operator index
         b += size_op
@@ -140,9 +138,10 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
 
     coupled_flatconfigs = np.empty((num_terms, n), dtype=np.uint8)
     coeffs = np.empty(num_terms, dtype=dtype)
+    seen = Dict.empty(np.int64, np.int64)
 
     # indices into stacked terms and operators
-    a = b = 0
+    a = b = np.uint32(0)
     for size_term in sizes_term:
         # for each term in the hamiltonian find which, if
         # any, config it couples to, & with what coefficient
@@ -150,9 +149,16 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
             a, b, n, flatconfig, bj, size_term, sizes_op, regs, xis, xjs, cijs
         )
         if valid:
-            coupled_flatconfigs[buf_ptr, :] = bj
-            coeffs[buf_ptr] = hij
-            buf_ptr += 1
+            key = flatconfig_to_rank_nosymm(bj)
+            if key in seen:
+                # already seen this config -> simply add to coeff
+                old_ptr = seen[key]
+                coeffs[old_ptr] += hij
+            else:
+                seen[key] = buf_ptr
+                coupled_flatconfigs[buf_ptr, :] = bj
+                coeffs[buf_ptr] = hij
+                buf_ptr += 1
 
     return coupled_flatconfigs[:buf_ptr], coeffs[:buf_ptr]
 
@@ -248,7 +254,7 @@ def build_coo_numba_core_nosymm(
         # reset the starting config
         rank_into_flatconfig_nosymm(bi, ci, n)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -294,7 +300,7 @@ def matvec_nosymm(
         # reset the starting config
         rank_into_flatconfig_nosymm(bi, ci, n)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -406,7 +412,7 @@ def build_coo_numba_core_z2(
         # reset the starting config
         rank_into_flatconfig_z2(bi, ci, n, p)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -447,37 +453,20 @@ def matvec_z2(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_z2(bi, ci, n, p)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = np.uint32(0)
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 cj = flatconfig_to_rank_z2(bj)
                 out[cj] += hij * x[ci]
 
@@ -630,7 +619,7 @@ def build_coo_numba_core_u1(
         # reset the starting config
         rank_into_flatconfig_u1_pascal(bi, ci, n, k, pt)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -678,7 +667,7 @@ def matvec_u1(
         # reset the starting config
         rank_into_flatconfig_u1_pascal(bi, ci, n, k, pt)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -816,7 +805,7 @@ def build_coo_numba_core_u1u1(
         # reset the starting configs
         rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -867,7 +856,7 @@ def matvec_u1u1(
         # reset the starting config
         rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
         # indices into stacked terms and operators
-        a = b = 0
+        a = b = np.uint32(0)
         for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
@@ -883,7 +872,7 @@ def matvec_u1u1(
 
 
 @njit(nogil=nogil)
-def rank_to_flatconfig(r, sector, symmetry=None, pt=None):
+def rank_to_flatconfig(r, sector, symmetry=0, pt=None):
     """Convert a rank to a flat config array.
 
     Parameters
@@ -898,8 +887,9 @@ def rank_to_flatconfig(r, sector, symmetry=None, pt=None):
         - (n, k) for U1 symmetry
         - (na, ka, nb, kb) for U1U1 symmetry
 
-    symmetry : {None, "Z2", "U1", "U1U1"}, optional
-        Specifies the symmetry to use.
+    symmetry : {0, 1, 2, 3}, optional
+        Specifies the symmetry to use. 0 = "None", 1 = "Z2", 2 = "U1",
+        3 = "U1U1". Default is 0.
     pt : array_like, optional
         The Pascal triangle table of shape containing at least max(na, nb).
         If not provided, it will be built internally. This is only used for
@@ -911,34 +901,33 @@ def rank_to_flatconfig(r, sector, symmetry=None, pt=None):
         A flat config array of shape (n,), corresponding to a bitstring.
         The array will be of dtype uint8.
     """
-    if symmetry is None:
+    if symmetry == 0:
         # unconstrained hilbert space
         (n,) = sector
         return rank_to_flatconfig_nosymm(r, n)
-    elif symmetry == "Z2":
+    elif symmetry == 1:
         n, p = sector
         if pt is None:
             pt = build_pascal_table(n)
         return rank_to_flatconfig_z2(r, n, p)
-    elif symmetry == "U1":
+    elif symmetry == 2:
         n, k = sector
         if pt is None:
             pt = build_pascal_table(n)
         return rank_to_flatconfig_u1_pascal(r, n, k, pt)
-    elif symmetry == "U1U1":
+    elif symmetry == 3:
         na, ka, nb, kb = sector
         if pt is None:
             pt = build_pascal_table(max(na, nb))
         return rank_to_flatconfig_u1u1_pascal(r, na, ka, nb, kb, pt)
     else:
         raise ValueError(
-            r"Symmetry must be None, 'Z2', 'U1' or 'U1U1'. Got "
-            f"{symmetry} instead."
+            f"Symmetry must be 0, 1, 2, or 3. Got {symmetry} instead."
         )
 
 
 @njit(nogil=nogil)
-def flatconfig_to_rank(flatconfig, sector, symmetry=None, pt=None):
+def flatconfig_to_rank(flatconfig, sector, symmetry=0, pt=None):
     """Convert a flat config array to a rank, i.e. its position in the
     lexicographic ordering of all bitstrings of that length.
 
@@ -955,8 +944,9 @@ def flatconfig_to_rank(flatconfig, sector, symmetry=None, pt=None):
         - (n, k) for U1 symmetry
         - (na, ka, nb, kb) for U1U1 symmetry
 
-    symmetry : {None, "Z2", "U1", "U1U1"}, optional
-        Specifies the symmetry to use.
+    symmetry : {0, 1, 2, 3}, optional
+        Specifies the symmetry to use. 0 = "None", 1 = "Z2", 2 = "U1",
+        3 = "U1U1". Default is 0.
     pt : array_like, optional
         The Pascal triangle table of shape containing at least max(na, nb).
         If not provided, it will be built internally. This is only used for
@@ -966,27 +956,26 @@ def flatconfig_to_rank(flatconfig, sector, symmetry=None, pt=None):
     -------
     int
     """
-    if symmetry is None:
+    if symmetry == 0:
         # unconstrained hilbert space
         (n,) = sector
         return flatconfig_to_rank_nosymm(flatconfig)
-    elif symmetry == "Z2":
+    elif symmetry == 1:
         n, p = sector
         return flatconfig_to_rank_z2(flatconfig, n, p)
-    elif symmetry == "U1":
+    elif symmetry == 2:
         n, k = sector
         if pt is None:
             pt = build_pascal_table(n)
         return flatconfig_to_rank_u1_pascal(flatconfig, n, k, pt)
-    elif symmetry == "U1U1":
+    elif symmetry == 3:
         na, ka, nb, kb = sector
         if pt is None:
             pt = build_pascal_table(max(na, nb))
         return flatconfig_to_rank_u1u1_pascal(flatconfig, na, ka, nb, kb, pt)
     else:
         raise ValueError(
-            r"Symmetry must be None, 'Z2', 'U1' or 'U1U1'. Got "
-            f"{symmetry} instead."
+            f"Symmetry must be 0, 1, 2, or 3. Got {symmetry} instead."
         )
 
 
@@ -994,7 +983,7 @@ def flatconfig_to_rank(flatconfig, sector, symmetry=None, pt=None):
 def build_coo_numba_core(
     coupling_map,
     sector,
-    symmetry,
+    symmetry=0,
     dtype=np.float64,
     world_size=1,
     world_rank=0,
@@ -1013,8 +1002,9 @@ def build_coo_numba_core(
         - (n, k) for U1 symmetry
         - (na, ka, nb, kb) for U1U1 symmetry
 
-    symmetry : {None, "Z2", "U1", "U1U1"}, optional
-        Specifies the symmetry to use.
+    symmetry : {0, 1, 2, 3}, optional
+        Specifies the symmetry to use. 0 = "None", 1 = "Z2", 2 = "U1",
+        3 = "U1U1". Default is 0.
     dtype : {np.float64, np.complex128, np.float32, np.float64}, optional
         The dtype to use for the data. Default is np.float64.
     world_size : int, optional
@@ -1035,32 +1025,31 @@ def build_coo_numba_core(
     cols : ndarray[int64]
         The column indices for the sparse matrix in COO format.
     """
-    if symmetry is None:
+    if symmetry == 0:
         # unconstrained hilbert space
         (n,) = sector
         return build_coo_numba_core_nosymm(
             n, coupling_map, dtype, world_size, world_rank
         )
-    elif symmetry == "Z2":
+    elif symmetry == 1:
         n, p = sector
         return build_coo_numba_core_z2(
             n, p, coupling_map, dtype, world_size, world_rank
         )
 
-    elif symmetry == "U1":
+    elif symmetry == 2:
         n, k = sector
         return build_coo_numba_core_u1(
             n, k, coupling_map, dtype, world_size, world_rank
         )
-    elif symmetry == "U1U1":
+    elif symmetry == 3:
         na, ka, nb, kb = sector
         return build_coo_numba_core_u1u1(
             na, ka, nb, kb, coupling_map, dtype, world_size, world_rank
         )
     else:
         raise ValueError(
-            "Symmetry must be None, 'Z2', 'U1' "
-            f"or 'U1U1'. Got {symmetry} instead."
+            f"Symmetry must be 0, 1, 2, or 3. Got {symmetry} instead."
         )
 
 
@@ -1070,7 +1059,7 @@ def matvec_numba(
     out,
     coupling_map,
     sector,
-    symmetry=None,
+    symmetry=0,
     world_size=1,
     world_rank=0,
 ):
@@ -1092,8 +1081,9 @@ def matvec_numba(
         - (n, k) for U1 symmetry
         - (na, ka, nb, kb) for U1U1 symmetry
 
-    symmetry : {None, "Z2", "U1", "U1U1"}, optional
-        Specifies the symmetry to use.
+    symmetry : {0, 1, 2, 3}, optional
+        Specifies the symmetry to use. 0 = "None", 1 = "Z2", 2 = "U1",
+        3 = "U1U1". Default is 0.
     world_size : int, optional
         The number of processes in the world. Default is 1. Only rows
         corresponding to range(world_rank, D, world_size) will be computed.
@@ -1103,17 +1093,17 @@ def matvec_numba(
         corresponding to range(world_rank, D, world_size) will be computed.
         This is used for parallelization.
     """
-    if symmetry is None:
+    if symmetry == 0:
         # unconstrained hilbert space
         (n,) = sector
         matvec_nosymm(x, out, n, coupling_map, world_size, world_rank)
-    elif symmetry == "Z2":
+    elif symmetry == 1:
         n, p = sector
         matvec_z2(x, out, n, p, coupling_map, world_size, world_rank)
-    elif symmetry == "U1":
+    elif symmetry == 2:
         n, k = sector
         matvec_u1(x, out, n, k, coupling_map, world_size, world_rank)
-    elif symmetry == "U1U1":
+    elif symmetry == 3:
         na, ka, nb, kb = sector
         matvec_u1u1(
             x,
@@ -1128,6 +1118,5 @@ def matvec_numba(
         )
     else:
         raise ValueError(
-            "Symmetry must be None, 'Z2', 'U1' "
-            f"or 'U1U1'. Got {symmetry} instead."
+            f"Symmetry must be 0, 1, 2, or 3. Got {symmetry} instead."
         )

@@ -190,11 +190,11 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
         raise ValueError(f"Unknown dtype {dtype}")
 
     # number of operators per term e.g. 5 for '+zzz-'
-    sizes = []
+    sizes_term = []
     # the registers each term acts on
     regs = []
     # number of elements per operator e.g. 2 for 'z', 1 for '+'
-    sizes_t = []
+    sizes_op = []
     # input / output bits, e.g. 0 -> 1 for 'sx'
     xis = []
     xjs = []
@@ -241,17 +241,17 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
                 cijs.append(cij)
                 size_t += 1
 
-            sizes_t.append(size_t)
+            sizes_op.append(size_t)
             size += 1
 
-        sizes.append(size)
+        sizes_term.append(size)
 
     return (
-        np.array(sizes),
-        np.array(regs),
-        np.array(sizes_t),
-        np.array(xis),
-        np.array(xjs),
+        np.array(sizes_term, dtype=np.uint32),
+        np.array(regs, dtype=np.uint32),
+        np.array(sizes_op, dtype=np.uint8),
+        np.array(xis, dtype=np.uint8),
+        np.array(xjs, dtype=np.uint8),
         np.array(cijs, dtype=dtype),
     )
 
@@ -293,19 +293,28 @@ class SparseOperatorBuilder:
     hilbert_space : HilbertSpace
         The Hilbert space to build the operator in. If this is not supplied
         then a minimal Hilbert space will be constructed from the sites used,
-        when required.
+        when required. The default symmetry and sector to build operators in is
+        inherited from this Hilbert space, but can be overridden.
+    dtype : numpy.dtype or str, optional
+        A default data type for the coefficients of the operator. If not
+        provided, will be automatically determined at building time based on
+        the terms in the operator. If the operator is complex, will be set to
+        ``np.complex128``. If the operator is real, will be set to
+        ``np.float64``. Individual building methods can override this.
     """
 
     def __init__(
         self,
         terms=(),
         hilbert_space: HilbertSpace = None,
+        dtype=None,
     ):
         self._term_store = {}
         self._sites_used = set()
         self._hilbert_space = hilbert_space
         self._coupling_maps = {}
         self._iscomplex = False
+        self._dtype = dtype
         for term in terms:
             self.add_term(*term)
 
@@ -476,7 +485,7 @@ class SparseOperatorBuilder:
                 s[self.site_to_reg(site)] = f"{op:<2}"
             print("".join(s), f"{coeff:+}")
 
-    def calc_dtype(self, dtype=None):
+    def get_dtype(self, dtype=None):
         """Calculate the numpy data type of the operator to use.
 
         Parameters
@@ -490,6 +499,8 @@ class SparseOperatorBuilder:
         dtype : numpy.dtype
             The data type of the coefficients.
         """
+        if dtype is None:
+            dtype = self._dtype
         return calc_dtype_cached(dtype, self._iscomplex)
 
     def get_coupling_map(self, dtype=None):
@@ -506,7 +517,7 @@ class SparseOperatorBuilder:
         coupling_map : tuple[ndarray]
             The operator defined as tuple of flat arrays.
         """
-        dtype = self.calc_dtype(dtype)
+        dtype = self.get_dtype(dtype)
 
         try:
             coupling_map = self._coupling_maps[dtype]
@@ -520,256 +531,8 @@ class SparseOperatorBuilder:
 
         return coupling_map
 
-    def build_coo_data(self, dtype=None, parallel=False):
-        """Build the raw data for a sparse matrix in COO format, optionally
-        in parallel.
-
-        Parameters
-        ----------
-        dtype : numpy.dtype, optional
-            The data type of the matrix. If not provided, will be
-            automatically determined based on the terms in the operator.
-        parallel : bool or int, optional
-            Whether to build the matrix in parallel (multi-threaded). If True,
-            will use number of threads equal to the number of available CPU
-            cores. If False, will use a single thread. If an integer is
-            provided, it will be used as the number of threads to use.
-
-        Returns
-        -------
-        data : array
-            The data entries for the sparse matrix in COO format.
-        rows : array
-            The row indices for the sparse matrix in COO format.
-        cols : array
-            The column indices for the sparse matrix in COO format.
-        d : int
-            The total number of basis states.
-        """
-        dtype = self.calc_dtype(dtype)
-        coupling_map = self.get_coupling_map(dtype=dtype)
-        kwargs = {
-            "coupling_map": coupling_map,
-            "sector": self.hilbert_space.sector_numba,
-            "symmetry": self.hilbert_space.symmetry,
-            "dtype": dtype,
-        }
-
-        if not parallel:
-            data, rows, cols = configcore.build_coo_numba_core(**kwargs)
-        else:
-            pool, world_size = get_pool_and_world_size(parallel)
-
-            # launch the threads! note we distribtue in cyclic fashion as the
-            # sparsity can be concentrated in certain ranges and we want each
-            # thread to have roughly the same amount of work to do
-            fs = [
-                pool.submit(
-                    configcore.build_coo_numba_core,
-                    world_rank=i,
-                    world_size=world_size,
-                    **kwargs,
-                )
-                for i in range(world_size)
-            ]
-
-            # gather and concatenate the results (some memory overhead here)
-            data = []
-            rows = []
-            cols = []
-            for f in fs:
-                d, ci, cj = f.result()
-                data.append(d)
-                rows.append(ci)
-                cols.append(cj)
-
-            data = np.concatenate(data)
-            rows = np.concatenate(rows)
-            cols = np.concatenate(cols)
-
-        return data, rows, cols, self.hilbert_space.size
-
-    def build_sparse_matrix(
-        self,
-        stype="csr",
-        dtype=None,
-        parallel=False,
-    ):
-        """Build a sparse matrix in the given format. Optionally in parallel.
-
-        Parameters
-        ----------
-        stype : str, optional
-            The sparse matrix format to use. Can be one of 'coo', 'csr', 'csc',
-            'bsr', 'lil', 'dok', or 'dia'. Default is 'csr'.
-        dtype : numpy.dtype, optional
-            The data type of the matrix. If not provided, will be
-            automatically determined based on the terms in the operator.
-        parallel : bool, optional
-            Whether to build the matrix in parallel (multi-threaded).
-
-        Returns
-        -------
-        scipy.sparse matrix
-        """
-        import scipy.sparse as sp
-
-        data, rows, cols, d = self.build_coo_data(
-            dtype=dtype,
-            parallel=parallel,
-        )
-        A = sp.coo_matrix((data, (rows, cols)), shape=(d, d))
-        if stype != "coo":
-            A = A.asformat(stype)
-        return A
-
-    def build_dense(self, dtype=None):
-        """Get the dense (`numpy.ndarray`) matrix representation of this
-        operator.
-
-        Parameters
-        ----------
-        dtype : numpy.dtype, optional
-            The data type of the matrix. If not provided, will be
-            automatically determined based on the terms in the operator.
-
-        Returns
-        -------
-        A : numpy.ndarray
-            The dense matrix representation of this operator.
-        """
-        A = self.build_sparse_matrix(stype="coo", dtype=dtype)
-        return A.toarray()
-
-    def matvec(self, x, out=None, dtype=None, parallel=False):
-        """Apply this operator lazily (i.e. without constructing a sparse
-        matrix) to a vector. This uses less memory but is much slower.
-
-        Parameters
-        ----------
-        x : array
-            The vector to apply the operator to.
-        out : array, optional
-            An array to store the result in. If not provided, a new array
-            will be created.
-        dtype : numpy.dtype, optional
-            The data type of the matrix. If not provided, will be
-            automatically set as the same as the input vector.
-        parallel : bool or int, optional
-            Whether to apply the operator in parallel (multi-threaded). If
-            True, will use number of threads equal to the number of
-            available CPU cores. If False, will use a single thread. If an
-            integer is provided, it will be used as the number of threads to
-            use. Uses `num_threads` more memory but is faster.
-
-        Returns
-        -------
-        out : array
-            The result of applying the operator to the vector.
-        """
-        if dtype is None:
-            dtype = x.dtype
-
-        kwargs = {
-            "coupling_map": self.get_coupling_map(dtype=dtype),
-            "sector": self.hilbert_space.sector_numba,
-            "symmetry": self.hilbert_space.symmetry,
-        }
-
-        if not parallel:
-            if out is None:
-                out = np.zeros_like(x, dtype=dtype)
-            configcore.matvec_numba(x, out, **kwargs)
-            return out
-
-        pool, world_size = get_pool_and_world_size(parallel)
-        out_i = np.zeros_like(x, dtype=dtype, shape=(world_size, x.size))
-
-        fs = [
-            pool.submit(
-                configcore.matvec_numba,
-                x,
-                out_i[i],
-                world_rank=i,
-                world_size=world_size,
-                **kwargs,
-            )
-            for i in range(world_size)
-        ]
-        for f in fs:
-            f.result()
-
-        # sum the results from each thread
-        return np.sum(out_i, axis=0, out=out)
-
-    def aslinearoperator(
-        self,
-        dtype=None,
-        parallel=False,
-    ):
-        """Get a `scipy.sparse.linalg.LinearOperator` for this operator.
-        Note currently it is assumed to be hermitian.
-
-        Parameters
-        ----------
-        dtype : numpy.dtype, optional
-            The data type of the matrix. If not provided, will be
-            automatically determined based on the terms in the operator.
-
-        Returns
-        -------
-        A : scipy.sparse.linalg.LinearOperator
-            The linear operator representation of this operator.
-        """
-        from scipy.sparse.linalg import LinearOperator
-
-        if dtype is None:
-            dtype = self.calc_dtype()
-
-        matvec = functools.partial(
-            self.matvec,
-            dtype=dtype,
-            parallel=parallel,
-        )
-        shape = (self.hilbert_space.size, self.hilbert_space.size)
-
-        return LinearOperator(
-            shape=shape,
-            matvec=matvec,
-            rmatvec=matvec,
-            dtype=dtype,
-        )
-
-    def build_local_terms(self, dtype=None):
-        """Get a dictionary of local terms, where each key is a sorted tuple
-        of sites, and each value is the local matrix representation of the
-        operator on those sites. For use with e.g. tensor network algorithms.
-
-        Note terms acting on the same sites are summed together and the size of
-        each local matrix is exponential in the locality of that term.
-
-        Returns
-        -------
-        Hk : dict[tuple[hashable], numpy.ndarray]
-            The local terms.
-        """
-        Hk = {}
-
-        dtype = self.calc_dtype(dtype)
-
-        for term, coeff in self._term_store.items():
-            ops, sites = zip(*term)
-            mats = (get_mat(op, dtype=dtype) for op in ops)
-            hk = coeff * functools.reduce(np.kron, mats)
-            if sites not in Hk:
-                Hk[sites] = hk
-            else:
-                Hk[sites] = Hk[sites] + hk
-
-        return Hk
-
     def flatconfig_coupling(self, flatconfig, dtype=None):
-        """Get an array of other configurations coupled to the given
+        """Get an array of other configurations coupled to the given individual
         ``flatconfig`` by this operator, and the corresponding coupling
         coefficients. This is for use with VMC for example.
 
@@ -788,7 +551,7 @@ class SparseOperatorBuilder:
         coeffs : ndarray[dtype]
             The corresponding coupling coefficients.
         """
-        dtype = calc_dtype_cached(dtype, self._iscomplex)
+        dtype = self.get_dtype(dtype)
         coupling_map = self.get_coupling_map(dtype=dtype)
         return configcore.flatconfig_coupling_numba(
             flatconfig,
@@ -820,8 +583,343 @@ class SparseOperatorBuilder:
         ]
         return coupled_configs, cijs
 
+    def build_coo_data(
+        self, sector=None, symmetry=None, dtype=None, parallel=False
+    ):
+        """Build the raw data for a sparse matrix in COO format, optionally
+        in parallel.
+
+        Parameters
+        ----------
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically determined based on the terms in the operator.
+        parallel : bool or int, optional
+            Whether to build the matrix in parallel (multi-threaded). If True,
+            will use number of threads equal to the number of available CPU
+            cores. If False, will use a single thread. If an integer is
+            provided, it will be used as the number of threads to use.
+
+        Returns
+        -------
+        data : array
+            The data entries for the sparse matrix in COO format.
+        rows : array
+            The row indices for the sparse matrix in COO format.
+        cols : array
+            The column indices for the sparse matrix in COO format.
+        d : int
+            The total number of basis states.
+        """
+        dtype = self.get_dtype(dtype)
+        coupling_map = self.get_coupling_map(dtype=dtype)
+        d = self.hilbert_space.get_size(sector, symmetry)
+        sector_nb, symmetry_nb = self.hilbert_space.get_sector_numba(
+            sector=sector, symmetry=symmetry
+        )
+        kwargs = {
+            "coupling_map": coupling_map,
+            "sector": sector_nb,
+            "symmetry": symmetry_nb,
+            "dtype": dtype,
+        }
+
+        if not parallel:
+            data, rows, cols = configcore.build_coo_numba_core(**kwargs)
+        else:
+            pool, world_size = get_pool_and_world_size(parallel)
+
+            # launch the threads! note we distribtue in cyclic fashion as the
+            # sparsity can be concentrated in certain ranges and we want each
+            # thread to have roughly the same amount of work to do
+            fs = [
+                pool.submit(
+                    configcore.build_coo_numba_core,
+                    world_rank=i,
+                    world_size=world_size,
+                    **kwargs,
+                )
+                for i in range(world_size)
+            ]
+
+            # gather and concatenate the results (some memory overhead here)
+            data = []
+            rows = []
+            cols = []
+            for f in fs:
+                df, ci, cj = f.result()
+                data.append(df)
+                rows.append(ci)
+                cols.append(cj)
+
+            data = np.concatenate(data)
+            rows = np.concatenate(rows)
+            cols = np.concatenate(cols)
+
+        return data, rows, cols, d
+
+    def build_sparse_matrix(
+        self,
+        sector=None,
+        symmetry=None,
+        dtype=None,
+        stype="csr",
+        parallel=False,
+    ):
+        """Build a sparse matrix in the given format. Optionally in parallel.
+
+        Parameters
+        ----------
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically determined based on the terms in the operator.
+        stype : str, optional
+            The sparse matrix format to use. Can be one of 'coo', 'csr', 'csc',
+            'bsr', 'lil', 'dok', or 'dia'. Default is 'csr'.
+        parallel : bool, optional
+            Whether to build the matrix in parallel (multi-threaded).
+
+        Returns
+        -------
+        scipy.sparse matrix
+        """
+        import scipy.sparse as sp
+
+        data, rows, cols, d = self.build_coo_data(
+            sector=sector,
+            symmetry=symmetry,
+            dtype=dtype,
+            parallel=parallel,
+        )
+        A = sp.coo_matrix((data, (rows, cols)), shape=(d, d))
+        if stype != "coo":
+            A = A.asformat(stype)
+
+        return A
+
+    def build_dense(
+        self,
+        sector=None,
+        symmetry=None,
+        dtype=None,
+        parallel=False,
+    ):
+        """Get the dense (`numpy.ndarray`) matrix representation of this
+        operator.
+
+        Parameters
+        ----------
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically determined based on the terms in the operator.
+        parallel : bool or int, optional
+            Whether to build the matrix in parallel (multi-threaded). If
+            True, will use number of threads equal to the number of
+            available CPU cores. If False, will use a single thread. If an
+            integer is provided, it will be used as the number of threads to
+            use.
+
+        Returns
+        -------
+        A : numpy.ndarray
+            The dense matrix representation of this operator.
+        """
+        A = self.build_sparse_matrix(
+            sector=sector,
+            symmetry=symmetry,
+            dtype=dtype,
+            stype="coo",
+            parallel=parallel,
+        )
+        return A.toarray()
+
+    def matvec(
+        self,
+        x,
+        out=None,
+        sector=None,
+        symmetry=None,
+        dtype=None,
+        parallel=False,
+    ):
+        """Apply this operator lazily (i.e. without constructing a sparse
+        matrix) to a vector. This uses less memory but is much slower.
+
+        Parameters
+        ----------
+        x : array
+            The vector to apply the operator to.
+        out : array, optional
+            An array to store the result in. If not provided, a new array
+            will be created.
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used. The implicit size should match that of `x`.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically set as the same as the input vector.
+        parallel : bool or int, optional
+            Whether to apply the operator in parallel (multi-threaded). If
+            True, will use number of threads equal to the number of
+            available CPU cores. If False, will use a single thread. If an
+            integer is provided, it will be used as the number of threads to
+            use. Uses `num_threads` more memory but is faster.
+
+        Returns
+        -------
+        out : array
+            The result of applying the operator to the vector.
+        """
+        if dtype is None:
+            dtype = x.dtype
+
+        sector_nb, symmetry_nb = self.hilbert_space.get_sector_numba(
+            sector=sector, symmetry=symmetry
+        )
+
+        kwargs = {
+            "coupling_map": self.get_coupling_map(dtype=dtype),
+            "sector": sector_nb,
+            "symmetry": symmetry_nb,
+        }
+
+        if not parallel:
+            if out is None:
+                out = np.zeros_like(x, dtype=dtype)
+            configcore.matvec_numba(x, out, **kwargs)
+            return out
+
+        pool, world_size = get_pool_and_world_size(parallel)
+        out_i = np.zeros_like(x, dtype=dtype, shape=(world_size, x.size))
+
+        fs = [
+            pool.submit(
+                configcore.matvec_numba,
+                x,
+                out_i[i],
+                world_rank=i,
+                world_size=world_size,
+                **kwargs,
+            )
+            for i in range(world_size)
+        ]
+        for f in fs:
+            f.result()
+
+        # sum the results from each thread
+        return np.sum(out_i, axis=0, out=out)
+
+    def aslinearoperator(
+        self,
+        sector=None,
+        symmetry=None,
+        dtype=None,
+        parallel=False,
+    ):
+        """Get a `scipy.sparse.linalg.LinearOperator` for this operator.
+        This is a lazy representation of the operator, which uses `matvec` to
+        apply the operator to a vector. Less memory is required than
+        constructing the full sparse matrix, but it is significantly slower.
+
+        Note currently the operator is assumed to be hermitian.
+
+        Parameters
+        ----------
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically determined based on the terms in the operator.
+        parallel : bool or int, optional
+            Whether to apply the operator in parallel (multi-threaded). If
+            True, will use number of threads equal to the number of
+            available CPU cores. If False, will use a single thread. If an
+            integer is provided, it will be used as the number of threads to
+            use. Uses `num_threads` more memory but is faster.
+
+        Returns
+        -------
+        Alo : scipy.sparse.linalg.LinearOperator
+            The linear operator representation of this operator.
+        """
+        from scipy.sparse.linalg import LinearOperator
+
+        if dtype is None:
+            dtype = self.get_dtype()
+
+        d = self.hilbert_space.get_size(sector, symmetry)
+        shape = (d, d)
+
+        matvec = functools.partial(
+            self.matvec,
+            sector=sector,
+            symmetry=symmetry,
+            dtype=dtype,
+            parallel=parallel,
+        )
+
+        return LinearOperator(
+            shape=shape,
+            matvec=matvec,
+            rmatvec=matvec,
+            dtype=dtype,
+        )
+
+    def build_local_terms(self, dtype=None):
+        """Get a dictionary of local terms, where each key is a sorted tuple
+        of sites, and each value is the local matrix representation of the
+        operator on those sites. For use with e.g. tensor network algorithms.
+
+        Note terms acting on the same sites are summed together and the size of
+        each local matrix is exponential in the locality of that term.
+
+        Returns
+        -------
+        Hk : dict[tuple[hashable], numpy.ndarray]
+            The local terms.
+        """
+        Hk = {}
+
+        dtype = self.get_dtype(dtype)
+
+        for term, coeff in self._term_store.items():
+            ops, sites = zip(*term)
+            mats = (get_mat(op, dtype=dtype) for op in ops)
+            hk = coeff * functools.reduce(np.kron, mats)
+            if sites not in Hk:
+                Hk[sites] = hk
+            else:
+                Hk[sites] = Hk[sites] + hk
+
+        return Hk
+
     def build_state_machine_greedy(self):
-        # XXX: upgrade to optimal method : https://arxiv.org/abs/2006.02056
+        # XXX: also implement optimal method : https://arxiv.org/abs/2006.02056
 
         import networkx as nx
 
@@ -1106,7 +1204,8 @@ class SparseOperatorBuilder:
         else:
             raise ValueError(f"Unknown method {method}.")
 
-        dtype = self.calc_dtype(dtype)
+        dtype = self.get_dtype(dtype)
+
         Wts = [
             np.zeros((dl, dr, 2, 2), dtype=dtype)
             for dl, dr in qu.utils.pairwise(G.graph["num_rails"])

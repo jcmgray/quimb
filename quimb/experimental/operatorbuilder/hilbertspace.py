@@ -76,7 +76,7 @@ def valid_u1u1_sector(sector, nsites):
         return False
 
 
-def parse_symmetry_and_sector(nsites, symmetry=None, sector=None):
+def parse_symmetry_and_sector(nsites, sector=None, symmetry=None):
     if sector is None:
         return None, None
 
@@ -151,19 +151,19 @@ class HilbertSpace:
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
         and ``key=order.index`` will be used.
+    sector : {None, str, int, ((int, int), (int, int))}, optional
+        The sector of the Hilbert space. If None, no sector is assumed.
     symmetry : {None, "Z2", "U1", "U1U1"}, optional
         The symmetry of the Hilbert space if any. If `None` and a `sector` is
-        provided, the symmetry will be inferred from the sector.
-    sector : {None, str, int, tuple[tuple[int, int], tuple[int, int]]}, optional
-        The sector of the Hilbert space. If None, no sector is assumed.
+        provided, the symmetry will be inferred from the sector if possible.
     """
 
     def __init__(
         self,
         sites,
         order=None,
-        symmetry=None,
         sector=None,
+        symmetry=None,
     ):
         if isinstance(sites, int):
             sites = range(sites)
@@ -177,9 +177,9 @@ class HilbertSpace:
         self._mapping = {s: i for i, s in self._mapping_inv.items()}
 
         self._symmetry, self._sector = parse_symmetry_and_sector(
-            symmetry=symmetry,
-            sector=sector,
             nsites=self.nsites,
+            sector=sector,
+            symmetry=symmetry,
         )
 
         # lazily computed:
@@ -188,14 +188,14 @@ class HilbertSpace:
         # storage for pascal table
         self._pt = None
 
-        if self.symmetry is None:
+        if self._symmetry is None:
             self._rank_to_flatconfig = functools.partial(
                 configcore.rank_to_flatconfig_nosymm,
                 n=self.nsites,
             )
             self._flatconfig_to_rank = configcore.flatconfig_to_rank_nosymm
 
-        elif self.symmetry == "Z2":
+        elif self._symmetry == "Z2":
             self._rank_to_flatconfig = functools.partial(
                 configcore.rank_to_flatconfig_z2,
                 n=self.nsites,
@@ -203,7 +203,7 @@ class HilbertSpace:
             )
             self._flatconfig_to_rank = configcore.flatconfig_to_rank_z2
 
-        elif self.symmetry == "U1":
+        elif self._symmetry == "U1":
             self._rank_to_flatconfig = functools.partial(
                 configcore.rank_to_flatconfig_u1_pascal,
                 n=self.nsites,
@@ -217,7 +217,7 @@ class HilbertSpace:
                 pt=self.get_pascal_table(),
             )
 
-        elif self.symmetry == "U1U1":
+        elif self._symmetry == "U1U1":
             (na, ka), (nb, kb) = self.sector
             self._rank_to_flatconfig = functools.partial(
                 configcore.rank_to_flatconfig_u1u1_pascal,
@@ -262,18 +262,54 @@ class HilbertSpace:
         """The sector of the Hilbert space."""
         return self._sector
 
-    @property
-    def sector_numba(self):
-        """The sector of the Hilbert space, for numba consumption."""
-        if self._sector is None:
-            return np.array([self.nsites], dtype=np.int64)
-        elif self.symmetry == "Z2":
-            return np.array([self.nsites, self.sector], dtype=np.int64)
-        elif self.symmetry == "U1":
-            return np.array([self.nsites, self.sector], dtype=np.int64)
-        elif self.symmetry == "U1U1":
-            (na, ka), (nb, kb) = self.sector
-            return np.array([na, ka, nb, kb], dtype=np.int64)
+    def get_sector_numba(self, sector=None, symmetry=None):
+        """The sector of the Hilbert space, in 'numba form'. A non-default
+        symmetry and sector can be provided.
+
+        Parameters
+        ----------
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+
+        Returns
+        -------
+        sector : ndarray[int64]
+            The sector of the Hilbert space, in 'numba form'. This is a 1D
+            array of length 1, 2 or 4, depending on the symmetry.
+        symmetry : str
+            The symmetry of the Hilbert space. This is one of "None", "Z2",
+            "U1", or "U1U1".
+        """
+        if sector is not None:
+            symmetry, sector = parse_symmetry_and_sector(
+                nsites=self.nsites,
+                sector=sector,
+                symmetry=symmetry,
+            )
+        else:
+            # use defaults
+            sector = self._sector
+            symmetry = self._symmetry
+
+        if sector is None:
+            sector_nb = np.array([self.nsites], dtype=np.int64)
+            symmetry_nb = 0
+        elif symmetry == "Z2":
+            sector_nb = np.array([self.nsites, sector], dtype=np.int64)
+            symmetry_nb = 1
+        elif symmetry == "U1":
+            sector_nb = np.array([self.nsites, sector], dtype=np.int64)
+            symmetry_nb = 2
+        elif symmetry == "U1U1":
+            (na, ka), (nb, kb) = sector
+            sector_nb = np.array([na, ka, nb, kb], dtype=np.int64)
+            symmetry_nb = 3
+
+        return sector_nb, symmetry_nb
 
     @property
     def symmetry(self):
@@ -295,25 +331,55 @@ class HilbertSpace:
             self._pt = configcore.build_pascal_table(nmax)
         return self._pt
 
+    def get_size(self, sector=None, symmetry=None):
+        """Get the size of the Hilbert space, optionally given a non-default
+        symmetry and sector.
+
+        Parameters
+        ----------
+        sector : {None, str, int, ((int, int), (int, int))}, optional
+            The sector of the Hilbert space. If None, the default sector is
+            used.
+        symmetry : {None, "Z2", "U1", "U1U1"}, optional
+            The symmetry of the Hilbert space. If None, the default symmetry is
+            used, or inferred from the supplied sector if possible.
+        """
+        if sector is not None:
+            symmetry, sector = parse_symmetry_and_sector(
+                nsites=self.nsites,
+                sector=sector,
+                symmetry=symmetry,
+            )
+        else:
+            # use defaults
+            sector = self._sector
+            symmetry = self._symmetry
+
+        if symmetry is None:
+            return 2**self.nsites
+
+        elif symmetry == "Z2":
+            return 2 ** (self.nsites - 1)
+
+        elif symmetry == "U1":
+            return math.comb(self.nsites, sector)
+
+        elif symmetry == "U1U1":
+            (na, ka), (nb, kb) = sector
+            return math.comb(na, ka) * math.comb(nb, kb)
+
+        else:
+            raise ValueError(
+                f"Invalid symmetry {symmetry} for sector {sector}."
+            )
+
     @property
     def size(self):
         """Get the size of this Hilbert space, taking into account the
         symmetry and sector.
         """
         if self._size is None:
-            if self.symmetry is None:
-                self._size = 2**self.nsites
-
-            elif self.symmetry == "Z2":
-                self._size = 2 ** (self.nsites - 1)
-
-            elif self.symmetry == "U1":
-                self._size = math.comb(self.nsites, self.sector)
-
-            elif self.symmetry == "U1U1":
-                (na, ka), (nb, kb) = self.sector
-                self._size = math.comb(na, ka) * math.comb(nb, kb)
-
+            self._size = self.get_size()
         return self._size
 
     def site_to_reg(self, site):
