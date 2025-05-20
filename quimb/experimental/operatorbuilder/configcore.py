@@ -3,12 +3,149 @@
 import numpy as np
 from numba import njit
 
-# ----------------------- unconstrained hilbert space ----------------------- #
-
 nogil = True
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
+def _check_next_coupled_term(
+    a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+):
+    """Calculate the next coupled config and coeff, or flag as zero if
+    there is no coupled config. Inplace modifies the bj array.
+
+    Parameters
+    ----------
+    a : int
+        The index into the stacked terms.
+    b : int
+        The index into the stacked operators.
+    n : int
+        The total size of the flat configuration.
+    bi : ndarray[uint8]
+        The flat configuration to get the coupled configurations for.
+    bj : ndarray[uint8]
+        The coupled flat configuration to be modified in place.
+    size_term : int
+        The number of operators in the term.
+    sizes_op : ndarray[int]
+        Flat array of number of entries for each operator, indexed by `a`.
+    regs : ndarray[int]
+        Flat array of registers in each term, indexed by `a`.
+    xis : ndarray[uint8]
+        Flat array of input bits for each entry, indexed by `b`.
+    xjs : ndarray[uint8]
+        Flat array of output bits for each entry, indexed by `b`.
+    cijs : ndarray[float]
+        Flat array of coefficients for each entry, indexed by `b`.
+
+    Returns
+    -------
+    a : int
+        The updated index into the stacked terms.
+    b : int
+        The updated index into the stacked operators.
+    valid : bool
+        True if the coupled config is non-zero, False otherwise.
+    hij : float
+        The coefficient for the coupled config.
+    """
+    # reset coeff
+    hij = 1.0
+    valid = True
+    # reset coupled config
+    for q in range(n):
+        bj[q] = bi[q]
+
+    # for each operator in the term
+    for da in range(size_term):
+        # the number of entries in the operator
+        size_op = sizes_op[a + da]
+
+        if valid:
+            # check further coupling
+            reg = regs[a + da]
+            xi = bi[reg]
+
+            # for each entry in the operator
+            for db in range(size_op):
+                xin = xis[b + db]
+                if xi == xin:
+                    # found a match
+                    xj = xjs[b + db]
+                    cij = cijs[b + db]
+                    break
+            else:
+                # didn't break -> current bit doesn't match any entry
+                valid = False
+
+            if valid:
+                # midstring update of coeff and config
+                hij *= cij
+                bj[reg] = xj
+
+        # increment operator index
+        b += size_op
+    # increment the term index
+    a += size_term
+
+    return a, b, valid, hij
+
+
+@njit(nogil=True)
+def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
+    """Get the coupled flat configurations for a given flat configuration
+    and coupling map.
+
+    Like applying the sparse matrix to a basis vector, or retrieving a single
+    row.
+
+    Parameters
+    ----------
+    flatconfig : ndarray[uint8]
+        The flat configuration to get the coupled configurations for.
+    coupling_map : tuple[ndarray]
+        The operator defined as tuple of flat arrays.
+    dtype : {np.float64, np.complex128, np.float32, np.float64}, optional
+        The dtype to use for the coupled coefficients. Default is np.float64.
+
+    Returns
+    -------
+    coupled_flatconfigs : ndarray[uint8]
+        A list of coupled flat configurations, each with the corresponding
+        coefficient.
+    coeffs : ndarray[dtype]
+        The coefficients for each coupled flat configuration.
+    """
+    n = flatconfig.size
+    buf_ptr = 0
+    bj = np.empty(n, dtype=np.uint8)
+
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+    num_terms = len(sizes_term)
+
+    coupled_flatconfigs = np.empty((num_terms, n), dtype=np.uint8)
+    coeffs = np.empty(num_terms, dtype=dtype)
+
+    # indices into stacked terms and operators
+    a = b = 0
+    for size_term in sizes_term:
+        # for each term in the hamiltonian find which, if
+        # any, config it couples to, & with what coefficient
+        a, b, valid, hij = _check_next_coupled_term(
+            a, b, n, flatconfig, bj, size_term, sizes_op, regs, xis, xjs, cijs
+        )
+        if valid:
+            coupled_flatconfigs[buf_ptr, :] = bj
+            coeffs[buf_ptr] = hij
+            buf_ptr += 1
+
+    return coupled_flatconfigs[:buf_ptr], coeffs[:buf_ptr]
+
+
+# ----------------------- unconstrained hilbert space ----------------------- #
+
+
+@njit(nogil=nogil, inline="always")
 def flatconfig_to_rank_nosymm(flatconfig):
     """Convert a flat config array to a rank, i.e. its position in the
     lexicographic ordering of all bitstrings of that length.
@@ -29,7 +166,7 @@ def flatconfig_to_rank_nosymm(flatconfig):
     return r
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_into_flatconfig_nosymm(flatconfig, r, n):
     """Inplace conversion of a rank to a flat config array.
 
@@ -48,7 +185,7 @@ def rank_into_flatconfig_nosymm(flatconfig, r, n):
         r >>= 1
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_to_flatconfig_nosymm(r, n):
     """Convert a rank to a flat config array.
 
@@ -90,37 +227,20 @@ def build_coo_numba_core_nosymm(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_nosymm(bi, ci, n)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
@@ -153,37 +273,20 @@ def matvec_nosymm(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_nosymm(bi, ci, n)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 cj = flatconfig_to_rank_nosymm(bj)
                 out[cj] += hij * x[ci]
 
@@ -191,7 +294,7 @@ def matvec_nosymm(
 # --------------------- parity conserved hilbert space ---------------------- #
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def flatconfig_to_rank_z2(flatconfig):
     """Convert a flat config array to a z2 rank, i.e. its position in the
     lexicographic ordering of all bitstrings of even or odd parity.
@@ -213,7 +316,7 @@ def flatconfig_to_rank_z2(flatconfig):
     return r
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_into_flatconfig_z2(flatconfig, r, n, p):
     """Inplace conversion of a z2 rank to a flat config array.
 
@@ -237,7 +340,7 @@ def rank_into_flatconfig_z2(flatconfig, r, n, p):
     flatconfig[n - 1] = prem ^ p
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_to_flatconfig_z2(r, n, p):
     """Convert a z2 rank to a flat config array.
 
@@ -282,37 +385,20 @@ def build_coo_numba_core_z2(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_z2(bi, ci, n, p)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
@@ -410,7 +496,7 @@ def build_pascal_table(nmax):
     return pt
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def flatconfig_to_rank_u1_pascal(flatconfig, n, k, pt):
     """Given a flat config array, return the u1 rank of the config in the
     lexicographic ordering of all bitstrings of that length with hamming weight
@@ -443,7 +529,7 @@ def flatconfig_to_rank_u1_pascal(flatconfig, n, k, pt):
     return r
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_into_flatconfig_u1_pascal(flatconfig, r, n, k, pt):
     """Inplace conversion of a rank to a flat config array with hamming weight
     k.
@@ -476,7 +562,7 @@ def rank_into_flatconfig_u1_pascal(flatconfig, r, n, k, pt):
             flatconfig[i] = 0
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_to_flatconfig_u1_pascal(r, n, k, pt):
     """Convert a rank to a flat config array with hamming weight k.
 
@@ -523,37 +609,20 @@ def build_coo_numba_core_u1(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_u1_pascal(bi, ci, n, k, pt)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
@@ -588,37 +657,20 @@ def matvec_u1(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_u1_pascal(bi, ci, n, k, pt)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 cj = flatconfig_to_rank_u1_pascal(bj, n, k, pt)
                 out[cj] += hij * x[ci]
 
@@ -626,7 +678,7 @@ def matvec_u1(
 # --------------------- doubly conserved hilbert space ---------------------- #
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def flatconfig_to_rank_u1u1_pascal(flatconfig, na, ka, nb, kb, pt):
     """Convert a flat config array to a doubly number conserved rank, i.e.
     its position in the ordering of all bitstrings of lenght `na + nb` with
@@ -659,7 +711,7 @@ def flatconfig_to_rank_u1u1_pascal(flatconfig, na, ka, nb, kb, pt):
     ) * Db + flatconfig_to_rank_u1_pascal(flatconfig[na:], nb, kb, pt)
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_into_flatconfig_u1u1_pascal(flatconfig, r, na, ka, nb, kb, pt):
     """Inplace conversion of a doubly number conserved rank to a flat config
     array.
@@ -689,7 +741,7 @@ def rank_into_flatconfig_u1u1_pascal(flatconfig, r, na, ka, nb, kb, pt):
     rank_into_flatconfig_u1_pascal(flatconfig[na:], r2, nb, kb, pt)
 
 
-@njit(nogil=nogil)
+@njit(nogil=nogil, inline="always")
 def rank_to_flatconfig_u1u1_pascal(r, na, ka, nb, kb, pt):
     """Convert a doubly number conserved rank to a flat config array.
 
@@ -743,37 +795,20 @@ def build_coo_numba_core_u1u1(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting configs
         rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 if buf_ptr >= buf_size:
                     # need to double our storage
                     data = np.concatenate((data, np.empty_like(data)))
@@ -811,37 +846,20 @@ def matvec_u1u1(
     bi = np.empty(n, dtype=np.uint8)
     bj = np.empty(n, dtype=np.uint8)
 
+    sizes_term, regs, sizes_op, xis, xjs, cijs = coupling_map
+
     for ci in range(world_rank, D, world_size):
         # reset the starting config
         rank_into_flatconfig_u1u1_pascal(bi, ci, na, ka, nb, kb, pt)
-
-        for coupling_t in coupling_map:
+        # indices into stacked terms and operators
+        a = b = 0
+        for size_term in sizes_term:
             # for each term in the hamiltonian find which, if
             # any, config it couples to, & with what coefficient
-
-            # reset coeff
-            hij = 1.0
-            # reset coupled config
-            for q in range(n):
-                bj[q] = bi[q]
-
-            # for each operator in the term
-            for reg, coupling_t_reg in coupling_t:
-                xi = bi[reg]
-
-                for xin, xj, cij in coupling_t_reg:
-                    if xi == xin:
-                        # found a match
-                        break
-                else:
-                    # not coupled to anything - break from whole term loop
-                    break
-
-                # update coeff and config
-                hij *= cij
-                bj[reg] = xj
-            else:
-                # didn't break out of loop -> valid coupled config
+            a, b, valid, hij = _check_next_coupled_term(
+                a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
+            )
+            if valid:
                 cj = flatconfig_to_rank_u1u1_pascal(bj, na, ka, nb, kb, pt)
                 out[cj] += hij * x[ci]
 
@@ -970,10 +988,8 @@ def build_coo_numba_core(
 
     Parameters
     ----------
-    coupling_map : numba.typed.List
-        A nested numba dictionary of the form
-        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
-        The coupling map to defines the operator.
+    coupling_map : tuple[ndarray]
+        The operator defined as tuple of flat arrays.
     sector : tuple[int]
         Specifies the sector to convert.
 
@@ -1051,10 +1067,8 @@ def matvec_numba(
         The input vector to apply the operator to.
     out : ndarray[float64]
         The output vector to store the result.
-    coupling_map : numba.typed.List
-        A nested numba dictionary of the form
-        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
-        The coupling map to defines the operator.
+    coupling_map : tuple[ndarray]
+        The operator defined as tuple of flat arrays.
     sector : tuple[int]
         Specifies the sector to convert.
 
@@ -1102,64 +1116,3 @@ def matvec_numba(
             "Symmetry must be None, 'Z2', 'U1' "
             f"or 'U1U1'. Got {symmetry} instead."
         )
-
-
-@njit(nogil=True)
-def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
-    """Get the coupled flat configurations for a given flat configuration
-    and coupling map.
-
-    Like applying the sparse matrix to a basis vector, or retrieving a single
-    row.
-
-    Parameters
-    ----------
-    flatconfig : ndarray[uint8]
-        The flat configuration to get the coupled configurations for.
-    coupling_map : numba.typed.List
-        A nested numba dictionary of the form
-        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
-        The coupling map to defines the operator.
-    dtype : {np.float64, np.complex128, np.float32, np.float64}, optional
-        The dtype to use for the coupled coefficients. Default is np.float64.
-
-    Returns
-    -------
-    coupled_flatconfigs : ndarray[uint8]
-        A list of coupled flat configurations, each with the corresponding
-        coefficient.
-    coeffs : ndarray[dtype]
-        The coefficients for each coupled flat configuration.
-    """
-    n = flatconfig.size
-    buf_ptr = 0
-    bj = np.empty(n, dtype=np.uint8)
-    coupled_flatconfigs = np.empty((len(coupling_map), n), dtype=np.uint8)
-    coeffs = np.empty(len(coupling_map), dtype=dtype)
-
-    for coupling_t in coupling_map:
-        # reset coeff
-        hij = 1.0
-        # reset coupled config
-        for i in range(n):
-            bj[i] = flatconfig[i]
-
-        for reg, coupling_t_reg in coupling_t:
-            xi = flatconfig[reg]
-            for xin, xj, cij in coupling_t_reg:
-                if xi == xin:
-                    # found a match
-                    break
-            else:
-                # not coupled to anything - break from whole term loop
-                break
-            # update coeff and config
-            hij *= cij
-            bj[reg] = xj
-        else:
-            # no break - all terms survived
-            coupled_flatconfigs[buf_ptr, :] = bj
-            coeffs[buf_ptr] = hij
-            buf_ptr += 1
-
-    return coupled_flatconfigs[:buf_ptr], coeffs[:buf_ptr]

@@ -175,12 +175,9 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
     Returns
     -------
-    coupling_map : numba.typed.List
-        A nested numba dictionary of the form
-        ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
+    coupling_map : tuple[ndarray]
+        The operator defined as tuple of flat arrays.
     """
-    from numba.typed import List
-
     if (dtype is None) or np.issubdtype(dtype, np.float64):
         dtype = np.float64
     elif np.issubdtype(dtype, np.complex128):
@@ -192,7 +189,15 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
     else:
         raise ValueError(f"Unknown dtype {dtype}")
 
-    coupling_map = List()
+    # number of operators per term e.g. 5 for '+zzz-'
+    sizes = []
+    regs = []
+    # number of elements per operator e.g. 2 for 'z' 1 for '+'
+    sizes_t = []
+    # input bit
+    xis = []
+    xjs = []
+    cijs = []
 
     # for term t ...
     for term, coeff in term_store.items():
@@ -205,9 +210,7 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
             map_to_reg = True
 
         # what sites does this term act non-trivially on?
-        # term_to_reg = Dict.empty(types.int64, ty_xi)
-        coupling_t = List()
-
+        size = 0
         first = True
         # which couples sites with product of ops ...
         for op, site in term:
@@ -217,25 +220,39 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
                 # special all identity term -> always first register
                 reg = site
 
+            regs.append(reg)
             # -> bit `xi` at `reg` is coupled to `xj` with coeff `cij`
             #          : reg
             #     ...10010...    xi=0  ->
             #     ...10110...    xj=1  with coeff cij
 
             # populate just the term/reg/bit maps we need
-            coupling_t_reg = List()
+            size_t = 0
             for xi, (xj, cij) in _OPMAP[op].items():
                 if first:
                     # absorb overall coefficient into first coupling
                     cij = coeff * cij
                     first = False
-                coupling_t_reg.append((xi, xj, cij))
-            coupling_t.append((reg, coupling_t_reg))
 
-        # add the term to the coupling map
-        coupling_map.append(coupling_t)
+                # coupling_t_reg.append((xi, xj, cij))
+                xis.append(xi)
+                xjs.append(xj)
+                cijs.append(cij)
+                size_t += 1
 
-    return coupling_map
+            sizes_t.append(size_t)
+            size += 1
+
+        sizes.append(size)
+
+    return (
+        np.array(sizes),
+        np.array(regs),
+        np.array(sizes_t),
+        np.array(xis),
+        np.array(xjs),
+        np.array(cijs, dtype=dtype),
+    )
 
 
 @functools.cache
@@ -485,9 +502,8 @@ class SparseOperatorBuilder:
 
         Returns
         -------
-        coupling_map : numba.typed.List
-            A nested numba dictionary of the form
-            ``[{reg: {bit_in: (bit_out, coeff), ...}, ...}, ...]``.
+        coupling_map : tuple[ndarray]
+            The operator defined as tuple of flat arrays.
         """
         dtype = self.calc_dtype(dtype)
 
