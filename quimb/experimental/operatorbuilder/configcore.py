@@ -59,24 +59,39 @@ def _check_next_coupled_term(
     # for each operator in the term
     for da in range(size_term):
         # the number of entries in the operator
-        size_op = sizes_op[a + da]
+        ia = a + da
+        size_op = sizes_op[ia]
 
         if valid:
             # check further coupling
-            reg = regs[a + da]
+            reg = regs[ia]
             xi = bi[reg]
 
-            # for each entry in the operator
-            for db in range(size_op):
-                xin = xis[b + db]
-                if xi == xin:
+            # TODO: generalize this to more than dim=2
+            if size_op == 1:
+                # must match single input
+                valid = xi == xis[b]
+                if valid:
                     # found a match
-                    xj = xjs[b + db]
-                    cij = cijs[b + db]
-                    break
+                    xj = xjs[b]
+                    cij = cijs[b]
             else:
-                # didn't break -> current bit doesn't match any entry
-                valid = False
+                # 0 and 1 both match
+                ib = b + xi
+                xj = xjs[ib]
+                cij = cijs[ib]
+
+            # valid = False
+            # for each entry in the operator
+            # for db in range(size_op):
+            #     ib = b + db
+            #     xin = xis[ib]
+            #     if xi == xin:
+            #         # found a match
+            #         valid = True
+            #         xj = xjs[ib]
+            #         cij = cijs[ib]
+            #         break
 
             if valid:
                 # midstring update of coeff and config

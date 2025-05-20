@@ -191,12 +191,14 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
     # number of operators per term e.g. 5 for '+zzz-'
     sizes = []
+    # the registers each term acts on
     regs = []
-    # number of elements per operator e.g. 2 for 'z' 1 for '+'
+    # number of elements per operator e.g. 2 for 'z', 1 for '+'
     sizes_t = []
-    # input bit
+    # input / output bits, e.g. 0 -> 1 for 'sx'
     xis = []
     xjs = []
+    # transition coeffs, e.g. 0.5 for 'sx'
     cijs = []
 
     # for term t ...
@@ -234,7 +236,6 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
                     cij = coeff * cij
                     first = False
 
-                # coupling_t_reg.append((xi, xj, cij))
                 xis.append(xi)
                 xjs.append(xj)
                 cijs.append(cij)
@@ -701,8 +702,13 @@ class SparseOperatorBuilder:
         # sum the results from each thread
         return np.sum(out_i, axis=0, out=out)
 
-    def aslinearoperator(self, dtype=None, parallel=False):
+    def aslinearoperator(
+        self,
+        dtype=None,
+        parallel=False,
+    ):
         """Get a `scipy.sparse.linalg.LinearOperator` for this operator.
+        Note currently it is assumed to be hermitian.
 
         Parameters
         ----------
@@ -727,7 +733,12 @@ class SparseOperatorBuilder:
         )
         shape = (self.hilbert_space.size, self.hilbert_space.size)
 
-        return LinearOperator(shape=shape, matvec=matvec, dtype=dtype)
+        return LinearOperator(
+            shape=shape,
+            matvec=matvec,
+            rmatvec=matvec,
+            dtype=dtype,
+        )
 
     def build_local_terms(self, dtype=None):
         """Get a dictionary of local terms, where each key is a sorted tuple
