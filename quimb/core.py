@@ -2027,8 +2027,12 @@ def ikron(
         sparse = any(issparse(op) for op in ops)
 
     # Create a sorted list of operators with their matching index
-    inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
-    inds, ops = set(inds), iter(ops)
+    try:
+        inds, ops = zip(*sorted(zip(inds, itertools.cycle(ops))))
+        inds, ops = set(inds), iter(ops)
+    except ValueError:
+        inds = {}
+        ops = ()
 
     # can't slice "coo" format so use "csr" if ownership specified
     eye_kws = {
