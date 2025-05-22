@@ -6036,7 +6036,21 @@ class TensorNetwork(object):
         self._contract_between_tids(tid1, tid2, **contract_opts)
 
     def contract_ind(self, ind, output_inds=None, **contract_opts):
-        """Contract tensors connected by ``ind``."""
+        """Contract tensors connected by ``ind``. This is an inplace operation.
+
+        Parameters
+        ----------
+        ind : str
+            The index to contract over. All tensors connected by this index
+            will be contracted into a single tensor. Note that if `ind` is in
+            `output_inds` then it will still be retained on this tensor.
+        output_inds : str or sequence of str, optional
+            The output indices for the local contraction. If not given, they
+            will be calculated from the default outer indices of the full
+            tensor network.
+        contract_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_contract`.
+        """
         tids = tuple(self._get_tids_from_inds(ind))
         output_inds = self.compute_contracted_inds(
             *tids, output_inds=output_inds
