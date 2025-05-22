@@ -3883,10 +3883,6 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         self._site_tag_id = site_tag_id
         self.cyclic = ops.ndim(arrays[0]) == 4
 
-        # this is the perm needed to bring the arrays from
-        # their current `shape`, to the desired 'lrud' order
-        lrud_order = tuple(map(shape.find, "lrud"))
-
         tensors = []
         tags = tags_to_oset(tags)
         bonds = [rand_uuid() for _ in range(num_sites)]
@@ -3895,19 +3891,27 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         for i, (site, array) in enumerate(zip(sites, arrays)):
             inds = []
 
-            if (i == 0) and not self.cyclic:
+            if L == 1:
+                # only one site, no bonds
+                shape_desired = "ud"
+            elif (i == 0) and not self.cyclic:
                 # only right bond
-                order = tuple(shape.replace("l", "").find(x) for x in "rud")
+                shape_desired = "rud"
                 inds.append(bonds[i + 1])
             elif (i == num_sites - 1) and not self.cyclic:
                 # only left bond
-                order = tuple(shape.replace("r", "").find(x) for x in "lud")
+                shape_desired = "lud"
                 inds.append(bonds[i])
             else:
-                order = lrud_order
+                shape_desired = "lrud"
                 # both bonds
                 inds.append(bonds[i])
                 inds.append(bonds[i + 1])
+
+            # this is the perm needed to bring the arrays from
+            # their current `shape`, to the desired 'lrud' order
+            shape_given = [x for x in shape if x in shape_desired]
+            order = [shape_given.index(x) for x in shape_desired]
 
             # physical indices
             inds.append(upper_ind_id.format(site))
