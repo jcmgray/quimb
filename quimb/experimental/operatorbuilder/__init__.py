@@ -42,8 +42,10 @@ from .models import (
     fermi_hubbard_from_edges,
     fermi_hubbard_spinless_from_edges,
     heisenberg_from_edges,
+    rand_operator,
 )
 from .operatorbuilder import (
+    get_mat,
     SparseOperatorBuilder,
 )
 
@@ -52,5 +54,7 @@ __all__ = (
     "fermi_hubbard_spinless_from_edges",
     "heisenberg_from_edges",
     "HilbertSpace",
+    "rand_operator",
     "SparseOperatorBuilder",
+    "get_mat",
 )

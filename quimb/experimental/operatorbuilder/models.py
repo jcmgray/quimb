@@ -306,3 +306,63 @@ def fermi_hubbard_spinless_from_edges(
 
     H.jordan_wigner_transform()
     return H
+
+
+def rand_operator(n, m, k, kmin=None, seed=None, ops="XYZ"):
+    """Generate a random operator with n qubits and m terms.
+    Each term is a sum of k operators acting on different qubits.
+    The operators are chosen randomly from the set {X, Y, Z, +, -, n}.
+    The coefficients are drawn from a normal distribution.
+
+    Parameters
+    ----------
+    n : int
+        The number of qubits.
+    m : int
+        The number of terms in the operator.
+    k : int
+        The number of operators in each term.
+    kmin : int, optional
+        The minimum number of operators in each term. If not given, kmin = k.
+    seed : int, optional
+        The random seed for reproducibility.
+    ops : str, optional
+        The set of operators to choose from.
+
+    Returns
+    -------
+    SparseOperatorBuilder
+        The random operator as a SparseOperatorBuilder object.
+    """
+    import numpy as np
+
+    terms = []
+
+    rng = np.random.default_rng(seed)
+    allowed_ops = np.array(list(ops))
+
+    if kmin is None:
+        kmin = k
+    if not (0 <= kmin <= k <= n):
+        raise ValueError(
+            "kmin must be positive and k must be between kmin and n"
+        )
+
+    for _ in range(m):
+        coeff = rng.normal()
+        ops = []
+
+        if kmin == k:
+            ki = k
+        else:
+            ki = rng.integers(kmin, k + 1)
+
+        regs = rng.choice(np.arange(n), size=ki, replace=False)
+        for reg in regs:
+            op = rng.choice(allowed_ops)
+            ops.append((str(op), int(reg)))
+        terms.append((coeff, *ops))
+
+    hilbert_space = HilbertSpace(sites=range(n))
+
+    return SparseOperatorBuilder(terms=terms, hilbert_space=hilbert_space)

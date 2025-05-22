@@ -203,8 +203,8 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
     # for term t ...
     for term, coeff in term_store.items():
-        if (len(term) == 0) and (coeff != 1.0):
-            # special case: all identity term, if coeff != 1.0, need to add it
+        if len(term) == 0:
+            # special case: all identity term
             term = [("I", 0)]
             # directly add to first *register*
             map_to_reg = False
@@ -213,7 +213,7 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
         # what sites does this term act non-trivially on?
         size = 0
-        first = True
+        first_reg = True
         # which couples sites with product of ops ...
         for op, site in term:
             if map_to_reg:
@@ -231,10 +231,9 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
             # populate just the term/reg/bit maps we need
             size_t = 0
             for xi, (xj, cij) in _OPMAP[op].items():
-                if first:
+                if first_reg:
                     # absorb overall coefficient into first coupling
                     cij = coeff * cij
-                    first = False
 
                 xis.append(xi)
                 xjs.append(xj)
@@ -243,6 +242,7 @@ def build_coupling_numba(term_store, site_to_reg, dtype=None):
 
             sizes_op.append(size_t)
             size += 1
+            first_reg = False
 
         sizes_term.append(size)
 
@@ -430,6 +430,9 @@ class SparseOperatorBuilder:
                     self._iscomplex = True
 
         # if we have already seen this exact term, just add the coeff
+        # note, if the term is a permutation of an existing term, it will be
+        # not be simplified to the same term here, in case its fermionic
+        # .get_terms_sorted() will sort and group that case later
         key = tuple(simplified_ops)
         new_coeff = self._term_store.pop(key, 0.0) + coeff
         if new_coeff != 0.0:
@@ -503,6 +506,25 @@ class SparseOperatorBuilder:
             dtype = self._dtype
         return calc_dtype_cached(dtype, self._iscomplex)
 
+    def get_terms_sorted(self):
+        """Get the terms of the operator sorted, and grouped by register and
+        operator. If for example jordan-wigner transformed, this should be
+        called after the transformation.
+        """
+        sorted_terms = {}
+
+        for k, coeff in self._term_store.items():
+            # sort and group terms, by site and then by operator
+            key = tuple(
+                sorted(
+                    k,
+                    key=lambda x: (self.hilbert_space.site_to_reg(x[1]), x[0]),
+                )
+            )
+            sorted_terms[key] = sorted_terms.setdefault(key, 0.0) + coeff
+
+        return sorted_terms
+
     def get_coupling_map(self, dtype=None):
         """Build and cache the coupling map for the specified dtype.
 
@@ -523,7 +545,7 @@ class SparseOperatorBuilder:
             coupling_map = self._coupling_maps[dtype]
         except KeyError:
             coupling_map = build_coupling_numba(
-                self._term_store,
+                self.get_terms_sorted(),
                 self.site_to_reg,
                 dtype=dtype,
             )
@@ -907,7 +929,7 @@ class SparseOperatorBuilder:
 
         dtype = self.get_dtype(dtype)
 
-        for term, coeff in self._term_store.items():
+        for term, coeff in self.get_terms_sorted().items():
             ops, sites = zip(*term)
             mats = (get_mat(op, dtype=dtype) for op in ops)
             hk = coeff * functools.reduce(np.kron, mats)
@@ -1017,7 +1039,7 @@ class SparseOperatorBuilder:
 
             return next_node
 
-        for t, (term, coeff) in enumerate(self._term_store.items()):
+        for t, (term, coeff) in enumerate(self.get_terms_sorted().items()):
             # build full string for this term including identity ops
             rmap = {self.site_to_reg(site): op for op, site in term}
             string = tuple(rmap.get(r, "I") for r in range(self.nsites))
@@ -1199,12 +1221,17 @@ class SparseOperatorBuilder:
         import quimb as qu
         import quimb.tensor as qtn
 
+        dtype = self.get_dtype(dtype)
+
+        if self.nsites == 1:
+            # single site operator, just sum them
+            Wt0 = self.build_dense(dtype=dtype)
+            return qtn.MatrixProductOperator([Wt0], **mpo_opts)
+
         if method == "greedy":
             G = self.build_state_machine_greedy()
         else:
             raise ValueError(f"Unknown method {method}.")
-
-        dtype = self.get_dtype(dtype)
 
         Wts = [
             np.zeros((dl, dr, 2, 2), dtype=dtype)
@@ -1236,3 +1263,32 @@ class SparseOperatorBuilder:
             f"locality={self.locality})"
             ")"
         )
+
+    def build_matrix_ikron(self, **ikron_opts):
+        """Build either the dense or sparse matrix of this operator via
+        explicit calls to `ikron`. This is a slower but useful alternative
+        testing method.
+        """
+        from quimb import ikron
+
+        A = None
+
+        dims = [2] * self.nsites
+        for ops, coeff in self.get_terms_sorted().items():
+            if not ops:
+                ops = [("I", 0)]
+
+            mats = []
+            inds = []
+            for op, reg in ops:
+                mats.append(get_mat(op))
+                inds.append(reg)
+
+            Aterm = coeff * ikron(mats, dims, inds, **ikron_opts)
+
+            if A is None:
+                A = Aterm
+            else:
+                A = A + Aterm
+
+        return A
