@@ -14,7 +14,6 @@ import functools
 import operator
 
 import numpy as np
-from numba import njit
 
 from . import configcore
 from .hilbertspace import HilbertSpace
@@ -25,6 +24,8 @@ _OPMAP = {
     "x": {0: (1, 1.0), 1: (0, 1.0)},
     "y": {0: (1, 1.0j), 1: (0, -1.0j)},
     "z": {0: (0, 1.0), 1: (1, -1.0)},
+    # ZX=iY: 'real Y'
+    "zx": {0: (1, -1.0), 1: (0, 1.0)},
     # spin 1/2 matrices (scaled paulis)
     "sx": {0: (1, 0.5), 1: (0, 0.5)},
     "sy": {0: (1, 0.5j), 1: (0, -0.5j)},
@@ -61,6 +62,75 @@ def get_mat(op, dtype=None):
     # make immutable since caching
     a.flags.writeable = False
     return a
+
+
+def _identity_fn(x):
+    return x
+
+
+def jordan_wigner_transform(terms, site_to_reg=None, reg_to_site=None):
+    """Transform the terms in this operator by pre-prending pauli Z
+    strings to all creation and annihilation operators. This is always
+    applied directly to the raw terms, so that the any fermionic ordering
+    is respected. Any further transformations (e.g. simplification or
+    pauli decomposition) should thus be applied after this transformation.
+
+    Note this doesn't decompose +, - into (X + iY) / 2 and (X - iY) / 2, it
+    just prepends Z strings. Call `pauli_decompose` after this to get the
+    full decomposition.
+
+    The placement of the Z strings is defined by the ordering supplied by
+    `site_to_reg` and `reg_to_site`, by default, it assumes the terms already
+    are specified on a linear range of integers.
+
+    Parameters
+    ----------
+    terms : dict[term, coeff]
+        The terms of the operator. Each term is a tuple of tuples, where each
+        inner tuple is a pair of ``(operator, site)``.
+    site_to_reg : callable, optional
+        A function that maps a site to a linear register index. If not
+        provided, the sites are assumed to be linear integers already.
+    reg_to_site : callable, optional
+        A function that maps a linear register index to a site. If not
+        provided, the sites are assumed to be linear integers already.
+
+    Returns
+    -------
+    terms_jordan_wigner : dict[term, coeff]
+        The transformed terms of the operator. Each term is a tuple of tuples,
+        where each inner tuple is a pair of ``(operator, site)``.
+    """
+    if site_to_reg is None:
+        site_to_reg = _identity_fn
+    if reg_to_site is None:
+        reg_to_site = _identity_fn
+
+    terms_jordan_wigner = {}
+
+    for term, coeff in terms.items():
+        if not term:
+            # all identity term, can't unzip
+            terms_jordan_wigner[term] = coeff
+            continue
+
+        ops, site = zip(*term)
+        if {"+", "-"}.intersection(ops):
+            # need to insert jordan-wigner strings
+            new_term = []
+            for op, site in term:
+                reg = site_to_reg(site)
+                if op in {"+", "-"}:
+                    for r in range(reg):
+                        site_below = reg_to_site(r)
+                        new_term.append(("z", site_below))
+                new_term.append((op, site))
+            terms_jordan_wigner[tuple(new_term)] = coeff
+        else:
+            # no creation/annihilation operators, just add the term
+            terms_jordan_wigner[term] = coeff
+
+    return terms_jordan_wigner
 
 
 @functools.lru_cache(maxsize=2**14)
@@ -123,25 +193,197 @@ def simplify_single_site_ops(coeff, ops):
     return coeff, op
 
 
-@njit
-def get_local_size(n, rank, world_size):
-    """Given global size n, and a rank in [0, world_size), return the size of
-    the portion assigned to this rank.
+def simplify(terms, atol=1e-12, site_to_reg=None):
+    """Simplify the given terms by combining operators acting on the same site,
+    putting them in canonical order, removing null-terms, and combining
+    equivalent operator strings.
+
+    Parameters
+    ----------
+    terms : dict[term, coeff]
+        The terms of the operator. Each term is a tuple of tuples, where each
+        inner tuple is a pair of ``(operator, site)``.
+    atol : float, optional
+        The absolute tolerance for considering coefficients after
+        simplification to be null.
+    site_to_reg : callable, optional
+        A function that maps a site to a linear register index. If not
+        provided, the sites are assumed to be linear integers already.
+        This is just used to sort the operators into canonical order.
+
+    Returns
+    -------
+    terms_simplified : dict[term, coeff]
+        The simplified terms of the operator. Each term is a tuple of tuples,
+        where each inner tuple is a pair of ``(operator, site)``.
     """
-    cutoff_rank = n % world_size
-    return n // world_size + int(rank < cutoff_rank)
+    if site_to_reg is None:
+        site_to_reg = _identity_fn
+
+    terms_simplified = {}
+
+    for term, coeff in terms.items():
+        # collect operators acting on the same site
+        collected = {}
+        for op, site in term:
+            collected.setdefault(site, []).append(op)
+
+        # simplify operators acting on the same site & don't add null-terms
+        simplified_ops = []
+        for site, collected_ops in collected.items():
+            coeff, op = simplify_single_site_ops(coeff, tuple(collected_ops))
+
+            if op is None:
+                # null-term ('e.g. '++' or '--')
+                coeff = 0.0
+                break
+
+            if op != "I":
+                # only need to record non-identity operators
+                simplified_ops.append((op, site))
+
+        if abs(coeff) < atol:
+            # null-term
+            continue
+
+        # assume we can sort the operators into canonical order now
+        simplified_ops.sort(key=lambda x: (site_to_reg(x[1]), x[0]))
+        # combine coefficients of equivalent terms
+        key = tuple(simplified_ops)
+        coeff = terms_simplified.pop(key, 0.0) + coeff
+
+        if abs(coeff) < atol:
+            # null-term after combining coefficients
+            continue
+
+        if abs(coeff.imag) < atol:
+            # if the coefficient is real, convert to real
+            coeff = coeff.real
+
+        terms_simplified[key] = coeff
+
+    return terms_simplified
 
 
-@njit
-def get_local_range(n, rank, world_size):
-    """Given global size n, and a rank in [0, world_size), return the range of
-    indices assigned to this rank.
+
+@functools.lru_cache(maxsize=None)
+def get_pauli_decomp(op, atol=1e-12, use_zx=False):
+    """Decompose the given operator (specified as a label) into a sum of
+    Pauli components.
+
+    Parameters
+    ----------
+    op : str
+        The operator to decompose.
+    atol : float, optional
+        The absolute tolerance for considering coefficients to be null.
+    use_zx : bool, optional
+        Whether to decompose in terms of the real `ZX = iY` instead of `Y`.
+
+    Returns
+    -------
+    list[tuple[float, str]]
+        The decomposition of the operator into Pauli components. Each tuple
+        contains the coefficient and the Pauli operator label.
     """
-    ri = 0
-    for rank_below in range(rank):
-        ri += get_local_size(n, rank_below, world_size)
-    rf = ri + get_local_size(n, rank, world_size)
-    return ri, rf
+    bops = ("I", "x", "y", "z")
+
+    if op in bops:
+        terms = [(1.0, op)]
+    else:
+        terms = []
+        mat = get_mat(op)
+        for bop in bops:
+            bmat = get_mat(bop)
+
+            # Hilbert-Schmidt inner product
+            cb = np.trace(bmat @ mat) / 2
+
+            if abs(cb.imag) < atol:
+                # realify if possible
+                cb = cb.real
+
+            # ignore zero components
+            if abs(cb) >= atol:
+                terms.append((cb, bop))
+
+    if use_zx:
+        # convert Y -> -iZX
+        terms = [
+            (-1j * coeff, "zx")
+            if op == "y" else (coeff, op)
+            for coeff, op in terms
+        ]
+
+    return terms
+
+
+def pauli_decompose(terms, atol=1e-12, use_zx=False, site_to_reg=None):
+    """Decompose the given terms into a sum of Pauli strings.
+
+    Parameters
+    ----------
+    terms : dict[term, coeff]
+        The terms of the operator. Each term is a tuple of tuples, where each
+        inner tuple is a pair of ``(operator, site)``.
+    atol : float, optional
+        The absolute tolerance for considering coefficients after
+        decomposition to be null.
+    use_xz : bool, optional
+        Whether to decompose in terms of the real `ZX = iY` instead of `Y`.
+    site_to_reg : callable, optional
+        A function that maps a site to a linear register index. If not
+        provided, the sites are assumed to be linear integers already.
+        This is just used to sort the operators into canonical order.
+
+    Returns
+    -------
+    terms_pauli_decomposed : dict[term, coeff]
+        The decomposed terms of the operator. Each term is a tuple of tuples,
+        where each inner tuple is a pair of ``(operator, site)``.
+    """
+    terms_pauli_decomposed = {}
+
+    for ops, coeff in terms.items():
+        # for each current term -> turn into potential sum
+        new_ts = [(coeff, ())]
+
+        for op, reg in ops:
+            # for each operator in the string
+            new_ts = [
+                # extend with weighted pauli ...
+                (coeff_t * dcoeff, (*ops_t, (dop, reg)))
+                # ... for each weighted pauli in the decomposition
+                for dcoeff, dop in get_pauli_decomp(
+                    op, atol=atol, use_zx=use_zx
+                )
+                # ... for each term in current sum
+                for coeff_t, ops_t in new_ts
+            ]
+
+        for coeff, ops in new_ts:
+            # we can sort paulis strings into canonical order, strip identities
+            key = tuple(
+                (op, site)
+                for op, site in sorted(
+                    ops, key=lambda x: (site_to_reg(x[1]), x[0])
+                )
+                if op != "I"
+            )
+
+            coeff = terms_pauli_decomposed.pop(key, 0.0) + coeff
+
+            if abs(coeff) < atol:
+                # null-term after combining coefficients
+                continue
+
+            if abs(coeff.imag) < atol:
+                # if the coefficient is real, convert to real
+                coeff = coeff.real
+
+            terms_pauli_decomposed[key] = coeff
+
+    return terms_pauli_decomposed
 
 
 def get_pool_and_world_size(parallel):
@@ -309,14 +551,20 @@ class SparseOperatorBuilder:
         hilbert_space: HilbertSpace = None,
         dtype=None,
     ):
-        self._term_store = {}
         self._sites_used = set()
         self._hilbert_space = hilbert_space
-        self._coupling_maps = {}
-        self._iscomplex = False
+
+        self._terms_raw = {}
+        self._terms_transformed = None
+        self._terms = None
+
         self._dtype = dtype
+        self._coupling_maps = {}
+        self._cache = {}
+
         for term in terms:
             self.add_term(*term)
+
 
     @property
     def sites_used(self):
@@ -337,26 +585,6 @@ class SparseOperatorBuilder:
         """The total number of coordinates/sites seen so far."""
         return self.hilbert_space.nsites
 
-    @property
-    def terms(self):
-        """A tuple of the simplified terms seen so far."""
-        return tuple((coeff, ops) for ops, coeff in self._term_store.items())
-
-    @property
-    def nterms(self):
-        """The total number of terms seen so far."""
-        return len(self._term_store)
-
-    @property
-    def locality(self):
-        """The locality of the operator, the maximum support of any term."""
-        return max(len(ops) for ops in self._term_store)
-
-    @property
-    def iscomplex(self):
-        """Whether the operator has complex terms."""
-        return self._iscomplex
-
     def site_to_reg(self, site):
         """Get the register / linear index of coordinate ``site``."""
         return self.hilbert_space.site_to_reg(site)
@@ -365,7 +593,70 @@ class SparseOperatorBuilder:
         """Get the site of register / linear index ``reg``."""
         return self.hilbert_space.reg_to_site(reg)
 
-    def add_term(self, *coeff_ops):
+    @property
+    def terms_raw(self):
+        """A tuple of the raw terms seen so far, as a mapping from
+        operator strings to coefficients.
+        """
+        return tuple((coeff, ops) for ops, coeff in self._terms_raw.items())
+
+    def _get_terms_current(self):
+        if self._terms is not None:
+            # have existing processed terms
+            return self._terms
+        elif self._terms_transformed is not None:
+            # have existing transformed terms
+            return self._terms_transformed
+        else:
+            # no existing terms, take raw
+            return self._terms_raw
+
+    def _reset_caches(self):
+        self._cache.clear()
+        self._coupling_maps.clear()
+
+    def _finalize(self):
+        if self._terms is None:
+            self.simplify()
+
+    def _get_terms_final(self):
+        self._finalize()
+        return self._terms
+
+    @property
+    def terms(self):
+        """A tuple of the, possibly transformed, terms seen so far."""
+        return tuple(
+            (coeff, ops) for ops, coeff in self._get_terms_final().items()
+        )
+
+    @property
+    def nterms(self):
+        """The total number of terms seen so far."""
+        return len(self._get_terms_final())
+
+    @property
+    def locality(self):
+        """The locality of the operator, the maximum support of any term."""
+        terms = self._get_terms_final()
+        if not terms:
+            return 0
+        return max(len(ops) for ops in terms)
+
+    @property
+    def iscomplex(self):
+        """Whether the operator has complex terms."""
+        try:
+            iscomplex = self._cache["iscomplex"]
+        except KeyError:
+            iscomplex = self._cache["iscomplex"] = any(
+                np.iscomplexobj(coeff)
+                or any(op in _OPCOMPLEX for op, _ in ops)
+                for ops, coeff in self._get_terms_final().items()
+            )
+        return iscomplex
+
+    def add_term(self, *coeff_ops, atol=1e-12):
         """Add a term to the operator.
 
         Parameters
@@ -377,12 +668,12 @@ class SparseOperatorBuilder:
             Each term should be a pair of ``(operator, site)``, where
             ``operator`` can be:
 
-                - ``'x'``, ``'y'``, ``'z'``: Pauli matrices
-                - ``'sx'``, ``'sy'``, ``'sz'``: spin operators (i.e. scaled
-                  Pauli matrices)
-                - ``'+'``, ``'-'``: creation/annihilation operators
-                - ``'n'``, ``'sn'``, or ``'h'``: number, symmetric
-                  number (n - 1/2) and hole (1 - n) operators
+            - ``'x'``, ``'y'``, ``'z'``: Pauli matrices
+            - ``'sx'``, ``'sy'``, ``'sz'``: spin operators (i.e. scaled
+                Pauli matrices)
+            - ``'+'``, ``'-'``: creation/annihilation operators
+            - ``'n'``, ``'sn'``, or ``'h'``: number, symmetric
+                number (n - 1/2) and hole (1 - n) operators
 
             And ``site`` is a hashable object that represents the site that
             the operator acts on.
@@ -394,50 +685,41 @@ class SparseOperatorBuilder:
             ops = coeff_ops
         else:
             coeff, *ops = coeff_ops
+            if abs(coeff) < atol:
+                # null-term
+                return
 
-        if coeff == 0.0:
-            # null-term
-            return
-        elif np.iscomplexobj(coeff):
-            self._iscomplex = True
-
-        # collect operators acting on the same site
-        collected = {}
+        # parse the operator specification
+        ops = tuple(tuple(op) for op in ops)
         for op, site in ops:
             # check that the site is valid if the Hilbert space is known
             if (
                 self._hilbert_space is not None
             ) and not self._hilbert_space.has_site(site):
                 raise ValueError(f"Site {site} not in the Hilbert space.")
+
+            # record used sites, for later construction of the Hilbert space
             self._sites_used.add(site)
-            collected.setdefault(site, []).append(op)
 
-        # simplify operators acting on the smae site & don't add null-terms
-        simplified_ops = []
-        for site, collected_ops in collected.items():
-            coeff, op = simplify_single_site_ops(coeff, tuple(collected_ops))
+            if op not in _OPMAP:
+                raise ValueError(f"Unknown operator '{op}'.")
 
-            if op is None:
-                # null-term ('e.g. '++' or '--')
-                return
+        # if we have already seen this exact term, just add the coeff but note,
+        # we do not simplify equivalent terms here, in case its a fermionic
+        coeff = self._terms_raw.pop(ops, 0.0) + coeff
 
-            if op != "I":
-                # only need to record non-identity operators
-                simplified_ops.append((op, site))
+        if abs(coeff) < atol:
+            # null-term after combining coefficients
+            return
 
-                if op in _OPCOMPLEX:
-                    # if we have complex operators, need to use complex dtype
-                    self._iscomplex = True
+        if abs(coeff.imag) < atol:
+            # if the coefficient is real, convert to real
+            coeff = coeff.real
 
-        # if we have already seen this exact term, just add the coeff
-        # note, if the term is a permutation of an existing term, it will be
-        # not be simplified to the same term here, in case its fermionic
-        # .get_terms_sorted() will sort and group that case later
-        key = tuple(simplified_ops)
-        new_coeff = self._term_store.pop(key, 0.0) + coeff
-        if new_coeff != 0.0:
-            # but only if it doesn't cancel to zero
-            self._term_store[key] = new_coeff
+        self._terms_raw[ops] = coeff
+        self._terms_transformed = None
+        self._terms = None
+        self._reset_caches()
 
     def __iadd__(self, term):
         self.add_term(*term)
@@ -449,40 +731,64 @@ class SparseOperatorBuilder:
 
     def jordan_wigner_transform(self):
         """Transform the terms in this operator by pre-prending pauli Z
-        strings to all creation and annihilation operators, and then
-        simplifying the resulting terms.
+        strings to all creation and annihilation operators. This is always
+        applied directly to the raw terms, so that the any fermionic ordering
+        is respected. Any further transformations (e.g. simplification or
+        pauli decomposition) should thus be applied after this transformation.
+
+        Note this doesn't decompose +, - into (X + iY) / 2 and (X - iY) / 2, it
+        just prepends Z strings. Call `pauli_decompose` after this to get the
+        full decomposition.
+
+        The placement of the Z strings is defined by the ordering of the
+        hilbert space, by default, the sorted order of the site labels.
+
+        Calling this multiple times will reset the transformed terms and any
+        simplifications or decompositions that have been applied to the
+        transformed terms will be lost.
         """
-        # TODO: check if transform has been applied already?
-        # TODO: store untransformed terms, so we can re-order at will?
+        if self._terms_transformed is not None:
+            # already transformed, just reset transformed terms
+            self._terms_transformed = None
+        else:
+            self._terms_transformed = jordan_wigner_transform(
+                terms=self._terms_raw,
+                site_to_reg=self.site_to_reg,
+                reg_to_site=self.reg_to_site,
+            )
+        # reset simplified terms
+        self._terms = None
+        self._reset_caches()
 
-        old_term_store = self._term_store.copy()
-        self._term_store.clear()
+    def simplify(self, atol=1e-12):
+        """Simplify terms so that each term is a string of single operators
+        acting on different sites. This assumes that operators on different
+        sites commute, and thus is always performed after transformations
+        such as Jordan-Wigner.
+        """
+        self._terms = simplify(
+            terms=self._get_terms_current(),
+            atol=atol,
+            site_to_reg=self.site_to_reg,
+        )
+        self._reset_caches()
 
-        for term, coeff in old_term_store.items():
-            if not term:
-                self.add_term(coeff, *term)
-                continue
-
-            ops, site = zip(*term)
-            if {"+", "-"}.intersection(ops):
-                new_term = []
-
-                for op, site in term:
-                    reg = self.site_to_reg(site)
-                    if op in {"+", "-"}:
-                        for r in range(reg):
-                            site_below = self.reg_to_site(r)
-                            new_term.append(("z", site_below))
-                    new_term.append((op, site))
-
-                self.add_term(coeff, *new_term)
-            else:
-                self.add_term(coeff, *term)
+    def pauli_decompose(self, atol=1e-12, use_zx=False):
+        """Transform the terms in this operator by decomposing them into
+        Pauli strings.
+        """
+        self._terms = pauli_decompose(
+            terms=self._get_terms_current(),
+            atol=atol,
+            use_zx=use_zx,
+            site_to_reg=self.site_to_reg,
+        )
+        self._reset_caches()
 
     def show(self, filler="."):
         """Print an ascii representation of the terms in this operator."""
         print(self)
-        for _, (term, coeff) in enumerate(self._term_store.items()):
+        for _, (term, coeff) in enumerate(self._get_terms_final().items()):
             s = [f"{filler} "] * self.nsites
             for op, site in term:
                 s[self.site_to_reg(site)] = f"{op:<2}"
@@ -504,26 +810,7 @@ class SparseOperatorBuilder:
         """
         if dtype is None:
             dtype = self._dtype
-        return calc_dtype_cached(dtype, self._iscomplex)
-
-    def get_terms_sorted(self):
-        """Get the terms of the operator sorted, and grouped by register and
-        operator. If for example jordan-wigner transformed, this should be
-        called after the transformation.
-        """
-        sorted_terms = {}
-
-        for k, coeff in self._term_store.items():
-            # sort and group terms, by site and then by operator
-            key = tuple(
-                sorted(
-                    k,
-                    key=lambda x: (self.hilbert_space.site_to_reg(x[1]), x[0]),
-                )
-            )
-            sorted_terms[key] = sorted_terms.setdefault(key, 0.0) + coeff
-
-        return sorted_terms
+        return calc_dtype_cached(dtype, self.iscomplex)
 
     def get_coupling_map(self, dtype=None):
         """Build and cache the coupling map for the specified dtype.
@@ -545,7 +832,7 @@ class SparseOperatorBuilder:
             coupling_map = self._coupling_maps[dtype]
         except KeyError:
             coupling_map = build_coupling_numba(
-                self.get_terms_sorted(),
+                self._get_terms_final(),
                 self.site_to_reg,
                 dtype=dtype,
             )
@@ -929,7 +1216,7 @@ class SparseOperatorBuilder:
 
         dtype = self.get_dtype(dtype)
 
-        for term, coeff in self.get_terms_sorted().items():
+        for term, coeff in self._get_terms_final().items():
             ops, sites = zip(*term)
             mats = (get_mat(op, dtype=dtype) for op in ops)
             hk = coeff * functools.reduce(np.kron, mats)
@@ -940,7 +1227,7 @@ class SparseOperatorBuilder:
 
         return Hk
 
-    def build_state_machine_greedy(self):
+    def build_state_machine_greedy(self, atol=1e-12):
         # XXX: also implement optimal method : https://arxiv.org/abs/2006.02056
 
         import networkx as nx
@@ -1039,7 +1326,7 @@ class SparseOperatorBuilder:
 
             return next_node
 
-        for t, (term, coeff) in enumerate(self.get_terms_sorted().items()):
+        for t, (term, coeff) in enumerate(self._get_terms_final().items()):
             # build full string for this term including identity ops
             rmap = {self.site_to_reg(site): op for op, site in term}
             string = tuple(rmap.get(r, "I") for r in range(self.nsites))
@@ -1082,7 +1369,7 @@ class SparseOperatorBuilder:
             # every term passing through this edge is multiplied by this coeff
             for t in edges_to_terms.pop(edge):
                 new_coeff = coeffs_to_place.pop(t, 1.0) / coeff
-                if new_coeff != 1.0:
+                if abs(new_coeff - 1.0) > atol:
                     # if another term doesn't have matching coeff, still need
                     # to place the updated coeff
                     coeffs_to_place[t] = new_coeff
@@ -1274,7 +1561,7 @@ class SparseOperatorBuilder:
         A = None
 
         dims = [2] * self.nsites
-        for ops, coeff in self.get_terms_sorted().items():
+        for ops, coeff in self._get_terms_final().items():
             if not ops:
                 ops = [("I", 0)]
 

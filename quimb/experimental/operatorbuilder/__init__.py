@@ -44,7 +44,7 @@ from .models import (
     heisenberg_from_edges,
     rand_operator,
 )
-from .operatorbuilder import (
+from .builder import (
     get_mat,
     SparseOperatorBuilder,
 )
