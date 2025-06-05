@@ -71,9 +71,9 @@ def draw_tn(
 
     Parameters
     ----------
-    color : sequence of tags, optional
-        If given, uniquely color any tensors which have each of the tags.
-        If some tensors have more than of the tags, only one color will show.
+    color : sequence of tags or True, optional
+        If given, color all tensor with each of these tags with a unique color.
+        If `True`, do this for all tags in the tensor network.
     output_inds : sequence of str, optional
         For hyper tensor networks explicitly specify which indices should be
         drawn as outer indices. If not set, the outer indices are assumed to be
@@ -266,6 +266,10 @@ def draw_tn(
         label_color = mpl.rcParams["axes.labelcolor"]
 
     # get colors for tagged nodes
+    if color is True:
+        # color all tags automatically
+        color = tuple(tn.tag_map.keys())
+
     colors = get_colors(color, custom_colors, node_alpha)
 
     if legend == "auto":
@@ -475,26 +479,32 @@ def draw_tn(
     else:
         pos = _normalize_positions(pos)
 
-    # compute a base size using the position and number of tensors
-    # first get plot volume:
-    node_packing_factor = tn.num_tensors**-0.45
-    xs, ys, *zs = zip(*pos.values())
-    xmin, xmax = min(xs), max(xs)
-    ymin, ymax = min(ys), max(ys)
-    # if there only a few tensors we don't want to limit the node size
-    # because of flatness, also don't allow the plot volume to go to zero
-    xrange = max(((xmax - xmin) / 2, node_packing_factor, 0.1))
-    yrange = max(((ymax - ymin) / 2, node_packing_factor, 0.1))
-    plot_volume = xrange * yrange
-    if zs:
-        zmin, zmax = min(zs[0]), max(zs[0])
-        zrange = max(((zmax - zmin) / 2, node_packing_factor, 0.1))
-        plot_volume *= zrange
-    # in total we account for:
-    #     - user specified scaling
-    #     - number of tensors
-    #     - how flat the plot area is (flatter requires smaller nodes)
-    full_node_scale = 0.2 * node_scale * node_packing_factor * plot_volume**0.5
+    if tn.num_tensors > 0:
+        # compute a base size using the position and number of tensors
+        # first get plot volume:
+        node_packing_factor = tn.num_tensors**-0.45
+        xs, ys, *zs = zip(*pos.values())
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        # if there only a few tensors we don't want to limit the node size
+        # because of flatness, also don't allow the plot volume to go to zero
+        xrange = max(((xmax - xmin) / 2, node_packing_factor, 0.1))
+        yrange = max(((ymax - ymin) / 2, node_packing_factor, 0.1))
+        plot_volume = xrange * yrange
+        if zs:
+            zmin, zmax = min(zs[0]), max(zs[0])
+            zrange = max(((zmax - zmin) / 2, node_packing_factor, 0.1))
+            plot_volume *= zrange
+        # in total we account for:
+        #     - user specified scaling
+        #     - number of tensors
+        #     - how flat the plot area is (flatter requires smaller nodes)
+        full_node_scale = (
+            0.2 * node_scale * node_packing_factor * plot_volume**0.5
+        )
+
+    else:
+        full_node_scale = 1.0
 
     default_outline_size = 6 * full_node_scale**0.5
 

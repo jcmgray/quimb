@@ -396,7 +396,7 @@ def rand_matrix(
         iscomplex = True
     else:
         raise TypeError(
-            f"dtype {dtype} not understood - should be " "float or complex."
+            f"dtype {dtype} not understood - should be float or complex."
         )
 
     # handle seed manually since standard python random.seed might be called
