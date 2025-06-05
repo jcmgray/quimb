@@ -1264,10 +1264,8 @@ class TensorNetwork2D(TensorNetworkGen):
         istep = r2d.istep
 
         def _do_compress(site_tag_tmps):
-            nonlocal self
-
             # split off the boundary network
-            self, tn_boundary = self.partition(site_tag_tmps, inplace=True)
+            tn_boundary = self.partition(site_tag_tmps, inplace=True)[1]
 
             # compress it inplace
             tensor_network_1d_compress(
@@ -1281,7 +1279,7 @@ class TensorNetwork2D(TensorNetworkGen):
             )
 
             # recombine with the main network
-            self |= tn_boundary
+            self.add_tensor_network(tn_boundary, virtual=True)
 
         # maybe compress the initial row, which may be multiple layers
         # and have effective bond dimension > max_bond already
@@ -1294,6 +1292,10 @@ class TensorNetwork2D(TensorNetworkGen):
         if layer_tags is None:
             layer_tags = [None]
 
+        # we explicitly track the temporary tags to drop later, so we don't
+        # have to track all the env networks they might appear in
+        record = {}
+
         for i in r2d.sweep[:-1]:
             for layer_tag in layer_tags:
                 for j, st in zip(r2d.sweep_other, site_tag_tmps):
@@ -1302,15 +1304,24 @@ class TensorNetwork2D(TensorNetworkGen):
                     tag2 = site_tag(i + istep, j)  # inner
                     if layer_tag is None:
                         # tag and compress any inner tensors
-                        self.select_any((tag1, tag2)).add_tag(st)
+                        self.add_tag(
+                            st, where=(tag1, tag2), which="any", record=record
+                        )
                     else:
                         # only tag and compress one inner layer
-                        self.select_all((tag1,)).add_tag(st)
-                        self.select_all((tag2, layer_tag)).add_tag(st)
+                        self.add_tag(st, where=(tag1,), record=record)
+                        self.add_tag(
+                            st,
+                            where=(tag2, layer_tag),
+                            which="all",
+                            record=record,
+                        )
 
                 _do_compress(site_tag_tmps)
 
-        self.drop_tags(site_tag_tmps)
+        # rewind all the temporary tags
+        for t, t_tmp_tags in record.items():
+            t.drop_tags(t_tmp_tags)
 
     def _contract_boundary_core(
         self,
@@ -4398,7 +4409,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             equalize_norms=equalize_norms,
             progbar=progbar,
             inplace=True,
-            **contract_opts
+            **contract_opts,
         )
 
     def compute_local_expectation(

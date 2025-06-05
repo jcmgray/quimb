@@ -1881,9 +1881,14 @@ class Tensor:
     isel_ = functools.partialmethod(isel, inplace=True)
 
     def add_tag(self, tag):
-        """Add a tag or multiple tags to this tensor. Unlike ``self.tags.add``
-        this also updates any ``TensorNetwork`` objects viewing this
-        ``Tensor``.
+        """Add a tag or multiple tags to this tensor. Unlike naively calling
+        `self.tags.add` this also updates the tag maps of all `TensorNetwork`
+        objects viewing this `Tensor`. Inplace operation.
+
+        Parameters
+        ----------
+        tag : str or sequence of str
+            The tag(s) to add to this tensor.
         """
         if isinstance(tag, str):
             tags = (tag,)
@@ -4529,15 +4534,39 @@ class TensorNetwork(object):
                     f"'{ix}' in tensors {ts}."
                 )
 
-    def add_tag(self, tag, where=None, which="all"):
-        """Add tag to every tensor in this network, or if ``where`` is
+    def add_tag(self, tag, where=None, which="all", record=None):
+        """Add tag(s) to every tensor in this network, or if ``where`` is
         specified, the tensors matching those tags -- i.e. adds the tag to
-        all tensors in ``self.select_tensors(where, which=which)``.
+        all tensors in ``self.select_tensors(where, which=which)``. Inplace
+        operation.
+
+        Parameters
+        ----------
+        tag : str or sequence of str
+            The tag or tags to add.
+        where : str or sequence of str, optional
+            The existing tags to match for selection.
+        which : {'all', 'any', '!all', '!any'}, optional
+            How to match the ``where`` tags. Default is 'all', meaning a tensor
+            must have *all* of the specified tags to be selected.
+        record : None or dict, optional
+            A dictionary to record the tags added to each tensor. Useful for
+            untagging later at the Tensor level. The keys will be the
+            tensors themselves, and the values will be sets of tags that were
+            added. If ``None`` (the default), no record is kept.
         """
         tids = self._get_tids_from_tags(where, which=which)
 
         for tid in tids:
-            self.tensor_map[tid].add_tag(tag)
+            t = self.tensor_map[tid]
+            t.add_tag(tag)
+
+            if record is not None:
+                if isinstance(tag, str):
+                    record.setdefault(t, set()).add(tag)
+                else:
+                    # sequence of tags
+                    record.setdefault(t, set()).update(tag)
 
     def drop_tags(self, tags=None):
         """Remove a tag or tags from this tensor network, defaulting to all.
