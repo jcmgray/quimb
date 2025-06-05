@@ -559,7 +559,11 @@ def rand_mix(d, tr_d_min=None, tr_d_max=None, mode="rand", dtype=complex):
     if tr_d_max is None:
         tr_d_max = d
 
-    m = _randint(tr_d_min, tr_d_max)
+    if tr_d_min == tr_d_max:
+        m = tr_d_min
+    else:
+        m = _randint(tr_d_min, tr_d_max)
+
     if mode == "rand":
         psi = rand_ket(d * m, dtype=dtype)
     elif mode == "haar":

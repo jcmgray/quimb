@@ -221,11 +221,12 @@ class TestRandHaarState:
 
 
 class TestRandMix:
+    @pytest.mark.parametrize("d", [2, 3])
     @pytest.mark.parametrize("mode", ["rand", "haar"])
-    def test_rand_mix(self, mode):
-        rho = qu.rand_mix(3, mode=mode)
-        assert rho.shape == (3, 3)
-        assert type(rho) == qu.qarray
+    def test_rand_mix(self, d, mode):
+        rho = qu.rand_mix(d, mode=mode)
+        assert rho.shape == (d, d)
+        assert type(rho) is qu.qarray
         assert_allclose(qu.tr(rho), 1.0)
         mixedness = qu.tr(rho @ rho)
         assert mixedness < 1.0
