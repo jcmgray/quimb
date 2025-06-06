@@ -1319,7 +1319,9 @@ class TensorNetwork2D(TensorNetworkGen):
 
                 _do_compress(site_tag_tmps)
 
-        # rewind all the temporary tags
+        # rewind *all* the temporary tags
+        self.drop_tags(site_tag_tmps)
+        # even those not in final boundary
         for t, t_tmp_tags in record.items():
             t.drop_tags(t_tmp_tags)
 
