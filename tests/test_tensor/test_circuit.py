@@ -223,6 +223,17 @@ class TestCircuit:
             "U3",
         ] * 4
 
+    def test_openqasm2_a_gate_called_gate(self):
+        qasm_str = """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        gate gate_PauliEvolution(param0) q0,q1 { rz(0.2) q0; rz(-0.1) q1; }
+        qreg q[2];
+        gate_PauliEvolution(0.1) q[0],q[1];
+        """
+        circ = qtn.Circuit.from_openqasm2_str(qasm_str)
+        assert len(circ.gates) == 2
+
     @pytest.mark.parametrize(
         "Circ", [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
     )

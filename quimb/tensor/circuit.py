@@ -157,7 +157,7 @@ def get_openqasm2_regexes():
         "gate": re.compile(r"(\w+)\s*(\((.+)\))?\s*(.*);"),
         "error": re.compile(r"^(if|for)"),
         "ignore": re.compile(r"^(creg|measure|barrier)"),
-        "gate_def": re.compile(r"^gate"),
+        "gate_def": re.compile(r"^gate\s+"),
         "gate_sig": re.compile(r"^gate\s+(\w+)\s*(\((.+)\))?\s*(.*)"),
     }
 
