@@ -148,13 +148,16 @@ class Drawing:
         style.setdefault("horizontalalignment", "center")
         style.setdefault("verticalalignment", "center")
         style.setdefault("clip_on", False)
+        zorder_delta = style.pop("zorder_delta", 0.02)
 
         if len(coo) == 2:
             x, y = self._2d_project(*coo)
-            style.setdefault("zorder", +0.02)
+            style.setdefault("zorder", zorder_delta)
         else:
             x, y = self._3d_project(*coo)
-            style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.02)
+            style.setdefault(
+                "zorder", self._coo_to_zorder(*coo) + zorder_delta
+            )
 
         self.ax.text(x, y, text, **style)
         self._adjust_lims(x, y)
@@ -184,15 +187,17 @@ class Drawing:
         style.setdefault("verticalalignment", "center")
         style.setdefault("clip_on", False)
         center = style.pop("center", 0.5)
+        zorder_delta = style.pop("zorder_delta", 0.02)
 
         if len(cooa) == 2:
             xa, ya = self._2d_project(*cooa)
             xb, yb = self._2d_project(*coob)
-            style.setdefault("zorder", +0.02)
+            style.setdefault("zorder", zorder_delta)
         else:
             style.setdefault(
                 "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]) + 0.02,
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
+                + zorder_delta,
             )
             xa, ya = self._3d_project(*cooa)
             xb, yb = self._3d_project(*coob)
@@ -266,13 +271,16 @@ class Drawing:
         style.setdefault("edgecolor", darken_color(style["facecolor"]))
         style.setdefault("linewidth", 1)
         style.setdefault("radius", 0.25)
+        zorder_delta = style.pop("zorder_delta", 0.01)
 
         if len(coo) == 2:
             x, y = self._2d_project(*coo)
-            style.setdefault("zorder", +0.01)
+            style.setdefault("zorder", zorder_delta)
         else:
             x, y = self._3d_project(*coo)
-            style.setdefault("zorder", self._coo_to_zorder(*coo) + 0.01)
+            style.setdefault(
+                "zorder", self._coo_to_zorder(*coo) + zorder_delta
+            )
 
         return x, y, style
 
@@ -502,15 +510,17 @@ class Drawing:
         shorten = style.pop("shorten", None)
         arrowhead = style.pop("arrowhead", None)
         text = style.pop("text")
+        zorder_delta = style.pop("zorder_delta", 0.0)
 
         if len(cooa) == 2:
             xa, ya = self._2d_project(*cooa)
             xb, yb = self._2d_project(*coob)
-            style.setdefault("zorder", +0.0)
+            style.setdefault("zorder", zorder_delta)
         else:
             style.setdefault(
                 "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]),
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
+                + zorder_delta,
             )
             xa, ya = self._3d_project(*cooa)
             xb, yb = self._3d_project(*coob)
@@ -599,14 +609,16 @@ class Drawing:
         style.setdefault("text", None)
         arrowhead = style.pop("arrowhead")
         text = style.pop("text")
+        zorder_delta = style.pop("zorder_delta", 0.0)
 
         if len(cooa) == 2:
             xs, ys = zip(*[self._2d_project(*coo) for coo in [cooa, coob]])
-            style.setdefault("zorder", +0.0)
+            style.setdefault("zorder", zorder_delta)
         else:
             style.setdefault(
                 "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]),
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
+                + zorder_delta,
             )
             xs, ys = zip(*[self._3d_project(*coo) for coo in [cooa, coob]])
 
@@ -690,14 +702,17 @@ class Drawing:
         if reverse:
             cooa, coob = coob, cooa
 
+        zorder_delta = style.pop("zorder_delta", 0.0)
         if len(cooa) != 2:
             style.setdefault(
                 "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob]),
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
+                + zorder_delta,
             )
             cooa = self._3d_project(*cooa)
             coob = self._3d_project(*coob)
         else:
+            style.setdefault("zorder", zorder_delta)
             cooa = self._2d_project(*cooa)
             coob = self._2d_project(*coob)
 
@@ -758,12 +773,15 @@ class Drawing:
         smoothing = style.pop("smoothing")
         shorten = style.pop("shorten", None)
 
+        zorder_delta = style.pop("zorder_delta", 0.0)
         if len(coos[0]) != 2:
             style.setdefault(
-                "zorder", mean(self._coo_to_zorder(*coo) for coo in coos)
+                "zorder",
+                mean(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
             )
             coos = [self._3d_project(*coo) for coo in coos]
         else:
+            style.setdefault("zorder", zorder_delta)
             coos = [self._2d_project(*coo) for coo in coos]
 
         N = len(coos)
@@ -842,13 +860,16 @@ class Drawing:
         style.setdefault("edgecolor", darken_color(style["facecolor"]))
         style.setdefault("linewidth", 1)
         style.setdefault("joinstyle", "round")
+        zorder_delta = style.pop("zorder_delta", 0.0)
 
         if len(coos[0]) != 2:
             style.setdefault(
-                "zorder", mean(self._coo_to_zorder(*coo) for coo in coos)
+                "zorder",
+                mean(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
             )
             coos = [self._3d_project(*coo) for coo in coos]
         else:
+            style.setdefault("zorder", zorder_delta)
             coos = [self._2d_project(*coo) for coo in coos]
 
         path = [coos[0]]
@@ -911,12 +932,14 @@ class Drawing:
         style.setdefault("facecolor", (0.5, 0.5, 0.5, 0.25))
         style.setdefault("smoothing", 1 / 2)
         smoothing = style.pop("smoothing")
+        zorder_delta = style.pop("zorder_delta", -0.01)
 
         if len(coos[0]) != 2:
             # use min so the patch appears *just* behind the elements
             # its meant to highlight
             style.setdefault(
-                "zorder", min(self._coo_to_zorder(*coo) for coo in coos) - 0.01
+                "zorder",
+                min(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
             )
             coos = [self._3d_project(*coo) for coo in coos]
         else:
@@ -980,6 +1003,7 @@ class Drawing:
         style = parse_style_preset(self.presets, preset, **kwargs)
         radius = style.pop("radius", 0.0)
         resolution = style.pop("resolution", 12)
+        zorder_delta = style.pop("zorder_delta", -0.01)
 
         if isinstance(radius, (int, float)):
             radius = [radius] * len(coos)
@@ -988,11 +1012,12 @@ class Drawing:
             # use min so the patch appears *just* behind the elements
             # its meant to highlight
             style.setdefault(
-                "zorder", min(self._coo_to_zorder(*coo) for coo in coos) - 0.01
+                "zorder",
+                min(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
             )
             coos = [self._3d_project(*coo) for coo in coos]
         else:
-            style.setdefault("zorder", -0.01)
+            style.setdefault("zorder", zorder_delta)
 
         expanded_pts = []
         for coo, r in zip(coos, radius):
@@ -1054,6 +1079,7 @@ class Drawing:
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
         style.setdefault("smoothing", 1.0)
+        zorder_delta = style.pop("zorder_delta", -0.01)
 
         if pinch is True:
             pinch = 1 - padding
@@ -1061,12 +1087,13 @@ class Drawing:
         if len(cooa) != 2:
             style.setdefault(
                 "zorder",
-                min(self._coo_to_zorder(*coo) for coo in [cooa, coob]) - 0.01,
+                min(self._coo_to_zorder(*coo) for coo in [cooa, coob])
+                + zorder_delta,
             )
             cooa = self._3d_project(*cooa)
             coob = self._3d_project(*coob)
         else:
-            style.setdefault("zorder", -0.01)
+            style.setdefault("zorder", zorder_delta)
             cooa = self._2d_project(*cooa)
             coob = self._2d_project(*coob)
 
