@@ -261,6 +261,7 @@ from .utils import (
     tree_unflatten,
 )
 from .utils_plot import (
+    plot,
     NEUTRAL_STYLE,
     default_to_neutral_style,
     plot_multi_series_zoom,
@@ -413,6 +414,7 @@ __all__ = [
     "pi",
     "pkron",
     "plot_multi_series_zoom",
+    "plot",
     "plus",
     "prod",
     "projector",

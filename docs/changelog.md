@@ -16,6 +16,7 @@ Release notes for `quimb`.
 
 - Fix [`TensorNetwork2D.compute_plaquette_environments`](quimb.tensor.tensor_2d.TensorNetwork2D.compute_plaquette_environments) for `mode="zipup"` and other boundary contraction methods that use the generic 1D compression algorithms.
 - [`parse_openqasm2_str`](quimb.tensor.circuit.parse_openqasm2_str) allow custom gate names to start with the word `gate` ({issue}`312`).
+- [`MatrixProductState.gate_with_mpo`](quimb.tensor.tensor_1d.MatrixProductState.gate_with_mpo): fix bug to do with inplace argument ({issue}`313`).
 
 
 (whats-new-1-11-0)=

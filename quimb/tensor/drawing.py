@@ -683,7 +683,7 @@ def _draw_matplotlib(
     arrow_opts.setdefault("length", 0.12)
 
     if title is not None:
-        ax.set_title(str(title))
+        ax.set_title(str(title), color=label_color)
 
     for _, edge_data in edges.items():
         cooa, coob = edge_data["coos"]

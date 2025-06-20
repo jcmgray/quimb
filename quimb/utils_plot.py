@@ -30,7 +30,7 @@ def default_to_neutral_style(fn):
         style="neutral",
         show_and_close=True,
         clear_previous=False,
-        **kwargs
+        **kwargs,
     ):
         import matplotlib.pyplot as plt
 
@@ -86,6 +86,17 @@ def _ensure_dict(k, v):
             v["color"] = hash_to_color(k, vmin=0.75, vmax=0.85)
 
     return v
+
+
+@default_to_neutral_style
+def plot(*args, **kwargs):
+    """Wrapper around `matplotlib.pyplot.plot` to use the neutral style by
+    default (`style="neutral") as well as showing and closing the plot by
+    default (`show_and_close=True`).
+    """
+    import matplotlib.pyplot as plt
+
+    return plt.plot(*args, **kwargs)
 
 
 @default_to_neutral_style
@@ -187,9 +198,7 @@ def plot_multi_series_zoom(
                 mpl.ticker.ScalarFormatter(useOffset=False)
             )
         elif yscale == "asinh":
-            ax.yaxis.set_major_locator(
-                mpl.ticker.AsinhLocator(1, numticks=6)
-            )
+            ax.yaxis.set_major_locator(mpl.ticker.AsinhLocator(1, numticks=6))
         else:
             ax.set_yscale(yscale)
 
