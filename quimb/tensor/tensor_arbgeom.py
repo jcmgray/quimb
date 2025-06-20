@@ -149,7 +149,8 @@ def tensor_network_apply_op_vec(
     inplace : bool
         Whether to modify ``x``, the input vector tensor network inplace.
     inplace_A : bool
-        Whether to modify ``A``, the operator tensor network inplace.
+        Whether to reindex the operator tensor network ``A`` inplace, a
+        minor performance gain if you don't need to use ``A`` afterwards.
     compress_opts
         Options to pass to ``tn.compress``, where ``tn`` is the resulting
         tensor network, if ``compress=True``.
@@ -1461,7 +1462,14 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     to_qarray = functools.partialmethod(to_dense, to_qarray=True)
 
-    def gate_with_op_lazy(self, A, transpose=False, inplace=False, **kwargs):
+    def gate_with_op_lazy(
+        self,
+        A,
+        transpose=False,
+        inplace=False,
+        inplace_op=False,
+        **kwargs,
+    ):
         r"""Act lazily with the operator tensor network ``A``, which should
         have matching structure, on this vector/state tensor network, like
         ``A @ x``. The returned tensor network will have the same structure as
@@ -1491,6 +1499,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         inplace : bool, optional
             Whether to perform the gate operation inplace on this tensor
             network.
+        inplace_op : bool, optional
+            Whether to reindex the operator tensor network ``A`` inplace, a
+            minor performance gain if you don't need to use ``A`` afterwards.
 
         Returns
         -------
@@ -1502,6 +1513,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             which_A="upper" if transpose else "lower",
             contract=False,
             inplace=inplace,
+            inplace_A=inplace_op,
             **kwargs,
         )
 

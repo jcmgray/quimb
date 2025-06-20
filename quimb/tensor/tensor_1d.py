@@ -2371,7 +2371,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         inplace : bool, optional
             Whether to perform the compression inplace.
         inplace_mpo : bool, optional
-            Whether the modify the MPO in place, a minor performance gain.
+            Whether to reindex the operator tensor network ``mpo`` inplace, a
+            minor performance gain if you don't need to use it afterwards.
         compress_opts
             Other options supplied to
             :func:`~quimb.tensor.tensor_1d_compress.tensor_network_1d_compress`.
@@ -2388,7 +2389,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         psi.gate_with_op_lazy_(
             mpo,
             transpose=transpose,
-            inplace=inplace_mpo,
+            inplace_op=inplace_mpo,
         )
 
         # compress it!
