@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 (whats-new-1-11-1)=
-## v1.11.1 (unreleased)
+## v1.11.1 (2025-06-20)
 
 **Enhancements:**
 
@@ -12,6 +12,8 @@ Release notes for `quimb`.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): permit empty network, and allow `color=True` to automatically color all tags.
 - [`tn.add_tag`](quimb.tensor.tensor_core.TensorNetwork.add_tag): add a `record: Optional[dict]` kwarg, to allow for easy rewinding of temporary tags without tracking the actual networks.
 - add [`qu.plot`](quimb.utils_plot.plot) as a quick wrapper for calling `matplotlib.pyplot.plot` with the `quimb` style.
+- [`quimb.schematic`](quimb.schematic): add `zorder_delta` kwarg for fine adjustments to layering of objects in approximately the same position.
+- [`operatorbuilder`](quimb.experimental.operatorbuilder): big performance improvements and fixes for building matrix representations including Z2 symmetry. Add default `symmetry` and `sector` options that can be overridden at build time. Add lazy (slow, matrix free) 'apply' method. Add `pauli_decompose` transformation. Add experimental PEPO builder for nearest neighbor operators. Add unit tests.
 
 **Bug fixes:**
 
