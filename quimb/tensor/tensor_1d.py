@@ -1701,31 +1701,45 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         self._site_tag_id = site_tag_id
         self.cyclic = ops.ndim(arrays[0]) == 3
 
-        # this is the perm needed to bring the arrays from
-        # their current `shape`, to the desired 'lrp' order
-        lrp_ord = tuple(map(shape.find, "lrp"))
-
         tensors = []
         tags = tags_to_oset(tags)
         bonds = [rand_uuid() for _ in range(num_sites)]
+        # account for cyclic case
         bonds.append(bonds[0])
 
         for i, (site, array) in enumerate(zip(sites, arrays)):
             inds = []
 
-            if (i == 0) and not self.cyclic:
+            if L == 1:
+                # only one site
+                if self.cyclic:
+                    # bond is a self loop on the single tensor
+                    shape_desired = "lrp"
+                    inds.append(bonds[i])
+                    inds.append(bonds[i])
+                    # XXX: should we just trace it out instead?
+                else:
+                    # no bonds, just physical index
+                    shape_desired = "p"
+
+            elif (i == 0) and not self.cyclic:
                 # only right bond
-                order = tuple(shape.replace("l", "").find(x) for x in "rp")
+                shape_desired = "rp"
                 inds.append(bonds[i + 1])
             elif (i == num_sites - 1) and not self.cyclic:
                 # only left bond
-                order = tuple(shape.replace("r", "").find(x) for x in "lp")
+                shape_desired = "lp"
                 inds.append(bonds[i])
             else:
-                order = lrp_ord
+                shape_desired = "lrp"
                 # both bonds
                 inds.append(bonds[i])
                 inds.append(bonds[i + 1])
+
+            # this is the perm needed to bring the arrays from
+            # their current `shape`, to the desired 'lrud' order
+            shape_given = [x for x in shape if x in shape_desired]
+            order = [shape_given.index(x) for x in shape_desired]
 
             # physical index
             inds.append(site_ind_id.format(site))
@@ -3887,14 +3901,23 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
         tensors = []
         tags = tags_to_oset(tags)
         bonds = [rand_uuid() for _ in range(num_sites)]
+        # account for cyclic case
         bonds.append(bonds[0])
 
         for i, (site, array) in enumerate(zip(sites, arrays)):
             inds = []
 
             if L == 1:
-                # only one site, no bonds
-                shape_desired = "ud"
+                # only one site
+                if self.cyclic:
+                    # bond is a self loop on the single tensor
+                    shape_desired = "lrud"
+                    inds.append(bonds[i])
+                    inds.append(bonds[i])
+                    # XXX: should we just trace it out instead?
+                else:
+                    # no bonds, just physical indices
+                    shape_desired = "ud"
             elif (i == 0) and not self.cyclic:
                 # only right bond
                 shape_desired = "rud"
