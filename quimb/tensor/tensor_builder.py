@@ -3862,7 +3862,7 @@ def MPS_COPY(
             if i < L - 1:
                 shape.append(phys_dim)
             shape.append(phys_dim)
-            yield delta_array(shape, dtype=dtype)
+            yield delta_array(tuple(shape), dtype=dtype)
 
     return MatrixProductState(gen_arrays(), **mps_opts)
 
