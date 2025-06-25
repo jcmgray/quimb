@@ -10,12 +10,12 @@ dtypes = ["float32", "float64", "complex64", "complex128"]
 
 class TestMatrixProductState:
     def test_matrix_product_state(self):
-        tensors = (
+        arrays = (
             [np.random.rand(5, 2)]
             + [np.random.rand(5, 5, 2) for _ in range(3)]
             + [np.random.rand(5, 2)]
         )
-        mps = qtn.MatrixProductState(tensors)
+        mps = qtn.MatrixProductState(arrays)
         mps.check()
         assert len(mps.tensors) == 5
         nmps = mps.reindex_sites("foo{}", inplace=False, where=slice(0, 3))

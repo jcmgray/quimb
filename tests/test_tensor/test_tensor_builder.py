@@ -128,13 +128,14 @@ class TestMPSSpecificStates:
 
 
 class TestMatrixProductOperatorSpecifics:
-    def test_MPO_product_operator(self):
-        psis = [qu.rand_ket(2) for _ in range(5)]
-        ops = [qu.rand_matrix(2) for _ in range(5)]
+    @pytest.mark.parametrize("L", [1, 5])
+    def test_MPO_product_operator(self, L):
+        psis = [qu.rand_ket(2) for _ in range(L)]
+        ops = [qu.rand_matrix(2) for _ in range(L)]
         psif = qu.kron(*ops) @ qu.kron(*psis)
         mps = qtn.MPS_product_state(psis)
         mpo = qtn.MPO_product_operator(ops)
-        assert mpo.bond_sizes() == [1, 1, 1, 1]
+        assert mpo.bond_sizes() == [1] * (L - 1)
         mpsf = mpo.apply(mps)
         assert_allclose(mpsf.to_dense(), psif)
 
