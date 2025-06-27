@@ -1,4 +1,4 @@
-"""Draw psuedo-3D diagrams using matplotlib."""
+"""Draw 2D and pseudo-3D diagrams programmatically using matplotlib."""
 
 import functools
 import warnings
@@ -37,7 +37,9 @@ class Drawing:
         A dictionary of named style presets. When you add an element to the
         drawing, you can specify a preset name to use as default styling.
     ax : matplotlib.axes.Axes
-        The axes to draw on. If None, a new figure is created.
+        The axes to draw on. If None, a new figure is created. If an external
+        `ax` is supplied, then note that this `Drawing` instance will not
+        automatically adjust the limits of the axes as elements are added.
     kwargs
         Passed to ``plt.figure`` if ``ax`` is None.
     """
@@ -60,9 +62,11 @@ class Drawing:
             self.fig = plt.figure(**kwargs)
             self.fig.set_facecolor(background)
             self.ax = self.fig.add_subplot(111)
+            self.fig_owner = True
         else:
             self.ax = ax
             self.fig = self.ax.figure
+            self.fig_owner = False
 
         self.ax.set_axis_off()
         self.ax.set_aspect("equal")
@@ -100,6 +104,10 @@ class Drawing:
         )
 
     def _adjust_lims(self, x, y):
+        if not self.fig_owner:
+            # if we don't own the figure, we shouldn't adjust the limits
+            return
+
         xchange = ychange = False
         if self._xmin is None or x < self._xmin:
             xchange = True
@@ -1471,7 +1479,7 @@ def hash_to_color(
     color : tuple
         A tuple of floats in the range [0, 1] representing the RGB color.
     """
-    from matplotlib.colors import to_hex, hsv_to_rgb
+    from matplotlib.colors import hsv_to_rgb, to_hex
 
     h, s, v = hash_to_nvalues(s, 3)
     h = hmin + h * (hmax - hmin)
