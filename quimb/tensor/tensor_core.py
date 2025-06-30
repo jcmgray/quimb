@@ -9174,13 +9174,14 @@ class TensorNetwork(object):
         Parameters
         ----------
         tags : sequence of str, all, or Ellipsis, optional
-            Any tensors with any of these tags with be contracted. Use ``all``
+            Any tensors with any of these tags will be contracted. Use ``all``
             or ``...`` (``Ellipsis``) to contract all tensors. ``...`` will try
             and use a 'structured' contract method if possible.
         output_inds : sequence of str, optional
             The indices to specify as outputs of the contraction. If not given,
             and the tensor network has no hyper-indices, these are computed
-            automatically as every index appearing once.
+            automatically as every index appearing once. If the network has
+            hyper-indices, `output_inds` must be specified.
         optimize : str, PathOptimizer, ContractionTree or path_like, optional
             The contraction path optimization strategy to use.
 
@@ -9222,8 +9223,9 @@ class TensorNetwork(object):
             Which backend to use to perform the contraction. Supplied to
             `cotengra`.
         inplace : bool, optional
-            Whether to perform the contraction inplace. This is only valid
-            if not all tensors are contracted (which doesn't produce a TN).
+            Whether to perform the contraction inplace. If ``True`` and all
+            tensors are being contracted, this forces the return type to
+            be preserved as a ``TensorNetwork``.
         kwargs
             Passed to :func:`~quimb.tensor.tensor_core.tensor_contract`,
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_compressed`
@@ -9233,7 +9235,7 @@ class TensorNetwork(object):
         -------
         TensorNetwork, Tensor or scalar
             The result of the contraction, still a ``TensorNetwork`` if the
-            contraction was only partial.
+            contraction was only partial or `inplace=True` was used.
 
         See Also
         --------
