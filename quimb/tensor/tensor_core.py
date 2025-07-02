@@ -1871,7 +1871,7 @@ class Tensor:
                 T.rand_reduce_(ix)
             else:
                 # index will be removed by selecting a specific index
-                data_loc.append(int(sel))
+                data_loc.append(sel)
 
         T.modify(
             apply=lambda x: x[tuple(data_loc)], inds=new_inds, left_inds=None

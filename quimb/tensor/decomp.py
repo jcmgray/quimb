@@ -4,6 +4,7 @@ import functools
 import operator
 import warnings
 
+import cotengra as ctg
 import numpy as np
 import scipy.linalg as scla
 import scipy.linalg.interpolative as sli
@@ -23,6 +24,7 @@ from autoray import (
 
 from ..core import njit
 from ..linalg import base_linalg, rand_linalg
+from .array_ops import isblocksparse, isfermionic
 
 _CUTOFF_MODE_MAP = {
     "abs": 1,
@@ -113,6 +115,17 @@ def sgn_tf(x):
         x0 = do("cast", do("equal", x, 0.0), x.dtype)
         xa = do("cast", do("abs", x), x.dtype)
         return (x + x0) / (xa + x0)
+
+
+_ABSORB_MAP = {
+    None: None,
+    -1: -1,
+    0: 0,
+    1: 1,
+    "left": -1,
+    "both": 0,
+    "right": 1,
+}
 
 
 def _trim_and_renorm_svd_result(
@@ -219,6 +232,8 @@ def svd_truncated(
     renorm : {0, 1}, optional
         Whether to renormalize the singular values (depends on `cutoff_mode`).
     """
+    absorb = _ABSORB_MAP[absorb]
+
     with backend_like(backend):
         U, s, VH = do("linalg.svd", x)
         return _trim_and_renorm_svd_result(
@@ -326,6 +341,7 @@ def svd_truncated_numba(
 ):
     """Accelerated version of ``svd_truncated`` for numpy arrays."""
     U, s, VH = np.linalg.svd(x, full_matrices=False)
+
     return _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
@@ -338,6 +354,7 @@ def svd_truncated_numpy(
     """Numpy version of ``svd_truncated``, trying the accelerated version
     first, then falling back to the more stable scipy version.
     """
+    absorb = _ABSORB_MAP[absorb]
     try:
         return svd_truncated_numba(
             x, cutoff, cutoff_mode, max_bond, absorb, renorm
@@ -1130,8 +1147,6 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
     or right reduced factor matrix of the unsquared operator ``x`` with
     original shape ``(dl, dr)``.
     """
-    s2, W = do("linalg.eigh", x2)
-
     if right:
         if dl < dr:
             # know exactly low-rank, so truncate
@@ -1145,19 +1160,39 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
         else:
             keep = None
 
-    if keep is not None:
-        # outer dimension smaller -> exactly low-rank
-        s2 = s2[-keep:]
-        W = W[:, -keep:]
+    try:
+        # attempt faster hermitian eigendecomposition
+        s2, W = do("linalg.eigh", x2)
 
-    # might have negative eigenvalues due to numerical error from squaring
-    s2 = do("clip", s2, s2[-1] * 1e-12, None)
-    s = do("sqrt", s2)
+        if keep is not None:
+            # outer dimension smaller -> exactly low-rank
+            s2 = s2[-keep:]
+            W = W[:, -keep:]
 
-    if right:
-        factor = ldmul(s, dag(W))
-    else:  # 'left'
-        factor = rdmul(W, s)
+        # might have negative eigenvalues due to numerical error from squaring
+        s2 = do("clip", s2, 0.0, None)
+        s = do("sqrt", s2)
+
+        if right:
+            factor = ldmul(s, dag(W))
+        else:  # 'left'
+            factor = rdmul(W, s)
+
+    except Exception:
+        # fallback to SVD
+        U, s2, VH = do("linalg.svd", x2)
+        if keep is not None:
+            # outer dimension smaller -> exactly low-rank
+            s2 = s2[:keep]
+            if right:
+                VH = VH[:keep, :]
+            else:
+                U = U[:, :keep]
+        s = do("sqrt", s2)
+        if right:
+            factor = ldmul(s, VH)
+        else:  # 'left'
+            factor = rdmul(U, s)
 
     return factor
 
@@ -1229,12 +1264,10 @@ def compute_oblique_projectors(
     Pr : array
         The right oblique projector.
     """
-    if absorb != "both":
-        raise NotImplementedError("only absorb='both' supported")
-
     if max_bond is None:
         max_bond = -1
 
+    absorb = _ABSORB_MAP[absorb]
     cutoff_mode = map_cutoff_mode(cutoff_mode)
 
     Ut, st, VHt = svd_truncated(
@@ -1245,10 +1278,344 @@ def compute_oblique_projectors(
         cutoff_mode=cutoff_mode,
         **compress_opts,
     )
-    st_sqrt = do("sqrt", st)
 
-    # then form the 'oblique' projectors
-    Pl = Rr @ rddiv(dag(VHt), st_sqrt)
-    Pr = lddiv(st_sqrt, dag(Ut)) @ Rl
+    if absorb is None:
+        Pl = Rr @ rddiv(dag(VHt), st)
+        Pr = lddiv(st, dag(Ut)) @ Rl
+        return Pl, st, Pr
+
+    elif absorb == 0:
+        st_sqrt = do("sqrt", st)
+
+        # then form the 'oblique' projectors
+        Pl = Rr @ rddiv(dag(VHt), st_sqrt)
+        Pr = lddiv(st_sqrt, dag(Ut)) @ Rl
+
+    elif absorb == -1:
+        Pl = Rr @ dag(VHt)
+        Pr = lddiv(st, dag(Ut)) @ Rl
+
+    elif absorb == 1:
+        Pl = Rr @ rddiv(dag(VHt), st)
+        Pr = dag(Ut) @ Rl
+    else:
+        raise ValueError(f"Unrecognized absorb={absorb}.")
 
     return Pl, Pr
+
+
+def compute_bondenv_projectors(
+    E,
+    max_bond,
+    cutoff=0.0,
+    absorb="both",
+    max_iterations=100,
+    tol=1e-10,
+    solver="solve",
+    solver_maxiter=4,
+    prenormalize=False,
+    condition=False,
+    enforce_pos=False,
+    pos_smudge=1e-10,
+    init="svd",
+    info=None,
+):
+    """Given 4D environment tensor of a bond, iteratively compute projectors
+    that compress the bond dimension to `max_bond`, minimizing the distance in
+    terms of frobenius norm.
+
+    N.B. This is experimental and not working for e.g. fermions yet.
+
+    Parameters
+    ----------
+    E : array
+        The 4D environment tensor of a bond. The dimensions should be arranged
+        as (ket-left, ket-right, bra-left, bra-right).
+    max_bond : int
+        The maximum bond dimension to compress to.
+    cutoff : float, optional
+        The singular value cutoff to use.
+    absorb : {'both', 'left', 'right', None}, optional
+        How to absorb the effective singular values into the tensors.
+    max_iterations : int, optional
+        The maximum number of iterations to use when fitting the projectors.
+    tol : float, optional
+        The target tolerance to reach when fitting the projectors.
+    solver : {'solve', None, str}, optional
+        The solver to use inside the fitting loop. If None will use a custom
+        conjugate gradient method. Else can be any of the iterative solvers
+        supported by ``scipy.sparse.linalg`` such as 'gmres', 'bicgstab', etc.
+    solver_maxiter : int, optional
+        The maximum number of iterations to use for the *inner* solver, i.e.
+        per fitting step, only for iterative `solver` args.
+    enforce_pos : bool, optional
+        Whether to enforce the environment tensor to be positive semi-definite
+        by symmetrizing and clipping negative eigenvalues.
+    pos_smudge : float, optional
+        The value to clip negative eigenvalues to when enforcing positivity,
+        relative to the largest eigenvalue.
+    info : dict, optional
+        If provided, will store information about the fitting process here.
+        The keys 'iterations' and 'distance' will contain the final number of
+        iterations and distance reached respectively.
+
+    Returns
+    -------
+    Pl : array
+        The left projector.
+    Pr : array
+        The right projector.
+    """
+    backend = infer_backend(E)
+    _conj = get_lib_fn(backend, "conj")
+    _fuse = get_lib_fn(backend, "fuse")
+    _reshape = get_lib_fn(backend, "reshape")
+
+    absorb = _ABSORB_MAP[absorb]
+
+    if solver == "solve":
+        _solve = get_lib_fn(backend, "linalg.solve")
+        use_x0 = False
+    elif solver is None:
+        from .fitting import conjugate_gradient
+
+        _solve = conjugate_gradient
+        use_x0 = True
+
+    blocksparse = isblocksparse(E)
+    fermionic = isfermionic(E)
+
+    if fermionic:
+        if E.indices[2].dual:
+            E = E.phase_flip(2)
+        else:
+            E = E.phase_flip(3)
+
+    if prenormalize:
+        E = E / ctg.array_contract((E,), (("K", "K", "B", "B"),), ())
+
+    if enforce_pos:
+        with backend_like(backend):
+            Ea = do("fuse", E, (0, 1), (2, 3))
+            Ea = (Ea + dag(Ea)) / 2
+            el, ev = do("linalg.eigh", Ea)
+            lmax = do("max", el)
+            el = do("clip", el + lmax * pos_smudge, lmax * pos_smudge, None)
+            Ea = do("multiply_diagonal", ev, el, axis=1) @ dag(ev)
+            E = do("reshape", Ea, E.shape)
+
+    # current bond dim
+    d = E.shape[0]
+    # environment with bra indices traced out (i.e. half uncompressed)
+    Ek = ctg.array_contract((E,), (("kl", "kr", "X", "X"),), ("kl", "kr"))
+    # for distance calculation, compute <A|A>, which is constant
+    yAA = do("abs", ctg.array_contract((Ek,), (("X", "X"),), ()))
+
+    # initial guess for projectors
+
+    if init == "svd":
+        Pl, _, Pr = svd_truncated(
+            Ek,
+            absorb=None,
+            max_bond=max_bond,
+            cutoff=1e-15,
+            cutoff_mode=2,
+        )
+        Pl = _conj(Pl)
+        Pr = _conj(Pr)
+
+    elif init == "eigh":
+        Pl, Pr = similarity_compress(Ek, max_bond)
+
+    elif init == "random":
+        if backend == "torch":
+            import torch
+
+            Pl = torch.randn(d, max_bond, dtype=E.dtype, device=E.device)
+            Pr = torch.linalg.pinv(Pl)
+        else:
+            Pl = do("random.normal", size=(d, max_bond), like=E)
+            Pr = do("linalg.pinv", Pl)
+
+    elif init == "reduced":
+        from .tensor_core import Tensor
+
+        ft = Tensor(E, ["kl", "kr", "bl", "br"])
+        # factor positive environment
+        ekt, _ = ft.split(
+            left_inds=["kl", "kr"],
+            right_inds=["bl", "br"],
+            get="tensors",
+            bond_ind="b",
+            method="eigh",
+        )
+        # compute left reduced factor
+        Rl = ekt.compute_reduced_factor("right", ["b", "kr"], ["kl"])
+
+        # compute right reduced factor
+        Rr = ekt.compute_reduced_factor("left", ["kr"], ["kl", "b"])
+
+        # compute compressed projectors
+        Pl, Pr = compute_oblique_projectors(
+            Rl,
+            Rr,
+            max_bond=max_bond,
+            cutoff=cutoff,
+        )
+
+    elif init == "split":
+        ft = Tensor(E, ["kl", "kr", "bl", "br"])
+
+    else:
+        raise ValueError(f"Unrecognized init={init}.")
+
+    # E, Pl = do("align_axes", E, Pl, ((0,), (0,)))
+    # E, Pr = do("align_axes", E, Pr, ((1,), (1,)))
+    # E, Pl = do("align_axes", E, Pl, ((2,), (0,)))
+    # E, Pr = do("align_axes", E, Pr, ((3,), (1,)))
+    # Ek, Pl = do("align_axes", Ek, Pl, ((0,), (0,)))
+    # Ek, Pr = do("align_axes", Ek, Pr, ((1,), (1,)))
+
+    def _distance(xc, x, A, b):
+        yAB = (xc @ b).real
+        yBB = abs(xc @ (A @ x))
+        return 2 * (yAA + yBB - 2 * yAB) ** 0.5 / (yAA**0.5 + yBB**0.5)
+
+    old_diff = None
+    new_diff = None
+
+    if use_x0:
+        xl0 = _conj(_fuse(Pl, (0, 1)))
+        xr0 = _conj(_fuse(Pr, (0, 1)))
+    else:
+        xl0 = xr0 = None
+
+    for it in range(max_iterations):
+        if condition == "iso":
+            Lr, _, Pr = lq_stabilized(Pr)
+            Pl = Pl @ Lr
+
+        elif condition:
+            # match projector norms
+            nrml = do("linalg.norm", Pl)
+            nrmr = do("linalg.norm", Pr)
+            Pl = Pl * (nrmr**0.5 / nrml**0.5)
+            Pr = Pr * (nrml**0.5 / nrmr**0.5)
+
+        # solve for left projector
+        #      ┌────┐             ┌────┐
+        #          ┌┴─┐               ┌┴─┐
+        #          │Pr│               │Pr│
+        #          └┬─┘               └┬─┘
+        #     ┌┴────┴┐           ┌┴────┴┐
+        #     │  E   │   x    =  │  Ek  │
+        #     └┬────┬┘           └┬────┬┘
+        #          ┌┴─┐           │    │
+        #      ?   │Pr│*          └────┘
+        #          └┬─┘
+        #      └────┘
+        A = ctg.array_contract(
+            [E, Pr, _conj(Pr)],
+            [("kl", "krX", "bl", "brX"), ("kr", "krX"), ("br", "brX")],
+            ("kl", "kr", "bl", "br"),
+        )
+        b = ctg.array_contract(
+            [Ek, Pr],
+            [("kl", "krX"), ("kr", "krX")],
+            ("kl", "kr"),
+        )
+
+        if blocksparse:
+            A, b = do("align_axes", A, b, axes=((0, 1), (0, 1)))
+            A, b = do("align_axes", A, b, axes=((2, 3), (0, 1)))
+
+        # get pre-fuse shape as `d` might have changed
+        Pl_shape = b.shape
+        b = _fuse(b, (0, 1))
+        A = _fuse(A, (0, 1), (2, 3))
+
+        if use_x0:
+            x = _solve(A, b, x0=xl0, maxiter=solver_maxiter)
+            xl0 = x
+        else:
+            x = _solve(A, b)
+
+        xc = _conj(x)
+        Pl = _reshape(xc, Pl_shape)
+
+        # solve for right projector
+        #      ┌────┐            ┌────┐
+        #     ┌┴─┐              ┌┴─┐
+        #     │Pl│              │Pl│
+        #     └┬─┘              └┬─┘
+        #     ┌┴─────┐          ┌┴─────┐
+        #     │  E   │  x ?  =  │  Ek  │
+        #     └┬─────┘          └┬────┬┘
+        #     ┌┴─┐               │    │
+        #     │Pl│*              └────┘
+        #     └┬─┘
+        #      └────┘
+        if condition == "iso":
+            Pl, _, Rl = qr_stabilized(Pl)
+            Pr = Rl @ Pr
+
+        b = ctg.array_contract(
+            [Ek, Pl],
+            [("klX", "kr"), ("klX", "kl")],
+            ("kl", "kr"),
+        )
+        A = ctg.array_contract(
+            [E, Pl, _conj(Pl)],
+            [("klX", "kr", "blX", "br"), ("klX", "kl"), ("blX", "bl")],
+            ("kl", "kr", "bl", "br"),
+        )
+
+        if blocksparse:
+            A, b = do("align_axes", A, b, axes=((0, 1), (0, 1)))
+            A, b = do("align_axes", A, b, axes=((2, 3), (0, 1)))
+
+        # get pre-fuse shape as `d` might have changed
+        Pr_shape = b.shape
+        b = _fuse(b, (0, 1))
+        A = _fuse(A, (0, 1), (2, 3))
+
+        if use_x0:
+            x = _solve(A, b, x0=xr0, maxiter=solver_maxiter)
+            xr0 = x
+        else:
+            x = _solve(A, b)
+
+        xc = _conj(x)
+        Pr = _reshape(xc, Pr_shape)
+
+        # check for convergence
+        if tol != 0.0:
+            new_diff = _distance(xc, x, A, b)
+            if old_diff is not None and abs(new_diff - old_diff) < tol:
+                break
+            old_diff = new_diff
+
+    if info is not None:
+        info["distance"] = new_diff
+        info["iterations"] = it + 1
+
+    if fermionic:
+        # reflip
+        if Pr.indices[0].dual:
+            Pr.phase_flip(0, inplace=True)
+        else:
+            Pl.phase_flip(1, inplace=True)
+
+    if not ((absorb == 0) and (cutoff == 0.0)):
+        # should/can do this on reduced factors?
+        Pl, svals, Pr = svd_truncated(
+            Pl @ Pr,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            absorb=absorb,
+        )
+    else:
+        # svals already absorbed on both sides, and no dynamic cutoff
+        svals = None
+
+    return Pl, svals, Pr
