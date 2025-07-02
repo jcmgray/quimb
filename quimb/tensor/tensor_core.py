@@ -1871,6 +1871,8 @@ class Tensor:
                 T.rand_reduce_(ix)
             else:
                 # index will be removed by selecting a specific index
+                if isinstance(sel, str):
+                    sel = int(sel)
                 data_loc.append(sel)
 
         T.modify(
