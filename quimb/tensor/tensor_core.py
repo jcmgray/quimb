@@ -1870,7 +1870,7 @@ class Tensor:
                 # index will be kept (including a partial slice of entries)
                 new_inds.append(ix)
                 data_loc.append(sel)
-            elif sel == "r":
+            elif isinstance(sel, str) and sel == "r":
                 # eagerly remove any 'random' selections
                 T.rand_reduce_(ix)
             else:

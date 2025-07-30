@@ -14,6 +14,7 @@ Release notes for `quimb`.
 
 - fixes for MPS and MPO constructors when L=1, ({issue}`314`)
 - tensor splitting with absorb="left" now correctly marks left indices.
+- [`tn.isel`](quimb.tensor.tensor_core.TensorNetwork.isel): fix bug when value could not be compared to string `"r"`
 
 
 (whats-new-1-11-1)=
