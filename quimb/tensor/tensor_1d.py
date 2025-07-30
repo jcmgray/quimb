@@ -508,15 +508,22 @@ class TensorNetwork1D(TensorNetworkGen):
         return x
 
     def contract_structured(
-        self, tag_slice, structure_bsz=5, inplace=False, **opts
+        self,
+        tag_slice,
+        structure_bsz=5,
+        optimize="auto",
+        inplace=False,
+        **contract_opts,
     ):
         """Perform a structured contraction, translating ``tag_slice`` from a
         ``slice`` or `...` to a cumulative sequence of tags.
 
         Parameters
         ----------
-        tag_slice : slice or ...
+        tag_slice : slice or ... (Ellipsis)
             The range of sites, or `...` for all.
+        structure_bsz : int, optional
+            The number of sites to group together for each sub-contraction.
         inplace : bool, optional
             Whether to perform the contraction inplace.
 
@@ -535,6 +542,10 @@ class TensorNetwork1D(TensorNetworkGen):
             # else slice over all sites
             tag_slice = slice(0, self.L)
 
+        if optimize is None:
+            # this helps a lot vs greedy for large bond triple overlap e.g.
+            optimize = "auto"
+
         # filter sites by the slice, but also which sites are present at all
         tags_seq = filter(
             self.tag_map.__contains__,
@@ -546,7 +557,12 @@ class TensorNetwork1D(TensorNetworkGen):
             tags_seq = partition_all(structure_bsz, tags_seq)
 
         # contract each block of sites cumulatively
-        return self.contract_cumulative(tags_seq, inplace=inplace, **opts)
+        return self.contract_cumulative(
+            tags_seq,
+            optimize=optimize,
+            inplace=inplace,
+            **contract_opts,
+        )
 
     def compute_left_environments(self, **contract_opts):
         """Compute the left environments of this 1D tensor network.

@@ -167,19 +167,20 @@ def fuse(x, *axes_groups, backend=None):
     """
     if backend is None:
         backend = infer_backend(x)
-    _transpose = get_lib_fn(backend, "transpose")
-    _reshape = get_lib_fn(backend, "reshape")
 
     axes_groups = tuple(map(tuple, axes_groups))
     if not any(axes_groups):
         return x
 
-    shape = tuple(map(int, x.shape))
+    _shape = get_lib_fn(backend, "shape")
+    shape = _shape(x)
     perm, new_shape = calc_fuse_perm_and_shape(shape, axes_groups)
 
     if perm is not None:
+        _transpose = get_lib_fn(backend, "transpose")
         x = _transpose(x, perm)
     if new_shape is not None:
+        _reshape = get_lib_fn(backend, "reshape")
         x = _reshape(x, new_shape)
 
     return x

@@ -8,6 +8,7 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - Update the introduction to tensor contrcction docs
+- Improve efficiency of 1D structured contractions when default `optimize` is used.
 
 **Bug fixes:**
 
