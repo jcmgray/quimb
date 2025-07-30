@@ -166,9 +166,9 @@ def _trim_and_renorm_svd_result(
         n_chi = max_bond
     else:
         # neither maximum bond dimension nor cutoff specified
-        n_chi = s.shape[0]
+        n_chi = do("shape", s)[0]
 
-    if n_chi < s.shape[0]:
+    if n_chi < do("shape", s)[0]:
         s = s[:n_chi]
         U = U[:, :n_chi]
         VH = VH[:n_chi, :]
