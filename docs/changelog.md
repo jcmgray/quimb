@@ -2,6 +2,19 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-11-12)=
+## v1.11.2 (unreleased)
+
+**Enhancements:**
+
+- Update the introduction to tensor contrcction docs
+
+**Bug fixes:**
+
+- fixes for MPS and MPO constructors when L=1, ({issue}`314`)
+- tensor splitting with absorb="left" now correctly marks left indices.
+
+
 (whats-new-1-11-1)=
 ## v1.11.1 (2025-06-20)
 

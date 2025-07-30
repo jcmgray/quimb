@@ -406,9 +406,13 @@ _DENSE_ONLY_METHODS = {
     "lu",
     "svdamr",
 }
+# methods whose left factor is isometric
 _LEFT_ISOM_METHODS = {"qr", "polar_right"}
+# methods whose right factor is isometric
 _RIGHT_ISOM_METHODS = {"lq", "polar_left"}
-_ISOM_METHODS = {"svd", "eig", "eigh", "isvd", "svds", "rsvd", "eigsh"}
+# methods whose left and right factors are isometric, depending
+# on where the 'singular/eigen' values are absorbed
+_BOTH_ISOM_METHODS = {"svd", "eig", "eigh", "isvd", "svds", "rsvd", "eigsh"}
 
 _CUTOFF_LOOKUP = {None: -1.0}
 _ABSORB_LOOKUP = {"left": -1, "both": 0, "right": 1, None: None}
@@ -456,10 +460,10 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
 @functools.lru_cache(None)
 def _check_left_right_isom(method, absorb):
     left_isom = (method in _LEFT_ISOM_METHODS) or (
-        method in _ISOM_METHODS and absorb in (None, "right")
+        method in _BOTH_ISOM_METHODS and absorb in (None, "right")
     )
-    right_isom = (method == _RIGHT_ISOM_METHODS) or (
-        method in _ISOM_METHODS and absorb in (None, "left")
+    right_isom = (method in _RIGHT_ISOM_METHODS) or (
+        method in _BOTH_ISOM_METHODS and absorb in (None, "left")
     )
     return left_isom, right_isom
 
