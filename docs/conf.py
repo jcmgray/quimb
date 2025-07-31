@@ -3,42 +3,46 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import datetime
 import os
 import sys
+
 sys.path.append(os.path.abspath("./_pygments"))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'quimb'
-copyright = '2015-2024, Johnnie Gray'
-author = 'Johnnie Gray'
+project = "quimb"
+copyright = f"2015-{datetime.date.today().year}, Johnnie Gray"
+author = "Johnnie Gray"
 
 # The full version, including alpha/beta/rc tags
 try:
     from quimb import __version__
+
     release = __version__
 except ImportError:
     try:
         from importlib.metadata import version as _version
-        release = _version('quimb')
-    except ImportError:
-        release = '0.0.0+unknown'
 
-version = '.'.join(release.split('.')[:2])
+        release = _version("quimb")
+    except ImportError:
+        release = "0.0.0+unknown"
+
+version = ".".join(release.split(".")[:2])
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx.ext.intersphinx',
-    'sphinx.ext.extlinks',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.linkcode',
-    'myst_nb',
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.extlinks",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.linkcode",
+    "myst_nb",
     "sphinx_design",
-    'sphinx_copybutton',
-    'autoapi.extension',
+    "sphinx_copybutton",
+    "autoapi.extension",
 ]
 
 # msyt_nb configuration
@@ -54,32 +58,32 @@ myst_enable_extensions = [
 
 
 # sphinx-autoapi
-autoapi_dirs = ['../quimb']
+autoapi_dirs = ["../quimb"]
 
 extlinks = {
-    'issue': ('https://github.com/jcmgray/quimb/issues/%s', 'GH %s'),
-    'pull': ('https://github.com/jcmgray/quimb/pull/%s', 'PR %s'),
+    "issue": ("https://github.com/jcmgray/quimb/issues/%s", "GH %s"),
+    "pull": ("https://github.com/jcmgray/quimb/pull/%s", "PR %s"),
 }
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/3/', None),
-    'numpy': ('https://numpy.org/doc/stable/', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
-    'cotengra': ('https://cotengra.readthedocs.io/en/latest/', None),
-    'autoray': ('https://autoray.readthedocs.io/en/latest/', None),
+    "python": ("https://docs.python.org/3/", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "cotengra": ("https://cotengra.readthedocs.io/en/latest/", None),
+    "autoray": ("https://autoray.readthedocs.io/en/latest/", None),
 }
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', '**.ipynb_checkpoints']
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'furo'
+html_theme = "furo"
 html_theme_options = {
     "sidebar_hide_name": True,
     "light_css_variables": {
@@ -98,10 +102,10 @@ html_theme_options = {
     "dark_logo": "quimb_logo_title.png",
 }
 
-pygments_style = '_pygments_light.MarianaLight'
+pygments_style = "_pygments_light.MarianaLight"
 pygments_dark_style = "_pygments_dark.MarianaDark"
 
-html_static_path = ['_static']
+html_static_path = ["_static"]
 html_css_files = ["my-styles.css"]
 html_favicon = "_static/quimb.ico"
 
@@ -152,8 +156,7 @@ def linkcode_resolve(domain, info):
 
     if "+" in quimb.__version__:
         return (
-            f"https://github.com/jcmgray/quimb/blob/"
-            f"main/quimb/{fn}{linespec}"
+            f"https://github.com/jcmgray/quimb/blob/main/quimb/{fn}{linespec}"
         )
     else:
         return (
