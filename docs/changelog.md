@@ -2,13 +2,13 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-11-12)=
-## v1.11.2 (unreleased)
+(whats-new-1-11-2)=
+## v1.11.2 (2025-07-30)
 
 **Enhancements:**
 
-- Update the introduction to tensor contrcction docs
-- Improve efficiency of 1D structured contractions when default `optimize` is used.
+- Update the introduction to tensor contraction docs
+- Improve efficiency of 1D structured contractions when default `optimize` is used, especially for large bond dimension overlaps.
 
 **Bug fixes:**
 
