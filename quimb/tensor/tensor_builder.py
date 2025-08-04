@@ -26,7 +26,6 @@ from ..gen.rand import (
 from ..utils import concat, deprecated, unique
 from .array_ops import asarray, do, reshape, sensibly_scale
 from .contraction import array_contract
-from .decomp import eigh_truncated
 from .tensor_1d import MatrixProductOperator, MatrixProductState
 from .tensor_1d_tebd import LocalHam1D
 from .tensor_2d import TensorNetwork2D, gen_2d_bonds, gen_2d_plaquettes

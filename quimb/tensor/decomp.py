@@ -26,46 +26,32 @@ from ..core import njit
 from ..linalg import base_linalg, rand_linalg
 from .array_ops import isblocksparse, isfermionic
 
-_CUTOFF_MODE_MAP = {
-    "abs": 1,
-    "rel": 2,
-    "sum2": 3,
-    "rsum2": 4,
-    "sum1": 5,
-    "rsum1": 6,
-}
-
-
-def map_cutoff_mode(cutoff_mode):
-    """Map mode to an integer for compatibility with numba."""
-    return _CUTOFF_MODE_MAP.get(cutoff_mode, cutoff_mode)
-
 
 # some convenience functions for multiplying diagonals
 
 
 def rdmul(x, d):
     """Right-multiplication a matrix by a vector representing a diagonal."""
-    return x * reshape(d, (1, -1))
+    return x * d[None, :]
 
 
 def rddiv(x, d):
     """Right-multiplication of a matrix by a vector representing an inverse
     diagonal.
     """
-    return x / reshape(d, (1, -1))
+    return x / d[None, :]
 
 
 def ldmul(d, x):
     """Left-multiplication a matrix by a vector representing a diagonal."""
-    return x * reshape(d, (-1, 1))
+    return x * d[:, None]
 
 
 def lddiv(d, x):
     """Left-multiplication of a matrix by a vector representing an inverse
     diagonal.
     """
-    return x / reshape(d, (-1, 1))
+    return x / d[:, None]
 
 
 @njit  # pragma: no cover
@@ -98,7 +84,7 @@ def sgn(x):
     """Get the 'sign' of ``x``, such that ``x / sgn(x)`` is real and
     non-negative.
     """
-    x0 = x == 0.0
+    x0 = do("equal", x, 0.0)
     return (x + x0) / (do("abs", x) + x0)
 
 
@@ -117,6 +103,22 @@ def sgn_tf(x):
         return (x + x0) / (xa + x0)
 
 
+_CUTOFF_MODE_MAP = {
+    1: 1,
+    "abs": 1,
+    2: 2,
+    "rel": 2,
+    3: 3,
+    "sum2": 3,
+    4: 4,
+    "rsum2": 4,
+    5: 5,
+    "sum1": 5,
+    6: 6,
+    "rsum1": 6,
+}
+
+
 _ABSORB_MAP = {
     None: None,
     -1: -1,
@@ -129,26 +131,41 @@ _ABSORB_MAP = {
 
 
 def _trim_and_renorm_svd_result(
-    U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+    U,
+    s,
+    VH,
+    cutoff,
+    cutoff_mode,
+    max_bond,
+    absorb,
+    renorm,
+    use_abs=False,
 ):
     """Give full SVD decomposion result ``U``, ``s``, ``VH``, optionally trim,
     renormalize, and absorb the singular values. See ``svd_truncated`` for
     details.
     """
+    if use_abs:
+        sabs = do("abs", s)
+    else:
+        # assume already all positive
+        sabs = s
+
     if (cutoff > 0.0) or (renorm > 0):
         if cutoff_mode == 1:  # 'abs'
-            n_chi = do("count_nonzero", s > cutoff)
+            n_chi = do("count_nonzero", sabs > cutoff)
 
         elif cutoff_mode == 2:  # 'rel'
-            n_chi = do("count_nonzero", s > cutoff * s[0])
+            n_chi = do("count_nonzero", sabs > cutoff * sabs[0])
 
         elif cutoff_mode in (3, 4, 5, 6):
             if cutoff_mode in (3, 4):
                 pow = 2
+                sp = sabs**pow
             else:
                 pow = 1
+                sp = sabs
 
-            sp = s**pow
             csp = do("cumsum", sp, 0)
             tot = csp[-1]
 
@@ -159,6 +176,7 @@ def _trim_and_renorm_svd_result(
 
         n_chi = max(n_chi, 1)
         if max_bond > 0:
+            # need to take both cutoff and max bond into account
             n_chi = min(n_chi, max_bond)
 
     elif max_bond > 0:
@@ -233,6 +251,7 @@ def svd_truncated(
         Whether to renormalize the singular values (depends on `cutoff_mode`).
     """
     absorb = _ABSORB_MAP[absorb]
+    cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
     with backend_like(backend):
         U, s, VH = do("linalg.svd", x)
@@ -282,32 +301,57 @@ def _compute_svals_renorm_factor_numba(s, n_chi, renorm):
     """
     s_tot_keep = 0.0
     s_tot_lose = 0.0
+
+    raise_power = renorm >= 2
+
     for i in range(s.size):
-        s2 = s[i] ** renorm
+        s2 = s[i]
+        if raise_power:
+            s2 **= renorm
+
         if not np.isnan(s2):
             if i < n_chi:
                 s_tot_keep += s2
             else:
                 s_tot_lose += s2
-    return ((s_tot_keep + s_tot_lose) / s_tot_keep) ** (1 / renorm)
+
+    f = (s_tot_keep + s_tot_lose) / s_tot_keep
+    if raise_power:
+        f **= 1 / renorm
+
+    return f
 
 
 @njit  # pragma: no cover
 def _trim_and_renorm_svd_result_numba(
-    U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+    U,
+    s,
+    VH,
+    cutoff,
+    cutoff_mode,
+    max_bond,
+    absorb,
+    renorm,
+    use_abs=False,
 ):
-    """Accelerate version of ``_trim_and_renorm_svd_result``."""
+    """Accelerated version of ``_trim_and_renorm_svd_result``."""
+
+    if use_abs:
+        sabs = np.abs(s)
+    else:
+        sabs = s
+
     if (cutoff > 0.0) or (renorm > 0):
-        n_chi = _compute_number_svals_to_keep_numba(s, cutoff, cutoff_mode)
+        # need to dynamically truncate
+        n_chi = _compute_number_svals_to_keep_numba(sabs, cutoff, cutoff_mode)
 
         if max_bond > 0:
             n_chi = min(n_chi, max_bond)
 
         if n_chi < s.size:
             if renorm > 0:
-                s = s[:n_chi] * _compute_svals_renorm_factor_numba(
-                    s, n_chi, renorm
-                )
+                f = _compute_svals_renorm_factor_numba(sabs, n_chi, renorm)
+                s = s[:n_chi] * f
             else:
                 s = s[:n_chi]
 
@@ -315,6 +359,7 @@ def _trim_and_renorm_svd_result_numba(
             VH = VH[:n_chi, :]
 
     elif (max_bond != -1) and (max_bond < s.shape[0]):
+        # only maximum bond specified
         U = U[:, :max_bond]
         s = s[:max_bond]
         VH = VH[:max_bond, :]
@@ -355,6 +400,7 @@ def svd_truncated_numpy(
     first, then falling back to the more stable scipy version.
     """
     absorb = _ABSORB_MAP[absorb]
+    cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
     try:
         return svd_truncated_numba(
             x, cutoff, cutoff_mode, max_bond, absorb, renorm
@@ -545,12 +591,22 @@ def eigh_truncated(
         # make sure largest singular value first
         k = do("argsort", -do("abs", s))
         s, U = s[k], U[:, k]
+        VH = dag(U)
 
-        # absorb phase into V
-        V = ldmul(sgn(s), dag(U))
-        s = do("abs", s)
+        # XXX: better to absorb phase in V and return positive 'values'?
+        # V = ldmul(sgn(s), dag(U))
+        # s = do("abs", s)
+
         return _trim_and_renorm_svd_result(
-            U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
+            U,
+            s,
+            VH,
+            cutoff,
+            cutoff_mode,
+            max_bond,
+            absorb,
+            renorm,
+            use_abs=True,
         )
 
 
@@ -567,12 +623,14 @@ def eigh_truncated_numba(
     # make sure largest singular value first
     k = np.argsort(-np.abs(s))
     s, U = s[k], U[:, k]
+    VH = dag_numba(U)
 
-    # absorb phase into V
-    V = ldmul_numba(sgn_numba(s), dag_numba(U))
-    s = np.abs(s)
+    # XXX: better to absorb phase in V and return positive 'values'?
+    # VH = ldmul_numba(sgn_numba(s), dag_numba(U))
+    # s = np.abs(s)
+
     return _trim_and_renorm_svd_result_numba(
-        U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
+        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm, use_abs=True
     )
 
 
@@ -1268,7 +1326,7 @@ def compute_oblique_projectors(
         max_bond = -1
 
     absorb = _ABSORB_MAP[absorb]
-    cutoff_mode = map_cutoff_mode(cutoff_mode)
+    cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
     Ut, st, VHt = svd_truncated(
         Rl @ Rr,
