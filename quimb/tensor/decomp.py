@@ -1372,15 +1372,16 @@ def compute_bondenv_projectors(
     solver="solve",
     solver_maxiter=4,
     prenormalize=False,
-    condition=False,
-    enforce_pos=False,
+    condition=True,
+    enforce_pos=True,
     pos_smudge=1e-10,
     init="svd",
     info=None,
 ):
     """Given 4D environment tensor of a bond, iteratively compute projectors
     that compress the bond dimension to `max_bond`, minimizing the distance in
-    terms of frobenius norm.
+    terms of frobenius norm. If absorb!="both" and cutoff!=0.0 then a final
+    truncated SVD is also performed on the final projector pair.
 
     N.B. This is experimental and not working for e.g. fermions yet.
 
@@ -1406,12 +1407,33 @@ def compute_bondenv_projectors(
     solver_maxiter : int, optional
         The maximum number of iterations to use for the *inner* solver, i.e.
         per fitting step, only for iterative `solver` args.
+    prenormalize : bool, optional
+        Whether to prenormalize the environment tensor such that its full
+        contraction before compression is 1. Recommended for stability when
+        the normalization does not matter.
+    condition : bool or "iso", optional
+        Whether to condition the projectors after each fitting step. If
+        ``True``, their norms will be simply matched. If ``"iso"``, then they
+        are gauged each time such that the previous tensor is isometric.
+        Recommended for stability.
     enforce_pos : bool, optional
         Whether to enforce the environment tensor to be positive semi-definite
-        by symmetrizing and clipping negative eigenvalues.
+        by symmetrizing and clipping negative eigenvalues. Recommended for
+        stability.
     pos_smudge : float, optional
         The value to clip negative eigenvalues to when enforcing positivity,
         relative to the largest eigenvalue.
+    init : {'svd', 'eigh', 'random', 'reduced'}, optional
+        How to initialize the compression projectors. The options are:
+
+        - 'svd': use a truncated SVD of the environment tensor with the bra
+          bond traced out.
+        - 'eigh': use a similarity compression of the environment tensor with
+          the bra bond traced out.
+        - 'random': use random projectors.
+        - 'reduced': split the environment into bra and ket parts, then
+          canonize one half left and right to get the reduced factors.
+
     info : dict, optional
         If provided, will store information about the fitting process here.
         The keys 'iterations' and 'distance' will contain the final number of
@@ -1520,9 +1542,6 @@ def compute_bondenv_projectors(
             max_bond=max_bond,
             cutoff=cutoff,
         )
-
-    elif init == "split":
-        ft = Tensor(E, ["kl", "kr", "bl", "br"])
 
     else:
         raise ValueError(f"Unrecognized init={init}.")

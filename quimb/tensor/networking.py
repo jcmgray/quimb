@@ -1076,8 +1076,8 @@ def get_loop_union(
         Only if ``tids`` is specified, this determines how to filter
         loops. If 'all', only take loops containing *all* of the tids
         in ``tids``, if 'any', yield loops containing *any* of the tids
-        in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to be
-        dangling, i.e. 1-degree connected.
+        in ``tids``. If 'alldangle' or 'anydangle', the base tids are allowed
+        to be dangling, i.e. 1-degree connected.
 
     Returns
     -------
