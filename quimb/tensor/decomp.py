@@ -589,8 +589,8 @@ def eigh_truncated(
         s, U = do("linalg.eigh", x)
 
         # make sure largest singular value first
-        k = do("argsort", -do("abs", s))
-        s, U = s[k], U[:, k]
+        idx = do("argsort", -do("abs", s))
+        s, U = s[idx], U[:, idx]
         VH = dag(U)
 
         # XXX: better to absorb phase in V and return positive 'values'?

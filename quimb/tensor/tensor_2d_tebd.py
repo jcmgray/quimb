@@ -585,14 +585,14 @@ class SimpleUpdate(TEBD2D):
         for site in string:
             Tij = self._psi[site]
             for neighbour in neighbours[site]:
-                Tsval = self.gauges[tuple(sorted((site, neighbour)))]
+                Tsval = self._gauges[tuple(sorted((site, neighbour)))]
                 Tij.multiply_index_diagonal_(
                     ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
 
         # absorb the inner bond gauges equally into both sites along string
         for site_a, site_b in pairwise(string):
             Ta, Tb = self._psi[site_a], self._psi[site_b]
-            Tsval = self.gauges[tuple(sorted((site_a, site_b)))]
+            Tsval = self._gauges[tuple(sorted((site_a, site_b)))]
             bnd, = Tsval.inds
             Ta.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
             Tb.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
@@ -609,14 +609,14 @@ class SimpleUpdate(TEBD2D):
             if self.gauge_renorm:
                 # keep the singular values from blowing up
                 s = s / do("max", s)
-            Tsval = self.gauges[bond_pair]
+            Tsval = self._gauges[bond_pair]
             Tsval.modify(data=s)
 
         # absorb the 'outer' gauges from these neighbours
         for site in string:
             Tij = self._psi[site]
             for neighbour in neighbours[site]:
-                Tsval = self.gauges[tuple(sorted((site, neighbour)))]
+                Tsval = self._gauges[tuple(sorted((site, neighbour)))]
                 Tij.multiply_index_diagonal_(
                     ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
 
@@ -629,10 +629,10 @@ class SimpleUpdate(TEBD2D):
         psi = self._psi.copy()
 
         if not absorb_gauges:
-            for Tsval in self.gauges.values():
+            for Tsval in self._gauges.values():
                 psi &= Tsval
         else:
-            for (ija, ijb), Tsval in self.gauges.items():
+            for (ija, ijb), Tsval in self._gauges.items():
                 bnd, = Tsval.inds
                 Ta = psi[ija]
                 Tb = psi[ijb]
@@ -1134,7 +1134,9 @@ class FullUpdate(TEBD2D):
         envs = dict()
         for x_bsz, y_bsz in calc_plaquette_sizes(self.ham.terms):
             envs.update(norm.compute_plaquette_environments(
-                x_bsz=x_bsz, y_bsz=y_bsz, max_bond=self.chi, cutoff=0.0))
+                x_bsz=x_bsz, y_bsz=y_bsz, max_bond=self.chi, cutoff=0.0,
+                equalize_norms=True,
+            ))
 
         if self.pre_normalize:
             # get the first plaquette env and use it to compute current norm
@@ -1165,7 +1167,7 @@ class FullUpdate(TEBD2D):
         self._env_group_count = self._group_count
         self._env_term_count = self._term_count
 
-    def presweep(self, i):
+    def presweep(self, i=None):
         """Full update presweep - compute envs and inject gate options.
         """
         # inject the specific gate options required (do
@@ -1226,6 +1228,10 @@ class FullUpdate(TEBD2D):
             condition_balance_bonds=self.condition_balance_bonds,
             **self._gate_opts
         )
+
+        # self._psi.gauge_all_simple_()
+        self._psi.equalize_norms_(1.0)
+        self._psi.exponent = 0.0
 
         # increments every gate call regardless
         self._term_count += 1
