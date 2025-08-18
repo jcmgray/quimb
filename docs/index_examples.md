@@ -21,5 +21,6 @@
 ./examples/ex_tn_tensor_fitting
 ./examples/ex_circuit_to_mpo
 ./examples/ex_htn_to_tn_2d
+./examples/ex_tracing_tn_functions
 ./examples/schematic-demo
 ```

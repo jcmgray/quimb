@@ -2,6 +2,15 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-11-3)=
+## v1.11.3 (unreleased)
+
+**Enhancements:**
+
+- add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
+- update infrastructure for TEBD and SimpleUpdate based algorithms.
+
+
 (whats-new-1-11-2)=
 ## v1.11.2 (2025-07-30)
 
