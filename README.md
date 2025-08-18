@@ -16,7 +16,7 @@ The `quimb.tensor` module contains tools for working with **tensors and tensor n
 
 - construct and manipulate arbitrary (hyper) graphs of tensor networks
 - automatically [contract](https://cotengra.readthedocs.io), optimize and draw networks
-- use various backend array libraries such as [jax](https://jax.readthedocs.io) and [torch](https://pytorch.org/) via [autoray](https://github.com/jcmgray/autoray/)
+- use various backend array libraries such as [jax](https://jax.readthedocs.io) and [torch](https://pytorch.org/) via [autoray](https://github.com/jcmgray/autoray/), including symmetries and fermions via [symmray](https://github.com/jcmgray/symmray)
 - run specific MPS, PEPS, MERA and quantum circuit algorithms, such as DMRG & TEBD
 
 ![tensor pic](https://github.com/jcmgray/quimb/blob/HEAD/docs/_static/rand-tensor.svg?raw=true)
