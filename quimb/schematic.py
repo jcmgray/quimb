@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from math import atan2, cos, pi, sin
+from math import atan2, cos, pi, sin, ceil, floor, degrees
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -56,6 +56,7 @@ class Drawing:
         zscale=1,
         presets=None,
         ax=None,
+        adjust_lims="auto",
         **kwargs,
     ):
         if ax is None:
@@ -63,10 +64,16 @@ class Drawing:
             self.fig.set_facecolor(background)
             self.ax = self.fig.add_subplot(111)
             self.fig_owner = True
+            if adjust_lims == "auto":
+                adjust_lims = True
         else:
             self.ax = ax
             self.fig = self.ax.figure
             self.fig_owner = False
+            if adjust_lims == "auto":
+                adjust_lims = False
+
+        self.adjust_lims = adjust_lims
 
         self.ax.set_axis_off()
         self.ax.set_aspect("equal")
@@ -104,7 +111,7 @@ class Drawing:
         )
 
     def _adjust_lims(self, x, y):
-        if not self.fig_owner:
+        if not self.adjust_lims:
             # if we don't own the figure, we shouldn't adjust the limits
             return
 
@@ -671,6 +678,78 @@ class Drawing:
         for coo in curve_pts:
             self._adjust_lims(*coo)
 
+    def zigzag(
+        self,
+        cooa,
+        coob,
+        preset=None,
+        **kwargs,
+    ):
+        """
+        Parameters
+        ----------
+        cooa, coob : tuple[int, int] or tuple[int, int, int]
+            The coordinates of the start and end of the line. If 3D, the
+            coordinates will be projected onto the 2D plane, and a z-order
+            will be assigned based on average z-order of the endpoints.
+        width : float, optional
+            The width of the zig-zagging. Default is to aim for 8 zig-zags.
+        extend : float, optional
+            Only start zig-zagging after this distance from the end-points.
+        preset : str, optional
+            A preset style to use for the line.
+        kwargs
+            Specific style options passed to ``Drawing.curve``.
+        """
+        style = parse_style_preset(self.presets, preset, **kwargs)
+
+        w = style.pop("width", "auto")
+        extend = style.pop("extend", 0.0)
+        density = style.pop("density", 1.0)
+        style.setdefault("smoothing", 0.2)
+
+        zorder_delta = style.pop("zorder_delta", 0.0)
+        if len(cooa) == 2:
+            xa, ya = self._2d_project(*cooa)
+            xb, yb = self._2d_project(*coob)
+            style.setdefault("zorder", zorder_delta)
+        else:
+            style.setdefault(
+                "zorder",
+                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
+                + zorder_delta,
+            )
+            xa, ya = self._3d_project(*cooa)
+            xb, yb = self._3d_project(*coob)
+
+        f, b = get_rotator_and_inverse((xa, ya), (xb, yb))
+        R = f(xb, yb)[0]
+        extend = min(extend, R / 2)
+        Rz = R - 2 * extend
+
+        if w == "auto":
+            M = round(density * 20)
+            wx = Rz / M
+            wy = wx * density
+        else:
+            wy = w
+            M = max(4, 4 * round(density * Rz / (4 * w)))
+            wx = Rz / M
+
+        pts = []
+        if extend != 0.0:
+            pts.append((0, 0))
+        for i in range(M + 1):
+            y = [0, +wy, 0, -wy][i % 4]
+            pts.append((extend + i * wx, y))
+        if extend != 0.0:
+            pts.append((R, 0))
+
+        # transform back to
+        pts = [b(*pt) for pt in pts]
+
+        self.curve(pts, **style)
+
     def arrowhead(self, cooa, coob, preset=None, **kwargs):
         """Draw just a arrowhead on the line between ``cooa`` and ``coob``.
 
@@ -766,7 +845,7 @@ class Drawing:
         preset : str, optional
             A preset style to use for the curve.
         kwargs
-            Specific style options passed to ``matplotlib.lines.Line2D``.
+            Specific style options passed to ``matplotlib.patches.PathPatch``.
         """
         from matplotlib.path import Path
 
@@ -778,6 +857,8 @@ class Drawing:
         style.setdefault("fill", False)
         style.setdefault("capstyle", "round")
         style.setdefault("smoothing", 1 / 2)
+        # match Line2D
+        style.setdefault("linewidth", 1.5)
         smoothing = style.pop("smoothing")
         shorten = style.pop("shorten", None)
 
@@ -1044,6 +1125,52 @@ class Drawing:
 
         self.patch(boundary_pts, **style)
 
+    def cup(
+        self,
+        cooa,
+        coob,
+        extend=0.0,
+        flatness=1.0,
+        which="left",
+        preset=None,
+        **kwargs,
+    ):
+        assert which == "left", "Only left cups are supported so far."
+
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("linewidth", 1.5)
+        zorder_delta = style.pop("zorder_delta", 0.0)
+        style.setdefault("zorder", zorder_delta)
+
+        xa, ya = cooa
+        xb, yb = coob
+
+        # x = min(xa - extend, xb - extend)
+        x = (xa + xb) / 2
+        y = (ya + yb) / 2
+        # diam = max(ya, yb) - min(ya, yb)
+        diam = ((ya - yb) ** 2 + (xa - xb) ** 2) ** 0.5
+
+        theta0 = degrees(atan2(yb - ya, xb - xa)) - 90
+
+        print(theta0)
+
+        arc = mpl.patches.Arc(
+            (x, y),
+            diam / flatness,
+            diam,
+            theta1=theta0 + 90,
+            theta2=theta0 - 90,
+            **style,
+        )
+
+        if extend != 0.0:
+            self.line((x, ya), (xa, ya))
+            self.line((x, yb), (xa, yb))
+
+        self.ax.add_patch(arc)
+        self._adjust_lims(x - diam / 2, y)
+
     def patch_around_circles(
         self,
         cooa,
@@ -1130,6 +1257,58 @@ class Drawing:
 
         pcoos = [inverse(*rcoo) for rcoo in rcoos]
         self.patch(pcoos, preset=preset, **style)
+
+    def grid(
+        self,
+        color=(0, 0.7, 0.8),
+        alpha=0.3,
+        zorder=-100,
+        subdivisions=(0.5,),
+        margin=0.4,
+        ticklabels=True,
+    ):
+        gxmin = floor(self._xmin - margin)
+        gxmax = ceil(self._xmax + margin)
+        gymin = floor(self._ymin - margin)
+        gymax = ceil(self._ymax + margin)
+
+        style = dict(color=color, alpha=alpha, zorder=zorder)
+
+        for xi in range(gxmin, gxmax + 1):
+            if ticklabels:
+                self.text((xi, gymin - 0.25), f"{xi}", va="top", **style)
+                if xi == gxmax:
+                    self.text((xi + 0.3, gymin), "x", ha="left", **style)
+
+            self.line(
+                (xi, gymin - 0.2), (xi, gymax + 0.2), linewidth=0.5, **style
+            )
+
+            if xi < gxmax:
+                for s in subdivisions:
+                    # draw subdivision lines
+                    self.line(
+                        (xi + s, gymin - 0.2),
+                        (xi + s, gymax + 0.2),
+                        linewidth=0.25,
+                        **style,
+                    )
+        for yi in range(gymin, gymax + 1):
+            if ticklabels:
+                self.text((gxmin - 0.25, yi), f"{yi}", ha="right", **style)
+                if yi == gymax:
+                    self.text((gxmin, yi + 0.3), "y", va="bottom", **style)
+            self.line(
+                (gxmin - 0.2, yi), (gxmax + 0.2, yi), linewidth=0.5, **style
+            )
+            if yi < gymax:
+                for s in subdivisions:
+                    self.line(
+                        (gxmin - 0.2, yi + s),
+                        (gxmax + 0.2, yi + s),
+                        linewidth=0.25,
+                        **style,
+                    )
 
     def savefig(self, fname, dpi=300, bbox_inches="tight"):
         self.fig.savefig(fname, dpi=dpi, bbox_inches=bbox_inches)
