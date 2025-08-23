@@ -1650,7 +1650,8 @@ class TestTensorNetwork:
             assert psi.H @ psi == pytest.approx(x_exp, rel=1e-4)
         else:
             assert all(n1 == pytest.approx(value) for n1 in enorms)
-            assert (psi.H @ psi) == pytest.approx(x_exp)
+            rel = 1e-5 if dtype == "float32" else None
+            assert (psi.H @ psi) == pytest.approx(x_exp, rel=rel)
 
     @pytest.mark.parametrize("append", [None, "*"])
     def test_mangle_inner(self, append):
