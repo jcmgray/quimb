@@ -1,6 +1,5 @@
 """Draw 2D and pseudo-3D diagrams programmatically using matplotlib."""
 
-import functools
 import warnings
 from math import atan2, cos, pi, sin, ceil, floor, degrees
 
@@ -89,25 +88,65 @@ class Drawing:
         self.presets = {} if presets is None else dict(presets)
         self.presets.setdefault(None, {})
 
-        self._2d_project = functools.partial(
-            simple_scale,
-            xscale=xscale,
-            yscale=yscale,
+        self._project_a = a
+        self._project_b = b
+        self._project_xscale = xscale
+        self._project_yscale = yscale
+        self._project_zscale = zscale
+
+        self._3d_xmin = None
+        self._3d_xmax = None
+        self._3d_ymin = None
+        self._3d_ymax = None
+        self._3d_zmin = None
+        self._3d_zmax = None
+
+    def _2d_project(self, x, y):
+        return simple_scale(
+            x,
+            y,
+            xscale=self._project_xscale,
+            yscale=self._project_yscale,
         )
 
-        self._3d_project = functools.partial(
-            axonometric_project,
-            a=a,
-            b=b,
-            xscale=xscale,
-            yscale=yscale,
-            zscale=zscale,
+    def _3d_project(self, x, y, z):
+        if self._3d_xmin is None:
+            self._3d_xmin = self._3d_xmax = x
+        else:
+            self._3d_xmin = min(self._3d_xmin, x)
+            self._3d_xmax = max(self._3d_xmax, x)
+
+        if self._3d_ymin is None:
+            self._3d_ymin = self._3d_ymax = y
+        else:
+            self._3d_ymin = min(self._3d_ymin, y)
+            self._3d_ymax = max(self._3d_ymax, y)
+
+        if self._3d_zmin is None:
+            self._3d_zmin = self._3d_zmax = z
+        else:
+            self._3d_zmin = min(self._3d_zmin, z)
+            self._3d_zmax = max(self._3d_zmax, z)
+
+        return axonometric_project(
+            x,
+            y,
+            z,
+            a=self._project_a,
+            b=self._project_b,
+            xscale=self._project_xscale,
+            yscale=self._project_yscale,
+            zscale=self._project_zscale,
         )
-        self._coo_to_zorder = functools.partial(
-            coo_to_zorder,
-            xscale=xscale,
-            yscale=yscale,
-            zscale=zscale,
+
+    def _coo_to_zorder(self, x, y, z):
+        return coo_to_zorder(
+            x,
+            y,
+            z,
+            xscale=self._project_xscale,
+            yscale=self._project_yscale,
+            zscale=self._project_zscale,
         )
 
     def _adjust_lims(self, x, y):
@@ -252,7 +291,6 @@ class Drawing:
         style.setdefault("verticalalignment", "center")
         style.setdefault("transform", self.ax.transAxes)
         self.ax.text(x, y, text, **style)
-        self._adjust_lims(x, y)
 
     def label_fig(self, x, y, text, preset=None, **kwargs):
         """Place text at the specified location, using the figure coordinates
@@ -275,7 +313,6 @@ class Drawing:
         style.setdefault("verticalalignment", "center")
         style.setdefault("transform", self.fig.transFigure)
         self.ax.text(x, y, text, **style)
-        self._adjust_lims(x, y)
 
     def _parse_style_for_marker(self, coo, preset=None, **kwargs):
         style = parse_style_preset(self.presets, preset, **kwargs)
@@ -409,6 +446,35 @@ class Drawing:
         )
         self.ax.add_artist(rpoly)
         self._adjust_lims_for_marker(x, y, style["radius"])
+
+    def star(self, coo, preset=None, **kwargs):
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        radius = style.pop("radius", 0.1)
+        npoint = style.pop("npoint", 9)
+        orientation = style.pop("orientation", 0)
+        zorder_delta = style.pop("zorder_delta", 0.01)
+
+        if len(coo) == 2:
+            x, y = self._2d_project(*coo)
+            style.setdefault("zorder", zorder_delta)
+        else:
+            x, y = self._3d_project(*coo)
+            style.setdefault(
+                "zorder", self._coo_to_zorder(*coo) + zorder_delta
+            )
+
+        for i in range(npoint):
+            # start at vertical
+            theta = 2 * pi * (i / npoint + 1 / 4) + orientation
+            rc = radius * cos(theta)
+            rs = radius * sin(theta)
+            self.line((x, y), (x + rc, y + rs), **style)
+
+    def cross(self, coo, preset=None, **kwargs):
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        style.setdefault("npoint", 4)
+        style.setdefault("orientation", pi / 4)
+        self.star(coo, **style)
 
     def marker(self, coo, preset=None, **kwargs):
         """Draw a 'marker' at the specified coordinate. This is a shorthand for
@@ -979,6 +1045,8 @@ class Drawing:
         style = parse_style_preset(self.presets, preset, **kwargs)
         radius = style.pop("radius", 0.25)
 
+        # XXX: handle 3d?
+
         forward, inverse = get_rotator_and_inverse(cooa, coob)
 
         # rotate both onto y=0
@@ -1125,6 +1193,54 @@ class Drawing:
 
         self.patch(boundary_pts, **style)
 
+    def bezier(
+        self,
+        coos,
+        preset=None,
+        **kwargs,
+    ):
+        """Draw a bezier curve, explicitly supplying the sequence of
+        coordinates and anchors like `[coo0, anchor0, anchor1, coo1, ...]`.
+
+        Parameters
+        ----------
+        coos : sequence[tuple[int, int]] or sequence[tuple[int, int, int]]
+            The coordinates of the points to draw the bezier curve around.
+        preset : str, optional
+            A preset style to use for the bezier curve.
+        kwargs
+            Specific style options passed to ``matplotlib.patches.PathPatch``.
+        """
+        from matplotlib.path import Path
+
+        style = parse_style_preset(self.presets, preset, **kwargs)
+        if "color" in style:
+            # presume that edge color is being specified
+            style.setdefault("edgecolor", style.pop("color"))
+        style.setdefault("edgecolor", self.drawcolor)
+        style.setdefault("fill", False)
+        style.setdefault("capstyle", "round")
+        # match Line2D
+        style.setdefault("linewidth", 1.5)
+
+        zorder_delta = style.pop("zorder_delta", 0.0)
+        if len(coos[0]) != 2:
+            style.setdefault(
+                "zorder",
+                mean(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
+            )
+            coos = [self._3d_project(*coo) for coo in coos]
+        else:
+            style.setdefault("zorder", zorder_delta)
+            coos = [self._2d_project(*coo) for coo in coos]
+
+        N = len(coos)
+        moves = [Path.MOVETO] + [Path.CURVE4] * (N - 1)
+        curve = mpl.patches.PathPatch(Path(coos, moves), **style)
+        self.ax.add_patch(curve)
+        for coo in coos:
+            self._adjust_lims(*coo)
+
     def cup(
         self,
         cooa,
@@ -1135,6 +1251,8 @@ class Drawing:
         preset=None,
         **kwargs,
     ):
+        """Draw a cup shape between two points.
+        """
         assert which == "left", "Only left cups are supported so far."
 
         style = parse_style_preset(self.presets, preset, **kwargs)
@@ -1142,21 +1260,36 @@ class Drawing:
         zorder_delta = style.pop("zorder_delta", 0.0)
         style.setdefault("zorder", zorder_delta)
 
+        # XXX: handle 3d
+
         xa, ya = cooa
         xb, yb = coob
 
-        # x = min(xa - extend, xb - extend)
-        x = (xa + xb) / 2
-        y = (ya + yb) / 2
-        # diam = max(ya, yb) - min(ya, yb)
-        diam = ((ya - yb) ** 2 + (xa - xb) ** 2) ** 0.5
+        forward, backward = get_rotator_and_inverse(cooa, coob)
+        diam = forward(*coob)[0]
+        if extend == 0.0:
+            ea = cooa
+            eb = coob
+            c0 = backward(diam / 2, 0)
+        else:
+            ea = backward(0, extend)
+            eb = backward(diam, extend)
+            c0 = backward(diam / 2, extend)
+        cf = backward(diam / 2, diam / 2 + extend)
+
+        # xa, ya = cooa
+        # xb, yb = coob
+
+        # # x = min(xa - extend, xb - extend)
+        # x = (xa + xb) / 2
+        # y = (ya + yb) / 2
+        # # diam = max(ya, yb) - min(ya, yb)
+        # diam = ((ya - yb) ** 2 + (xa - xb) ** 2) ** 0.5
 
         theta0 = degrees(atan2(yb - ya, xb - xa)) - 90
 
-        print(theta0)
-
         arc = mpl.patches.Arc(
-            (x, y),
+            c0,
             diam / flatness,
             diam,
             theta1=theta0 + 90,
@@ -1165,11 +1298,12 @@ class Drawing:
         )
 
         if extend != 0.0:
-            self.line((x, ya), (xa, ya))
-            self.line((x, yb), (xa, yb))
+            self.line(cooa, ea)
+            self.line(coob, eb)
 
         self.ax.add_patch(arc)
-        self._adjust_lims(x - diam / 2, y)
+        for coo in [cooa, coob, ea, eb, c0, cf]:
+            self._adjust_lims(*coo)
 
     def patch_around_circles(
         self,
@@ -1263,52 +1397,222 @@ class Drawing:
         color=(0, 0.7, 0.8),
         alpha=0.3,
         zorder=-100,
-        subdivisions=(0.5,),
-        margin=0.4,
+        subdivisions=(1 / 4, 2 / 4, 3 / 4),
+        margin=0.5,
+        overextend=0.0,
         ticklabels=True,
     ):
-        gxmin = floor(self._xmin - margin)
-        gxmax = ceil(self._xmax + margin)
-        gymin = floor(self._ymin - margin)
-        gymax = ceil(self._ymax + margin)
+        xmin = self._xmin - margin
+        xmax = self._xmax + margin
+        ymin = self._ymin - margin
+        ymax = self._ymax + margin
+        gxmin = floor(xmin)
+        gxmax = ceil(xmax)
+        gymin = floor(ymin)
+        gymax = ceil(ymax)
+
+        ximin = float("inf")
+        ximax = float("-inf")
+        yimin = float("inf")
+        yimax = float("-inf")
 
         style = dict(color=color, alpha=alpha, zorder=zorder)
 
-        for xi in range(gxmin, gxmax + 1):
-            if ticklabels:
-                self.text((xi, gymin - 0.25), f"{xi}", va="top", **style)
-                if xi == gxmax:
-                    self.text((xi + 0.3, gymin), "x", ha="left", **style)
+        for xi in range(gxmin - 1, gxmax + 2):
+            if xmin <= xi <= xmax:
+                ximin = min(ximin, xi)
+                ximax = max(ximax, xi)
 
-            self.line(
-                (xi, gymin - 0.2), (xi, gymax + 0.2), linewidth=0.5, **style
-            )
+                if ticklabels:
+                    self.text((xi, ymin - 0.25), f"{xi}", va="top", **style)
+                self.line(
+                    (xi, ymin - overextend),
+                    (xi, ymax + overextend),
+                    linewidth=0.5,
+                    **style,
+                )
 
-            if xi < gxmax:
-                for s in subdivisions:
+            for s in subdivisions:
+                if xmin <= xi + s <= xmax:
+                    ximin = min(ximin, xi + s)
+                    ximax = max(ximax, xi + s)
                     # draw subdivision lines
                     self.line(
-                        (xi + s, gymin - 0.2),
-                        (xi + s, gymax + 0.2),
+                        (xi + s, ymin - overextend),
+                        (xi + s, ymax + overextend),
                         linewidth=0.25,
                         **style,
                     )
-        for yi in range(gymin, gymax + 1):
-            if ticklabels:
-                self.text((gxmin - 0.25, yi), f"{yi}", ha="right", **style)
-                if yi == gymax:
-                    self.text((gxmin, yi + 0.3), "y", va="bottom", **style)
-            self.line(
-                (gxmin - 0.2, yi), (gxmax + 0.2, yi), linewidth=0.5, **style
+
+        for yi in range(gymin - 1, gymax + 2):
+            if ymin <= yi <= ymax:
+                yimin = min(yimin, yi)
+                yimax = max(yimax, yi)
+
+                if ticklabels:
+                    self.text((xmin - 0.25, yi), f"{yi}", ha="right", **style)
+                self.line(
+                    (xmin - overextend, yi),
+                    (xmax + overextend, yi),
+                    linewidth=0.5,
+                    **style,
+                )
+
+            for s in subdivisions:
+                if ymin <= yi + s <= ymax:
+                    yimin = min(yimin, yi + s)
+                    yimax = max(yimax, yi + s)
+                    self.line(
+                        (xmin - overextend, yi + s),
+                        (xmax + overextend, yi + s),
+                        linewidth=0.25,
+                        **style,
+                    )
+
+        if ticklabels:
+            self.text((ximax + 0.3, yimin), "x", ha="left", **style)
+            self.text((ximin, yimax + 0.3), "y", va="bottom", **style)
+
+    def grid3d(
+        self,
+        color=(0, 0.7, 0.8),
+        alpha=0.3,
+        zorder=-100,
+        subdivisions=(1 / 4, 2 / 4, 3 / 4),
+        margin=0.5,
+        ticklabels=True,
+    ):
+        style = dict(color=color, alpha=alpha, zorder=zorder)
+
+        if self._3d_xmin is None:
+            warnings.warn(
+                "3D limits are not set, defaulting to (0, 1) for all axes."
             )
-            if yi < gymax:
+            xmin, xmax = 0, 1
+            ymin, ymax = 0, 1
+            zmin, zmax = 0, 1
+        else:
+            xmin = floor(self._3d_xmin - margin)
+            xmax = ceil(self._3d_xmax + margin)
+            ymin = floor(self._3d_ymin - margin)
+            ymax = ceil(self._3d_ymax + margin)
+            zmin = floor(self._3d_zmin - margin)
+            zmax = ceil(self._3d_zmax + margin)
+
+        plane = xmin
+        for j in range(ymin, ymax):
+            self.line(
+                (plane, j, zmin), (plane, j, zmax), linewidth=0.5, **style
+            )
+            for s in subdivisions:
+                self.line(
+                    (plane, j + s, zmin),
+                    (plane, j + s, zmax),
+                    linewidth=0.25,
+                    **style,
+                )
+        for k in range(zmin, zmax + 1):
+            self.line(
+                (plane, ymin, k), (plane, ymax, k), linewidth=0.5, **style
+            )
+            if k < zmax:
                 for s in subdivisions:
                     self.line(
-                        (gxmin - 0.2, yi + s),
-                        (gxmax + 0.2, yi + s),
+                        (plane, ymin, k + s),
+                        (plane, ymax, k + s),
                         linewidth=0.25,
                         **style,
                     )
+
+        plane = ymax
+        for i in range(xmin, xmax + 1):
+            self.line(
+                (i, plane, zmin), (i, plane, zmax), linewidth=0.5, **style
+            )
+            if i < xmax:
+                for s in subdivisions:
+                    self.line(
+                        (i + s, plane, zmin),
+                        (i + s, plane, zmax),
+                        linewidth=0.25,
+                        **style,
+                    )
+        for k in range(zmin, zmax + 1):
+            self.line(
+                (xmin, plane, k), (xmax, plane, k), linewidth=0.5, **style
+            )
+            if k < zmax:
+                for s in subdivisions:
+                    self.line(
+                        (xmin, plane, k + s),
+                        (xmax, plane, k + s),
+                        linewidth=0.25,
+                        **style,
+                    )
+
+        plane = zmin
+        for i in range(xmin, xmax + 1):
+            if i != xmin:
+                # already have this line
+                self.line(
+                    (i, ymin, plane), (i, ymax, plane), linewidth=0.5, **style
+                )
+            if i < xmax:
+                for s in subdivisions:
+                    self.line(
+                        (i + s, ymin, plane),
+                        (i + s, ymax, plane),
+                        linewidth=0.25,
+                        **style,
+                    )
+        for j in range(ymin, ymax):
+            self.line(
+                (xmin, j, plane), (xmax, j, plane), linewidth=0.5, **style
+            )
+            for s in subdivisions:
+                self.line(
+                    (xmin, j + s, plane),
+                    (xmax, j + s, plane),
+                    linewidth=0.25,
+                    **style,
+                )
+
+        if ticklabels:
+            for i in range(xmin, xmax + 1):
+                self.text(
+                    (i, ymin - 0.5, zmin),
+                    f"{i}",
+                    rotation=-self._project_a,
+                    **style,
+                )
+            for j in range(ymin, ymax + 1):
+                self.text(
+                    (xmax + 0.5, j, zmin),
+                    f"{j}",
+                    rotation=self._project_b,
+                    **style,
+                )
+            for k in range(zmin, zmax + 1):
+                self.text((xmax, ymax + 0.5, k), f"{k}", rotation=90, **style)
+
+            self.text(
+                (xmax + 1, ymin - 0.5, zmin),
+                "$x \\rightarrow$",
+                rotation=-self._project_a,
+                **style,
+            )
+            self.text(
+                (xmax + 0.5, ymax + 1, zmin),
+                "$y \\rightarrow$",
+                rotation=self._project_b,
+                **style,
+            )
+            self.text(
+                (xmax, ymax + 0.5, zmax + 1),
+                "$z \\rightarrow$",
+                rotation=90,
+                **style,
+            )
 
     def savefig(self, fname, dpi=300, bbox_inches="tight"):
         self.fig.savefig(fname, dpi=dpi, bbox_inches=bbox_inches)
