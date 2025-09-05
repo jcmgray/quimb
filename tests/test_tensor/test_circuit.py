@@ -520,8 +520,8 @@ class TestCircuit:
         depth = 2
         goodnesses = [0] * 5
 
-        for _ in range(reps):
-            circ = random_a2a_circ(L, depth, seed=666)
+        for i in range(reps):
+            circ = random_a2a_circ(L, depth, seed=42 + i)
 
             psi = circ.to_dense()
             p_exp = abs(psi.reshape(-1)) ** 2
@@ -529,7 +529,7 @@ class TestCircuit:
 
             for num_marginal in [3, 4, 5]:
                 counts = collections.Counter(
-                    circ.sample_chaotic(C, num_marginal, seed=666)
+                    circ.sample_chaotic(C, num_marginal, seed=42 + i)
                 )
                 f_obs = np.zeros(2**L)
                 for b, c in counts.items():
