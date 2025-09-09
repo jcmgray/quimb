@@ -1725,6 +1725,9 @@ class Tensor:
                 f"Tensor data contains non-finite values: {self.data}."
             )
 
+        if hasattr(self.data, "check"):
+            self.data.check()
+
     @property
     def owners(self):
         return self._owners
@@ -4539,6 +4542,10 @@ class TensorNetwork(object):
                     "Mismatched index dimension for index "
                     f"'{ix}' in tensors {ts}."
                 )
+            if len(ts) == 2 and hasattr(ts[0].data, "check_with"):
+                axa = ts[0].inds.index(ix)
+                axb = ts[1].inds.index(ix)
+                ts[0].data.check_with(ts[1].data, [axa], [axb])
 
     def add_tag(self, tag, where=None, which="all", record=None):
         """Add tag(s) to every tensor in this network, or if ``where`` is
@@ -5498,7 +5505,7 @@ class TensorNetwork(object):
                 )
 
                 # full-rank decompose the outer tensor
-                l, r = self.tensor_map[tid_out].split(
+                _, r = self.tensor_map[tid_out].split(
                     left_inds=None,
                     right_inds=[ix],
                     max_bond=None,
@@ -9593,7 +9600,7 @@ class TensorNetwork(object):
 
     def trace(self, left_inds, right_inds, **contract_opts):
         """Trace over ``left_inds`` joined with ``right_inds``"""
-        tn = self.reindex({u: l for u, l in zip(left_inds, right_inds)})
+        tn = self.reindex(dict(zip(left_inds, right_inds)))
         return tn.contract_tags(..., **contract_opts)
 
     def to_dense(self, *inds_seq, to_qarray=False, **contract_opts):

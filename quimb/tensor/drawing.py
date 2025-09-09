@@ -379,25 +379,43 @@ def draw_tn(
                 # dummy hyper outer edge - no arrows
                 edges[pair]["arrow_left"].append(False)
                 edges[pair]["arrow_right"].append(False)
+                edges[pair]["label_left"].append(None)
+                edges[pair]["label_right"].append(None)
             else:
                 # tensor side can always have an incoming arrow
-                tl_left_inds = tn.tensor_map[pair[0]].left_inds
+                tl = tn.tensor_map[pair[0]]
+                tl_left_inds = tl.left_inds
                 edges[pair]["arrow_left"].append(
                     show_left_inds
                     and (tl_left_inds is not None)
                     and (ix in tl_left_inds)
                 )
+
+                if hasattr(tl.data, "signature"):
+                    sigl = tl.data.signature[tl.inds.index(ix)]
+                    edges[pair]["label_left"].append(sigl)
+                else:
+                    edges[pair]["label_left"].append(None)
+
                 if ishyper:
                     # hyper edge can't have an incoming arrow
                     edges[pair]["arrow_right"].append(False)
+                    edges[pair]["label_right"].append(None)
                 else:
                     # standard edge can
-                    tr_left_inds = tn.tensor_map[pair[1]].left_inds
+                    tr = tn.tensor_map[pair[1]]
+                    tr_left_inds = tr.left_inds
                     edges[pair]["arrow_right"].append(
                         show_left_inds
                         and (tr_left_inds is not None)
                         and (ix in tr_left_inds)
                     )
+
+                    if hasattr(tr.data, "signature"):
+                        sigr = tr.data.signature[tr.inds.index(ix)]
+                        edges[pair]["label_right"].append(sigr)
+                    else:
+                        edges[pair]["label_right"].append(None)
 
     # parse all tensors / nodes
     for tid, t in tn.tensor_map.items():
@@ -519,7 +537,11 @@ def draw_tn(
         nodes[node]["coo"] = G.nodes[node]["coo"] = pos[node]
 
     for (i, j), edge_data in edges.items():
-        edges[i, j]["coos"] = G.edges[i, j]["coos"] = pos[i], pos[j]
+        edge_data["coos"] = G.edges[i, j]["coos"] = pos[i], pos[j]
+        edge_data["shorten"] = G.edges[i, j]["shorten"] = (
+            nodes[i]["size"],
+            nodes[j]["size"],
+        )
 
     if get == "pos":
         return pos
@@ -677,7 +699,7 @@ def _draw_matplotlib(
         fig = None
 
     arrow_opts = arrow_opts or {}
-    arrow_opts.setdefault("center", 3 / 4)
+    arrow_opts.setdefault("center", 0.8)
     arrow_opts.setdefault("linewidth", 1)
     arrow_opts.setdefault("width", 0.08)
     arrow_opts.setdefault("length", 0.12)
@@ -692,7 +714,10 @@ def _draw_matplotlib(
         labels = edge_data["label"]
         arrow_lefts = edge_data["arrow_left"]
         arrow_rights = edge_data["arrow_right"]
+        label_lefts = edge_data["label_left"]
+        label_rights = edge_data["label_right"]
         multiplicity = len(edge_colors)
+        shorten = edge_data["shorten"]
 
         if multiplicity > 1:
             offsets = np.linspace(
@@ -731,11 +756,25 @@ def _draw_matplotlib(
                     color=edge_data["label_color"],
                     fontfamily=edge_data["label_fontfamily"],
                 )
+            if label_lefts[m]:
+                line_opts["text_left"] = dict(
+                    text=label_lefts[m],
+                    fontsize=edge_data["label_fontsize"] + 3,
+                    color=edge_data["label_color"],
+                    fontfamily=edge_data["label_fontfamily"],
+                )
+            if label_rights[m]:
+                line_opts["text_right"] = dict(
+                    text=label_rights[m],
+                    fontsize=edge_data["label_fontsize"] + 3,
+                    color=edge_data["label_color"],
+                    fontfamily=edge_data["label_fontfamily"],
+                )
 
             if multiplicity > 1:
                 d.line_offset(offset=offsets[m], **line_opts)
             else:
-                d.line(**line_opts)
+                d.line(shorten=shorten, **line_opts)
 
     # draw the tensors
     for _, node_data in nodes.items():

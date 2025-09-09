@@ -12,6 +12,7 @@ Release notes for `quimb`.
 - [`schematic.Drawing`](quimb.schematic.drawing): add [`grid`](quimb.schematic.drawing.grid), [`grid3d`](quimb.schematic.drawing.grid3d), [`bezier`](quimb.schematic.drawing.bezier), [`star`](quimb.schematic.drawing.star), [`cross`](quimb.schematic.drawing.cross) and [`zigzag`](quimb.schematic.drawing.zigzag) methods.
 - [`schematic.Drawing`](quimb.schematic.drawing): add `relative` option to [`arrowhead`](quimb.schematic.drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.drawing.line).
 - refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
+- [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 
 (whats-new-1-11-2)=
 ## v1.11.2 (2025-07-30)

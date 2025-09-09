@@ -1971,7 +1971,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     add_MPS_ = functools.partialmethod(add_MPS, inplace=True)
 
     def permute_arrays(self, shape="lrp"):
-        """Permute the indices of each tensor in this MPS to match ``shape``.
+        """Ensure the arrays are stored internally in the specified order.
         This doesn't change how the overall object interacts with other tensor
         networks but may be useful for extracting the underlying arrays
         consistently. This is an inplace operation.
