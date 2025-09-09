@@ -230,6 +230,10 @@ class Drawing:
         center : float, optional
             The position of the text along the line, where 0.0 is the start and
             1.0 is the end. Default is 0.5.
+        shorten : float or tuple[float, float], optional
+            Shorten the implicit line by this *absolute* amount at each end.
+            If a tuple, the first value is the start shortening, the second the
+            end shortening.
         preset : str, optional
             A preset style to use for the text.
         kwargs
@@ -241,6 +245,7 @@ class Drawing:
         style.setdefault("verticalalignment", "center")
         style.setdefault("clip_on", False)
         center = style.pop("center", 0.5)
+        shorten = style.pop("shorten", None)
         zorder_delta = style.pop("zorder_delta", 0.02)
 
         if len(cooa) == 2:
@@ -255,6 +260,18 @@ class Drawing:
             )
             xa, ya = self._3d_project(*cooa)
             xb, yb = self._3d_project(*coob)
+
+        if shorten is not None:
+            forward, inverse = get_rotator_and_inverse((xa, ya), (xb, yb))
+            R = forward(xb, yb)[0]
+            try:
+                start, end = shorten
+            except TypeError:
+                start = end = shorten
+            ra = (start, 0.0)
+            rb = (R - end, 0.0)
+            xa, ya = inverse(*ra)
+            xb, yb = inverse(*rb)
 
         # compute midpoint
         x = xa * (1 - center) + xb * center
@@ -591,6 +608,8 @@ class Drawing:
         shorten = style.pop("shorten", None)
         arrowhead = style.pop("arrowhead", None)
         text = style.pop("text")
+        text_left = style.pop("text_left", None)
+        text_right = style.pop("text_right", None)
         zorder_delta = style.pop("zorder_delta", 0.0)
 
         if len(cooa) == 2:
@@ -624,6 +643,8 @@ class Drawing:
             xa, ya = inverse(*ra)
             xb, yb = inverse(*rb)
 
+        cooa, coob = (xa, ya), (xb, yb)
+
         if arrowhead is not None:
             if arrowhead is True:
                 arrowhead = {}
@@ -641,8 +662,26 @@ class Drawing:
                 text = dict(text)
 
             # don't want to pass full style dict to text_between
-            text.setdefault("zorder", style["zorder"])
+            text.setdefault("zorder", style["zorder"] + 0.02)
             self.text_between(cooa, coob, **text)
+
+        if text_left:
+            if isinstance(text_left, str):
+                text_left = {"text": text_left}
+            else:
+                text_left = dict(text_left)
+
+            text_left.setdefault("zorder", style["zorder"] + 0.02)
+            self.text_between(cooa, coob, center=0.0, **text_left)
+
+        if text_right:
+            if isinstance(text_right, str):
+                text_right = {"text": text_right}
+            else:
+                text_right = dict(text_right)
+
+            text_right.setdefault("zorder", style["zorder"] + 0.02)
+            self.text_between(cooa, coob, center=1.0, **text_right)
 
         self._adjust_lims(xa, ya)
         self._adjust_lims(xb, yb)
@@ -690,6 +729,8 @@ class Drawing:
         style.setdefault("text", None)
         arrowhead = style.pop("arrowhead")
         text = style.pop("text")
+        text_left = style.pop("text_left", None)
+        text_right = style.pop("text_right", None)
         zorder_delta = style.pop("zorder_delta", 0.0)
 
         if len(cooa) == 2:
@@ -740,6 +781,24 @@ class Drawing:
             # don't want to pass full style dict to text_between
             text.setdefault("zorder", style["zorder"])
             self.text_between(cooml, coomr, **text)
+
+        if text_left:
+            if isinstance(text_left, str):
+                text_left = {"text": text_left}
+            else:
+                text_left = dict(text_left)
+
+            text_left.setdefault("zorder", style["zorder"])
+            self.text_between(cooml, coomr, center=0.0, **text_left)
+
+        if text_right:
+            if isinstance(text_right, str):
+                text_right = {"text": text_right}
+            else:
+                text_right = dict(text_right)
+
+            text_right.setdefault("zorder", style["zorder"])
+            self.text_between(cooml, coomr, center=1.0, **text_right)
 
         for coo in curve_pts:
             self._adjust_lims(*coo)
@@ -836,6 +895,9 @@ class Drawing:
             The width of the arrowhead. Default is 0.05.
         length : float, optional
             The length of the arrowhead. Default is 0.1.
+        relative : bool or float, optional
+            If True, the the `width` and `length` parameters are scaled as
+            `total_line_length ** relative`.
         preset : str, optional
             A preset style to use for the arrowhead, including the above
             options.
@@ -875,10 +937,13 @@ class Drawing:
         center = style.pop("center")
         width = style.pop("width")
         length = style.pop("length")
+        relative = style.pop("relative", 1.0)
+
         lab = rb[0]
+        scale = lab ** relative
         xc = center * lab
-        arrow_x = xc - length * lab
-        arrow_y = width * lab
+        arrow_x = xc - length * scale
+        arrow_y = width * scale
 
         aa, ab, ac = [
             inverse(arrow_x, arrow_y),

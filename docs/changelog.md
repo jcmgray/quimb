@@ -10,6 +10,7 @@ Release notes for `quimb`.
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
 - update infrastructure for TEBD and SimpleUpdate based algorithms.
 - [`schematic.Drawing`](quimb.schematic.drawing): add [`grid`](quimb.schematic.drawing.grid), [`grid3d`](quimb.schematic.drawing.grid3d), [`bezier`](quimb.schematic.drawing.bezier), [`star`](quimb.schematic.drawing.star), [`cross`](quimb.schematic.drawing.cross) and [`zigzag`](quimb.schematic.drawing.zigzag) methods.
+- [`schematic.Drawing`](quimb.schematic.drawing): add `relative` option to [`arrowhead`](quimb.schematic.drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.drawing.line).
 - refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
 
 (whats-new-1-11-2)=
