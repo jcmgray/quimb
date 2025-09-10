@@ -19,3 +19,5 @@ quimb/_version.py export-subst
 
 # ensure quimb appears as a python project on github
 *.ipynb linguist-language=Python
+# SCM syntax highlighting & preventing 3-way merges
+pixi.lock merge=binary linguist-language=YAML linguist-generated=true

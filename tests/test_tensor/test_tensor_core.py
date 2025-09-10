@@ -1868,6 +1868,55 @@ class TestTensorNetwork:
         xs = mps.to_dense().ravel()
         assert not any(np.allclose(rx, x) for x in xs)
 
+    def test_insert_compressor_between_regions(self):
+        inputs = ["abgl", "gfhim", "bcdfe", "iekj"]
+        tags = ["A", "C", "B", "D"]
+        size_dict = {ix: 2 for ix in set("".join(inputs))}
+        ts = [
+            qtn.rand_tensor(
+                [size_dict[k] for k in term], inds=term, tags=[tag]
+            )
+            for term, tag in zip(inputs, tags)
+        ]
+        tn = qtn.TensorNetwork(ts)
+        gh = tn.geometry_hash()
+
+        # compute the svd via explicit contraction of the whole tensor
+        td = tn.contract()
+        tn_ex = td.split(["a", "l", "c", "d"], max_bond=4)
+        d1 = tn_ex.distance(tn)
+
+        # test inserting into parallel network
+        tn_other = tn.copy()
+        tn.insert_compressor_between_regions_(
+            ["A", "B"], ["C", "D"], max_bond=4, insert_into=tn_other
+        )
+        assert tn.geometry_hash() == gh
+        assert tn_other.num_tensors == 6
+        d = tn_other.distance(tn)
+        assert d == pytest.approx(d1)
+
+        # test not-inplace
+        tn_other = tn.insert_compressor_between_regions(
+            ["A", "B"],
+            ["C", "D"],
+            max_bond=4,
+        )
+        assert tn.geometry_hash() == gh
+        assert tn_other.num_tensors == 6
+        d = tn_other.distance(tn)
+        assert d == pytest.approx(d1)
+
+        # test inplace
+        tn_other = tn.copy()
+        tn_other.insert_compressor_between_regions_(
+            ["A", "B"], ["C", "D"], max_bond=4
+        )
+        assert tn_other.geometry_hash() != gh
+        assert tn_other.num_tensors == 6
+        d = tn_other.distance(tn)
+        assert d == pytest.approx(d1)
+
 
 class TestTensorNetworkSimplifications:
     def test_rank_simplify(self):

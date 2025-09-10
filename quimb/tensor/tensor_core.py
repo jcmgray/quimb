@@ -9802,7 +9802,7 @@ class TensorNetwork(object):
 
         # get the connecting indices and corresponding sizes
         bix = bonds(ltn, rtn)
-        bix_sizes = [tn.ind_size(ix) for ix in bix]
+        bix_sizes = [ltn.ind_size(ix) for ix in bix]
 
         if mode == "nystrom":
             # only use
@@ -9887,8 +9887,8 @@ class TensorNetwork(object):
 
         if insert_into is not None:
             tn = insert_into
-            ltn = tn.select(ltags, which=select_which)
-            rtn = tn.select(rtags, which=select_which)
+        ltn = tn.select(ltags, which=select_which)
+        rtn = tn.select(rtags, which=select_which)
 
         # finally cut the bonds
         new_lix = [rand_uuid() for _ in bix]

@@ -127,3 +127,6 @@ docs/autoapi
 # quimb specific
 ctg_cache
 quimb/_version.py
+# pixi environments
+.pixi/*
+!.pixi/config.toml

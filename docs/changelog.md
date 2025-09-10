@@ -14,6 +14,11 @@ Release notes for `quimb`.
 - refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 
+**Bug fixes:**
+
+- fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) when `insert_into is None`.
+
+
 (whats-new-1-11-2)=
 ## v1.11.2 (2025-07-30)
 
