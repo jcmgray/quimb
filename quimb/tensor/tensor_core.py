@@ -485,6 +485,7 @@ def tensor_split(
     bond_ind=None,
     right_inds=None,
     matrix_svals=False,
+    **kwargs,
 ):
     """Decompose this tensor into two tensors.
 
@@ -630,7 +631,7 @@ def tensor_split(
     )
 
     # `s` itself will be None unless `absorb=None` is specified
-    left, s, right = _SPLIT_FNS[method](array, **opts)
+    left, s, right = _SPLIT_FNS[method](array, **opts, **kwargs)
 
     if nleft != 1:
         # unfuse dangling left indices
@@ -1830,9 +1831,10 @@ class Tensor:
 
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
-        thereby removing them. Analogous to ``X[:, :, 3, :, :]`` with arrays.
-        The indices to select from can be specified either by integer, in which
-        case the correspoding index is removed, or by a slice.
+        thereby removing them. Analogous to __getitem__ syntax like
+        ``X[:, :, 3, :, 4:7]`` with arrays. The indices to select from can be
+        specified either by integer, in which case the correspoding index is
+        removed, or by a slice.
 
         Parameters
         ----------
@@ -1866,9 +1868,16 @@ class Tensor:
 
         new_inds = []
         data_loc = []
+        num_project = 0
 
         for ix in T.inds:
-            sel = selectors.get(ix, slice(None))
+
+            if ix not in selectors:
+                sel = slice(None)
+            else:
+                sel = selectors[ix]
+                num_project += 1
+
             if isinstance(sel, slice):
                 # index will be kept (including a partial slice of entries)
                 new_inds.append(ix)
@@ -1882,9 +1891,13 @@ class Tensor:
                     sel = int(sel)
                 data_loc.append(sel)
 
-        T.modify(
-            apply=lambda x: x[tuple(data_loc)], inds=new_inds, left_inds=None
-        )
+
+        if num_project:
+            T.modify(
+                apply=lambda x: x[tuple(data_loc)],
+                inds=new_inds,
+                left_inds=None,
+            )
         return T
 
     isel_ = functools.partialmethod(isel, inplace=True)
@@ -2514,11 +2527,19 @@ class Tensor:
 
         Parameters
         ----------
+        ind : str
+            The index to contract with a random vector.
+        dtype : str
+            The data type of the random vector.
+        inplace : bool, optional
+            Whether to perform the reduction inplace.
+        kwargs
+            Passed to `quimb.randn`.
         """
         if dtype is None:
             dtype = self.dtype
 
-        v = randn(self.ind_size(ind), dtype=self.dtype, **kwargs)
+        v = randn(self.ind_size(ind), dtype=dtype, **kwargs)
 
         return self.vector_reduce(ind, v, inplace=inplace)
 
@@ -9673,15 +9694,20 @@ class TensorNetwork(object):
         if side == "right":
             # form dag(X) @ X --> left_inds are contracted
             ixmap = {ix: rand_uuid() for ix in right_inds}
+            lix = ixmap.values()
+            rix = ixmap.keys()
         else:  # 'left'
             # form X @ dag(X) --> right_inds are contracted
             ixmap = {ix: rand_uuid() for ix in left_inds}
+            lix = ixmap.keys()
+            rix = ixmap.values()
+
+        # note: problem is hermitian but we still need to get
+        # lix and rix correct way round for blocksparse arrays
 
         # contract to dense array
         tnd = self.reindex(ixmap).conj_() & self
-        XX = tnd.to_dense(
-            ixmap.values(), ixmap.keys(), optimize=optimize, **contract_opts
-        )
+        XX = tnd.to_dense(lix, rix, optimize=optimize, **contract_opts)
 
         return decomp.squared_op_to_reduced_factor(
             XX,
@@ -9696,6 +9722,8 @@ class TensorNetwork(object):
         rtags,
         max_bond=None,
         cutoff=1e-10,
+        mode="oblique",
+        max_bond_oversample="auto",
         select_which="any",
         insert_into=None,
         new_tags=None,
@@ -9726,6 +9754,8 @@ class TensorNetwork(object):
             is controlled by ``cutoff``.
         cutoff : float, optional
             The cutoff to use for the compression.
+        mode : {"oblique", "nystrom"}, optional
+            How to compute the projectors.
         select_which : {'any', 'all', 'none'}, optional
             How to select the regions based on the tags, see
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.select`.
@@ -9774,18 +9804,83 @@ class TensorNetwork(object):
         bix = bonds(ltn, rtn)
         bix_sizes = [tn.ind_size(ix) for ix in bix]
 
-        # contract the reduced factors
-        Rl = ltn.compute_reduced_factor("right", None, bix, optimize=optimize)
-        Rr = rtn.compute_reduced_factor("left", bix, None, optimize=optimize)
+        if mode == "nystrom":
+            # only use
+            lix = [ix for ix in ltn.outer_inds() if ix not in bix]
+            rix = [ix for ix in rtn.outer_inds() if ix not in bix]
+            dbond = prod(bix_sizes)
+            dleft = prod(map(ltn.ind_size, lix))
+            dright = prod(map(rtn.ind_size, rix))
+            current_rank = min(dbond, dleft, dright)
+            # if current_rank <= max_bond:
+            # mode = "oblique"
 
-        # then form the 'oblique' projectors
-        Pl, Pr = decomp.compute_oblique_projectors(
-            Rl,
-            Rr,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            **compress_opts,
-        )
+        if mode == "oblique":
+            # contract the reduced factors
+            Rl = ltn.compute_reduced_factor(
+                "right", None, bix, optimize=optimize
+            )
+            Rr = rtn.compute_reduced_factor(
+                "left", bix, None, optimize=optimize
+            )
+
+            # then form the 'oblique' projectors
+            Pl, Pr = decomp.compute_oblique_projectors(
+                Rl,
+                Rr,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                **compress_opts,
+            )
+        elif mode == "nystrom":
+            from .tensor_builder import rand_tensor
+            from .decomp import svd_truncated, rdmul, ldmul
+
+            #
+            max_bond = min(current_rank, max_bond)
+
+            if callable(max_bond_oversample):
+                max_bond_oversample = max_bond_oversample(max_bond)
+            elif max_bond_oversample == "auto":
+                max_bond_oversample = max(max_bond * 2, max_bond + 20)
+
+            ixbl = rand_uuid()
+            for ix in lix:
+                ltn |= rand_tensor(
+                    shape=(max_bond_oversample, ltn.ind_size(ix)),
+                    inds=(ixbl, ix),
+                    dist="rademacher",
+                )
+            tml = ltn.contract(
+                all, optimize="auto-hq", output_inds=(ixbl, *bix)
+            )
+
+            ixbr = rand_uuid()
+            for ix in rix:
+                rtn |= rand_tensor(
+                    shape=(rtn.ind_size(ix), max_bond_oversample),
+                    inds=(ix, ixbr),
+                    dist="rademacher",
+                )
+            tmr = rtn.contract(
+                all, optimize="auto-hq", output_inds=(*bix, ixbr)
+            )
+
+            Ml = tml.to_dense((ixbl,), bix)
+            Mr = tmr.to_dense(bix, (ixbr,))
+
+            U, s, VH = svd_truncated(
+                Ml @ Mr,
+                cutoff=cutoff,
+                max_bond=max_bond,
+                absorb=None,
+                **compress_opts,
+            )
+            sqi = s**-0.5
+            Pl = Mr @ rdmul(dag(VH), sqi)
+            Pr = ldmul(sqi, dag(U)) @ Ml
+        else:
+            raise ValueError(f"mode `{mode}` is invalid.")
 
         Pl = do("reshape", Pl, (*bix_sizes, -1))
         Pr = do("reshape", Pr, (-1, *bix_sizes))

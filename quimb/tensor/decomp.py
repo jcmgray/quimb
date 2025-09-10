@@ -30,11 +30,13 @@ from .array_ops import isblocksparse, isfermionic
 # some convenience functions for multiplying diagonals
 
 
+@compose
 def rdmul(x, d):
     """Right-multiplication a matrix by a vector representing a diagonal."""
     return x * d[None, :]
 
 
+@compose
 def rddiv(x, d):
     """Right-multiplication of a matrix by a vector representing an inverse
     diagonal.
@@ -42,11 +44,13 @@ def rddiv(x, d):
     return x / d[None, :]
 
 
+@compose
 def ldmul(d, x):
     """Left-multiplication a matrix by a vector representing a diagonal."""
     return x * d[:, None]
 
 
+@compose
 def lddiv(d, x):
     """Left-multiplication of a matrix by a vector representing an inverse
     diagonal.
@@ -61,22 +65,22 @@ def dag_numba(x):
 
 @njit  # pragma: no cover
 def rdmul_numba(x, d):
-    return x * d.reshape(1, -1)
+    return x * d[None, :]
 
 
 @njit  # pragma: no cover
 def rddiv_numba(x, d):
-    return x / d.reshape(1, -1)
+    return x / d[None, :]
 
 
 @njit  # pragma: no cover
 def ldmul_numba(d, x):
-    return x * d.reshape(-1, 1)
+    return x * d[:, None]
 
 
 @njit  # pragma: no cover
 def lddiv_numba(d, x):
-    return x / d.reshape(-1, 1)
+    return x / d[:, None]
 
 
 @compose
@@ -151,6 +155,8 @@ def _trim_and_renorm_svd_result(
         # assume already all positive
         sabs = s
 
+    d = do("shape", sabs)[0]
+
     if (cutoff > 0.0) or (renorm > 0):
         if cutoff_mode == 1:  # 'abs'
             n_chi = do("count_nonzero", sabs > cutoff)
@@ -184,9 +190,9 @@ def _trim_and_renorm_svd_result(
         n_chi = max_bond
     else:
         # neither maximum bond dimension nor cutoff specified
-        n_chi = do("shape", s)[0]
+        n_chi = d
 
-    if n_chi < do("shape", s)[0]:
+    if n_chi < d:
         s = s[:n_chi]
         U = U[:, :n_chi]
         VH = VH[:n_chi, :]
@@ -583,14 +589,21 @@ def eigh_truncated(
     max_bond=-1,
     absorb=0,
     renorm=0,
+    positive=0,
     backend=None,
 ):
     with backend_like(backend):
         s, U = do("linalg.eigh", x)
 
         # make sure largest singular value first
-        idx = do("argsort", -do("abs", s))
-        s, U = s[idx], U[:, idx]
+        if not positive:
+            idx = do("argsort", -do("abs", s))
+            s, U = s[idx], U[:, idx]
+        else:
+            # assume all positive, simply reverse
+            s = s[::-1]
+            U = U[:, ::-1]
+
         VH = dag(U)
 
         # XXX: better to absorb phase in V and return positive 'values'?
@@ -613,7 +626,13 @@ def eigh_truncated(
 @eigh_truncated.register("numpy")
 @njit  # pragma: no cover
 def eigh_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    positive=0,
 ):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
     ``x`` is hermitian.
@@ -621,8 +640,12 @@ def eigh_truncated_numba(
     s, U = np.linalg.eigh(x)
 
     # make sure largest singular value first
-    k = np.argsort(-np.abs(s))
-    s, U = s[k], U[:, k]
+    if not positive:
+        k = np.argsort(-np.abs(s))
+        s, U = s[k], U[:, k]
+    else:
+        s = s[::-1]
+        U = U[:, ::-1]
     VH = dag_numba(U)
 
     # XXX: better to absorb phase in V and return positive 'values'?
@@ -1210,47 +1233,40 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
             # know exactly low-rank, so truncate
             keep = dl
         else:
-            keep = None
+            keep = -1
     else:
         if dl > dr:
             # know exactly low-rank, so truncate
             keep = dr
         else:
-            keep = None
+            keep = -1
 
     try:
         # attempt faster hermitian eigendecomposition
-        s2, W = do("linalg.eigh", x2)
-
-        if keep is not None:
-            # outer dimension smaller -> exactly low-rank
-            s2 = s2[-keep:]
-            W = W[:, -keep:]
-
+        U, s2, VH = eigh_truncated(
+            x2,
+            max_bond=keep,
+            cutoff=0.0,
+            absorb=None,
+            positive=1,  # know positive
+        )
         # might have negative eigenvalues due to numerical error from squaring
         s2 = do("clip", s2, 0.0, None)
-        s = do("sqrt", s2)
-
-        if right:
-            factor = ldmul(s, dag(W))
-        else:  # 'left'
-            factor = rdmul(W, s)
 
     except Exception:
-        # fallback to SVD
-        U, s2, VH = do("linalg.svd", x2)
-        if keep is not None:
-            # outer dimension smaller -> exactly low-rank
-            s2 = s2[:keep]
-            if right:
-                VH = VH[:keep, :]
-            else:
-                U = U[:, :keep]
-        s = do("sqrt", s2)
-        if right:
-            factor = ldmul(s, VH)
-        else:  # 'left'
-            factor = rdmul(U, s)
+        # fallback to SVD if maybe badly conditioned etc.
+        U, s2, VH = svd_truncated(
+            x2,
+            max_bond=keep,
+            cutoff=0.0,
+            absorb=None,
+        )
+
+    s = do("sqrt", s2)
+    if right:
+        factor = ldmul(s, VH)
+    else:  # 'left'
+        factor = rdmul(U, s)
 
     return factor
 

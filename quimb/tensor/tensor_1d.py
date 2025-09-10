@@ -1980,7 +1980,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         ----------
         shape : str, optional
             A permutation of ``'lrp'`` specifying the *desired* order of the
-            left, right, and physical indices respectively.
+            [l]eft, [r]ight, and [p]hysical indices respectively.
         """
         self.ensure_bonds_exist()
 

@@ -19,13 +19,16 @@ import warnings
 
 from autoray import do
 
+from ..gen.rand import randn
 from .tensor_arbgeom import tensor_network_apply_op_vec
 from .tensor_arbgeom_compress import tensor_network_ag_compress
-from .tensor_builder import TN_matching
+from .tensor_builder import TN_matching, rand_tensor
 from .tensor_core import (
     Tensor,
     TensorNetwork,
+    bonds,
     ensure_dict,
+    oset,
     rand_uuid,
     tensor_contract,
 )
@@ -274,6 +277,51 @@ def tensor_network_1d_compress_direct(
     return new
 
 
+def _form_final_tn_from_tensor_sequence(
+    tn,
+    ts,
+    normalize,
+    sweep_reverse,
+    permute_arrays,
+    equalize_norms,
+    inplace,
+    tags_per_site=None,
+):
+    if tags_per_site is not None:
+        for t, tags in zip(ts, tags_per_site):
+            t.modify(tags=tags)
+
+    if normalize:
+        # in right canonical form already
+        ts[0].normalize_()
+
+    if sweep_reverse:
+        # this is purely cosmetic for ordering tensor_map dict entries
+        ts.reverse()
+
+    # form the final TN
+    if inplace:
+        # simply replace all tensors
+        new = tn
+        new.remove_all_tensors()
+        new.add(ts, virtual=True)
+    else:
+        new = TensorNetwork(ts, virtual=True)
+        # cast as whatever the input was e.g. MPS, MPO
+        new.view_like_(tn)
+
+    # possibly put the array indices in canonical order (e.g. when MPS or MPO)
+    possibly_permute_(new, permute_arrays)
+
+    # XXX: do better than simply waiting til the end to equalize norms
+    if equalize_norms is True:
+        new.equalize_norms_()
+    elif equalize_norms:
+        new.equalize_norms_(value=equalize_norms)
+
+    return new
+
+
 def tensor_network_1d_compress_dm(
     tn,
     max_bond=None,
@@ -397,7 +445,7 @@ def tensor_network_1d_compress_dm(
         )
 
     # build projectors and right environments
-    Us = []
+    Us = [None] * N
     right_env_ket = None
     right_env_bra = None
     new_bonds = collections.defaultdict(rand_uuid)
@@ -426,6 +474,7 @@ def tensor_network_1d_compress_dm(
             left_inds=left_inds,
             right_inds=right_inds,
             method="eigh",
+            positive=1,
             max_bond=max_bond,
             cutoff=cutoff,
             cutoff_mode=cutoff_mode,
@@ -438,7 +487,7 @@ def tensor_network_1d_compress_dm(
         (bix,) = s.inds
         U.reindex_({bix: new_bonds["k", i]})
         UH.reindex_({bix: new_bonds["b", i]})
-        Us.append(U)
+        Us[i] = U
 
         # attach the unitaries to the right environments and contract
         right_ket_tensors = [*ket.select_tensors(site_tags[i]), U.H]
@@ -463,40 +512,22 @@ def tensor_network_1d_compress_dm(
         )
 
     # form the final site
-    U0 = tensor_contract(
+    Us[0] = tensor_contract(
         *ket.select_tensors(site_tags[0]),
         right_env_ket,
         optimize=optimize,
         preserve_tensor=True,
     )
 
-    if normalize:
-        # in right canonical form already
-        U0.normalize_()
-
-    # form the final TN
-    if inplace:
-        # simply replace all tensors
-        new = tn
-        new.remove_all_tensors()
-        new |= U0
-        for t in Us[::-1]:
-            new |= t
-    else:
-        new = TensorNetwork([U0] + Us[::-1])
-        # cast as whatever the input was e.g. MPS, MPO
-        new.view_like_(tn)
-
-    # possibly put the array indices in canonical order (e.g. when MPS or MPO)
-    possibly_permute_(new, permute_arrays)
-
-    # XXX: do better than simply waiting til the end to equalize norms
-    if equalize_norms is True:
-        new.equalize_norms_()
-    elif equalize_norms:
-        new.equalize_norms_(value=equalize_norms)
-
-    return new
+    return _form_final_tn_from_tensor_sequence(
+        tn,
+        Us,
+        normalize,
+        sweep_reverse,
+        permute_arrays,
+        equalize_norms,
+        inplace,
+    )
 
 
 def tensor_network_1d_compress_zipup(
@@ -598,7 +629,7 @@ def tensor_network_1d_compress_zipup(
         tn = tn.canonize_around_(site_tags[-1])
 
     # zip along the bonds
-    ts = []
+    ts = [None] * N
     bix = None
     Us = None
     for i in range(N - 1, 0, -1):
@@ -643,7 +674,7 @@ def tensor_network_1d_compress_zipup(
             **compress_opts,
         )
         Us.drop_tags()
-        ts.append(VH)
+        ts[i] = VH
         #           i
         #      │    │  │ │
         #     ─▶──□━◀━━◀━◀━
@@ -651,36 +682,60 @@ def tensor_network_1d_compress_zipup(
         #     ─▶  : :
         #       U*s VH
 
-    U0 = tensor_contract(
+    # compute final site
+    ts[0] = tensor_contract(
         Us, *tn.select_tensors(site_tags[0]), optimize=optimize
     )
 
+    return _form_final_tn_from_tensor_sequence(
+        tn,
+        ts,
+        normalize,
+        sweep_reverse,
+        permute_arrays,
+        equalize_norms,
+        inplace,
+    )
+
+
+def _do_direct_sweep(
+    tn,
+    site_tags,
+    max_bond,
+    cutoff,
+    cutoff_mode,
+    equalize_norms,
+    normalize,
+    permute_arrays,
+    **compress_opts,
+):
+    for i in range(len(site_tags) - 1, 0, -1):
+        # compress and shift canonical center
+        tn.compress_between(
+            site_tags[i - 1],
+            site_tags[i],
+            absorb="left",
+            reduced="right",
+            max_bond=max_bond,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            equalize_norms=equalize_norms,
+            **compress_opts,
+        )
+
     if normalize:
-        # in right canonical form already
-        U0.normalize_()
-
-    ts.append(U0)
-
-    if inplace:
-        new = tn
-        new.remove_all_tensors()
-        for t in ts:
-            new |= t
-    else:
-        new = TensorNetwork(ts)
-        # cast as whatever the input was e.g. MPS
-        new.view_like_(tn)
+        # make use of the fact that the output is in right canonical form
+        tn[site_tags[-1]].normalize_()
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
-    possibly_permute_(new, permute_arrays)
+    possibly_permute_(tn, permute_arrays)
 
-    # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:
-        new.equalize_norms_()
+        tn.equalize_norms_()
     elif equalize_norms:
-        new.equalize_norms_(value=equalize_norms)
+        tn.equalize_norms_(value=equalize_norms)
 
-    return new
+    return tn
 
 
 def tensor_network_1d_compress_zipup_first(
@@ -784,7 +839,7 @@ def tensor_network_1d_compress_zipup_first(
     if sweep_reverse:
         site_tags = tuple(reversed(site_tags))
 
-    # is now in right canonical form
+    # yields right canonical form w.r.t site_tags
     tn = tensor_network_1d_compress_zipup(
         tn,
         max_bond=max_bond_zipup,
@@ -798,34 +853,411 @@ def tensor_network_1d_compress_zipup_first(
         inplace=inplace,
         **compress_opts,
     )
+    # direct sweep in other direction
+    return _do_direct_sweep(
+        tn,
+        site_tags,
+        max_bond,
+        cutoff,
+        cutoff_mode,
+        equalize_norms,
+        normalize,
+        permute_arrays,
+        **compress_opts,
+    )
 
-    for i in range(len(site_tags) - 1, 0, -1):
-        # compress and shift canonical center
-        tn.compress_between(
-            site_tags[i - 1],
-            site_tags[i],
-            absorb="left",
-            reduced="right",
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            equalize_norms=equalize_norms,
-            **compress_opts,
+
+def tensor_network_1d_compress_src(
+    tn,
+    max_bond,
+    cutoff=0.0,
+    site_tags=None,
+    normalize=False,
+    noise_mode="separable",
+    permute_arrays=True,
+    sweep_reverse=False,
+    canonize=True,
+    equalize_norms=False,
+    inplace=False,
+    **contract_opts,
+):
+    """Compress any 1D-like tensor network using 'Successive Randomized
+    Compression' (SRC) https://arxiv.org/abs/2504.06475.
+    """
+    # TODO: customizable noise and seed etc. [ ]
+
+    if not canonize:
+        warnings.warn("`canonize=False` is ignored for the `src` method.")
+
+    if max_bond is None:
+        raise ValueError("`max_bond` must be given for the `src` method.")
+
+    if cutoff != 0.0:
+        warnings.warn(
+            "`cutoff` is ignored for the `src` method, use `max_bond` instead."
         )
 
-    if normalize:
-        # make use of the fact that the output is in right canonical form
-        tn[site_tags[-1]].normalize_()
+    contract_opts["drop_tags"] = True
 
-    # possibly put the array indices in canonical order (e.g. when MPS or MPO)
-    possibly_permute_(tn, permute_arrays)
+    # batch index for the noise samples
+    Bix = rand_uuid()
+    if site_tags is None:
+        site_tags = tn.site_tags
+    if sweep_reverse:
+        site_tags = tuple(reversed(site_tags))
+    L = len(site_tags)
 
-    if equalize_norms is True:
-        tn.equalize_norms_()
-    elif equalize_norms:
-        tn.equalize_norms_(value=equalize_norms)
+    # first we segment the tensor network into local sites
+    local_tns = [None] * L
+    local_inds = [None] * L
+    local_bonds = [None] * (L - 1)
+    output_inds = tn._outer_inds
+    for i in range(L):
+        # local network
+        local_tns[i] = tni = tn.select(site_tags[i])
+        # outer indices found on this site
+        local_inds[i] = oset.from_dict(tni.ind_map).intersection(output_inds)
+        if i > 0:
+            local_bonds[i - 1] = bonds(local_tns[i - 1], tni)
 
-    return tn
+    # first we form the left environment tensors with sampling noise
+    left_envs = {}
+    for i in range(1, L):
+        # get random sampling tensors for the previous site
+        if noise_mode == "separable":
+            tws = [
+                rand_tensor(
+                    shape=(max_bond, tn.ind_size(ix)),
+                    inds=(Bix, ix),
+                    tags=(site_tags[i - 1],),
+                    dist="rademacher",
+                )
+                for ix in local_inds[i - 1]
+            ]
+        elif noise_mode == "symmetric":
+            # reuse the same noise for all output legs
+            shape = (max_bond, tn.ind_size(next(iter(local_inds[i - 1]))))
+            data = randn(shape, dist="rademacher")
+            tws = [
+                Tensor(data=data, inds=(Bix, ix), tags=(site_tags[i - 1],))
+                for ix in local_inds[i - 1]
+            ]
+        elif noise_mode == "joint":
+            # one big noise tensor for all output legs
+            tws = [
+                rand_tensor(
+                    shape=(
+                        max_bond,
+                        *(tn.ind_size(ix) for ix in local_inds[i - 1]),
+                    ),
+                    inds=(Bix, *local_inds[i - 1]),
+                    tags=(site_tags[i - 1],),
+                    dist="rademacher",
+                )
+            ]
+        else:
+            raise ValueError(
+                f"Unknown noise mode {noise_mode!r}, "
+                "should be one of 'separable', 'symmetric', or 'joint'."
+            )
+        # contract it with the previous site and environment
+        #
+        #     bix
+        #      /\       (MPO-MPS example)
+        #     |  w
+        #     |  |
+        #    LE--i--
+        #    LE  |    bonds
+        #    LE--i--
+        #
+        ts = [*local_tns[i - 1], *tws]
+        if i > 1:
+            ts.append(left_envs[i - 1])
+        left_envs[i] = tensor_contract(
+            *ts,
+            output_inds=(
+                # batch index is hyper, so we have to specify it
+                Bix,
+                # other outputs are any shared bonds between sites
+                *local_bonds[i - 1],
+            ),
+            **contract_opts,
+        )
+
+    # then we sweep in from the right
+    Us = [None] * L
+    right_envs = {}
+    for i in range(L - 1, 0, -1):
+        # contract the environments with the current site
+        #
+        #   bix
+        #     |  |  |
+        #    LE--i--RE     (MPO-MPS example)
+        #    LE  |  RE
+        #    LE--i--RE
+        #
+        ts = [left_envs[i], *local_tns[i]]
+        if i < L - 1:
+            ts.append(right_envs[i])
+        t = tensor_contract(*ts, **contract_opts)
+
+        # perform QR to get the projector!
+        #
+        #   bix
+        #     |  |  |
+        #     R--QQQQ
+        #
+        tq, _ = t.split(
+            left_inds=None,  # auto calc
+            right_inds=(Bix,),
+            method="qr",
+            get="tensors",
+        )
+        Us[i] = tq
+
+        # now we contract the projector with one more site
+        # to form the right environment tensor
+        #
+        #       QQQQ--
+        #       |  |      (MPO-MPS example)
+        #     --i--RE
+        #       |  RE
+        #     --i--RE
+        #
+        ts = [*local_tns[i], tq.conj()]
+        if i < L - 1:
+            # include the right environment
+            ts.append(right_envs[i])
+        right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
+
+    # handle the final tensor
+    Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
+
+    return _form_final_tn_from_tensor_sequence(
+        tn,
+        Us,
+        normalize,
+        sweep_reverse,
+        permute_arrays,
+        equalize_norms,
+        inplace,
+        tags_per_site=[ltn.tags for ltn in local_tns],
+    )
+
+
+def tensor_network_1d_compress_src_oversample(
+    tn,
+    max_bond,
+    max_bond_src=None,
+    cutoff=1e-10,
+    cutoff_src=0.0,
+    noise_mode="separable",
+    site_tags=None,
+    canonize=True,
+    normalize=False,
+    cutoff_mode="rsum2",
+    permute_arrays=True,
+    optimize="auto-hq",
+    sweep_reverse=False,
+    equalize_norms=False,
+    inplace=False,
+    **compress_opts,
+):
+    """Compress this 1D-like tensor network using the 'src first' algorithm,
+    i.e. src with oversampling, that is, first compressing the tensor network
+    to a larger bond dimension using the 'src' (successive randomized
+    compression, https://arxiv.org/abs/2504.06475) algorithm, then compressing
+    to the desired bond dimension using a direct sweep.
+    """
+    if max_bond is None:
+        raise ValueError(
+            "`max_bond` must be given for the `src-first` method."
+        )
+
+    if max_bond_src is None:
+        # sensible default oversampling (taken from paper)
+        max_bond_src = max(round(1.5 * max_bond), max_bond + 10)
+
+    if not canonize:
+        warnings.warn(
+            "`canonize=False` is ignored for the `src-first` method."
+        )
+
+    if site_tags is None:
+        site_tags = tn.site_tags
+    if sweep_reverse:
+        site_tags = tuple(reversed(site_tags))
+
+    # yields right canonical form w.r.t site_tags
+    tn = tensor_network_1d_compress_src(
+        tn,
+        max_bond=max_bond_src,
+        cutoff=cutoff_src,
+        site_tags=site_tags,
+        noise_mode=noise_mode,
+        normalize=False,  # handled after direct sweep
+        permute_arrays=False,  # handle after direct sweep
+        sweep_reverse=True,  # handled above, opposite to direct sweep
+        equalize_norms=equalize_norms,
+        optimize=optimize,
+        inplace=inplace,
+    )
+    # direct sweep in other direction
+    return _do_direct_sweep(
+        tn,
+        site_tags,
+        max_bond,
+        cutoff,
+        cutoff_mode,
+        equalize_norms,
+        normalize,
+        permute_arrays,
+        **compress_opts,
+    )
+
+
+def tensor_network_1d_compress_srcmps(
+    tn,
+    max_bond,
+    cutoff=0.0,
+    tn_fit=None,
+    site_tags=None,
+    normalize=False,
+    permute_arrays=True,
+    sweep_reverse=False,
+    canonize=True,
+    equalize_norms=False,
+    inplace=False,
+    **contract_opts,
+):
+    """Compress any 1D-like tensor network using 'Successive Randomized
+    Compression' (SRC) https://arxiv.org/abs/2504.06475 but using an random or
+    supplied MPS as the 'sampling noise'.
+    """
+    # TODO: customizable noise and seed etc.
+    # TODO: handle arbitrary outer indices
+
+    if not canonize:
+        warnings.warn("`canonize=False` is ignored for the `src` method.")
+    if cutoff != 0.0:
+        warnings.warn(
+            "`cutoff` is ignored for the `src` method, use `max_bond` instead."
+        )
+
+    contract_opts["optimize"] = "auto"
+    contract_opts["drop_tags"] = True
+
+    if site_tags is None:
+        site_tags = tn.site_tags
+    if sweep_reverse:
+        site_tags = tuple(reversed(site_tags))
+    L = len(site_tags)
+
+    local_tns = [tn.select(site_tags[i]) for i in range(L)]
+
+    # parse the sampling MPS
+    if not isinstance(tn_fit, TensorNetwork):
+        if tn_fit is None:
+            tn_fit = TN_matching(
+                tn,
+                max_bond=max_bond,
+                site_tags=site_tags,
+            )
+        else:
+            if isinstance(tn_fit, str):
+                tn_fit = {"method": tn_fit}
+            tn_fit.setdefault("max_bond", max_bond)
+            tn_fit.setdefault("cutoff", cutoff)
+            tn_fit.setdefault("site_tags", site_tags)
+            tn_fit = tensor_network_1d_compress(tn, **tn_fit)
+
+    # get the bonds along the sampling MPS
+    bonds = [
+        next(iter(tn_fit[site_tags[i]].bonds(tn_fit[site_tags[i + 1]])))
+        for i in range(L - 1)
+    ]
+
+    # compute the left environments
+    left_envs = {}
+    for i in range(1, L):
+        # contract it with the previous site and environment
+        #
+        #    LE--w--    (MPO-MPS example)
+        #    LE  |
+        #    LE--i--
+        #    LE  |
+        #    LE--i--
+        #
+        ts = [*local_tns[i - 1], tn_fit[site_tags[i - 1]]]
+        if i >= 2:
+            ts.append(left_envs[i - 1])
+        left_envs[i] = tensor_contract(*ts, **contract_opts)
+
+    # then we sweep in from the right
+    Us = [None] * L
+    right_envs = {}
+    for i in range(L - 1, 0, -1):
+        # contract the environments with the current site
+        #
+        #       bonds[i-1]
+        #    LE--
+        #    LE   |  |
+        #    LE---i--RE     (MPO-MPS example)
+        #    LE   |  RE
+        #    LE---i--RE
+        #
+        ts = [left_envs[i], *local_tns[i]]
+        if i < L - 1:
+            ts.append(right_envs[i])
+
+        t = tensor_contract(*ts, **contract_opts)
+
+        # perform QR to get the projector!
+        #
+        #   bonds[i-1]
+        #     |
+        #     |  |  |
+        #     R--QQQQ
+        #
+        tq, _ = t.split(
+            left_inds=None,  # auto calc
+            right_inds=(bonds[i - 1],),
+            method="qr",
+            get="tensors",
+        )
+        Us[i] = tq
+
+        # now we contract the projector with one more site
+        # to form the right environment tensor
+        #
+        #       QQQQ--
+        #       |  |      (MPO-MPS example)
+        #     --i--RE
+        #       |  RE
+        #     --i--RE
+        #
+        ts = [*local_tns[i], tq.conj()]
+        if i < L - 1:
+            # include the right environment
+            ts.append(right_envs[i])
+        right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
+
+    # handle the final tensor
+    Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
+
+    return _form_final_tn_from_tensor_sequence(
+        tn,
+        Us,
+        normalize,
+        sweep_reverse,
+        permute_arrays,
+        equalize_norms,
+        inplace,
+        tags_per_site=[ltn.tags for ltn in local_tns],
+    )
+
+
+# ---------------------------- fitting methods ------------------------------ #
 
 
 def _tn1d_fit_sum_sweep_1site(
@@ -1267,8 +1699,20 @@ def tensor_network_1d_compress_fit(
             # don't start larger than the target bond dimension
             current_bond_dim = min(initial_bond_dim, max_bond)
 
+        # if we are only doing a small number of iterations, we need to make
+        # sure the doubling logic can actually reach max_bond
+        max_increase = 2**(max_iterations)
+        current_bond_dim = max(
+            current_bond_dim,
+            max_bond // max_increase + bool(max_bond % max_increase)
+        )
+
         if tn_fit is None:
             # random initial guess
+            if max_iterations <= 1:
+                # no need to generate a random guess and expand it
+                current_bond_dim = max_bond
+
             tn_fit = TN_matching(
                 tns[0], max_bond=current_bond_dim, site_tags=site_tags
             )
@@ -1280,6 +1724,7 @@ def tensor_network_1d_compress_fit(
             tn_fit.setdefault("site_tags", site_tags)
             tn_fit.setdefault("optimize", optimize)
             tn_fit = tensor_network_1d_compress(tns[0], **tn_fit)
+            # we generated it so we can always do inplace fitting
             inplace_fit = True
     else:
         # a guess was supplied
@@ -1288,7 +1733,7 @@ def tensor_network_1d_compress_fit(
             # assume we want to limit bond dimension to the initial guess
             max_bond = current_bond_dim
 
-    # choose to conjugte the smaller fitting network
+    # choose to conjugate the smaller, fitting network
     tn_fit = tn_fit.conj(inplace=inplace_fit)
     tn_fit.add_tag("__FIT__")
     # note these are all views of `tn_fit` and thus will update as it does
@@ -1434,6 +1879,9 @@ _TN1D_COMPRESS_METHODS = {
     "dm": tensor_network_1d_compress_dm,
     "zipup": tensor_network_1d_compress_zipup,
     "zipup-first": tensor_network_1d_compress_zipup_first,
+    "src": tensor_network_1d_compress_src,
+    "src-first": tensor_network_1d_compress_src_oversample,
+    "src-mps": tensor_network_1d_compress_srcmps,
     "fit": tensor_network_1d_compress_fit,
     "fit-zipup": tensor_network_1d_compress_fit_zipup,
     "fit-projector": tensor_network_1d_compress_fit_projector,

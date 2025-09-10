@@ -383,10 +383,10 @@ class TensorNetwork2D(TensorNetworkGen):
 
     This implies the following conventions:
 
-        * the 'up' bond is coordinates ``(i, j), (i + 1, j)``
-        * the 'down' bond is coordinates ``(i, j), (i - 1, j)``
-        * the 'right' bond is coordinates ``(i, j), (i, j + 1)``
-        * the 'left' bond is coordinates ``(i, j), (i, j - 1)``
+        * the 'up' (x+) bond is coordinates ``(i, j), (i + 1, j)``
+        * the 'down' (x-) bond is coordinates ``(i, j), (i - 1, j)``
+        * the 'right' (y+) bond is coordinates ``(i, j), (i, j + 1)``
+        * the 'left' (y-) bond is coordinates ``(i, j), (i, j - 1)``
 
     """
 
@@ -4826,10 +4826,10 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
     arrays : sequence of sequence of array_like
         The core tensor data arrays.
     shape : str, optional
-        Which order the dimensions of the arrays are stored in, the default
+        Which order the dimensions of the arrays are supplied in, the default
         ``'urdlp'`` stands for ('up', 'right', 'down', 'left', 'physical').
         Arrays on the edge of lattice are assumed to be missing the
-        corresponding dimension.
+        corresponding dimension. Internally, the arrays are stored 'urdlp'.
     tags : set[str], optional
         Extra global tags to add to the tensor network.
     site_ind_id : str, optional
@@ -4977,7 +4977,7 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             Whether the lattice is cyclic in the x and y directions.
         shape : str, optional
             How to layout the indices of the tensors, the default is
-            ``(up, right, down, left, phys) == 'urdlbk'``. This is the order
+            ``(up, right, down, left, phys) == 'urdlp'``. This is the order
             of the shape supplied to the filling function.
         peps_opts
             Supplied to :class:`~quimb.tensor.tensor_2d.PEPS`.
@@ -5285,8 +5285,9 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
     arrays : sequence of sequence of array
         The core tensor data arrays.
     shape : str, optional
-        Which order the dimensions of the arrays are stored in, the default
-        ``'urdlbk'`` stands for ('up', 'right', 'down', 'left', 'bra', 'ket').
+        What order the dimensions of the arrays are supplied in, the default
+        ``'urdlbk'`` stands for ('up' / x+, 'right' / y+, 'down' / x-,
+        'left' / y-, 'bra', 'ket').
         Arrays on the edge of lattice are assumed to be missing the
         corresponding dimension.
     tags : set[str], optional
