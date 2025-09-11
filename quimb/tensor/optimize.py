@@ -638,15 +638,31 @@ class TorchHandler:
     def _setup_backend_fn(self, arrays):
         torch = get_torch()
         if self.jit_fn:
-            example_inputs = (tree_map(self.to_variable, arrays),)
+
+            # jit.trace only accepts a tuple of example tensors ->
+            # so we need to further flatten the pytree of arrays
+
+            flat_arrays, ref_tree = tree_flatten(arrays, get_ref=True)
+            example_inputs = tuple(map(self.to_variable, flat_arrays))
+
+            def fn_flat(*arrays_flat):
+                arrays = tree_unflatten(arrays_flat, ref_tree)
+                return self._fn(arrays)
+
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     action="ignore",
                     message=".*can't record the data flow of Python values.*",
                 )
-                self._backend_fn = torch.jit.trace(
-                    self._fn, example_inputs=example_inputs
+                traced_fn = torch.jit.trace(
+                    fn_flat, example_inputs=example_inputs
                 )
+
+            def backend_fn(arrays):
+                flat_arrays = tree_flatten(arrays)
+                return traced_fn(*flat_arrays)
+
+            self._backend_fn = backend_fn
         else:
             self._backend_fn = self._fn
 
