@@ -23,6 +23,7 @@ from ..gen.rand import randn
 from .tensor_arbgeom import tensor_network_apply_op_vec
 from .tensor_arbgeom_compress import tensor_network_ag_compress
 from .tensor_builder import TN_matching, rand_tensor
+from .array_ops import isfermionic
 from .tensor_core import (
     Tensor,
     TensorNetwork,
@@ -1280,6 +1281,10 @@ def _tn1d_fit_sum_sweep_1site(
     N = len(site_tags)
     K = len(tn_overlaps)
 
+    fermion = isfermionic(tn_fit.tensors[0].data)
+    if fermion:
+        raise NotImplementedError("Fermionic 1-site fitting not implemented, use 2-site (bsz=2).")
+
     if max_bond is not None:
         current_bond_dim = tn_fit.max_bond()
         if current_bond_dim < max_bond:
@@ -1461,7 +1466,9 @@ def _tn1d_fit_sum_sweep_2site(
         left_inds = tuple(ix for ix in tfi0.inds if ix != bond)
         right_inds = tuple(ix for ix in tfi1.inds if ix != bond)
         tfinew = None
-
+        
+        fermion = isfermionic(tfi0.data)
+        
         for k, tn_overlap in enumerate(tn_overlaps):
             # form local overlap
             tnik = (
@@ -1469,6 +1476,14 @@ def _tn1d_fit_sum_sweep_2site(
                 | tn_overlap.select_any((site0, site1))
                 | envs["R", i + 1, k]
             )
+
+            if fermion:
+                # keep track of the environment legs for possible phase flips later
+                left_env_ind, right_env_ind = None, None
+                if type(envs["L", i, k]) is Tensor:
+                    (left_env_ind,) = tfi0.bonds(envs["L", i, k])
+                if type(envs["R", i + 1, k]) is Tensor:
+                    (right_env_ind,) = tfi1.bonds(envs["R", i + 1, k])
 
             # remove old tensors
             del tnik["__FIT__", site0]
@@ -1479,13 +1494,43 @@ def _tn1d_fit_sum_sweep_2site(
                 all, optimize=optimize, output_inds=left_inds + right_inds
             )
 
+            if fermion:
+                # flip the dual indices of the environment legs if needed
+                lind_id, rind_id = None, None
+                lind_id = tfiknew.inds.index(left_env_ind) if left_env_ind is not None else None
+                rind_id = tfiknew.inds.index(right_env_ind) if right_env_ind is not None else None
+                if lind_id is not None and rind_id is not None:
+                    if tfiknew.data.duals[lind_id]:
+                        tfiknew.data.phase_flip(lind_id, inplace=True)
+                    else:
+                        tfiknew.data.phase_flip(rind_id, inplace=True)
+                elif lind_id is not None and rind_id is None:
+                    if tfiknew.data.duals[lind_id]:
+                        tfiknew.data.phase_flip(lind_id, inplace=True)
+                elif lind_id is None and rind_id is not None:
+                    if tfiknew.data.duals[rind_id]:
+                        tfiknew.data.phase_flip(rind_id, inplace=True)
+
             # sum into fitted tensor
             if tfinew is None:
                 tfinew = tfiknew
             else:
                 tfinew += tfiknew
 
-        tfinew.conj_()
+        if fermion: 
+            # when conjugating tn_fit (a ftn) the dual outer indices will be flipped (phase_dual=True)
+            # but ftensor.conj() assumes phase_dual=False by default
+            # we need to manually flip the dual 'physical' indices in tfinew before conjugating
+            data = tfinew.data
+            dual_outer_axs = tuple(
+                ax
+                for ax, ix in enumerate(tfinew.inds)
+                if ix not in (left_env_ind, right_env_ind) and data.indices[ax].dual # or tfixnew.data.duals[ax]
+            )
+            if dual_outer_axs:
+                tfinew.modify(data=data.phase_flip(*dual_outer_axs))
+        
+        tfinew.conj_() 
 
         tfinew0, tfinew1 = tfinew.split(
             max_bond=max_bond,
@@ -1508,6 +1553,13 @@ def _tn1d_fit_sum_sweep_2site(
         tfinew1.transpose_like_(tfi1)
         tfi0.modify(data=tfinew0.data, left_inds=tfinew0.left_inds)
         tfi1.modify(data=tfinew1.data, left_inds=tfinew1.left_inds)
+
+        if fermion:
+            # deal with the global signs generated during conjugation
+            for ts in (tfi0|tfi1).tensors:
+                if len(ts.data._oddpos) % 2 == 1:
+                    ts.data.phase_global(inplace=True)
+
 
     return max_tdiff
 
