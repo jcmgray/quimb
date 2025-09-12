@@ -1492,7 +1492,7 @@ def _tn1d_fit_sum_sweep_2site(
             # contract its new value, maintaining index order
             tfiknew = tnik.contract(
                 all, optimize=optimize, output_inds=left_inds + right_inds
-            )#XXX: insert the parity tensor for fermion TN legs? 
+            )
 
             if fermion:
                 # flip the dual indices of the environment legs if needed
