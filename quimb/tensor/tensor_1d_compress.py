@@ -1481,9 +1481,9 @@ def _tn1d_fit_sum_sweep_2site(
                 # keep track of the environment legs for possible phase flips later
                 left_env_ind, right_env_ind = None, None
                 if type(envs["L", i, k]) is Tensor:
-                    (left_env_ind,) = tfi0.bonds(envs["L", i, k].contract())
+                    (left_env_ind,) = tfi0.bonds(envs["L", i, k])
                 if type(envs["R", i + 1, k]) is Tensor:
-                    (right_env_ind,) = tfi1.bonds(envs["R", i + 1, k].contract())
+                    (right_env_ind,) = tfi1.bonds(envs["R", i + 1, k])
 
             # remove old tensors
             del tnik["__FIT__", site0]
