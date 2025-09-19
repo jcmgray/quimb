@@ -4,6 +4,7 @@ from autoray import backend_like, compose, dag, do
 
 from ..utils import check_opt
 from .contraction import contract_strategy
+from .array_ops import isfermionic
 
 
 def tensor_network_distance(
@@ -94,6 +95,16 @@ def tensor_network_distance(
     if method == "dense":
         tnA = tnA.contract(output_inds=oix, preserve_tensor=True)
         tnB = tnB.contract(output_inds=oix, preserve_tensor=True)
+        if isfermionic(tnA.data):
+            # if fermion tensor, flip dual outer indices in A
+            data = tnA.data
+            dual_outer_axs = tuple(
+                ax
+                for ax, ix in enumerate(tnA.inds)
+                if (ix in oix) and not data.indices[ax].dual
+            )
+            if dual_outer_axs:
+                tnA.modify(data=data.phase_flip(*dual_outer_axs))
 
     # overlap method
     if xAA is None:
