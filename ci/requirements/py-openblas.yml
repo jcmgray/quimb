@@ -16,3 +16,5 @@ dependencies:
   - pytest-cov
   - scipy<1.15.0
   - tqdm
+- pip
+  - git+https://github.com/jcmgray/symmray.git@main
