@@ -1233,6 +1233,50 @@ class TensorNetwork3D(TensorNetworkGen):
             if equalize_norms:
                 for t in self.select_tensors(r.x_tag(inext)):
                     self.strip_exponent(t, equalize_norms)
+
+    def _contract_boundary_l2bp(
+        self,
+        xrange,
+        yrange,
+        zrange,
+        from_which,
+        max_bond=None,
+        cutoff=1e-10,
+        canonize=False,
+        layer_tags=None,
+        lazy=False,
+        equalize_norms=False,
+        optimize="auto-hq",
+        compress_opts=None,
+    ):
+        from quimb.tensor.belief_propagation import l2bp
+
+        compress_opts = ensure_dict(compress_opts)
+        r = Rotator3D(self, xrange, yrange, zrange, from_which)
+
+        for i0, i1 in pairwise(r.sweep):
+            tnp = self.partition([r.x_tag(i0), r.x_tag(i1)], inplace=True)[1]
+
+            regions = []
+            for j, k in r.sweep_other:
+                region_tag = f"__R{j},{k}__"
+                tnp[r.site_tag(i0, j, k)].add_tag(region_tag)
+                tnp[r.site_tag(i1, j, k)].add_tag(region_tag)
+                regions.append(region_tag)
+
+            l2bp.compress_l2bp(
+                tnp,
+                max_bond=max_bond,
+                cutoff=cutoff,
+                site_tags=regions,
+                optimize=optimize,
+                lazy=lazy,
+                inplace=True,
+                **compress_opts,
+            )
+            tnp.drop_tags(regions)
+            self |= tnp
+
             if equalize_norms:
                 for t in self.select_tensors(r.x_tag(i1)):
                     self.strip_exponent(t, equalize_norms)
@@ -1554,6 +1598,128 @@ class TensorNetwork3D(TensorNetworkGen):
     contract_boundary_ = functools.partialmethod(
         contract_boundary, inplace=True
     )
+
+    def contract_peps_sweep(
+        self,
+        max_bond,
+        cutoff=0.0,
+        from_which=None,
+        canonize=True,
+        canonize_interleave=True,
+        peps_opts=None,
+        mps_opts=None,
+        equalize_norms=False,
+        inplace=False,
+    ):
+        """This is a special case of ``contract_boundary`` where we sweep a
+        PEPS in a *single* direction across the 3D lattice, compressing it by
+        treating first rows and then columns as MPS, which we can fully
+        canonicalize. This is one natural generalization of contracting a PEPS
+        by sweeping a MPS across it. It is perhaps not a very accurate
+        contraction method and is provided as a reference only.
+        """
+        from quimb.tensor.tensor_2d import TensorNetwork2D
+
+        tn = self if inplace else self.copy()
+
+        if from_which is None:
+            plane_sizes = {
+                "xmin": tn.Ly * tn.Lz,
+                "ymin": tn.Lx * tn.Lz,
+                "zmin": tn.Lx * tn.Ly,
+            }
+            from_which = min(plane_sizes, key=plane_sizes.get)
+        else:
+            check_opt(from_which, ("xmin", "ymin", "zmin"))
+
+        peps_opts = ensure_dict(peps_opts)
+        peps_opts.setdefault("canonize", canonize)
+        peps_opts.setdefault("equalize_norms", equalize_norms)
+
+        # this specifies that we canonize <- and compress -> in one direction
+        # then move on to the second direction (^ v), rather than doing both
+        # in a single step
+        peps_opts.setdefault("canonize_interleave", canonize_interleave)
+        peps_opts.setdefault("compress_opts", {})
+        peps_opts["compress_opts"].setdefault("absorb", "right")
+        peps_opts.setdefault("canonize_opts", {})
+        peps_opts["canonize_opts"].setdefault("absorb", "right")
+
+        tn.contract_boundary_from_(
+            xrange=None,
+            yrange=None,
+            zrange=None,
+            from_which=from_which,
+            max_bond=max_bond,
+            cutoff=0.0,
+            **peps_opts,
+        )
+
+        site_tag_id = {
+            "xmin": "I0,{},{}",
+            "ymin": "I{},0,{}",
+            "zmin": "I{},{},0",
+        }[from_which]
+
+        tn.view_as_(
+            TensorNetwork2D, Lx=tn.Lx, Ly=tn.Ly, site_tag_id=site_tag_id
+        )
+
+        mps_opts = ensure_dict(mps_opts)
+        mps_opts.setdefault("max_bond", 2 * max_bond)
+        mps_opts.setdefault("sequence", ["b"])
+        mps_opts.setdefault("canonize", canonize)
+        mps_opts.setdefault("equalize_norms", equalize_norms)
+        mps_opts.setdefault("inplace", inplace)
+
+        return tn.contract_boundary(cutoff=cutoff, **mps_opts)
+
+    def contract_simple_sweep(
+        self,
+        max_bond,
+        power=1.0,
+        smudge=1e-12,
+        max_iterations=5,
+        equalize_norms=False,
+        peps_opts=None,
+        mps_opts=None,
+        inplace=False,
+    ):
+        tn = self if inplace else self.copy()
+
+        # sweep across the z-direction with a peps
+        peps_opts = ensure_dict(peps_opts)
+        peps_opts.setdefault("max_bond", max_bond)
+        peps_opts.setdefault("power", power)
+        peps_opts.setdefault("smudge", smudge)
+        peps_opts.setdefault("max_iterations", max_iterations)
+        for k in range(tn.Lz - 1):
+            for i, j in itertools.product(range(tn.Lx), range(tn.Ly)):
+                tn.contract_between(
+                    tn.site_tag(i, j, k),
+                    tn.site_tag(i, j, k + 1),
+                    equalize_norms=equalize_norms,
+                )
+            tnz = tn.select("Z0")
+            tnz.compress_all_simple_(**peps_opts)
+
+        # now 2D - sweep across the x-direction with an mps
+        mps_opts = ensure_dict(mps_opts)
+        mps_opts.setdefault("max_bond", max_bond)
+        mps_opts.setdefault("power", power)
+        mps_opts.setdefault("smudge", smudge)
+        mps_opts.setdefault("max_iterations", max_iterations)
+        for i in range(tn.Lx - 2):
+            for j in range(tn.Ly):
+                tn.contract_between(
+                    tn.site_tag(i, j, 0),
+                    tn.site_tag(i + 1, j, 0),
+                    equalize_norms=equalize_norms,
+                )
+            tnx = tn.select("X0")
+            tnx.compress_all_simple_(**mps_opts)
+
+        return tn.contract(optimize="auto-hq")
 
     def contract_ctmrg(
         self,
@@ -2406,10 +2572,16 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
     @classmethod
     def from_fill_fn(
-        cls, fill_fn, Lx, Ly, Lz, bond_dim, phys_dim=2,
+        cls,
+        fill_fn,
+        Lx,
+        Ly,
+        Lz,
+        bond_dim,
+        phys_dim=2,
         cyclic=False,
         shape="urfdlbp",
-        **peps3d_opts
+        **peps3d_opts,
     ):
         """Create a 3D PEPS from a filling function with signature
         ``fill_fn(shape)``.
