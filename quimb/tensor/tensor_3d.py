@@ -1070,12 +1070,6 @@ class TensorNetwork3D(TensorNetworkGen):
         compress_opts=None,
         canonize_opts=None,
     ):
-        if self.is_cyclic_x() or self.is_cyclic_y() or self.is_cyclic_z():
-            raise NotImplementedError(
-                "Cannot yet use _contract_boundary_core "
-                "(i.e. `mode=\"peps\"`) on cyclic networks."
-            )
-
         canonize_opts = ensure_dict(canonize_opts)
         canonize_opts.setdefault("absorb", "right")
         compress_opts = ensure_dict(compress_opts)
@@ -1580,6 +1574,15 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_opts["mode"] = mode
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["compress_opts"] = compress_opts
+
+        if (
+            (mode == "peps") and
+            (self.is_cyclic_x() or self.is_cyclic_y() or self.is_cyclic_z())
+        ):
+            raise NotImplementedError(
+                "Cannot yet use _contract_boundary_core "
+                "(i.e. `mode=\"peps\"`) on cyclic networks."
+            )
 
         return self._contract_interleaved_boundary_sequence(
             contract_boundary_opts=contract_boundary_opts,
