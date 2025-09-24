@@ -1070,6 +1070,12 @@ class TensorNetwork3D(TensorNetworkGen):
         compress_opts=None,
         canonize_opts=None,
     ):
+        if self.is_cyclic_x() or self.is_cyclic_y() or self.is_cyclic_z():
+            raise NotImplementedError(
+                "Cannot yet use _contract_boundary_core "
+                "(i.e. `mode=\"peps\"`) on cyclic networks."
+            )
+
         canonize_opts = ensure_dict(canonize_opts)
         canonize_opts.setdefault("absorb", "right")
         compress_opts = ensure_dict(compress_opts)
