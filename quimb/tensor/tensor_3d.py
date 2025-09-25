@@ -2,28 +2,28 @@
 
 import functools
 import itertools
-from operator import add
-from numbers import Integral
 from collections import defaultdict
-from itertools import product, combinations
+from itertools import combinations, product
+from numbers import Integral
+from operator import add
 
-from autoray import do, dag
+from autoray import dag, do
 
+from ..gen.rand import randn, seed_rand
 from ..utils import check_opt, ensure_dict, pairwise
 from ..utils import progbar as Progbar
-from ..gen.rand import randn, seed_rand
 from . import array_ops as ops
+from .tensor_arbgeom import (
+    TensorNetworkGen,
+    TensorNetworkGenVector,
+)
 from .tensor_core import (
+    Tensor,
     bonds,
     bonds_size,
     oset,
     rand_uuid,
     tags_to_oset,
-    Tensor,
-)
-from .tensor_arbgeom import (
-    TensorNetworkGen,
-    TensorNetworkGenVector,
 )
 
 
@@ -1070,6 +1070,11 @@ class TensorNetwork3D(TensorNetworkGen):
         compress_opts=None,
         canonize_opts=None,
     ):
+        """Core function for the 'peps' mode boundary contraction, which
+        eagerly contracts two layers of tensors, then compresses all the bonds,
+        possibly interleaving canonization between e.g. each direction of
+        compression sweep.
+        """
         canonize_opts = ensure_dict(canonize_opts)
         canonize_opts.setdefault("absorb", "right")
         compress_opts = ensure_dict(compress_opts)
@@ -1182,12 +1187,14 @@ class TensorNetwork3D(TensorNetworkGen):
 
         r = Rotator3D(self, xrange, yrange, zrange, from_which)
 
-        if canonize:
-            canonize_opts = ensure_dict(canonize_opts)
-            canonize_opts.setdefault("max_iterations", 2)
-            self.select(r.x_tag(r.sweep[0])).gauge_all_(**canonize_opts)
-
         for i, inext in pairwise(r.sweep):
+            if canonize:
+                # do some simple gauging of the layers we will be contracting
+                canonize_opts = ensure_dict(canonize_opts)
+                canonize_opts.setdefault("max_iterations", 2)
+                tn_x_layers = self.select_any([r.x_tag(i), r.x_tag(inext)])
+                tn_x_layers.gauge_all_(**canonize_opts)
+
             # we compute the projectors from an untouched copy
             tn_calc = self.copy()
 
@@ -1293,7 +1300,6 @@ class TensorNetwork3D(TensorNetworkGen):
         mode="peps",
         equalize_norms=False,
         compress_opts=None,
-        canonize_opts=None,
         inplace=False,
         **contract_boundary_opts,
     ):
@@ -1313,18 +1319,13 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_opts["compress_opts"] = compress_opts
 
         if mode == "peps":
-            return tn._contract_boundary_core(
-                canonize_opts=canonize_opts,
-                **contract_boundary_opts,
-            )
+            return tn._contract_boundary_core(**contract_boundary_opts)
 
         if mode == "l2bp3d":
             return tn._contract_boundary_l2bp(**contract_boundary_opts)
 
         if mode == "projector3d":
-            return tn._contract_boundary_projector(
-                canonize_opts=canonize_opts, **contract_boundary_opts
-            )
+            return tn._contract_boundary_projector(**contract_boundary_opts)
 
         return tn._contract_boundary_core_via_2d(
             method=mode, **contract_boundary_opts
@@ -1349,8 +1350,6 @@ class TensorNetwork3D(TensorNetworkGen):
         max_unfinished=1,
         around=None,
         equalize_norms=False,
-        canonize=False,
-        canonize_opts=None,
         final_contract=True,
         final_contract_opts=None,
         optimize="auto-hq",
@@ -1363,9 +1362,6 @@ class TensorNetwork3D(TensorNetworkGen):
         tn = self if inplace else self.copy()
 
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
-        if canonize:
-            canonize_opts = ensure_dict(canonize_opts)
-            canonize_opts.setdefault("max_iterations", 2)
 
         if progbar:
             pbar = Progbar()
@@ -1394,14 +1390,6 @@ class TensorNetwork3D(TensorNetworkGen):
         }
         separations = {
             d: boundaries[f"{d}max"] - boundaries[f"{d}min"] for d in "xyz"
-        }
-        boundary_tags = {
-            "xmin": tn.x_tag(boundaries["xmin"]),
-            "xmax": tn.x_tag(boundaries["xmax"]),
-            "ymin": tn.y_tag(boundaries["ymin"]),
-            "ymax": tn.y_tag(boundaries["ymax"]),
-            "zmin": tn.z_tag(boundaries["zmin"]),
-            "zmax": tn.z_tag(boundaries["zmax"]),
         }
         if around is not None:
             target_xmin = min(x[0] for x in around)
@@ -1468,9 +1456,6 @@ class TensorNetwork3D(TensorNetworkGen):
                     f"Ly={separations['y'] + 1}, "
                     f"Lz={separations['z'] + 1}"
                 )
-
-            if canonize:
-                tn.select(boundary_tags[direction]).gauge_all_(**canonize_opts)
 
             if direction[0] == "x":
                 if direction[1:] == "min":
@@ -1568,20 +1553,87 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **contract_boundary_opts,
     ):
-        """ """
+        """Contract this 3D tensor network by sweeping a sequence of the 2D
+        boundaries inwards.
+
+        Parameters
+        ----------
+        max_bond : int
+            The maximum bond dimension to allow during the contraction. You
+            can set this to `None` to use cutoff based compression only but
+            this is not recommended for loopy compressions.
+        cutoff : float, optional
+            The cutoff to use when compressing the bonds.
+        mode : {"peps", "projector3d", "l2bp3d", "projector", "l2bp",
+                "local-early", "local-late", "su", ...}, optional
+            The mode to use for the contraction:
+
+            - "peps" : eagerly contract two layers of tensors, then compress
+              all bonds, possibly interleaving canonization between. This is a
+              mode specific to 3D.
+            - "projector3d" : use CTMRG/HOTRG boundary projectors inserted
+              between layers to compress lazily. This mode is specific to 3D.
+            - "l2bp3d" : use lazy 2-norm belief propagation compression to
+              insert projectors between layers. This mode is specific to 3D.
+            - "projector", "l2bp", "local-early", "local-late", "su" :
+              use any 'arbitrary' geometry compression mode (see
+              `quimb.tensor.tensor_arbgeom_compress`) to compress the boundary.
+
+        canonize : bool, optional
+            Whether to perform canonization/gauging while compressing. What
+            this means depends on the mode.
+        compress_opts : dict, optional
+            Low level arguments to pass to the individual compression routine.
+        sequence : tuple[str, ...], optional
+            The sequence of boundaries to contract inwards. By default this
+            is chosen automatically as all three directions, but you can
+            specify a custom sequence with elements from {'xmin', 'xmax',
+            'ymin', 'ymax', 'zmin', 'zmax'}, which will be cycled through.
+        xmin, xmax, ymin, ymax, zmin, zmax : int, optional
+            The initial boundaries to start contracting from. By default
+            these are chosen as the outermost boundaries which contain
+            tensors.
+        max_separation : int, optional
+            The maximum separation to contract the boundaries to. By default
+            this is 1, meaning that the contraction stops when two opposing
+            boundaries are adjacent.
+        max_unfinished : int, optional
+            The maximum number of directions which are allowed to be not
+            finished (i.e. not reached max_separation) before stopping.
+        around : ((int, int, int), ...), optional
+            A set of coordinates to contract around. The contraction will
+            stop once all these coordinates are within the current boundaries.
+        equalize_norms : bool, optional
+            Whether to try and keep the norms of all tensors roughly equal
+            during the contraction, accruing any overall factors, log10, into
+            the attribute `tn.exponent`. If `equalize_norms` is not a specific
+            float, this factor is redistributed at the end of the contraction.
+        final_contract : bool, optional
+            Whether to perform the final, exact contraction of the remaining
+            tensors once the boundary contraction is finished. If ``around``
+            is specified, this is automatically set to ``False``.
+        final_contract_opts : dict, optional
+            Extra or custom options to pass to the final contraction step.
+        optimize : str or list, optional
+            The contraction path optimizer to use for the final contraction
+            step, if performed. By default uses "auto-hq".
+        progbar : bool, optional
+            Whether to show a progress bar of the boundary contraction.
+        inplace : bool, optional
+            Whether to perform the contraction in place or on a copy.
+        """
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["mode"] = mode
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["compress_opts"] = compress_opts
 
-        if (
-            (mode == "peps") and
-            (self.is_cyclic_x() or self.is_cyclic_y() or self.is_cyclic_z())
+        if (mode == "peps") and (
+            self.is_cyclic_x() or self.is_cyclic_y() or self.is_cyclic_z()
         ):
             raise NotImplementedError(
                 "Cannot yet use _contract_boundary_core "
-                "(i.e. `mode=\"peps\"`) on cyclic networks."
+                '(i.e. `mode="peps"`) on cyclic networks.'
             )
 
         return self._contract_interleaved_boundary_sequence(
@@ -1613,6 +1665,7 @@ class TensorNetwork3D(TensorNetworkGen):
         max_bond,
         cutoff=0.0,
         from_which=None,
+        mode="peps",
         canonize=True,
         canonize_interleave=True,
         peps_opts=None,
@@ -1626,6 +1679,31 @@ class TensorNetwork3D(TensorNetworkGen):
         canonicalize. This is one natural generalization of contracting a PEPS
         by sweeping a MPS across it. It is perhaps not a very accurate
         contraction method and is provided as a reference only.
+
+        Parameters
+        ----------
+        max_bond : int
+            The maximum bond dimension to allow during the contraction. By
+            default the MPS bond dimension is set to twice this value.
+        cutoff : float, optional
+            The cutoff to use when compressing the MPS.
+        from_which : {'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'}, optional
+            Which direction to contract the PEPS from. By default the
+            direction which requires the smallest area PEPS is chosen.
+        mode : {"peps", "projector", ...}, optional
+            The boundary contraction method to use. See ``contract_boundary``.
+        canonize : bool, optional
+            Whether to perform canonization/gauging during the PEPS and MPS
+            compression steps. By default applies to both. What this means
+            depends on the mode.
+        canonize_interleave : bool, optional
+            If ``mode=='peps'``, whether to interleave canonization and
+            compression sweeps, or do all canonization then all compression.
+        peps_opts : dict, optional
+            Extra or custom options to pass to the PEPS compression steps.
+        mps_opts : dict, optional
+            Extra or custom options to pass to the MPS compression steps.
+
         """
         from quimb.tensor.tensor_2d import TensorNetwork2D
 
@@ -1639,36 +1717,42 @@ class TensorNetwork3D(TensorNetworkGen):
             }
             from_which = min(plane_sizes, key=plane_sizes.get)
         else:
-            check_opt(from_which, ("xmin", "ymin", "zmin"))
+            check_opt(
+                "from_which",
+                from_which,
+                ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"),
+            )
 
         peps_opts = ensure_dict(peps_opts)
+        peps_opts.setdefault("max_bond", max_bond)
+        peps_opts.setdefault("cutoff", 0.0)
         peps_opts.setdefault("canonize", canonize)
         peps_opts.setdefault("equalize_norms", equalize_norms)
 
-        # this specifies that we canonize <- and compress -> in one direction
-        # then move on to the second direction (^ v), rather than doing both
-        # in a single step
-        peps_opts.setdefault("canonize_interleave", canonize_interleave)
-        peps_opts.setdefault("compress_opts", {})
-        peps_opts["compress_opts"].setdefault("absorb", "right")
-        peps_opts.setdefault("canonize_opts", {})
-        peps_opts["canonize_opts"].setdefault("absorb", "right")
+        if mode == "peps":
+            # this specifies that we canonize <- and compress -> in one
+            # direction then move on to the second direction (^ v), rather than
+            # doing both in a single step
+            peps_opts.setdefault("canonize_interleave", canonize_interleave)
+            peps_opts.setdefault("compress_opts", {})
+            peps_opts["compress_opts"].setdefault("absorb", "right")
+            peps_opts.setdefault("canonize_opts", {})
+            peps_opts["canonize_opts"].setdefault("absorb", "right")
 
         tn.contract_boundary_from_(
+            mode=mode,
             xrange=None,
             yrange=None,
             zrange=None,
             from_which=from_which,
-            max_bond=max_bond,
-            cutoff=0.0,
             **peps_opts,
         )
 
         site_tag_id = {
-            "xmin": "I0,{},{}",
-            "ymin": "I{},0,{}",
-            "zmin": "I{},{},0",
-        }[from_which]
+            "x": "I0,{},{}",
+            "y": "I{},0,{}",
+            "z": "I{},{},0",
+        }[from_which[0]]
 
         tn.view_as_(
             TensorNetwork2D, Lx=tn.Lx, Ly=tn.Ly, site_tag_id=site_tag_id
@@ -1676,12 +1760,13 @@ class TensorNetwork3D(TensorNetworkGen):
 
         mps_opts = ensure_dict(mps_opts)
         mps_opts.setdefault("max_bond", 2 * max_bond)
+        mps_opts.setdefault("cutoff", cutoff)
         mps_opts.setdefault("sequence", ["b"])
         mps_opts.setdefault("canonize", canonize)
         mps_opts.setdefault("equalize_norms", equalize_norms)
         mps_opts.setdefault("inplace", inplace)
 
-        return tn.contract_boundary(cutoff=cutoff, **mps_opts)
+        return tn.contract_boundary(**mps_opts)
 
     def contract_simple_sweep(
         self,
@@ -1762,6 +1847,8 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_opts["mode"] = mode
         contract_boundary_opts["compress_opts"] = compress_opts
         contract_boundary_opts["lazy"] = lazy
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["canonize_opts"] = canonize_opts
 
         if lazy:
             # we are implicitly asking for the tensor network
@@ -1786,8 +1873,6 @@ class TensorNetwork3D(TensorNetworkGen):
 
         return self._contract_interleaved_boundary_sequence(
             contract_boundary_opts=contract_boundary_opts,
-            canonize=canonize,
-            canonize_opts=canonize_opts,
             sequence=sequence,
             xmin=xmin,
             xmax=xmax,
@@ -2206,7 +2291,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
         if pbar is not None:
             pbar.set_description(
-                f"contracted HOTRG, " f"Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+                f"contracted HOTRG, Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
             )
             pbar.close()
 
