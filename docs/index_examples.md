@@ -19,6 +19,7 @@
 ./examples/ex_circuit_to_mpo
 ./examples/ex_htn_to_tn_2d
 ./examples/ex_tracing_tn_functions
+./examples/ex_real_time_simple_update.ipynb
 ```
 
 
