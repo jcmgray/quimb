@@ -1227,6 +1227,44 @@ class SparseOperatorBuilder:
 
         return Hk
 
+    def build_local_ham(self, dtype=None):
+        """Get a `LocalHamGen` object for this operator.
+
+        Parameters
+        ----------
+        dtype : numpy.dtype, optional
+            The data type of the matrix. If not provided, will be
+            automatically determined based on the terms in the operator.
+
+        Returns
+        -------
+        H : LocalHamGen
+            The local Hamiltonian representation of this operator.
+        """
+        from quimb.tensor.tensor_arbgeom_tebd import LocalHamGen
+
+        terms = self.build_local_terms(dtype=dtype)
+
+        H2 = {}
+        H1 = {}
+        for sites, hk in terms.items():
+            if len(sites) == 2:
+                H2[sites] = hk
+            elif len(sites) == 1:
+                H1[sites[0]] = hk
+            else:
+                raise NotImplementedError(
+                    "Only supports 1- and 2-site terms for now."
+                )
+
+        if not H1:
+            H1 = None
+        if not H2:
+            H2 = None
+
+        return LocalHamGen(H2, H1)
+
+
     def build_state_machine_greedy(self, atol=1e-12):
         # XXX: also implement optimal method : https://arxiv.org/abs/2006.02056
 
