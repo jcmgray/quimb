@@ -39,6 +39,16 @@ dependencies = [
 
 
 [project.optional-dependencies]
+recommended = [
+    "autograd",
+    "cmaes",
+    "cotengrust",
+    "kahypar",
+    "matplotlib",
+    "networkx",
+    "plotly",
+    "pygraphviz",
+]
 tensor = [
     "matplotlib>=2.0",
     "networkx>=2.3"
@@ -55,8 +65,6 @@ tests = [
 ]
 docs = [
     "astroid<3.0.0",
-    "autoray>=0.6.12",
-    "cotengra>=0.7.1",
     "doc2dash>=2.4.1",
     "furo",
     "ipython!=8.7.0",

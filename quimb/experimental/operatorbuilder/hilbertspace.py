@@ -376,7 +376,7 @@ class HilbertSpace:
     @property
     def size(self):
         """Get the size of this Hilbert space, taking into account the
-        symmetry and sector.
+        default symmetry and sector.
         """
         if self._size is None:
             self._size = self.get_size()

@@ -54,6 +54,7 @@ installation
 :maxdepth: 2
 index_tn
 index_matrix
+index_operator
 ```
 
 

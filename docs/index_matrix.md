@@ -4,10 +4,10 @@
 :numbered:
 :maxdepth: 2
 
-basics
-generate
-calculating quantities
-solving systems
-distributed parallelism - mpi
-dynamics and evolution
+matrix-basics
+matrix-generate
+matrix-calculating quantities
+matrix-solving systems
+matrix-distributed parallelism - mpi
+matrix-dynamics and evolution
 ```

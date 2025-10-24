@@ -116,6 +116,7 @@ def linkcode_resolve(domain, info):
     """
     import quimb
     import quimb.tensor  # needs to be imported
+    import quimb.operator  # needs to be imported
     import inspect
 
     if domain != "py":
