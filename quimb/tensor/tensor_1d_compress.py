@@ -430,6 +430,13 @@ def tensor_network_1d_compress_dm(
     bra.reindex_(ketbra_indmap)
 
     # construct dense left environments
+    # (n.b. K, B generally *collection* of tensors)
+    #
+    #     K══K══K══K══            ╔═K══          ╔═
+    #     │  │  │  │       ->    LE │     = ... LE
+    #     B══B══B══B══            ╚═B══          ╚═
+    #     0  1  2  3            i-1 i            i
+    #
     left_envs = {}
     left_envs[1] = norm.select(site_tags[0]).contract(
         preserve_tensor=True,
@@ -453,6 +460,16 @@ def tensor_network_1d_compress_dm(
 
     for i in range(N - 1, 0, -1):
         # form the reduced density matrix
+        #
+        #                          ket_site_inds[i]
+        #          │   ┃           :  new_bonds["k", i + 1]
+        #       ╔══K══REk          │  ┃
+        #      LE            =>    rhoi
+        #       ╚══B══REb          │  ┃
+        #          │   ┃           :  new_bonds["b", i + 1]
+        #                          bra_site_inds[i]
+        #     i-1  i  i+1
+        #
         rho_tensors = [
             left_envs[i],
             *ket.select_tensors(site_tags[i]),
@@ -466,6 +483,15 @@ def tensor_network_1d_compress_dm(
             right_inds.append(new_bonds["b", i + 1])
 
         # contract and then split it
+        #
+        #                    │  ┃
+        #     │  ┃           UUUU
+        #     │  ┃            ┃
+        #     rhoi    =>      s    ... bix, with size max_bond
+        #     │  ┃            ┃
+        #     │  ┃           UHUH
+        #                    │  ┃
+        #
         rhoi = tensor_contract(
             *rho_tensors,
             preserve_tensor=True,
@@ -485,12 +511,34 @@ def tensor_network_1d_compress_dm(
         )
 
         # turn bond into 'virtual right' indices
+        #
+        #     │  ┃
+        #     UUUU
+        #      ┃   ...new_bonds["k", i]
+        #     ✂
+        #      ┃   ...new_bonds["b", i]
+        #     UHUH
+        #     │  ┃
+        #
         (bix,) = s.inds
         U.reindex_({bix: new_bonds["k", i]})
         UH.reindex_({bix: new_bonds["b", i]})
         Us[i] = U
 
         # attach the unitaries to the right environments and contract
+        #
+        #         ┃
+        #       UUUUU†             new_bonds["k", i]
+        #       │   ┃     =>       ┃
+        #     ══K══REk          ══REk
+        #
+        #       i   i+1            i
+        #
+        #     ══B══REb          ══REb
+        #       │   ┃     =>       ┃
+        #       UHUHU†             new_bonds["b", i]
+        #         ┃
+        #
         right_ket_tensors = [*ket.select_tensors(site_tags[i]), U.H]
         right_bra_tensors = [*bra.select_tensors(site_tags[i]), UH.H]
         if right_env_ket is not None:
@@ -513,6 +561,11 @@ def tensor_network_1d_compress_dm(
         )
 
     # form the final site
+    #
+    #     │   ┏━━         │
+    #     K══REk     =    U━━
+    #     0   1           0
+    #
     Us[0] = tensor_contract(
         *ket.select_tensors(site_tags[0]),
         right_env_ket,
