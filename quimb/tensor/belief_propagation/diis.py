@@ -45,7 +45,6 @@ class Vectorizer:
         self.d = 0
 
         def extracter(x):
-
             if isinstance(x, Tensor):
                 array = x.data
                 size = x.size

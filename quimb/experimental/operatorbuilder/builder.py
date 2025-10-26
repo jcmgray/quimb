@@ -265,7 +265,6 @@ def simplify(terms, atol=1e-12, site_to_reg=None):
     return terms_simplified
 
 
-
 @functools.lru_cache(maxsize=None)
 def get_pauli_decomp(op, atol=1e-12, use_zx=False):
     """Decompose the given operator (specified as a label) into a sum of
@@ -310,8 +309,7 @@ def get_pauli_decomp(op, atol=1e-12, use_zx=False):
     if use_zx:
         # convert Y -> -iZX
         terms = [
-            (-1j * coeff, "zx")
-            if op == "y" else (coeff, op)
+            (-1j * coeff, "zx") if op == "y" else (coeff, op)
             for coeff, op in terms
         ]
 
@@ -564,7 +562,6 @@ class SparseOperatorBuilder:
 
         for term in terms:
             self.add_term(*term)
-
 
     @property
     def sites_used(self):
@@ -1263,7 +1260,6 @@ class SparseOperatorBuilder:
             H2 = None
 
         return LocalHamGen(H2, H1)
-
 
     def build_state_machine_greedy(self, atol=1e-12):
         # XXX: also implement optimal method : https://arxiv.org/abs/2006.02056

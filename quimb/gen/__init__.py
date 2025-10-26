@@ -1,2 +1,1 @@
-"""Functions for generating quantum objects.
-"""
+"""Functions for generating quantum objects."""

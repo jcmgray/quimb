@@ -8,10 +8,12 @@ requires_symmray = pytest.mark.skipif(
     reason="symmray not installed",
 )
 
+
 @requires_symmray
 @pytest.fixture
 def get_fpeps_and_norm():
     import symmray as sr
+
     # fPEPS parameters
     Lx = int(4)
     Ly = int(4)
@@ -29,10 +31,10 @@ def get_fpeps_and_norm():
     benchmark_norm = np.float64(9.347604511732736e18)
     return fpeps_norm, benchmark_norm
 
+
 @requires_symmray
 @pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
 def test_fmps_mpo_fitting(from_which, get_fpeps_and_norm):
-    
     fpeps_norm, benchmark_norm = get_fpeps_and_norm
     print(f"Benchmark norm: {benchmark_norm}")
     print("Boundary fMPS-MPO fitting contraction test:")

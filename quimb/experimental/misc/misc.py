@@ -582,3 +582,51 @@ def contract_greedily(
 
 
 contract_greedily_ = functools.partialmethod(contract_greedily, inplace=True)
+
+
+def all_mode_renormalization():
+    import numpy as np
+    from quimb.tensor.decomp import lq_stabilized, qr_stabilized, rdmul, ldmul
+
+    def make_random_truncator(d, chi, k=2):
+        x = np.zeros((d, chi))
+        np.fill_diagonal(x, 1)
+        x[chi - k :, -k:] = (
+            # np.random.randn(chi + k, k)
+            np.random.choice([-1, 1], size=(d - chi + k, k))
+        ) / k**0.5
+        return x
+
+    def svd_truncated_amr(
+        x,
+        cutoff=0.0,
+        cutoff_mode=4,
+        max_bond=-1,
+        absorb=0,
+        renorm=0,
+    ):
+        assert cutoff == 0.0
+        assert renorm == 0
+
+        U, s, VH = np.linalg.svd(x, full_matrices=False)
+        d = s.shape[0]
+        ssqrt = s**0.5
+
+        if max_bond < d:
+            N = make_random_truncator(d, max_bond)
+            U = rdmul(U, ssqrt) @ N
+            VH = dag(N) @ ldmul(ssqrt, VH)
+        else:
+            U = rdmul(U, ssqrt)
+            VH = ldmul(ssqrt, VH)
+
+        if absorb == 0:
+            return U, None, VH
+
+        if absorb == -1:
+            L, _, Q = lq_stabilized(VH)
+            return U @ L, None, Q
+
+        if absorb == 1:
+            Q, _, R = qr_stabilized(U)
+            return Q, None, R @ VH

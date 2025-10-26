@@ -1,5 +1,5 @@
-"""Functions for generating quantum operators.
-"""
+"""Functions for generating quantum operators."""
+
 import math
 import functools
 import itertools
@@ -10,13 +10,23 @@ import scipy.sparse as sp
 from scipy.special import comb
 
 from ..utils import isiterable, concat, unique
-from ..core import (qarray, make_immutable, get_thread_pool,
-                    par_reduce, isreal, qu, eye, kron, ikron)
+from ..core import (
+    qarray,
+    make_immutable,
+    get_thread_pool,
+    par_reduce,
+    isreal,
+    qu,
+    eye,
+    kron,
+    ikron,
+)
 
 
 # --------------------------------------------------------------------------- #
 #                      gates and other simple operators                       #
 # --------------------------------------------------------------------------- #
+
 
 @functools.lru_cache(maxsize=16)
 def spin_operator(label, S=1 / 2, **kwargs):
@@ -72,30 +82,32 @@ def spin_operator(label, S=1 / 2, **kwargs):
 
     label = label.lower()
 
-    if label in {'x', 'y'}:
+    if label in {"x", "y"}:
         for i in range(D - 1):
-            c = 0.5 * (S * (S + 1) - (ms[i] * ms[i + 1]))**0.5
-            op[i, i + 1] = -1.0j * c if (label == 'y') else c
-            op[i + 1, i] = 1.0j * c if (label == 'y') else c
+            c = 0.5 * (S * (S + 1) - (ms[i] * ms[i + 1])) ** 0.5
+            op[i, i + 1] = -1.0j * c if (label == "y") else c
+            op[i + 1, i] = 1.0j * c if (label == "y") else c
 
-    elif label == 'z':
+    elif label == "z":
         for i in range(D):
             op[i, i] = ms[i]
 
-    elif label in {'+', 'p', '-', 'm'}:
+    elif label in {"+", "p", "-", "m"}:
         for i in range(D - 1):
-            c = (S * (S + 1) - (ms[i] * ms[i + 1]))**0.5
-            if label in {'+', 'p'}:
+            c = (S * (S + 1) - (ms[i] * ms[i + 1])) ** 0.5
+            if label in {"+", "p"}:
                 op[i, i + 1] = c
             else:
                 op[i + 1, i] = c
 
-    elif label in {'i', 'I'}:
+    elif label in {"i", "I"}:
         np.fill_diagonal(op, 1.0)
 
     else:
-        raise ValueError(f"Label '{label}'' not understood, should be one of "
-                         "``['X', 'Y', 'Z', '+', '-', 'I']``.")
+        raise ValueError(
+            f"Label '{label}'' not understood, should be one of "
+            "``['X', 'Y', 'Z', '+', '-', 'I']``."
+        )
 
     op = qu(np.real_if_close(op), **kwargs)
 
@@ -127,27 +139,32 @@ def pauli(xyz, dim=2, **kwargs):
     --------
     spin_operator
     """
-    xyzmap = {0: 'i', 'i': 'i', 'I': 'i',
-              1: 'x', 'x': 'x', 'X': 'x',
-              2: 'y', 'y': 'y', 'Y': 'y',
-              3: 'z', 'z': 'z', 'Z': 'z'}
-    opmap = {('i', 2): lambda: eye(2, **kwargs),
-             ('x', 2): lambda: qu([[0, 1],
-                                   [1, 0]], **kwargs),
-             ('y', 2): lambda: qu([[0, -1j],
-                                   [1j, 0]], **kwargs),
-             ('z', 2): lambda: qu([[1, 0],
-                                   [0, -1]], **kwargs),
-             ('i', 3): lambda: eye(3, **kwargs),
-             ('x', 3): lambda: qu([[0, 1, 0],
-                                   [1, 0, 1],
-                                   [0, 1, 0]], **kwargs) / 2**.5,
-             ('y', 3): lambda: qu([[0, -1j, 0],
-                                   [1j, 0, -1j],
-                                   [0, 1j, 0]], **kwargs) / 2**.5,
-             ('z', 3): lambda: qu([[1, 0, 0],
-                                   [0, 0, 0],
-                                   [0, 0, -1]], **kwargs)}
+    xyzmap = {
+        0: "i",
+        "i": "i",
+        "I": "i",
+        1: "x",
+        "x": "x",
+        "X": "x",
+        2: "y",
+        "y": "y",
+        "Y": "y",
+        3: "z",
+        "z": "z",
+        "Z": "z",
+    }
+    opmap = {
+        ("i", 2): lambda: eye(2, **kwargs),
+        ("x", 2): lambda: qu([[0, 1], [1, 0]], **kwargs),
+        ("y", 2): lambda: qu([[0, -1j], [1j, 0]], **kwargs),
+        ("z", 2): lambda: qu([[1, 0], [0, -1]], **kwargs),
+        ("i", 3): lambda: eye(3, **kwargs),
+        ("x", 3): lambda: qu([[0, 1, 0], [1, 0, 1], [0, 1, 0]], **kwargs)
+        / 2**0.5,
+        ("y", 3): lambda: qu([[0, -1j, 0], [1j, 0, -1j], [0, 1j, 0]], **kwargs)
+        / 2**0.5,
+        ("z", 3): lambda: qu([[1, 0, 0], [0, 0, 0], [0, 0, -1]], **kwargs),
+    }
     op = opmap[(xyzmap[xyz], dim)]()
 
     # Operator is cached, so make sure it cannot be modified
@@ -158,10 +175,8 @@ def pauli(xyz, dim=2, **kwargs):
 
 @functools.lru_cache(8)
 def hadamard(dtype=complex, sparse=False):
-    """The Hadamard gate.
-    """
-    H = qu([[1., 1.],
-            [1., -1.]], dtype=dtype, sparse=sparse) / 2**0.5
+    """The Hadamard gate."""
+    H = qu([[1.0, 1.0], [1.0, -1.0]], dtype=dtype, sparse=sparse) / 2**0.5
     make_immutable(H)
     return H
 
@@ -171,39 +186,37 @@ def phase_gate(phi, dtype=complex, sparse=False):
     """The generalized qubit phase-gate, which adds phase ``phi`` to the
     ``|1>`` state.
     """
-    Rp = qu([[1., 0.],
-             [0., np.exp(1.0j * phi)]], dtype=dtype, sparse=sparse)
+    Rp = qu(
+        [[1.0, 0.0], [0.0, np.exp(1.0j * phi)]], dtype=dtype, sparse=sparse
+    )
     make_immutable(Rp)
     return Rp
 
 
 @functools.lru_cache(8)
 def T_gate(dtype=complex, sparse=False):
-    """The T-gate (pi/8 gate).
-    """
+    """The T-gate (pi/8 gate)."""
     return phase_gate(math.pi / 4, dtype=dtype, sparse=sparse)
 
 
 @functools.lru_cache(8)
 def S_gate(dtype=complex, sparse=False):
-    """The S-gate (phase gate).
-    """
+    """The S-gate (phase gate)."""
     return phase_gate(math.pi / 2, dtype=dtype, sparse=sparse)
 
 
 @functools.lru_cache(128)
-def rotation(phi, xyz='Z', dtype=complex, sparse=False):
-    """The single qubit rotation gate.
-    """
-    R = math.cos(phi / 2) * pauli('I') - 1.0j * math.sin(phi / 2) * pauli(xyz)
+def rotation(phi, xyz="Z", dtype=complex, sparse=False):
+    """The single qubit rotation gate."""
+    R = math.cos(phi / 2) * pauli("I") - 1.0j * math.sin(phi / 2) * pauli(xyz)
     R = qu(R, dtype=dtype, sparse=sparse)
     make_immutable(R)
     return R
 
 
-Rx = functools.partial(rotation, xyz='x')
-Ry = functools.partial(rotation, xyz='y')
-Rz = functools.partial(rotation, xyz='z')
+Rx = functools.partial(rotation, xyz="x")
+Ry = functools.partial(rotation, xyz="y")
+Rz = functools.partial(rotation, xyz="z")
 
 
 @functools.lru_cache(128)
@@ -236,9 +249,12 @@ def U_gate(theta, phi, lamda, dtype=complex, sparse=False):
 
     c2, s2 = cos(theta / 2), sin(theta / 2)
     U = qu(
-        [[c2, -exp(1j * lamda) * s2],
-         [exp(1j * phi) * s2, exp(1j * (lamda + phi)) * c2]],
-        dtype=dtype, sparse=sparse
+        [
+            [c2, -exp(1j * lamda) * s2],
+            [exp(1j * phi) * s2, exp(1j * (lamda + phi)) * c2],
+        ],
+        dtype=dtype,
+        sparse=sparse,
     )
     make_immutable(U)
     return U
@@ -310,12 +326,13 @@ def Wsqrt(**qu_opts):
 
 @functools.lru_cache(maxsize=8)
 def swap(dim=2, dtype=complex, **kwargs):
-    """The SWAP operator acting on subsystems of dimension `dim`.
-    """
+    """The SWAP operator acting on subsystems of dimension `dim`."""
     S = np.identity(dim**2, dtype=dtype)
-    S = (S.reshape([dim, dim, dim, dim])
-          .transpose([0, 3, 1, 2])
-          .reshape([dim**2, dim**2]))
+    S = (
+        S.reshape([dim, dim, dim, dim])
+        .transpose([0, 3, 1, 2])
+        .reshape([dim**2, dim**2])
+    )
     S = qu(S, dtype=dtype, **kwargs)
     make_immutable(S)
     return S
@@ -344,10 +361,7 @@ def fsim(theta, phi, dtype=complex, **kwargs):
     a = cos(theta)
     b = -1j * sin(theta)
     c = exp(-1j * phi)
-    gate = [[1, 0, 0, 0],
-            [0, a, b, 0],
-            [0, b, a, 0],
-            [0, 0, 0, c]]
+    gate = [[1, 0, 0, 0], [0, a, b, 0], [0, b, a, 0], [0, 0, 0, c]]
 
     gate = qu(gate, dtype=dtype, **kwargs)
     make_immutable(gate)
@@ -388,10 +402,7 @@ def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
 
     c = exp(-1j * (phi + 2 * gamma))
 
-    gate = [[1, 0, 0, 0],
-            [0, a1, b1, 0],
-            [0, b2, a2, 0],
-            [0, 0, 0, c]]
+    gate = [[1, 0, 0, 0], [0, a1, b1, 0], [0, b2, a2, 0], [0, 0, 0, c]]
     gate = qu(gate, dtype=dtype, **kwargs)
     make_immutable(gate)
     return gate
@@ -399,10 +410,16 @@ def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
 
 @functools.lru_cache(maxsize=4)
 def iswap(dtype=complex, **kwargs):
-    iswap = qu([[1., 0., 0., 0.],
-                [0., 0., 1j, 0.],
-                [0., 1j, 0., 0.],
-                [0., 0., 0., 1.]], dtype=dtype, **kwargs)
+    iswap = qu(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1j, 0.0],
+            [0.0, 1j, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=dtype,
+        **kwargs,
+    )
     make_immutable(iswap)
     return iswap
 
@@ -430,7 +447,7 @@ def ncontrolled_gate(ncontrol, gate, dtype=complex, sparse=False):
     dG = gate.shape[0]
     d = 2**ncontrol * dG
     # build gate dense and dtype='complex128'
-    op = np.identity(d, dtype='complex128')
+    op = np.identity(d, dtype="complex128")
     op[-dG:, -dG:] = gate
     # then convert to desired dtype and format
     op = qu(op, dtype=dtype, sparse=sparse)
@@ -454,7 +471,7 @@ def controlled(s, dtype=complex, sparse=False):
         The controlled two-qubit gate operator.
     """
     # alias not and NOT to x
-    s = {'NOT': 'x', 'not': 'x'}.get(s, s)
+    s = {"NOT": "x", "not": "x"}.get(s, s)
     gate = pauli(s)
     op = ncontrolled_gate(1, gate, dtype=dtype, sparse=sparse)
     make_immutable(op)
@@ -463,55 +480,48 @@ def controlled(s, dtype=complex, sparse=False):
 
 @functools.lru_cache(8)
 def CNOT(dtype=complex, sparse=False):
-    """The controlled-not gate.
-    """
-    return controlled('not', dtype=dtype, sparse=sparse)
+    """The controlled-not gate."""
+    return controlled("not", dtype=dtype, sparse=sparse)
 
 
 @functools.lru_cache(8)
 def cX(dtype=complex, sparse=False):
-    """The controlled-X gate.
-    """
-    return controlled('not', dtype=dtype, sparse=sparse)
+    """The controlled-X gate."""
+    return controlled("not", dtype=dtype, sparse=sparse)
 
 
 @functools.lru_cache(8)
 def cY(dtype=complex, sparse=False):
-    """The controlled-Y gate.
-    """
-    return controlled('Y', dtype=dtype, sparse=sparse)
+    """The controlled-Y gate."""
+    return controlled("Y", dtype=dtype, sparse=sparse)
 
 
 @functools.lru_cache(8)
 def cZ(dtype=complex, sparse=False):
-    """The controlled-Z gate.
-    """
-    return controlled('Z', dtype=dtype, sparse=sparse)
+    """The controlled-Z gate."""
+    return controlled("Z", dtype=dtype, sparse=sparse)
 
 
 @functools.lru_cache(8)
 def ccX(dtype=complex, sparse=False):
-    """The double controlled X gate, or Toffoli gate.
-    """
-    op = ncontrolled_gate(2, pauli('X'), dtype=dtype, sparse=sparse)
+    """The double controlled X gate, or Toffoli gate."""
+    op = ncontrolled_gate(2, pauli("X"), dtype=dtype, sparse=sparse)
     make_immutable(op)
     return op
 
 
 @functools.lru_cache(8)
 def ccY(dtype=complex, sparse=False):
-    """The double controlled Y gate.
-    """
-    op = ncontrolled_gate(2, pauli('Y'), dtype=dtype, sparse=sparse)
+    """The double controlled Y gate."""
+    op = ncontrolled_gate(2, pauli("Y"), dtype=dtype, sparse=sparse)
     make_immutable(op)
     return op
 
 
 @functools.lru_cache(8)
 def ccZ(dtype=complex, sparse=False):
-    """The double controlled Z gate.
-    """
-    op = ncontrolled_gate(2, pauli('Z'), dtype=dtype, sparse=sparse)
+    """The double controlled Z gate."""
+    op = ncontrolled_gate(2, pauli("Z"), dtype=dtype, sparse=sparse)
     make_immutable(op)
     return op
 
@@ -548,10 +558,10 @@ def hamiltonian_builder(fn):
     """
 
     @functools.wraps(fn)
-    def ham_fn(*args, stype='csr', sparse=False, **kwargs):
+    def ham_fn(*args, stype="csr", sparse=False, **kwargs):
         H = fn(*args, **kwargs)
 
-        if kwargs.get('dtype', None) is None and isreal(H):
+        if kwargs.get("dtype", None) is None and isreal(H):
             H = H.real
 
         if not sparse:
@@ -568,8 +578,15 @@ def hamiltonian_builder(fn):
 
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
-def ham_heis(n, j=1.0, b=0.0, cyclic=False,
-             parallel=False, nthreads=None, ownership=None):
+def ham_heis(
+    n,
+    j=1.0,
+    b=0.0,
+    cyclic=False,
+    parallel=False,
+    nthreads=None,
+    ownership=None,
+):
     """Constructs the nearest neighbour 1d heisenberg spin-1/2 hamiltonian.
 
     Parameters
@@ -617,21 +634,29 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=False,
 
     parallel = (n > 16) if parallel is None else parallel
 
-    op_kws = {'sparse': True, 'stype': 'coo'}
-    ikron_kws = {'sparse': True, 'stype': 'coo',
-                 'coo_build': True, 'ownership': ownership}
+    op_kws = {"sparse": True, "stype": "coo"}
+    ikron_kws = {
+        "sparse": True,
+        "stype": "coo",
+        "coo_build": True,
+        "ownership": ownership,
+    }
 
     # The basic operator (interaction and single b-field) that can be repeated.
     two_site_term = sum(
         j * kron(spin_operator(s, **op_kws), spin_operator(s, **op_kws))
-        for j, s in zip((jx, jy, jz), 'xyz')
+        for j, s in zip((jx, jy, jz), "xyz")
     ) - sum(
         b * kron(spin_operator(s, **op_kws), eye(2, **op_kws))
-        for b, s in zip((bx, by, bz), 'xyz') if b != 0.0
+        for b, s in zip((bx, by, bz), "xyz")
+        if b != 0.0
     )
 
-    single_site_b = sum(-b * spin_operator(s, **op_kws)
-                        for b, s in zip((bx, by, bz), 'xyz') if b != 0.0)
+    single_site_b = sum(
+        -b * spin_operator(s, **op_kws)
+        for b, s in zip((bx, by, bz), "xyz")
+        if b != 0.0
+    )
 
     def gen_term(i):
         # special case: the last b term needs to be added manually
@@ -641,15 +666,20 @@ def ham_heis(n, j=1.0, b=0.0, cyclic=False,
         # special case: the interaction between first and last spins if cyclic
         if i == n - 1:
             return sum(
-                j * ikron(spin_operator(s, **op_kws),
-                          dims, [0, n - 1], **ikron_kws)
-                for j, s in zip((jx, jy, jz), 'xyz') if j != 0.0)
+                j
+                * ikron(
+                    spin_operator(s, **op_kws), dims, [0, n - 1], **ikron_kws
+                )
+                for j, s in zip((jx, jy, jz), "xyz")
+                if j != 0.0
+            )
 
         # General term, on-site b-field plus interaction with next site
         return ikron(two_site_term, dims, [i, i + 1], **ikron_kws)
 
-    terms_needed = range(0 if not any((bx, by, bz)) else -1,
-                         n if cyclic else n - 1)
+    terms_needed = range(
+        0 if not any((bx, by, bz)) else -1, n if cyclic else n - 1
+    )
 
     if parallel:
         pool = get_thread_pool(nthreads)
@@ -716,11 +746,15 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, ownership=None):
     """
     dims = (2,) * n
 
-    op_kws = {'sparse': True, 'stype': 'coo'}
-    ikron_kws = {'sparse': True, 'stype': 'coo',
-                 'coo_build': True, 'ownership': ownership}
+    op_kws = {"sparse": True, "stype": "coo"}
+    ikron_kws = {
+        "sparse": True,
+        "stype": "coo",
+        "coo_build": True,
+        "ownership": ownership,
+    }
 
-    sxyz = [spin_operator(i, **op_kws) for i in 'xyz']
+    sxyz = [spin_operator(i, **op_kws) for i in "xyz"]
 
     coosj1 = np.array([(i, i + 1) for i in range(n)])
     coosj2 = np.array([(i, i + 2) for i in range(n)])
@@ -733,16 +767,21 @@ def ham_j1j2(n, j1=1.0, j2=0.5, bz=0.0, cyclic=False, ownership=None):
     def j1_terms():
         for coo in coosj1:
             if abs(coo[1] - coo[0]) == 1:  # can sum then tensor (faster)
-                yield ikron(sum(op & op for op in sxyz),
-                            dims, coo, **ikron_kws)
+                yield ikron(
+                    sum(op & op for op in sxyz), dims, coo, **ikron_kws
+                )
             else:  # tensor then sum (slower)
                 yield sum(ikron(op, dims, coo, **ikron_kws) for op in sxyz)
 
     def j2_terms():
         for coo in coosj2:
             if abs(coo[1] - coo[0]) == 2:  # can add then tensor (faster)
-                yield ikron(sum(op & eye(2, **op_kws) & op for op in sxyz),
-                            dims, coo, **ikron_kws)
+                yield ikron(
+                    sum(op & eye(2, **op_kws) & op for op in sxyz),
+                    dims,
+                    coo,
+                    **ikron_kws,
+                )
             else:
                 yield sum(ikron(op, dims, coo, **ikron_kws) for op in sxyz)
 
@@ -760,21 +799,21 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed=None, beta=None):
     if isinstance(dh, (tuple, list)):
         dhds = dh
     else:
-        dh_dim = {0: '', 1: 'z', 2: 'xy', 3: 'xyz'}.get(dh_dim, dh_dim)
-        dhds = tuple((dh if d in dh_dim else 0) for d in 'xyz')
+        dh_dim = {0: "", 1: "z", 2: "xy", 3: "xyz"}.get(dh_dim, dh_dim)
+        dhds = tuple((dh if d in dh_dim else 0) for d in "xyz")
 
     if seed is not None:
         np.random.seed(seed)
 
     # sort out the noise distribution
-    if dh_dist in {'g', 'gauss', 'gaussian', 'normal'}:
+    if dh_dist in {"g", "gauss", "gaussian", "normal"}:
         rs = np.random.randn(3, n)
 
-    elif dh_dist in {'s', 'flat', 'square', 'uniform', 'box'}:
+    elif dh_dist in {"s", "flat", "square", "uniform", "box"}:
         rs = 2.0 * np.random.rand(3, n) - 1.0
 
-    elif dh_dist in {'qp', 'quasiperiodic', 'qr', 'quasirandom'}:
-        if dh_dim != 'z':
+    elif dh_dist in {"qp", "quasiperiodic", "qr", "quasirandom"}:
+        if dh_dim != "z":
             raise ValueError("dh_dim should be 1 or 'z' for dh_dist='qp'.")
 
         if beta is None:
@@ -792,9 +831,19 @@ def _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed=None, beta=None):
 
 
 @hamiltonian_builder
-def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=False,
-            seed=None, dh_dist="s", dh_dim=1, beta=None, ownership=None):
-    """ Constructs a heisenberg hamiltonian with isotropic coupling and
+def ham_mbl(
+    n,
+    dh,
+    j=1.0,
+    bz=0.0,
+    cyclic=False,
+    seed=None,
+    dh_dist="s",
+    dh_dim=1,
+    beta=None,
+    ownership=None,
+):
+    """Constructs a heisenberg hamiltonian with isotropic coupling and
     random fields acting on each spin - the many-body localized (MBL)
     spin hamiltonian.
 
@@ -850,19 +899,32 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=False,
     dhds, rs = _gen_mbl_random_factors(n, dh, dh_dim, dh_dist, seed, beta)
 
     # the base hamiltonian ('csr' is most efficient format to add with)
-    ham = ham_heis(n=n, j=j, b=bz, cyclic=cyclic,
-                   sparse=True, stype='csr', ownership=ownership)
+    ham = ham_heis(
+        n=n,
+        j=j,
+        b=bz,
+        cyclic=cyclic,
+        sparse=True,
+        stype="csr",
+        ownership=ownership,
+    )
 
-    op_kws = {'sparse': True, 'stype': 'coo'}
-    ikron_kws = {'sparse': True, 'stype': 'coo',
-                 'coo_build': True, 'ownership': ownership}
+    op_kws = {"sparse": True, "stype": "coo"}
+    ikron_kws = {
+        "sparse": True,
+        "stype": "coo",
+        "coo_build": True,
+        "ownership": ownership,
+    }
 
     def dh_terms():
         for i in range(n):
             # dhd - the total strength in direction x, y, or z
             # r - the random strength in direction x, y, or z for site i
-            hdh = sum(dhd * r * spin_operator(s, **op_kws)
-                      for dhd, r, s in zip(dhds, rs[:, i], 'xyz'))
+            hdh = sum(
+                dhd * r * spin_operator(s, **op_kws)
+                for dhd, r, s in zip(dhds, rs[:, i], "xyz")
+            )
             yield ikron(hdh, (2,) * n, i, **ikron_kws)
 
     ham = ham + sum(dh_terms())
@@ -871,8 +933,9 @@ def ham_mbl(n, dh, j=1.0, bz=0.0, cyclic=False,
 
 
 @hamiltonian_builder
-def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
-                parallel=False, ownership=None):
+def ham_heis_2D(
+    n, m, j=1.0, bz=0.0, cyclic=False, parallel=False, ownership=None
+):
     r"""Construct the 2D spin-1/2 heisenberg model hamiltonian:
 
     .. math::
@@ -941,9 +1004,13 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
     pairs_ss = tuple(itertools.product(gen_pairs(), js))
 
     # build the hamiltonian in sparse 'coo' format always for efficiency
-    op_kws = {'sparse': True, 'stype': 'coo'}
-    ikron_kws = {'sparse': True, 'stype': 'coo',
-                 'coo_build': True, 'ownership': ownership}
+    op_kws = {"sparse": True, "stype": "coo"}
+    ikron_kws = {
+        "sparse": True,
+        "stype": "coo",
+        "coo_build": True,
+        "ownership": ownership,
+    }
 
     # generate XX, YY and ZZ interaction from
     #     e.g. arg ([(3, 4), (3, 5)], 'z')
@@ -954,20 +1021,22 @@ def ham_heis_2D(n, m, j=1.0, bz=0.0, cyclic=False,
 
     # generate Z field
     def fields(site):
-        Sz = spin_operator('z', **op_kws)
+        Sz = spin_operator("z", **op_kws)
         return ikron(bz * Sz, dims, inds=[site], **ikron_kws)
 
     if not parallel:
         # combine all terms
         all_terms = itertools.chain(
             map(interactions, pairs_ss),
-            map(fields, sites) if bz != 0.0 else ())
+            map(fields, sites) if bz != 0.0 else (),
+        )
         H = functools.reduce(operator.add, all_terms)
     else:
         pool = get_thread_pool()
         all_terms = itertools.chain(
             pool.map(interactions, pairs_ss),
-            pool.map(fields, sites) if bz != 0.0 else ())
+            pool.map(fields, sites) if bz != 0.0 else (),
+        )
         H = par_reduce(operator.add, all_terms)
 
     return H
@@ -1048,13 +1117,14 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
         # Number of 'up' spins
         k = n / 2 + s
         if not k.is_integer():
-            raise ValueError(f"{s} is not a valid spin half subspace for {n} "
-                             "spins.")
+            raise ValueError(
+                f"{s} is not a valid spin half subspace for {n} spins."
+            )
         k = int(round(k))
         # Size of subspace
         p += comb(n, k, exact=True)
         # Find all computational basis states with correct number of 0s and 1s
-        base_perm = '0' * (n - k) + '1' * k
+        base_perm = "0" * (n - k) + "1" * k
         all_perms += [uniq_perms(base_perm)]
 
     # Coordinates
@@ -1062,8 +1132,9 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
     cjs = tuple(int("".join(perm), 2) for perm in concat(all_perms))
 
     # Construct matrix which projects only on to these basis states
-    prj = sp.coo_matrix((np.ones(p, dtype=dtype), (cjs, cis)),
-                        shape=(2**n, p), dtype=dtype)
+    prj = sp.coo_matrix(
+        (np.ones(p, dtype=dtype), (cjs, cis)), shape=(2**n, p), dtype=dtype
+    )
     prj = qu(prj, stype=stype, dtype=dtype)
     make_immutable(prj)
     return prj
@@ -1071,12 +1142,11 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
 
 @functools.lru_cache(8)
 def create(n=2, **qu_opts):
-    """The creation operator acting on an n-level system.
-    """
+    """The creation operator acting on an n-level system."""
     data = np.zeros((n, n))
 
     for i in range(n):
-        data[i, i - 1] = i ** 0.5
+        data[i, i - 1] = i**0.5
 
     ap = qu(data, **qu_opts)
     make_immutable(ap)
@@ -1085,8 +1155,7 @@ def create(n=2, **qu_opts):
 
 @functools.lru_cache(8)
 def destroy(n=2, **qu_opts):
-    """The annihilation operator acting on an n-level system.
-    """
+    """The annihilation operator acting on an n-level system."""
     am = create(n, **qu_opts).T.copy()
     make_immutable(am)
     return am
@@ -1094,8 +1163,7 @@ def destroy(n=2, **qu_opts):
 
 @functools.lru_cache(8)
 def num(n, **qu_opts):
-    """The number operator acting on an n-level system.
-    """
+    """The number operator acting on an n-level system."""
     ap, am = create(n, **qu_opts), destroy(n, **qu_opts)
     an = qu(ap @ am, **qu_opts)
     make_immutable(an)
@@ -1104,8 +1172,9 @@ def num(n, **qu_opts):
 
 @functools.lru_cache(maxsize=8)
 @hamiltonian_builder
-def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=False,
-                         parallel=False, ownership=None):
+def ham_hubbard_hardcore(
+    n, t=0.5, V=1.0, mu=1.0, cyclic=False, parallel=False, ownership=None
+):
     """Generate the spinless fermion hopping hamiltonian.
 
     Parameters
@@ -1134,9 +1203,13 @@ def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=False,
         The hamiltonian.
     """
 
-    op_kws = {'sparse': True, 'stype': 'coo'}
-    ikron_kws = {'sparse': True, 'stype': 'csr',
-                 'coo_build': True, 'ownership': ownership}
+    op_kws = {"sparse": True, "stype": "coo"}
+    ikron_kws = {
+        "sparse": True,
+        "stype": "csr",
+        "coo_build": True,
+        "ownership": ownership,
+    }
 
     cdag, c, cnum = (f(2, **op_kws) for f in (create, destroy, num))
     neighbor_term = t * ((cdag & c) + (c & cdag)) + V * (cnum & cnum)
@@ -1159,7 +1232,7 @@ def ham_hubbard_hardcore(n, t=0.5, V=1., mu=1., cyclic=False,
             yield ikron(-mu * cnum, dims, i, **ikron_kws)
 
     if parallel is None:
-        parallel = (n >= 14)
+        parallel = n >= 14
 
     if parallel:
         return par_reduce(operator.add, terms())

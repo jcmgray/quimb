@@ -1,5 +1,5 @@
-"""Implementation of arbitrary geometry wavefunction cluster update.
-"""
+"""Implementation of arbitrary geometry wavefunction cluster update."""
+
 import functools
 
 from quimb.tensor.tensor_core import ensure_dict, bonds, bonds_size, do

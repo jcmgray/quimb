@@ -4,5 +4,5 @@
 :numbered:
 :maxdepth: 2
 
-operator-basics
+operator/operator-basics
 ```

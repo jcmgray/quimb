@@ -3,6 +3,7 @@
 TODO:
 - [ ] check and cache on input shapes
 """
+
 import functools
 
 import autoray as ar
@@ -32,7 +33,6 @@ class AutojittedTN:
 
         @self.decorator(**self.decorator_opts)
         def pyfn(*pytrees):
-
             # inject back into the skeletons
             flat = [unpack(p, skel) for p, skel in zip(pytrees, skeletons)]
             args, kwargs = ar.tree_unflatten(flat, ref_tree)

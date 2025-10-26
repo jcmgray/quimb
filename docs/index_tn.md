@@ -4,13 +4,13 @@
 :numbered:
 :maxdepth: 2
 
-tensor-basics
-tensor-contraction
-tensor-drawing
-tensor-optimization
-tensor-1d
-tensor-2d
-tensor-circuit
-tensor-circuit-mps
-tensor-design
+tensor/tensor-basics
+tensor/tensor-contraction
+tensor/tensor-drawing
+tensor/tensor-optimization
+tensor/tensor-1d
+tensor/tensor-2d
+tensor/tensor-circuit
+tensor/tensor-circuit-mps
+tensor/tensor-design
 ```

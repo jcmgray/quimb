@@ -325,7 +325,7 @@ class D1BP(BeliefPropagationCommon):
                 stn.tensor_map[tidr].gate_(pe, ix)
             else:
                 # insert boundary message
-                tid, = tids
+                (tid,) = tids
                 m = self.messages[ix, tid]
                 t = stn.tensor_map[tid]
                 t.vector_reduce_(ix, m)
@@ -541,7 +541,7 @@ class D1BP(BeliefPropagationCommon):
             mantissa = self.sign * sum(zr * cr for zr, cr in zvals)
             if strip_exponent:
                 return mantissa, self.exponent
-            return mantissa * 10 ** self.exponent
+            return mantissa * 10**self.exponent
 
         return combine_local_contractions(
             zvals,

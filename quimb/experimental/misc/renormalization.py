@@ -8,7 +8,11 @@ from quimb.tensor.tensor_2d import Rotator2D
 
 
 def CTMRG(
-    T, A, C, L, max_bond,
+    T,
+    A,
+    C,
+    L,
+    max_bond,
     strip_exponent=False,
 ):
     """Contract the translationally invariant tensor network given by bulk,
@@ -63,19 +67,19 @@ def CTMRG(
     order_a_inwards = True
     order_b_inwards = True
 
-    C_inds = ('c-a', 'c-b')
+    C_inds = ("c-a", "c-b")
     if order_a_inwards:
-        A_inds = ('c-a', 'a-d', 'a-t')
+        A_inds = ("c-a", "a-d", "a-t")
     else:
-        A_inds = ('a-d', 'c-a', 'a-t')
+        A_inds = ("a-d", "c-a", "a-t")
     if order_b_inwards:
-        B_inds = ('c-b', 'b-r', 'b-t')
+        B_inds = ("c-b", "b-r", "b-t")
     else:
-        B_inds = ('b-r', 'c-b', 'b-t')
-    T_inds = ('a-t', 't-d', 't-r', 'b-t')
+        B_inds = ("b-r", "c-b", "b-t")
+    T_inds = ("a-t", "t-d", "t-r", "b-t")
 
-    AC_inds = ('a-d', 't-d')
-    CB_inds = ('b-r', 't-r')
+    AC_inds = ("a-d", "t-d")
+    CB_inds = ("b-r", "t-r")
 
     d = T.shape[0]
     for l in range(2, L - 2, 2):
@@ -88,10 +92,10 @@ def CTMRG(
         #     └┬─┘      └┬─┘
         #      │a-d      │t-d
         tn_corner = (
-            qtn.Tensor(C, inds=C_inds, tags='C') |
-            qtn.Tensor(A, inds=A_inds, tags='A') |
-            qtn.Tensor(B, inds=B_inds, tags='B') |
-            qtn.Tensor(T, inds=T_inds, tags='T')
+            qtn.Tensor(C, inds=C_inds, tags="C")
+            | qtn.Tensor(A, inds=A_inds, tags="A")
+            | qtn.Tensor(B, inds=B_inds, tags="B")
+            | qtn.Tensor(T, inds=T_inds, tags="T")
         )
 
         # make the projector
@@ -110,9 +114,9 @@ def CTMRG(
 
         if asymmetric:
             tn_corner_proj = tn_corner.copy()
-            tn_corner_proj |= qtn.Tensor(U, inds=(*AC_inds,'new-d'), tags='U')
-            tn_corner_proj |= qtn.Tensor(U, inds=(*CB_inds,'new-r'), tags='V')
-            C = tn_corner_proj.to_dense(['new-d'], ['new-r'])
+            tn_corner_proj |= qtn.Tensor(U, inds=(*AC_inds, "new-d"), tags="U")
+            tn_corner_proj |= qtn.Tensor(U, inds=(*CB_inds, "new-r"), tags="V")
+            C = tn_corner_proj.to_dense(["new-d"], ["new-r"])
         else:
             C = ar.do("diag", s)
 
@@ -122,20 +126,17 @@ def CTMRG(
         #     └┬─┘     └┬─┘
         #      │a-d     │t-d
         tn_side = (
-            (
-                qtn.Tensor(A, inds=['a-u', 'a-d', 'a-t'], tags='A')
-                if order_a_inwards else
-                qtn.Tensor(A, inds=['a-d', 'a-u', 'a-t'], tags='A')
-             ) |
-            qtn.Tensor(T, inds=['a-t', 't-d', 't-r', 't-u'], tags='T')
-        )
+            qtn.Tensor(A, inds=["a-u", "a-d", "a-t"], tags="A")
+            if order_a_inwards
+            else qtn.Tensor(A, inds=["a-d", "a-u", "a-t"], tags="A")
+        ) | qtn.Tensor(T, inds=["a-t", "t-d", "t-r", "t-u"], tags="T")
         tn_side_proj = tn_side.copy()
-        tn_side_proj |= qtn.Tensor(U, inds=['a-u', 't-u', 'new-u'], tags='U')
-        tn_side_proj |= qtn.Tensor(U, inds=['a-d', 't-d', 'new-d'], tags='V')
+        tn_side_proj |= qtn.Tensor(U, inds=["a-u", "t-u", "new-u"], tags="U")
+        tn_side_proj |= qtn.Tensor(U, inds=["a-d", "t-d", "new-d"], tags="V")
         if order_a_inwards:
-            A = tn_side_proj.to_dense(['new-u'], ['new-d'], ['t-r'])
+            A = tn_side_proj.to_dense(["new-u"], ["new-d"], ["t-r"])
         else:
-            A = tn_side_proj.to_dense(['new-d'], ['new-u'], ['t-r'])
+            A = tn_side_proj.to_dense(["new-d"], ["new-u"], ["t-r"])
 
         if not asymmetric:
             B = A
@@ -149,45 +150,42 @@ def CTMRG(
             #          └┬─┘
             #           │t-d
             tn_side = (
-                (
-                    qtn.Tensor(B, inds=['b-l', 'b-r', 'b-t'], tags='B')
-                    if order_b_inwards else
-                    qtn.Tensor(B, inds=['b-r', 'b-l', 'b-t'], tags='B')
-                ) |
-                qtn.Tensor(T, inds=['t-l', 't-d', 't-r', 'b-t'], tags='T')
-            )
+                qtn.Tensor(B, inds=["b-l", "b-r", "b-t"], tags="B")
+                if order_b_inwards
+                else qtn.Tensor(B, inds=["b-r", "b-l", "b-t"], tags="B")
+            ) | qtn.Tensor(T, inds=["t-l", "t-d", "t-r", "b-t"], tags="T")
             tn_side_proj = tn_side.copy()
-            tn_side_proj |= qtn.Tensor(U, inds=['b-l', 't-l', 'n-l'], tags='U')
-            tn_side_proj |= qtn.Tensor(U, inds=['b-r', 't-r', 'n-r'], tags='V')
+            tn_side_proj |= qtn.Tensor(U, inds=["b-l", "t-l", "n-l"], tags="U")
+            tn_side_proj |= qtn.Tensor(U, inds=["b-r", "t-r", "n-r"], tags="V")
 
             if order_b_inwards:
-                B = tn_side_proj.to_dense(['n-l'], ['n-r'], ['t-d'])
+                B = tn_side_proj.to_dense(["n-l"], ["n-r"], ["t-d"])
             else:
-                B = tn_side_proj.to_dense(['n-r'], ['n-l'], ['t-d'])
+                B = tn_side_proj.to_dense(["n-r"], ["n-l"], ["t-d"])
 
         if strip_exponent:
             # Anorm = ar.do('linalg.norm', A)
             # TODO: work out how to rescale given a different norm each time
             Anorm = 2
-            exponent += 4 * l * ar.do('log10', Anorm)
+            exponent += 4 * l * ar.do("log10", Anorm)
             A = A / Anorm
             B = B / Anorm
 
-            Cnorm = ar.do('linalg.norm', C)
-            exponent += 4 * ar.do('log10', Cnorm)
+            Cnorm = ar.do("linalg.norm", C)
+            exponent += 4 * ar.do("log10", Cnorm)
             C = C / Cnorm
 
     tn_corner = (
-        qtn.Tensor(C, inds=C_inds, tags='C') |
-        qtn.Tensor(A, inds=A_inds, tags='A') |
-        qtn.Tensor(B, inds=B_inds, tags='B') |
-        qtn.Tensor(T, inds=T_inds, tags='T')
+        qtn.Tensor(C, inds=C_inds, tags="C")
+        | qtn.Tensor(A, inds=A_inds, tags="A")
+        | qtn.Tensor(B, inds=B_inds, tags="B")
+        | qtn.Tensor(T, inds=T_inds, tags="T")
     )
 
     # make the projector
     CTM = tn_corner.to_dense(AC_inds, CB_inds)
 
-    return ar.do('trace', CTM @ CTM @ CTM @ CTM), exponent
+    return ar.do("trace", CTM @ CTM @ CTM @ CTM), exponent
 
 
 def coarse_grain_eager(

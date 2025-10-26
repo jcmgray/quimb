@@ -1,5 +1,4 @@
-"""Linear algebra routines to solve quantum systems for example.
-"""
+"""Linear algebra routines to solve quantum systems for example."""
 
 from ..utils import find_library
 

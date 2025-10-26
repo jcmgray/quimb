@@ -613,7 +613,9 @@ def compress_between_tids_bondenv_gloop_expand(
         # and and possibly gauge region
         k = self._select_tids(r, virtual=False)
         if gauges is not None:
-            k.gauge_simple_insert(gauges, power=gauge_power, smudge=gauge_smudge)
+            k.gauge_simple_insert(
+                gauges, power=gauge_power, smudge=gauge_smudge
+            )
 
         # contract the 4-index bond tensor given by this region
         k._cut_between_tids(tida, tidb, "kl", "kr")

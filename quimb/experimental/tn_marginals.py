@@ -11,7 +11,6 @@ def compute_all_marginals_via_slicing(
     progbar=False,
     **contract_kwargs,
 ):
-
     tree0 = tn.contraction_tree(output_inds=(), optimize=optimize)
     arrays = tn.arrays
 
@@ -25,7 +24,6 @@ def compute_all_marginals_via_slicing(
         output_inds = tqdm(output_inds)
 
     for ix in output_inds:
-
         # convert quimb index to cotengra unicode symbol
         symbol = symbol_map[ix]
         symbol
@@ -55,9 +53,7 @@ def compute_all_marginals_via_slicing(
                     arrays, s, **contract_kwargs, strip_exponent=True
                 )
             else:
-                p = tree_v.contract_slice(
-                    arrays, s, **contract_kwargs
-                )
+                p = tree_v.contract_slice(arrays, s, **contract_kwargs)
                 exponent = 0.0
 
             p = float(p)
@@ -71,8 +67,7 @@ def compute_all_marginals_via_slicing(
             rel_exponent = exponent - overall_exponent
 
             # add result to correct index position
-            wv[key[symbol]] += p * 10 ** rel_exponent
-
+            wv[key[symbol]] += p * 10**rel_exponent
 
         if Z is None:
             # completed first index, can compute Z
@@ -105,10 +100,11 @@ def compute_all_marginals_via_slicing_shared(
 
     # stack into a single lazy array
     return do(
-        'stack', tuple(
-            do('stack', (w[ix][0][0], w[ix][0][1], w[ix][1]))
+        "stack",
+        tuple(
+            do("stack", (w[ix][0][0], w[ix][0][1], w[ix][1]))
             for ix in output_inds
-        )
+        ),
     )
 
 

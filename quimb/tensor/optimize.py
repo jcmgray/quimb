@@ -971,8 +971,7 @@ class ADAM:
 
 
 class CADAM(ADAM):
-    """Cautious ADAM - https://arxiv.org/abs/2411.16085.
-    """
+    """Cautious ADAM - https://arxiv.org/abs/2411.16085."""
 
     def __init__(self):
         super().__init__(cautious=True)

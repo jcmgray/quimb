@@ -1,5 +1,4 @@
-"""Manages the spawning of mpi processes to send to the various solvers.
-"""
+"""Manages the spawning of mpi processes to send to the various solvers."""
 
 import os
 import functools

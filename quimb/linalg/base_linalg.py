@@ -1,5 +1,5 @@
-"""Backend agnostic functions for solving matrices either fully or partially.
-"""
+"""Backend agnostic functions for solving matrices either fully or partially."""
+
 import functools
 import warnings
 

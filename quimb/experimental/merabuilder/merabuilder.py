@@ -15,6 +15,7 @@ TODO::
     - [x] hook into other arbgeom infrastructure for computing rdms etc
 
 """
+
 import itertools
 import functools
 from quimb.tensor.tensor_core import (

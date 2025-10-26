@@ -526,6 +526,7 @@ class ExponentialGeometricRollingDiffMean:
     """Track the absolute rolling mean of diffs between values, weighted in a
     exponentially decaying geometric fashion.
     """
+
     def __init__(self, factor=1 / 3, initial=1.0):
         self.y_prev = None
         self.x_prev = None

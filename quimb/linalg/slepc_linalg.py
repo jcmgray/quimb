@@ -1,5 +1,4 @@
-"""Interface to slepc4py for solving advanced eigenvalue problems.
-"""
+"""Interface to slepc4py for solving advanced eigenvalue problems."""
 
 import numpy as np
 import scipy.sparse as sp

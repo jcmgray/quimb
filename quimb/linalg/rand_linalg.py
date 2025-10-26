@@ -1,5 +1,5 @@
-"""Randomized iterative methods for decompositions.
-"""
+"""Randomized iterative methods for decompositions."""
+
 from numbers import Integral
 
 import numpy as np

@@ -1,5 +1,4 @@
-"""Tools for performing TEBD like algorithms on a 2D lattice.
-"""
+"""Tools for performing TEBD like algorithms on a 2D lattice."""
 
 from itertools import starmap
 
@@ -75,10 +74,15 @@ class LocalHam2D(LocalHamGen):
         # possibly fill in default gates
         default_H2 = H2.pop(None, None)
         if default_H2 is not None:
-            for coo_a, coo_b in gen_2d_bonds(Lx, Ly, steppers=[
-                lambda i, j: (i, j + 1),
-                lambda i, j: (i + 1, j),
-            ], cyclic=cyclic):
+            for coo_a, coo_b in gen_2d_bonds(
+                Lx,
+                Ly,
+                steppers=[
+                    lambda i, j: (i, j + 1),
+                    lambda i, j: (i + 1, j),
+                ],
+                cyclic=cyclic,
+            ):
                 if (coo_a, coo_b) not in H2 and (coo_b, coo_a) not in H2:
                     H2[coo_a, coo_b] = default_H2
 
@@ -86,8 +90,7 @@ class LocalHam2D(LocalHamGen):
 
     @property
     def nsites(self):
-        """The number of sites in the system.
-        """
+        """The number of sites in the system."""
         return self.Lx * self.Ly
 
     def __repr__(self):
@@ -97,7 +100,7 @@ class LocalHam2D(LocalHamGen):
     @default_to_neutral_style
     def draw(
         self,
-        ordering='sort',
+        ordering="sort",
         show_norm=True,
         figsize=None,
         fontsize=8,
@@ -129,11 +132,11 @@ class LocalHam2D(LocalHamGen):
         if figsize is None:
             figsize = (self.Ly, self.Lx)
 
-        ax_supplied = (ax is not None)
+        ax_supplied = ax is not None
         if not ax_supplied:
             fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
-            ax.axis('off')
-            ax.set_aspect('equal')
+            ax.axis("off")
+            ax.set_aspect("equal")
         else:
             fig = None
 
@@ -154,13 +157,13 @@ class LocalHam2D(LocalHamGen):
 
             ys, xs = zip(ij1, ij2)
 
-            d = ((xs[1] - xs[0])**2 + (ys[1] - ys[0])**2)**0.5
+            d = ((xs[1] - xs[0]) ** 2 + (ys[1] - ys[0]) ** 2) ** 0.5
             # offset by the length of bond to distinguish NNN etc.
             #     choose offset direction by parity of first site
 
             if d > 2**0.5:
-                xs = [xi + (-1)**int(ys[0]) * 0.02 * d for xi in xs]
-                ys = [yi + (-1)**int(xs[0]) * 0.02 * d for yi in ys]
+                xs = [xi + (-1) ** int(ys[0]) * 0.02 * d for xi in xs]
+                ys = [yi + (-1) ** int(xs[0]) * 0.02 * d for yi in ys]
 
             # set coordinates for label with some offset towards left
             if ij1[1] < ij2[1]:
@@ -170,7 +173,7 @@ class LocalHam2D(LocalHamGen):
                 lbl_x0 = (2 * xs[0] + 3 * xs[1]) / 5
                 lbl_y0 = (2 * ys[0] + 3 * ys[1]) / 5
 
-            nrm = do('linalg.norm', self.terms[ij1, ij2])
+            nrm = do("linalg.norm", self.terms[ij1, ij2])
 
             data.append((xs, ys, n, lbl_x0, lbl_y0, nrm))
 
@@ -188,13 +191,26 @@ class LocalHam2D(LocalHamGen):
         if legend:
             handles = []
             for color in colors.values():
-                handles += [plt.Line2D([0], [0], marker='o', color=color,
-                                       linestyle='', markersize=10)]
+                handles += [
+                    plt.Line2D(
+                        [0],
+                        [0],
+                        marker="o",
+                        color=color,
+                        linestyle="",
+                        markersize=10,
+                    )
+                ]
 
             lbls = [f"Group {i + 1}" for i in range(num_groups)]
 
-            ax.legend(handles, lbls, ncol=max(round(len(handles) / 20), 1),
-                      loc='center left', bbox_to_anchor=(1, 0.5))
+            ax.legend(
+                handles,
+                lbls,
+                ncol=max(round(len(handles) / 20), 1),
+                loc="center left",
+                bbox_to_anchor=(1, 0.5),
+            )
 
         return fig, ax
 
@@ -324,35 +340,33 @@ class TEBD2D(TEBDGen):
         # parse energy computation options
         if chi is None:
             chi = max(8, self.D**2)
-        self.compute_energy_opts['max_bond'] = chi
-        self.compute_energy_opts.setdefault('cutoff', 0.0)
-        self.compute_energy_opts.setdefault('normalized', True)
+        self.compute_energy_opts["max_bond"] = chi
+        self.compute_energy_opts.setdefault("cutoff", 0.0)
+        self.compute_energy_opts.setdefault("normalized", True)
 
     def compute_energy(self):
-        """Compute and return the energy of the current state.
-        """
+        """Compute and return the energy of the current state."""
         return self.state.compute_local_expectation(
-            self.ham.terms,
-            **self.compute_energy_opts
+            self.ham.terms, **self.compute_energy_opts
         )
 
     @property
     def chi(self):
-        return self.compute_energy_opts['max_bond']
+        return self.compute_energy_opts["max_bond"]
 
     @chi.setter
     def chi(self, value):
-        self.compute_energy_opts['max_bond'] = round(value)
+        self.compute_energy_opts["max_bond"] = round(value)
 
     def __repr__(self):
         s = "<{}(n={}, tau={}, D={}, chi={})>"
         return s.format(
-            self.__class__.__name__, self.n, self.tau, self.D, self.chi)
+            self.__class__.__name__, self.n, self.tau, self.D, self.chi
+        )
 
 
 def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
-    """
-    """
+    """ """
     if balance_bonds:
         for _ in range(sweeps - 1):
             tn.balance_bonds_()
@@ -475,7 +489,7 @@ class SimpleUpdate(TEBD2D):
         condition_tensors=True,
         condition_balance_bonds=True,
         long_range_use_swaps=False,
-        long_range_path_sequence='random',
+        long_range_path_sequence="random",
         imag=True,
         gate_opts=None,
         ordering=None,
@@ -512,12 +526,11 @@ class SimpleUpdate(TEBD2D):
         self.gauge_smudge = gauge_smudge
         self.condition_tensors = condition_tensors
         self.condition_balance_bonds = condition_balance_bonds
-        self.gate_opts['long_range_use_swaps'] = long_range_use_swaps
+        self.gate_opts["long_range_use_swaps"] = long_range_use_swaps
         self.long_range_path_sequence = long_range_path_sequence
 
     def _initialize_gauges(self):
-        """Create unit singular values, stored as tensors.
-        """
+        """Create unit singular values, stored as tensors."""
         # create the gauges like whatever data array is in the first site.
         data00 = next(iter(self._psi.tensor_map.values())).data
 
@@ -526,13 +539,13 @@ class SimpleUpdate(TEBD2D):
             bnd = self._psi.bond(ija, ijb)
             d = self._psi.ind_size(bnd)
             Tsval = Tensor(
-                do('ones', (d,), dtype=data00.dtype, like=data00),
+                do("ones", (d,), dtype=data00.dtype, like=data00),
                 inds=[bnd],
                 tags=[
                     self._psi.site_tag(*ija),
                     self._psi.site_tag(*ijb),
-                    'SU_gauge',
-                ]
+                    "SU_gauge",
+                ],
             )
             self._gauges[tuple(sorted((ija, ijb)))] = Tsval
 
@@ -546,11 +559,11 @@ class SimpleUpdate(TEBD2D):
 
     @property
     def long_range_use_swaps(self):
-        return self.gate_opts['long_range_use_swaps']
+        return self.gate_opts["long_range_use_swaps"]
 
     @long_range_use_swaps.setter
     def long_range_use_swaps(self, b):
-        self.gate_opts['long_range_use_swaps'] = bool(b)
+        self.gate_opts["long_range_use_swaps"] = bool(b)
 
     def gate(self, U, where):
         """Like ``TEBD2D.gate`` but absorb and extract the relevant gauges
@@ -564,19 +577,28 @@ class SimpleUpdate(TEBD2D):
             long_range_path_sequence = self.long_range_path_sequence
 
         if self.long_range_use_swaps:
-            path = tuple(gen_long_range_swap_path(
-                ija, ijb, sequence=long_range_path_sequence))
+            path = tuple(
+                gen_long_range_swap_path(
+                    ija, ijb, sequence=long_range_path_sequence
+                )
+            )
             string = swap_path_to_long_range_path(path, ija)
         else:
             # get the string linking the two sites
-            string = path = tuple(gen_long_range_path(
-                ija, ijb, sequence=long_range_path_sequence))
+            string = path = tuple(
+                gen_long_range_path(
+                    ija, ijb, sequence=long_range_path_sequence
+                )
+            )
 
         def env_neighbours(i, j):
-            return tuple(filter(
-                lambda coo: self._psi.valid_coo((coo)) and coo not in string,
-                nearest_neighbors((i, j))
-            ))
+            return tuple(
+                filter(
+                    lambda coo: self._psi.valid_coo((coo))
+                    and coo not in string,
+                    nearest_neighbors((i, j)),
+                )
+            )
 
         # get the relevant neighbours for string of sites
         neighbours = {site: env_neighbours(*site) for site in string}
@@ -587,25 +609,32 @@ class SimpleUpdate(TEBD2D):
             for neighbour in neighbours[site]:
                 Tsval = self._gauges[tuple(sorted((site, neighbour)))]
                 Tij.multiply_index_diagonal_(
-                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge))
+                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)
+                )
 
         # absorb the inner bond gauges equally into both sites along string
         for site_a, site_b in pairwise(string):
             Ta, Tb = self._psi[site_a], self._psi[site_b]
             Tsval = self._gauges[tuple(sorted((site_a, site_b)))]
-            bnd, = Tsval.inds
+            (bnd,) = Tsval.inds
             Ta.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
             Tb.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
 
         # perform the gate, retrieving new bond singular values
         info = dict()
-        self._psi.gate_(U, where, absorb=None, info=info,
-                        long_range_path_sequence=path, **self.gate_opts)
+        self._psi.gate_(
+            U,
+            where,
+            absorb=None,
+            info=info,
+            long_range_path_sequence=path,
+            **self.gate_opts,
+        )
 
         # set the new singualar values all along the chain
         for site_a, site_b in pairwise(string):
             bond_pair = tuple(sorted((site_a, site_b)))
-            s, = info.values()
+            (s,) = info.values()
             if self.gauge_renorm:
                 # keep the singular values from blowing up
                 s = s / do("max", s)
@@ -618,7 +647,8 @@ class SimpleUpdate(TEBD2D):
             for neighbour in neighbours[site]:
                 Tsval = self._gauges[tuple(sorted((site, neighbour)))]
                 Tij.multiply_index_diagonal_(
-                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)**-1)
+                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge) ** -1
+                )
 
     def get_state(self, absorb_gauges=True):
         """Return the state, with the diagonal bond gauges either absorbed
@@ -633,7 +663,7 @@ class SimpleUpdate(TEBD2D):
                 psi &= Tsval
         else:
             for (ija, ijb), Tsval in self._gauges.items():
-                bnd, = Tsval.inds
+                (bnd,) = Tsval.inds
                 Ta = psi[ija]
                 Tb = psi[ijb]
                 Ta.multiply_index_diagonal_(bnd, Tsval.data**0.5)
@@ -662,8 +692,8 @@ def gate_full_update_als(
     steps,
     tol,
     max_bond,
-    optimize='auto-hq',
-    solver='solve',
+    optimize="auto-hq",
+    solver="solve",
     dense=True,
     enforce_pos=False,
     pos_smudge=1e-6,
@@ -679,7 +709,7 @@ def gate_full_update_als(
     target = ket_plq.gate(G, where, contract=False) | env
 
     if init_simple_guess:
-        ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
+        ket_plq.gate_(G, where, contract="reduce-split", max_bond=max_bond)
         for site in tags_plq:
             bra_plq[site].modify(data=conj(ket_plq[site].data))
 
@@ -699,48 +729,51 @@ def gate_full_update_als(
 
     with contract_strategy(optimize):
         for i in range(steps):
-
             for site in tags_plq:
-                lix = norm_plq[site, 'BRA'].inds[:-1]
-                rix = norm_plq[site, 'KET'].inds[:-1]
+                lix = norm_plq[site, "BRA"].inds[:-1]
+                rix = norm_plq[site, "KET"].inds[:-1]
                 # remove site tensors and group their indices
                 if dense:
-                    N = (norm_plq.select(site, which='!any')
-                         .to_dense(lix, rix))
+                    N = norm_plq.select(site, which="!any").to_dense(lix, rix)
 
                     if enforce_pos:
-                        el, ev = do('linalg.eigh', (N + dag(N)) / 2)
-                        el = do('clip', el, pos_smudge, None)
-                        N = ev @ do('diag', el) @ dag(ev)
+                        el, ev = do("linalg.eigh", (N + dag(N)) / 2)
+                        el = do("clip", el, pos_smudge, None)
+                        N = ev @ do("diag", el) @ dag(ev)
 
                 else:
-                    N = (norm_plq.select(site, which='!any')
-                         .aslinearoperator(lix, rix))
+                    N = norm_plq.select(site, which="!any").aslinearoperator(
+                        lix, rix
+                    )
 
                 # target vector (remove lower site tensor and contract to vec)
-                b = (overlap
-                     .select((site, 'BRA'), which='!all')
-                     .to_dense(overlap[site, 'BRA'].inds[:-1],
-                               overlap[site, 'BRA'].inds[-1:]))
+                b = overlap.select((site, "BRA"), which="!all").to_dense(
+                    overlap[site, "BRA"].inds[:-1],
+                    overlap[site, "BRA"].inds[-1:],
+                )
 
-                if solver == 'solve':
-                    x = do('linalg.solve', N, b)
-                elif solver == 'lstsq':
-                    x = do('linalg.lstsq', N, b, rcond=tol * 1e-3)[0]
+                if solver == "solve":
+                    x = do("linalg.solve", N, b)
+                elif solver == "lstsq":
+                    x = do("linalg.lstsq", N, b, rcond=tol * 1e-3)[0]
                 else:
                     # use scipy sparse linalg solvers
-                    if solver in ('lsqr', 'lsmr'):
+                    if solver in ("lsqr", "lsmr"):
                         solver_opts = dict(atol=tol, btol=tol)
                     else:
                         solver_opts = dict(tol=tol)
 
                     # use current site as initial guess (iterate over site ind)
                     x0 = x_previous.get(site, b)
-                    x = np.stack([
-                        getattr(spla, solver)
-                        (N, b[..., k], x0=x0[..., k], **solver_opts)[0]
-                        for k in range(x0.shape[-1])
-                    ], axis=-1)
+                    x = np.stack(
+                        [
+                            getattr(spla, solver)(
+                                N, b[..., k], x0=x0[..., k], **solver_opts
+                            )[0]
+                            for k in range(x0.shape[-1])
+                        ],
+                        axis=-1,
+                    )
 
                 # update the tensors (all 'virtual' TNs above also updated)
                 Tk, Tb = ket[site], bra[site]
@@ -751,13 +784,12 @@ def gate_full_update_als(
                 xs[site] = x
 
             # after updating both sites check for convergence of tensor entries
-            cost_fid = do('trace', do('real', dag(x) @ b))
-            cost_norm = do('abs', do('trace', dag(x) @ (N @ x)))
-            cost = - 2 * cost_fid + cost_norm
+            cost_fid = do("trace", do("real", dag(x) @ b))
+            cost_norm = do("abs", do("trace", dag(x) @ (N @ x)))
+            cost = -2 * cost_fid + cost_norm
 
-            converged = (
-                (previous_cost is not None) and
-                (abs(cost - previous_cost) < tol)
+            converged = (previous_cost is not None) and (
+                abs(cost - previous_cost) < tol
             )
             if converged:
                 break
@@ -769,10 +801,10 @@ def gate_full_update_als(
     if condition_tensors:
         if condition_maintain_norms:
             conditioner(
-                ket_plq, value=pre_norm, balance_bonds=condition_balance_bonds)
+                ket_plq, value=pre_norm, balance_bonds=condition_balance_bonds
+            )
         else:
-            conditioner(
-                ket_plq, balance_bonds=condition_balance_bonds)
+            conditioner(ket_plq, balance_bonds=condition_balance_bonds)
         for site in tags_plq:
             bra_plq[site].modify(data=conj(ket_plq[site].data))
 
@@ -787,9 +819,9 @@ def gate_full_update_autodiff_fidelity(
     steps,
     tol,
     max_bond,
-    optimize='auto-hq',
-    autodiff_backend='autograd',
-    autodiff_optimizer='L-BFGS-B',
+    optimize="auto-hq",
+    autodiff_backend="autograd",
+    autodiff_optimizer="L-BFGS-B",
     init_simple_guess=True,
     condition_tensors=True,
     condition_maintain_norms=True,
@@ -804,7 +836,7 @@ def gate_full_update_autodiff_fidelity(
 
     # make initial guess the simple gate tensors
     if init_simple_guess:
-        ket_plq.gate_(G, where, contract='reduce-split', max_bond=max_bond)
+        ket_plq.gate_(G, where, contract="reduce-split", max_bond=max_bond)
         for site in tags_plq:
             bra_plq[site].modify(data=conj(ket_plq[site].data))
 
@@ -822,7 +854,7 @@ def gate_full_update_autodiff_fidelity(
         fid = (bra_plq | target).contract(all, optimize=optimize)
         norm = (bra_plq | env | ket_plq).contract(all, optimize=optimize)
 
-        return - 2 * do('abs', fid) + do('abs', norm)
+        return -2 * do("abs", fid) + do("abs", norm)
 
     tnopt = TNOptimizer(
         bra_plq,
@@ -843,55 +875,53 @@ def gate_full_update_autodiff_fidelity(
     if condition_tensors:
         if condition_maintain_norms:
             conditioner(
-                ket_plq, value=pre_norm, balance_bonds=condition_balance_bonds)
+                ket_plq, value=pre_norm, balance_bonds=condition_balance_bonds
+            )
         else:
-            conditioner(
-                ket_plq, balance_bonds=condition_balance_bonds)
+            conditioner(ket_plq, balance_bonds=condition_balance_bonds)
         for site in tags_plq:
             bra_plq[site].modify(data=conj(ket_plq[site].data))
 
 
 def get_default_full_update_fit_opts():
-    """The default options for the full update gate fitting procedure.
-    """
+    """The default options for the full update gate fitting procedure."""
     return {
         # general
-        'tol': 1e-10,
-        'steps': 20,
-        'init_simple_guess': True,
-        'condition_tensors': True,
-        'condition_maintain_norms': True,
+        "tol": 1e-10,
+        "steps": 20,
+        "init_simple_guess": True,
+        "condition_tensors": True,
+        "condition_maintain_norms": True,
         # alternative least squares
-        'als_dense': True,
-        'als_solver': 'solve',
-        'als_enforce_pos': False,
-        'als_enforce_pos_smudge': 1e-6,
+        "als_dense": True,
+        "als_solver": "solve",
+        "als_enforce_pos": False,
+        "als_enforce_pos_smudge": 1e-6,
         # automatic differentation optimizing
-        'autodiff_backend': 'autograd',
-        'autodiff_optimizer': 'L-BFGS-B',
+        "autodiff_backend": "autograd",
+        "autodiff_optimizer": "L-BFGS-B",
     }
 
 
 def parse_specific_gate_opts(strategy, fit_opts):
-    """Parse the options from ``fit_opts`` which are relevant for ``strategy``.
-    """
+    """Parse the options from ``fit_opts`` which are relevant for ``strategy``."""
     gate_opts = {
-        'tol': fit_opts['tol'],
-        'steps': fit_opts['steps'],
-        'init_simple_guess': fit_opts['init_simple_guess'],
-        'condition_tensors': fit_opts['condition_tensors'],
-        'condition_maintain_norms': fit_opts['condition_maintain_norms'],
+        "tol": fit_opts["tol"],
+        "steps": fit_opts["steps"],
+        "init_simple_guess": fit_opts["init_simple_guess"],
+        "condition_tensors": fit_opts["condition_tensors"],
+        "condition_maintain_norms": fit_opts["condition_maintain_norms"],
     }
 
-    if 'als' in strategy:
-        gate_opts['solver'] = fit_opts['als_solver']
-        gate_opts['dense'] = fit_opts['als_dense']
-        gate_opts['enforce_pos'] = fit_opts['als_enforce_pos']
-        gate_opts['pos_smudge'] = fit_opts['als_enforce_pos_smudge']
+    if "als" in strategy:
+        gate_opts["solver"] = fit_opts["als_solver"]
+        gate_opts["dense"] = fit_opts["als_dense"]
+        gate_opts["enforce_pos"] = fit_opts["als_enforce_pos"]
+        gate_opts["pos_smudge"] = fit_opts["als_enforce_pos_smudge"]
 
-    elif 'autodiff' in strategy:
-        gate_opts['autodiff_backend'] = fit_opts['autodiff_backend']
-        gate_opts['autodiff_optimizer'] = fit_opts['autodiff_optimizer']
+    elif "autodiff" in strategy:
+        gate_opts["autodiff_backend"] = fit_opts["autodiff_backend"]
+        gate_opts["autodiff_optimizer"] = fit_opts["autodiff_optimizer"]
 
     return gate_opts
 
@@ -1011,13 +1041,13 @@ class FullUpdate(TEBD2D):
         tau=0.01,
         D=None,
         chi=None,
-        fit_strategy='als',
+        fit_strategy="als",
         fit_opts=None,
         compute_envs_every=1,
         pre_normalize=True,
         condition_tensors=True,
         condition_balance_bonds=True,
-        contract_optimize='auto-hq',
+        contract_optimize="auto-hq",
         imag=True,
         gate_opts=None,
         ordering=None,
@@ -1067,7 +1097,7 @@ class FullUpdate(TEBD2D):
         self.compute_envs_every = compute_envs_every
         self._env_n = self._env_term_count = self._env_group_count = -1
 
-        self._psi.add_tag('KET')
+        self._psi.add_tag("KET")
 
     @property
     def fit_strategy(self):
@@ -1076,8 +1106,8 @@ class FullUpdate(TEBD2D):
     @fit_strategy.setter
     def fit_strategy(self, fit_strategy):
         self._gate_fit_fn = {
-            'als': gate_full_update_als,
-            'autodiff-fidelity': gate_full_update_autodiff_fidelity,
+            "als": gate_full_update_als,
+            "autodiff-fidelity": gate_full_update_autodiff_fidelity,
         }[fit_strategy]
         self._fit_strategy = fit_strategy
 
@@ -1097,20 +1127,18 @@ class FullUpdate(TEBD2D):
 
     @compute_envs_every.setter
     def compute_envs_every(self, x):
-        if x == 'sweep':
+        if x == "sweep":
+            self._need_to_recompute_envs = lambda: (self._n != self._env_n)
+        elif x == "group":
             self._need_to_recompute_envs = lambda: (
                 (self._n != self._env_n)
+                or (self._group_count != self._env_group_count)
             )
-        elif x == 'group':
+        elif x == "term":
             self._need_to_recompute_envs = lambda: (
-                (self._n != self._env_n) or
-                (self._group_count != self._env_group_count)
-            )
-        elif x == 'term':
-            self._need_to_recompute_envs = lambda: (
-                (self._n != self._env_n) or
-                (self._group_count != self._env_group_count) or
-                (self._term_count != self._env_term_count)
+                (self._n != self._env_n)
+                or (self._group_count != self._env_group_count)
+                or (self._term_count != self._env_term_count)
             )
         else:
             x = max(1, int(x))
@@ -1119,8 +1147,7 @@ class FullUpdate(TEBD2D):
         self._compute_envs_every = x
 
     def _maybe_compute_plaquette_envs(self, force=False):
-        """Compute and store the plaquette environments for all local terms.
-        """
+        """Compute and store the plaquette environments for all local terms."""
         # first check if we need to compute the envs
         if not self._need_to_recompute_envs() and not force:
             return
@@ -1133,10 +1160,15 @@ class FullUpdate(TEBD2D):
 
         envs = dict()
         for x_bsz, y_bsz in calc_plaquette_sizes(self.ham.terms):
-            envs.update(norm.compute_plaquette_environments(
-                x_bsz=x_bsz, y_bsz=y_bsz, max_bond=self.chi, cutoff=0.0,
-                equalize_norms=True,
-            ))
+            envs.update(
+                norm.compute_plaquette_environments(
+                    x_bsz=x_bsz,
+                    y_bsz=y_bsz,
+                    max_bond=self.chi,
+                    cutoff=0.0,
+                    equalize_norms=True,
+                )
+            )
 
         if self.pre_normalize:
             # get the first plaquette env and use it to compute current norm
@@ -1147,18 +1179,20 @@ class FullUpdate(TEBD2D):
 
             # contract the local plaquette norm
             nfactor = do(
-                'abs', norm_plq.contract(all, optimize=self.contract_optimize))
+                "abs", norm_plq.contract(all, optimize=self.contract_optimize)
+            )
 
             # scale the bra and ket and each of the plaquette environments
-            self._psi.multiply_(nfactor**(-1 / 2), spread_over='all')
-            self._bra.multiply_(nfactor**(-1 / 2), spread_over='all')
+            self._psi.multiply_(nfactor ** (-1 / 2), spread_over="all")
+            self._bra.multiply_(nfactor ** (-1 / 2), spread_over="all")
 
             # scale the envs, taking into account the number of sites missing
             n = self._psi.num_tensors
             for ((_, _), (di, dj)), env in envs.items():
                 n_missing = di * dj
-                env.multiply_(nfactor ** (n_missing / n - 1),
-                              spread_over='all')
+                env.multiply_(
+                    nfactor ** (n_missing / n - 1), spread_over="all"
+                )
 
         self.plaquette_envs = envs
         self.plaquette_mapping = calc_plaquette_map(envs)
@@ -1168,12 +1202,12 @@ class FullUpdate(TEBD2D):
         self._env_term_count = self._term_count
 
     def presweep(self, i=None):
-        """Full update presweep - compute envs and inject gate options.
-        """
+        """Full update presweep - compute envs and inject gate options."""
         # inject the specific gate options required (do
         # here so user can change options between sweeps)
         self._gate_opts = parse_specific_gate_opts(
-            self.fit_strategy, self.fit_opts)
+            self.fit_strategy, self.fit_opts
+        )
 
         # keep track of number of gates applied, and commutative groups
         self._term_count = 0
@@ -1190,7 +1224,7 @@ class FullUpdate(TEBD2D):
             self.ham.terms,
             plaquette_envs=self.plaquette_envs,
             plaquette_mapping=self.plaquette_mapping,
-            **self.compute_energy_opts
+            **self.compute_energy_opts,
         )
 
     def gate(self, G, where):
@@ -1226,7 +1260,7 @@ class FullUpdate(TEBD2D):
             max_bond=self.D,
             optimize=self.contract_optimize,
             condition_balance_bonds=self.condition_balance_bonds,
-            **self._gate_opts
+            **self._gate_opts,
         )
 
         # self._psi.gauge_all_simple_()

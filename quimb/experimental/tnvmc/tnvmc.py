@@ -1,5 +1,4 @@
-"""Tools for generic VMC optimization of tensor networks.
-"""
+"""Tools for generic VMC optimization of tensor networks."""
 
 import array
 import random
@@ -364,7 +363,6 @@ def draw_config(edges, config):
 
 
 class ClusterSampler:
-
     autocorrelated = False
 
     def __init__(
@@ -469,13 +467,14 @@ class ClusterSampler:
 
 
 class BPFGSampler:
-
     autocorrelated = False
 
     def __init__(self, psi=None, **kwargs):
         from quimb.experimental.vbp import (
-            run_belief_propagation, sample_belief_propagation
+            run_belief_propagation,
+            sample_belief_propagation,
         )
+
         self._run = run_belief_propagation
         self._sample = sample_belief_propagation
         self.kwargs = kwargs
@@ -489,7 +488,7 @@ class BPFGSampler:
 
     def _set_psi(self, psi):
         self.fg = psi.copy()
-        self.fg.apply_to_arrays(lambda x: abs(x)**2)
+        self.fg.apply_to_arrays(lambda x: abs(x) ** 2)
 
         if self.messages is None:
             self.messages, _ = self._run(self.fg)
@@ -505,10 +504,7 @@ class BPFGSampler:
             **self.kwargs,
         )
 
-        config = {
-            self.ind2site[ix]: val
-            for ix, val in config.items()
-        }
+        config = {self.ind2site[ix]: val for ix, val in config.items()}
 
         return config, omega
 
@@ -521,11 +517,10 @@ class BPFGSampler:
         return config, omega
 
     def update(self, **kwargs):
-        self._set_psi(kwargs['psi'])
+        self._set_psi(kwargs["psi"])
 
 
 class ExchangeSampler:
-
     autocorrelated = True
 
     def __init__(self, edges, seed=None):
@@ -563,7 +558,6 @@ class ExchangeSampler:
 
 
 class HamiltonianSampler:
-
     autocorrelated = True
 
     def __init__(self, ham, seed=None):
@@ -676,9 +670,8 @@ class MetropolisHastingsSampler:
                 self.accepted += 1
                 self.sub_sampler.accept(nconfig)
 
-                if (
-                    (self.total > self.burn) and
-                    (self.total % (self.skip + 1) == 0)
+                if (self.total > self.burn) and (
+                    self.total % (self.skip + 1) == 0
                 ):
                     return self.config, self.omega
 
@@ -733,9 +726,10 @@ def auto_share_multicall(func, arrays, configs):
     with ar.lazy.shared_intermediates():
         lzarrays_all = [
             # different variants provided as first dimension
-            ar.lazy.array(x) if hasattr(x, "shape") else
+            ar.lazy.array(x)
+            if hasattr(x, "shape")
             # different variants provided as a sequence
-            list(map(ar.lazy.array, x))
+            else list(map(ar.lazy.array, x))
             for x in arrays
         ]
         lzarrays_config = lzarrays_all.copy()
@@ -829,11 +823,9 @@ def fuse_unary_ops_(Z):
 
 
 def setup_single_amplitude_fn(contract_fn=None, **contract_opts):
-
     def single_amplitude_fn(psi, config):
-        psi_c = psi.isel({
-            psi.site_ind(site): val
-            for site, val in config.items()}
+        psi_c = psi.isel(
+            {psi.site_ind(site): val for site, val in config.items()}
         )
 
         if contract_fn is None:
@@ -845,7 +837,6 @@ def setup_single_amplitude_fn(contract_fn=None, **contract_opts):
         return contract_fn(psi_c, **contract_opts)
 
     return single_amplitude_fn
-
 
 
 class AmplitudeFactory:
@@ -1016,7 +1007,7 @@ class AmplitudeFactory:
 
     def update(self, **kwargs):
         self.store.clear()
-        self._set_psi(kwargs['psi'])
+        self._set_psi(kwargs["psi"])
 
     def __contains__(self, config):
         return tuple(sorted(config.items())) in self.store
@@ -1170,7 +1161,6 @@ class GradientAccumulator:
 
 
 class MinSR(GradientAccumulator):
-
     def __init__(self, learning_rate=0.01):
         self.learning_rate = learning_rate
         self.vectorizer = None
@@ -1405,8 +1395,7 @@ class TNVMC:
 
         self.amplitude_factory = AmplitudeFactory(self.psi, **contract_opts)
         self.sampler.update(
-            psi=self.psi,
-            amplitude_factory=self.amplitude_factory
+            psi=self.psi, amplitude_factory=self.amplitude_factory
         )
 
         # tracking information
@@ -1591,7 +1580,9 @@ class TNVMC:
             color=(0.1, 0.5, 0.7),
         )
         ax.fill_between(
-            x, yminus, yplus,
+            x,
+            yminus,
+            yplus,
             alpha=0.45,
             color=(0.6, 0.8, 0.6),
             zorder=-11,
@@ -1633,14 +1624,14 @@ class TNVMC:
             linewidth=2,
             color=(1.0, 0.7, 0.4),
         )
-        ax_var.set_yscale('log')
+        ax_var.set_yscale("log")
         ax_var.text(
             0.9,
             0.9,
             "Energy variance",
             color=(1.0, 0.7, 0.4),
-            horizontalalignment='right',
-            verticalalignment='top',
+            horizontalalignment="right",
+            verticalalignment="top",
             transform=ax_var.transAxes,
         )
         ax_var.set_rasterization_zorder(0)
@@ -1672,8 +1663,8 @@ class TNVMC:
                 0.9,
                 "Zoom",
                 color=(0.6, 0.8, 0.6),
-                horizontalalignment='right',
-                verticalalignment='top',
+                horizontalalignment="right",
+                verticalalignment="top",
                 transform=ax_zoom.transAxes,
             )
             ax_zoom.set_rasterization_zorder(0)

@@ -321,6 +321,90 @@ def matvec_nosymm(
                 out[cj] += hij * x[ci]
 
 
+# ----------------- mixed-radix unconstrained hilbert space ----------------- #
+
+
+@njit(cache=cache, nogil=nogil, inline="always")
+def calculate_strides(sizes):
+    n = len(sizes)
+    strides = np.ones(n, dtype=np.uint64)
+    for i in range(n - 2, -1, -1):
+        strides[i] = strides[i + 1] * sizes[i + 1]
+    return strides
+
+
+@njit(cache=cache, nogil=nogil, inline="always")
+def flatconfig_to_rank_mixed_radix_nosymm(flatconfig, strides):
+    """Convert a flat config array for a mixed size system to a rank, i.e. its
+    position in the lexicographic ordering of all configurations.
+
+    Parameters
+    ----------
+    flatconfig : array_like
+        A flat config array of shape (n,), corresponding to a configuration.
+        The array should be of dtype uint8.
+    strides : array_like
+        The strides array of shape (n,) The array should be of dtype uint64.
+
+    Returns
+    -------
+    np.uint64
+    """
+    r = 0
+    for i in range(flatconfig.size):
+        r += flatconfig[i] * strides[i]
+    return r
+
+
+@njit(cache=cache, nogil=nogil, inline="always")
+def rank_into_flatconfig_mixed_radix_nosymm(flatconfig, r, sizes, strides):
+    """Inplace conversion of a mixed-radix rank to a flat config array.
+
+    Parameters
+    ----------
+    flatconfig : array_like
+        A flat config array of shape (n,), corresponding to a configuration.
+        The array should be of dtype uint8.
+    r : np.uint64
+        The rank to convert.
+    sizes : array_like
+        The sizes of the configuration dimensions.
+    strides : array_like
+        The strides of the configuration dimensions.
+    """
+    for i in range(len(sizes)):
+        flatconfig[i] = (r // strides[i]) % sizes[i]
+
+
+@njit(cache=cache, nogil=nogil, inline="always")
+def rank_to_flatconfig_mixed_radix_nosymm(
+    r,
+    sizes,
+    strides,
+) -> np.ndarray:
+    """Convert a mixed-radix rank to a flat config array.
+
+    Parameters
+    ----------
+    r : np.uint64
+        The rank to convert.
+    sizes : array_like
+        The sizes of the configuration dimensions.
+    strides : array_like
+        The strides of the configuration dimensions.
+
+    Returns
+    -------
+    flatconfig : array_like
+        A flat config array of shape (n,), corresponding to a configuration.
+        The array will be of dtype uint8.
+    """
+    n = len(sizes)
+    flatconfig = np.empty(n, dtype=np.uint8)
+    rank_into_flatconfig_mixed_radix_nosymm(flatconfig, r, sizes, strides)
+    return flatconfig
+
+
 # --------------------- parity conserved hilbert space ---------------------- #
 
 

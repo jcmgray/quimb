@@ -1,13 +1,21 @@
-"""Functions for generating quantum states.
-"""
+"""Functions for generating quantum states."""
 
 import itertools
 import functools
 import math
 import numpy as np
 
-from ..core import (dag, ldmul, dot, make_immutable,
-                    qu, kron, eye, ikron, kronpow)
+from ..core import (
+    dag,
+    ldmul,
+    dot,
+    make_immutable,
+    qu,
+    kron,
+    eye,
+    ikron,
+    kronpow,
+)
 from ..linalg.base_linalg import eigh
 from .operators import pauli, controlled
 
@@ -117,7 +125,7 @@ def minus(**kwargs):
         \end{pmatrix}
 
     """
-    return qu([[2**-0.5], [-2**-0.5]], **kwargs)
+    return qu([[2**-0.5], [-(2**-0.5)]], **kwargs)
 
 
 xminus = minus
@@ -174,11 +182,12 @@ def bloch_state(ax, ay, az, purified=False, **kwargs):
     Matrix
         Density operator of qubit 'pointing' in (ax, ay, az) direction.
     """
-    n = (ax**2 + ay**2 + az**2)**.5
+    n = (ax**2 + ay**2 + az**2) ** 0.5
     if purified:
         ax, ay, az = (a / n for a in (ax, ay, az))
-    return sum(0.5 * a * pauli(s, **kwargs)
-               for a, s in zip((1, ax, ay, az), "ixyz"))
+    return sum(
+        0.5 * a * pauli(s, **kwargs) for a, s in zip((1, ax, ay, az), "ixyz")
+    )
 
 
 @functools.lru_cache(maxsize=8)
@@ -206,23 +215,34 @@ def bell_state(s, **kwargs):
     p : immutable vector
         The bell-state ``s``.
     """
-    keymap = {"psi-": "psi-", 0: "psi-", "psim": "psi-",
-              "psi+": "psi+", 1: "psi+", "psip": "psi+",
-              "phi-": "phi-", 2: "phi-", "phim": "phi-",
-              "phi+": "phi+", 3: "phi+", "phip": "phi+"}
-    c = 2.**-.5
-    statemap = {"psi-": lambda: qu([0, c, -c, 0], **kwargs),
-                "phi+": lambda: qu([c, 0, 0, c], **kwargs),
-                "phi-": lambda: qu([c, 0, 0, -c], **kwargs),
-                "psi+": lambda: qu([0, c, c, 0], **kwargs)}
+    keymap = {
+        "psi-": "psi-",
+        0: "psi-",
+        "psim": "psi-",
+        "psi+": "psi+",
+        1: "psi+",
+        "psip": "psi+",
+        "phi-": "phi-",
+        2: "phi-",
+        "phim": "phi-",
+        "phi+": "phi+",
+        3: "phi+",
+        "phip": "phi+",
+    }
+    c = 2.0**-0.5
+    statemap = {
+        "psi-": lambda: qu([0, c, -c, 0], **kwargs),
+        "phi+": lambda: qu([c, 0, 0, c], **kwargs),
+        "phi-": lambda: qu([c, 0, 0, -c], **kwargs),
+        "psi+": lambda: qu([0, c, c, 0], **kwargs),
+    }
     state = statemap[keymap[s]]()
     make_immutable(state)
     return state
 
 
 def singlet(**kwargs):
-    """Alias for the 'psi-' bell-state.
-    """
+    """Alias for the 'psi-' bell-state."""
     return bell_state("psi-", **kwargs)
 
 
@@ -334,7 +354,7 @@ def singlet_pairs(n, **kwargs):
     -------
     vector
     """
-    return kronpow(bell_state('psi-', **kwargs), (n // 2))
+    return kronpow(bell_state("psi-", **kwargs), (n // 2))
 
 
 def werner_state(p, **kwargs):
@@ -351,8 +371,10 @@ def werner_state(p, **kwargs):
     -------
     qarray
     """
-    return (p * bell_state('psi-', qtype="dop", **kwargs) +
-            (1 - p) * eye(4, **kwargs) / 4)
+    return (
+        p * bell_state("psi-", qtype="dop", **kwargs)
+        + (1 - p) * eye(4, **kwargs) / 4
+    )
 
 
 def ghz_state(n, **kwargs):
@@ -370,8 +392,7 @@ def ghz_state(n, **kwargs):
     -------
     vector
     """
-    psi = (basis_vec(0, 2**n) +
-           basis_vec(2**n - 1, 2**n)) / 2.**.5
+    psi = (basis_vec(0, 2**n) + basis_vec(2**n - 1, 2**n)) / 2.0**0.5
     return qu(psi, **kwargs)
 
 
@@ -445,7 +466,7 @@ def perm_state(ps):
         for vec, ind in zip(vec_perm, ind_perm):
             yield levi_civita(ind) * kron(*vec)
 
-    return sum(terms()) / math.factorial(n)**0.5
+    return sum(terms()) / math.factorial(n) ** 0.5
 
 
 def graph_state_1d(n, cyclic=False, sparse=False):
@@ -471,9 +492,17 @@ def graph_state_1d(n, cyclic=False, sparse=False):
         p = ikron(controlled("z", sparse=True), [2] * n, (i, i + 1)) @ p
 
     if cyclic:
-        p = ((eye(2, sparse=True) & eye(2**(n - 2), sparse=True) &
-              qu([1, 0], qtype="dop", sparse=True)) +
-             (pauli("z", sparse=True) & eye(2**(n - 2), sparse=True) &
-              qu([0, 1], qtype="dop", sparse=True))) @ p
+        p = (
+            (
+                eye(2, sparse=True)
+                & eye(2 ** (n - 2), sparse=True)
+                & qu([1, 0], qtype="dop", sparse=True)
+            )
+            + (
+                pauli("z", sparse=True)
+                & eye(2 ** (n - 2), sparse=True)
+                & qu([0, 1], qtype="dop", sparse=True)
+            )
+        ) @ p
 
     return p

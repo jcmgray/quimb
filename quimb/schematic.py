@@ -940,7 +940,7 @@ class Drawing:
         relative = style.pop("relative", 1.0)
 
         lab = rb[0]
-        scale = lab ** relative
+        scale = lab**relative
         xc = center * lab
         arrow_x = xc - length * scale
         arrow_y = width * scale
@@ -1316,8 +1316,7 @@ class Drawing:
         preset=None,
         **kwargs,
     ):
-        """Draw a cup shape between two points.
-        """
+        """Draw a cup shape between two points."""
         assert which == "left", "Only left cups are supported so far."
 
         style = parse_style_preset(self.presets, preset, **kwargs)

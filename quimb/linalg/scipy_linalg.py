@@ -1,5 +1,5 @@
-"""Scipy based linear algebra.
-"""
+"""Scipy based linear algebra."""
+
 import functools
 
 import numpy as np
