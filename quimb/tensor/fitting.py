@@ -700,7 +700,7 @@ def tensor_network_fit_tree(
                 tn_fit._canonize_around_tids([tid])
 
             # get the new conjugate tensor
-            ti_new = tn_hole.contract(output_inds=ti.inds, optimize="auto-hq")
+            ti_new = tn_hole.contract(output_inds=ti.inds, optimize=contract_optimize)
             ti_new.conj_()
             # modify the data
             ti.modify(data=ti_new.data)
