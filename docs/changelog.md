@@ -18,6 +18,7 @@ Release notes for `quimb`.
 **Bug fixes:**
 
 - fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) when `insert_into is None`.
+- tensor network drawing, ensure hyper indices can be specified as `output_inds`.
 
 
 (whats-new-1-11-2)=

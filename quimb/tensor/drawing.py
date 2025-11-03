@@ -318,38 +318,54 @@ def draw_tn(
         if ishyper:
             # each tensor connects to the dummy node represeting the hyper edge
             pairs = [(tid, ix) for tid in tids]
+            dummy_nodes = [ix]
             if isouter and len(tids) > 1:
                 # 'hyper outer' index
                 pairs.append((("outer", ix), ix))
+                dummy_nodes.append(("outer", ix))
             # hyper labels get put on dummy node
             label = ""
 
-            nodes[ix]["ind"] = ix
-            nodes[ix]["ind_size"] = ind_size
-            # make actual node invisible
-            nodes[ix]["color"] = (1.0, 1.0, 1.0, 1.0)
-            nodes[ix]["size"] = 0.0
-            nodes[ix]["outline_size"] = 0.0
-            nodes[ix]["outline_color"] = (1.0, 1.0, 1.0, 1.0)
-            nodes[ix]["marker"] = "."  # set this to avoid warning - size is 0
-            nodes[ix]["hatch"] = ""
+            for dnode in dummy_nodes:
+                nodes[dnode]["ind"] = ix
+                nodes[dnode]["ind_size"] = ind_size
+                # make actual node invisible
+                nodes[dnode]["color"] = (1.0, 1.0, 1.0, 1.0)
+                nodes[dnode]["size"] = 0.0
+                nodes[dnode]["outline_size"] = 0.0
+                nodes[dnode]["outline_color"] = (1.0, 1.0, 1.0, 1.0)
+                nodes[dnode]["marker"] = "."  # set to avoid warning, size=0
+                nodes[dnode]["hatch"] = ""
 
-            # set these for plotly hover info
-            nodes[ix]["tid"] = nodes[ix]["shape"] = nodes[ix]["tags"] = ""
+                # set these for plotly hover info
+                nodes[dnode]["tid"] = nodes[ix]["shape"] = nodes[ix][
+                    "tags"
+                ] = ""
 
-            if ((show_inds == "outer") and isouter) or (show_inds == "all"):
-                # show as outer index or inner index name
-                nodes[ix]["label"] = ix
-            elif show_inds == "bond-size":
-                # show all bond sizes
-                nodes[ix]["label"] = f"{tn.ind_size(ix)}"
-            else:
-                # labels hidden or inner edge
-                nodes[ix]["label"] = ""
+                should_label = len(dummy_nodes) == 1 or isinstance(
+                    dnode, tuple
+                )
+                # put the labels on this dummy node
+                # -> either at center of inner hyper index
+                # -> of danling on outer hyper index
 
-            nodes[ix]["label_fontsize"] = font_size_inner
-            nodes[ix]["label_color"] = label_color
-            nodes[ix]["label_fontfamily"] = font_family
+                if (
+                    should_label
+                    and ((show_inds == "outer") and isouter)
+                    or (show_inds == "all")
+                ):
+                    # show as outer index or inner index name
+                    nodes[dnode]["label"] = ix
+                elif should_label and show_inds == "bond-size":
+                    # show all bond sizes
+                    nodes[dnode]["label"] = f"{tn.ind_size(ix)}"
+                else:
+                    # labels hidden or inner edge
+                    nodes[dnode]["label"] = ""
+
+                nodes[dnode]["label_fontsize"] = font_size_inner
+                nodes[dnode]["label_color"] = label_color
+                nodes[dnode]["label_fontfamily"] = font_family
 
         else:
             # standard edge

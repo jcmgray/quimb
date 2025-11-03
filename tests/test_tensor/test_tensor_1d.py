@@ -1160,13 +1160,14 @@ class TestDense1D:
 
 class TestTensor1DCompress:
     @pytest.mark.parametrize(
-        "method", [
+        "method",
+        [
             "direct",
             "dm",
             "fit",
             "zipup",
             "zipup-first",
-        ]
+        ],
     )
     @pytest.mark.parametrize("dtype", dtypes)
     def test_mps_partial_mpo_apply(self, method, dtype):
@@ -1185,7 +1186,8 @@ class TestTensor1DCompress:
         )
 
     @pytest.mark.parametrize(
-        "method", [
+        "method",
+        [
             "direct",
             "dm",
             "fit",
@@ -1193,7 +1195,7 @@ class TestTensor1DCompress:
             "zipup-first",
             "src",
             "src-first",
-        ]
+        ],
     )
     @pytest.mark.parametrize("sweep_reverse", [False, True])
     def test_mpo_compress_opts(self, method, sweep_reverse):
