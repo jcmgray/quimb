@@ -62,6 +62,7 @@ def draw_tn(
     margin=None,
     xlims=None,
     ylims=None,
+    adjust_lims=True,
     get=None,
     return_fig=False,
     ax=None,
@@ -190,16 +191,19 @@ def draw_tn(
         Explicitly set the x plot range.
     xlims : None or tuple, optional
         Explicitly set the y plot range.
+    adjust_lims : bool or "auto", optional
+        Whether to automatically adjust the axes limits as elements are added.
+        If "auto" (the default), then this is ``True`` if ``ax`` is None, else
+        ``False``, i.e. only adjust limits if we own the figure.
     get : {None, 'pos', 'graph'}, optional
         If ``None`` then plot as normal, else if:
 
-            - ``'pos'``, return the plotting positions of each ``tid`` and
-              ``ind`` drawn as a node, this can supplied to subsequent calls as
-              ``fix=pos`` to maintain positions, even as the graph structure
-              changes.
-            - ``'graph'``, return the ``networkx.Graph`` object. Note that this
-              will potentially have extra nodes representing output and hyper
-              indices.
+        - ``'pos'``, return the plotting positions of each ``tid`` and ``ind``
+          drawn as a node, this can supplied to subsequent calls as ``fix=pos``
+          to maintain positions, even as the graph structure changes.
+        - ``'graph'``, return the ``networkx.Graph`` object. Note that this
+          will potentially have extra nodes representing output and hyper
+          indices.
 
     return_fig : bool, optional
         If True and ``ax is None`` then return the figure created rather than
@@ -586,7 +590,12 @@ def draw_tn(
         return edges, nodes, opts
 
     if backend == "matplotlib":
-        return _draw_matplotlib(edges=edges, nodes=nodes, **opts)
+        return _draw_matplotlib(
+            edges=edges,
+            nodes=nodes,
+            adjust_lims=adjust_lims,
+            **opts,
+        )
 
     if backend == "matplotlib3d":
         return _draw_matplotlib3d(G, **opts)
@@ -698,6 +707,7 @@ def _draw_matplotlib(
     margin=None,
     xlims=None,
     ylims=None,
+    adjust_lims=True,
     return_fig=False,
     ax=None,
 ):
@@ -705,7 +715,7 @@ def _draw_matplotlib(
 
     from quimb.schematic import Drawing, average_color
 
-    d = Drawing(figsize=figsize, ax=ax)
+    d = Drawing(figsize=figsize, ax=ax, adjust_lims=adjust_lims)
     if ax is None:
         fig = d.fig
         ax = d.ax
