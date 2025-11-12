@@ -50,6 +50,7 @@ class HD1GBP(BeliefPropagationCommon):
         tn: TensorNetwork,
         regions,
         *,
+        messages=None,
         autocomplete=True,
         autoprune=True,
         damping=1 / 2,
@@ -70,7 +71,17 @@ class HD1GBP(BeliefPropagationCommon):
             autocomplete=autocomplete,
             autoprune=autoprune,
         )
-        self.messages = {}
+
+        if callable(messages):
+            self._message_init_function = messages
+            self.messages = {}
+        elif messages is not None:
+            self._message_init_function = None
+            self.messages = messages
+        else:
+            self._message_init_function = None
+            self.messages = {}
+
         self.new_messages = {}
         self.contract_opts = dict(
             optimize=optimize,
@@ -165,6 +176,14 @@ class HD1GBP(BeliefPropagationCommon):
             for parent in self.rg.get_parents(child):
                 # contract the message!
                 m = self.compute_message(parent, child)
+
+                if self._message_init_function is not None:
+                    # the messages change size during the first few iterations
+                    # so we perform a delayed initialization upon seeing
+                    # each fresh shape
+                    mprev = self.new_messages.get((parent, child), None)
+                    if (mprev is None) or (mprev.shape != m.shape):
+                        m.modify(data=self._message_init_function(m.shape))
 
                 # immediately update the new messages for stability in GBP
                 # (they are used in the 'denominator' of higher messages)

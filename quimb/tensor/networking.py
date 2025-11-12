@@ -942,6 +942,7 @@ def gen_gloops(
     tids=None,
     grow_from="all",
     num_joins=1,
+    join_overlap=2,
 ):
     """Generate sets of tids that represent 'generalized loops' where every
     node is connected to at least two bonds, i.e. 2-degree connected subgraphs.
@@ -965,6 +966,15 @@ def gen_gloops(
         be dangling, i.e. 1-degree connected. This is useful for computing
         local expectations where the operator insertion breaks the loop
         assumption locally.
+    num_joins : int, optional
+        If larger than 1, repeatedly generate larger loops by joining together
+        the initial set (individually with size up to ``max_size``) of
+        generalized loops. Each join combines loops that overlap on at least
+        ``join_overlap`` tids.
+    join_overlap : {1, 2}, optional
+        When joining loops together, the minimum number of overlapping
+        tids they much share. 1 allows merging on a single node, 2 requires
+        sharing a bond, which leads to fewer but 'denser' loops.
 
     Yields
     ------
@@ -1003,11 +1013,21 @@ def gen_gloops(
         for tid in gl:
             lookup.setdefault(tid, []).append(gl)
 
+    once = set()
+    twice = set()
+
+    if join_overlap == 1:
+        overlapping = once
+    elif join_overlap == 2:
+        overlapping = twice
+    else:
+        raise ValueError("`join_overlap` must be 1 or 2.")
+
     for _ in range(num_joins - 1):
         next_patches = set()
         for gl in current_patches:
-            once = set()
-            twice = set()
+            once.clear()
+            twice.clear()
 
             # for each tensor
             for tid in gl:
@@ -1018,7 +1038,7 @@ def gen_gloops(
                     else:
                         once.add(glo)
 
-            for glo in twice:
+            for glo in overlapping:
                 # merge and add!
                 next_patches.add(gl | glo)
 

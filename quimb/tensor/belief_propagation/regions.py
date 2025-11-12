@@ -462,6 +462,10 @@ def gen_region_counts(regions, autocomplete=True, autoprune=True):
     # remove redundant nodes that appear in all regions
     # (we just re-add these when yielding)
     regions = tuple(map(frozenset, regions))
+
+    if not regions:
+        return
+
     base_region = frozenset.intersection(*regions)
     if base_region:
         regions = tuple(r - base_region for r in regions)

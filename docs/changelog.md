@@ -14,6 +14,10 @@ Release notes for `quimb`.
 - refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): allow `autodiff_backend="torch"` with `jit_fn=True` to work with array backends with general pytree parameters, e.g. `symmray` arrays.
+- [`tn.gen_gloops`](quimb.tensor.tensor_core.TensorNetwork.gen_gloops) and [`tn.gen_gloops_sites`](quimb.tensor.tensor_arbgeom.TensorNetworkArbgeom.gen_gloops_sites): add `join_overlap` option. When building cluster by joining smaller generalized loops, this option controls how many nodes they need to overlap by to be joined together.
+- all message passing routines: add `callback` option
+- GBP: allow a message initilization function.
+- [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP): allow `messages` to be a callable initialization function.
 
 **Bug fixes:**
 

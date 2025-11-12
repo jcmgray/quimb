@@ -135,7 +135,9 @@ class D1BP(BeliefPropagationCommon):
 
         self.local_convergence = local_convergence
 
-        if messages is None:
+        if callable(messages):
+            self.messages = initialize_messages(self.tn, messages)
+        elif messages is None:
             self.messages = initialize_messages(self.tn, message_init_function)
         else:
             self.messages = messages
@@ -532,6 +534,7 @@ class D1BP(BeliefPropagationCommon):
 
         zvals = []
         for r, c in gen_region_counts(gloops, autocomplete=autocomplete):
+            # XXX: autoreduce intersecting clusters to gloops?
             tnr = self.get_cluster(r)
             zr = tnr.contract(optimize=optimize, **contract_opts)
 

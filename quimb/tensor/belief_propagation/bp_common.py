@@ -50,6 +50,9 @@ class BeliefPropagationCommon:
         If not None, 'contract' (via BP) the tensor network every
         ``contract_every`` iterations. The resulting values are stored in
         ``zvals`` at corresponding points ``zval_its``.
+    callback : callable, optional
+        A function to call after every iteration, of signature
+        ``callback(bp_instance)``.
     inplace : bool, optional
         Whether to perform any operations inplace on the input tensor network.
     """
@@ -63,6 +66,7 @@ class BeliefPropagationCommon:
         normalize=None,
         distance=None,
         contract_every=None,
+        callback=None,
         inplace=False,
     ):
         self.tn = tn if inplace else tn.copy()
@@ -72,6 +76,7 @@ class BeliefPropagationCommon:
         self.exponent = tn.exponent
         self.damping = damping
         self.update = update
+        self.callback = callback
 
         if normalize is None:
             if "complex" in self.dtype:
@@ -352,6 +357,9 @@ class BeliefPropagationCommon:
 
             it += 1
             self.n += 1
+
+            if self.callback is not None:
+                self.callback(self)
 
         self._maybe_contract()
 

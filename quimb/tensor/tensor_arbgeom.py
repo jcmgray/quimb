@@ -798,6 +798,7 @@ class TensorNetworkGen(TensorNetwork):
         sites=None,
         grow_from="all",
         num_joins=1,
+        join_overlap=2,
     ):
         """Generate sets of sites that represent 'generalized loops' where
         every node is connected to at least two other loop nodes. This is a
@@ -812,6 +813,23 @@ class TensorNetworkGen(TensorNetwork):
             maximum size.
         sites : None or sequence[hashable]
             If supplied, only consider loops containing these sites.
+        grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+            Only if ``sites`` is specified, this determines how to filter
+            loops. If 'all', only yield loops containing *all* of the sites
+            in ``sites``, if 'any', yield loops containing *any* of the sites
+            in ``sites``. If 'alldangle' or 'anydangle', the sites are allowed
+            to be dangling, i.e. 1-degree connected. This is useful for
+            computing local expectations where the operator insertion breaks
+            the loop assumption locally.
+        num_joins : int, optional
+            If larger than 1, repeatedly generate larger loops by joining
+            together the initial set (individually those with size up to
+            ``max_size``) of generalized loops. Each join combines loops that
+            overlap on at least ``join_overlap`` sites.
+        join_overlap : {1, 2}, optional
+            When joining loops together, the minimum number of overlapping
+            sites they much share. 1 allows merging on a single site, 2
+            requires sharing a bond, which leads to fewer but 'denser' loops.
 
         Yields
         ------
@@ -830,6 +848,7 @@ class TensorNetworkGen(TensorNetwork):
             tids=tids,
             grow_from=grow_from,
             num_joins=num_joins,
+            join_overlap=join_overlap,
         ):
             yield tuple(tid2site[tid] for tid in gloop)
 
