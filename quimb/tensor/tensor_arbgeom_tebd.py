@@ -12,6 +12,7 @@ from ..core import eye, kron, qarray
 from ..utils import (
     ExponentialGeometricRollingDiffMean,
     ensure_dict,
+    tree_map,
 )
 from ..utils import progbar as Progbar
 from ..utils_plot import default_to_neutral_style
@@ -282,7 +283,10 @@ class LocalHamGen:
     def apply_to_arrays(self, fn):
         """Apply the function ``fn`` to all the arrays representing terms."""
         for k, x in self.terms.items():
-            self.terms[k] = fn(x)
+            if hasattr(x, "get_params"):
+                x.set_params(tree_map(fn, x.get_params()))
+            else:
+                self.terms[k] = fn(x)
 
     def get_auto_ordering(self, order="sort", **kwargs):
         """Get an ordering of the terms to use with TEBD, for example. The
