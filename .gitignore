@@ -122,11 +122,13 @@ docs/autoapi
 
 \.pytest_cache/
 \.vscode/
+\.ruff_cache
 *.ipynb_checkpoints/
 
 # quimb specific
 ctg_cache
 quimb/_version.py
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml
