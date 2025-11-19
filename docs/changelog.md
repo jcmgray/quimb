@@ -19,6 +19,7 @@ Release notes for `quimb`.
 - all message passing routines: add `callback` option
 - GBP: allow a message initilization function.
 - [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP): allow `messages` to be a callable initialization function.
+- [`MatrixProductState.gate_nonlocal`](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal): add `method="lazy"` option for lazily applying a non-local gate as a sub-MPO without contraction or compression.
 
 **Bug fixes:**
 

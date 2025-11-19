@@ -2326,10 +2326,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         # get the span of sites the sub-MPO acts on
         if where is None:
             where = tuple(submpo.gen_sites_present())
-        si, sf = min(where), max(where)
 
-        # make the psi canonical around the sub-MPO region
-        psi.canonicalize_((si, sf), info=info)
+        if method != "lazy":
+            si, sf = min(where), max(where)
+
+            # make the psi canonical around the sub-MPO region
+            psi.canonicalize_((si, sf), info=info)
 
         # lazily combine the sub-MPO with the MPS
         psi.gate_with_op_lazy_(
@@ -2337,6 +2339,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             transpose=transpose,
             inplace_op=inplace_mpo,
         )
+
+        if method == "lazy":
+            # we just add the sub-MPO, no contraction or compression
+            return psi
 
         # split off the sub MPS-MPO TN section
         sub_site_tags = [psi.site_tag(s) for s in range(si, sf + 1)]
