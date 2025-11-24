@@ -2,11 +2,12 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-11-3)=
+(whats-new-1-12-0)=
 ## v1.12.0 (unreleased)
 
 **Enhancements:**
 
+- add basic introductio to the operator module - {ref}`operator-basics`
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
 - update infrastructure for TEBD and SimpleUpdate based algorithms.
 - [`schematic.Drawing`](quimb.schematic.drawing): add [`grid`](quimb.schematic.drawing.grid), [`grid3d`](quimb.schematic.drawing.grid3d), [`bezier`](quimb.schematic.drawing.bezier), [`star`](quimb.schematic.drawing.star), [`cross`](quimb.schematic.drawing.cross) and [`zigzag`](quimb.schematic.drawing.zigzag) methods.
@@ -20,6 +21,9 @@ Release notes for `quimb`.
 - GBP: allow a message initilization function.
 - [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP): allow `messages` to be a callable initialization function.
 - [`MatrixProductState.gate_nonlocal`](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal): add `method="lazy"` option for lazily applying a non-local gate as a sub-MPO without contraction or compression.
+- [`LocalHamGen.apply_to_arrays`](quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.apply_to_arrays): support pytree parameter arrays such as `symmray`.
+- add [`Tensor.get_namespace`](quimb.tensor.tensor_core.Tensor.get_namespace) and [`TensorNetwork.get_namespace`](quimb.tensor.tensor_core.TensorNetwork.get_namespace) for getting a [reusable data array namespace](https://autoray.readthedocs.io/en/latest/automatic_dispatch.html#namespace-api)
+- [`TensorNetwork.isel`](quimb.tensor.tensor_core.TensorNetwork.isel): use `take` where possible to better support e.g. `torch.vmap` across amplitudes.
 
 **Bug fixes:**
 
