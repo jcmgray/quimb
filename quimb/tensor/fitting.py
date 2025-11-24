@@ -1,6 +1,6 @@
 """Tools for computing distances between and fitting tensor networks."""
 
-from autoray import backend_like, compose, dag, do
+from autoray import compose, dag, do
 
 from ..utils import check_opt
 from .contraction import contract_strategy
@@ -255,7 +255,7 @@ def conjugate_gradient(A, b, x0=None, tol=1e-5, maxiter=1000):
     ----------
     A : operator_like
         The matrix or linear operator.
-    B : array_like
+    b : array_like
         The right-hand side vector.
     x0 : array_like, optional
         Initial guess for the solution.
@@ -303,6 +303,8 @@ def _tn_fit_als_core(
     progbar=False,
 ):
     from .tensor_core import TNLinearOperator, group_inds
+
+    xp = tnAA.get_namespace()
 
     if solver == "auto":
         # XXX: maybe make this depend on local tensor as well?
@@ -381,8 +383,7 @@ def _tn_fit_als_core(
                         A, b, x0=x0, tol=tol, maxiter=solver_maxiter
                     )
                 else:
-                    x = do(
-                        f"scipy.sparse.linalg.{solver_i}",
+                    x = getattr(xp.scipy.sparse.linalg, solver_i)(
                         A,
                         b,
                         x0=x0,
@@ -401,35 +402,35 @@ def _tn_fit_als_core(
                         A, b, x0=x0, tol=tol, maxiter=solver_maxiter
                     )
                 elif enforce_pos or solver_i == "eigh":
-                    el, V = do("linalg.eigh", A)
-                    elmax = do("max", el)
-                    el = do("clip", el, elmax * pos_smudge, None)
+                    el, V = xp.linalg.eigh(A)
+                    elmax = xp.max(el)
+                    el = xp.clip(el, elmax * pos_smudge, None)
                     # can solve directly using eigendecomposition
-                    x = V @ ((dag(V) @ b) / do("reshape", el, (-1, 1)))
+                    x = V @ ((dag(V) @ b) / xp.reshape(el, (-1, 1)))
                 elif solver_i == "solve":
-                    x = do("linalg.solve", A, b)
+                    x = xp.linalg.solve(A, b)
                 elif solver_i == "lstsq":
-                    x = do("linalg.lstsq", A, b, rcond=pos_smudge)[0]
+                    x = xp.linalg.lstsq(A, b, rcond=pos_smudge)[0]
                 else:
                     raise ValueError(
                         f"Unknown or unsupported dense solver_dense: '{solver_i}'"
                     )
 
-            x_r = do("reshape", x, tk.shape)
+            x_r = xp.reshape(x, tk.shape)
             # n.b. because we are using virtual TNs -> updates propagate
             tk.modify(data=x_r)
-            tb.modify(data=do("conj", x_r))
+            tb.modify(data=xp.conj(x_r))
 
         # assess | A - B | (normalized) for convergence or printing
         if (tol != 0.0) or progbar:
             dagx = dag(x)
 
             if x.ndim == 2:
-                xAA = do("trace", do("real", dagx @ (A @ x)))  # <A|A>
-                xAB = do("trace", do("real", dagx @ b))  # <A|B>
+                xAA = xp.trace(xp.real(dagx @ (A @ x)))  # <A|A>
+                xAB = xp.trace(xp.real(dagx @ b))  # <A|B>
             else:
-                xAA = do("real", dagx @ (A @ x))
-                xAB = do("real", dagx @ b)
+                xAA = xp.real(dagx @ (A @ x))
+                xAB = xp.real(dagx @ b)
 
             d = abs(xAA + xBB - 2 * xAB) ** 0.5 * 2 / (xAA**0.5 + xBB**0.5)
             if abs(d - old_d) < tol:
@@ -568,9 +569,7 @@ def tensor_network_fit_als(
     if pos_smudge is None:
         pos_smudge = max(tol, 1e-15)
 
-    backend = next(iter(tnAA.tensors)).backend
-
-    with contract_strategy(contract_optimize), backend_like(backend):
+    with contract_strategy(contract_optimize):
         _tn_fit_als_core(
             var_tags=var_tags,
             tnAA=tnAA,
@@ -700,7 +699,9 @@ def tensor_network_fit_tree(
                 tn_fit._canonize_around_tids([tid])
 
             # get the new conjugate tensor
-            ti_new = tn_hole.contract(output_inds=ti.inds, optimize=contract_optimize)
+            ti_new = tn_hole.contract(
+                output_inds=ti.inds, optimize=contract_optimize
+            )
             ti_new.conj_()
             # modify the data
             ti.modify(data=ti_new.data)

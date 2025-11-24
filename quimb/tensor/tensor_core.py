@@ -24,6 +24,7 @@ from autoray import (
     infer_backend,
     shape,
     size,
+    get_namespace,
 )
 
 try:
@@ -2245,6 +2246,10 @@ class Tensor:
     def backend(self):
         """The backend inferred from the data."""
         return infer_backend(self._data)
+
+    def get_namespace(self):
+        """Get the namespace of the underlying data array."""
+        return get_namespace(self._data)
 
     def iscomplex(self):
         return iscomplex(self.data)
@@ -11641,6 +11646,12 @@ class TensorNetwork(object):
         the same for all tensors.
         """
         return next(iter(self.tensor_map.values())).backend
+
+    def get_namespace(self):
+        """Get the array namespace of any tensor in this network, asssuming
+        it to be the same for all tensors.
+        """
+        return next(iter(self.tensor_map.values())).get_namespace()
 
     def iscomplex(self):
         return iscomplex(self)

@@ -806,9 +806,10 @@ def qr_stabilized_lazy(x):
 
 @compose
 def lq_stabilized(x, backend=None):
-    with backend_like(backend):
-        Q, _, L = qr_stabilized(do("transpose", x))
-        return do("transpose", L), None, do("transpose", Q)
+    QT, _, LT = qr_stabilized(do("transpose", x, like=backend))
+    Q = do("transpose", QT, like=backend)
+    L = do("transpose", LT, like=backend)
+    return L, None, Q
 
 
 @lq_stabilized.register("numpy")
