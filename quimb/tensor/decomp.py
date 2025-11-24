@@ -601,8 +601,8 @@ def eigh_truncated(
             s, U = s[idx], U[:, idx]
         else:
             # assume all positive, simply reverse
-            s = s[::-1]
-            U = U[:, ::-1]
+            s = do("flip", s)
+            U = do("flip", U, axis=1)
 
         VH = dag(U)
 
@@ -1253,7 +1253,13 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
         # might have negative eigenvalues due to numerical error from squaring
         s2 = do("clip", s2, 0.0, None)
 
-    except Exception:
+    except Exception as e:
+        warnings.warn(
+            "squared_op_to_reduced_factor: eigh_truncated failed"
+            f" with error: {e}, falling back to svd_truncated.",
+            RuntimeWarning,
+        )
+
         # fallback to SVD if maybe badly conditioned etc.
         U, s2, VH = svd_truncated(
             x2,
