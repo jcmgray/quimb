@@ -1865,41 +1865,58 @@ class Tensor:
         --------
         TensorNetwork.isel, Tensor.rand_reduce
         """
-        T = self if inplace else self.copy()
+        new = self if inplace else self.copy()
 
         new_inds = []
-        data_loc = []
-        num_project = 0
+        ax_to_sel = {}
+        num_reduced = 0
 
-        for ix in T.inds:
-
+        for ax, ix in enumerate(new.inds):
             if ix not in selectors:
-                sel = slice(None)
+                # index kept as is
+                new_inds.append(ix)
             else:
                 sel = selectors[ix]
-                num_project += 1
 
-            if isinstance(sel, slice):
-                # index will be kept (including a partial slice of entries)
-                new_inds.append(ix)
-                data_loc.append(sel)
-            elif isinstance(sel, str) and sel == "r":
-                # eagerly remove any 'random' selections
-                T.rand_reduce_(ix)
-            else:
-                # index will be removed by selecting a specific index
                 if isinstance(sel, str):
-                    sel = int(sel)
-                data_loc.append(sel)
+                    if sel == "r":
+                        # eagerly remove any 'random' selections
+                        new.rand_reduce_(ix)
+                        num_reduced += 1
+                        continue
+                    else:
+                        # assume single int
+                        sel = int(sel)
 
+                if isinstance(sel, slice):
+                    # index will still be kept (but partial slice of entries)
+                    # XXX: handle iterable as well?
+                    new_inds.append(ix)
 
-        if num_project:
-            T.modify(
-                apply=lambda x: x[tuple(data_loc)],
+                ax_to_sel[ax - num_reduced] = sel
+
+        if len(ax_to_sel) == 1:
+            # single selection, for maximum compatibility
+            # (e.g. with torch.vmap) use `take`
+            ((axis, sel),) = ax_to_sel.items()
+            new.modify(
+                apply=lambda x: do("take", x, sel, axis=axis),
                 inds=new_inds,
                 left_inds=None,
             )
-        return T
+
+        elif ax_to_sel:
+            # multiple axes selections
+            data_loc = tuple(
+                ax_to_sel.get(ax, slice(None)) for ax in range(new.ndim)
+            )
+            new.modify(
+                apply=lambda x: x[data_loc],
+                inds=new_inds,
+                left_inds=None,
+            )
+
+        return new
 
     isel_ = functools.partialmethod(isel, inplace=True)
 
