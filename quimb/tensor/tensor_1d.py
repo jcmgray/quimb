@@ -8,7 +8,16 @@ from numbers import Integral
 
 import numpy as np
 import scipy.sparse.linalg as spla
-from autoray import conj, dag, do, get_dtype_name, reshape, size, transpose
+from autoray import (
+    conj,
+    dag,
+    do,
+    get_dtype_name,
+    get_namespace,
+    reshape,
+    size,
+    transpose,
+)
 
 import quimb as qu
 
@@ -3658,6 +3667,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         info=None,
         get=None,
         seed=None,
+        backend_random="numpy",
         inplace=False,
     ):
         r"""Measure this MPS at ``site``, including projecting the state.
@@ -3695,6 +3705,11 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             projection.
         seed : None, int, or np.random.Generator, optional
             A random seed or generator to use.
+        backend_random : {'numpy', None, ...}, optional
+            The backend to use for random sampling. If ``None``, will be
+            inferred from the tensor data. By default numpy is used meaning the
+            probability distributions are always converted to numpy arrays, for
+            consistency.
         inplace : bool, optional
             Whether to perform the measurement in place or not.
 
@@ -3719,16 +3734,35 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         t = tn[site]
         ind = tn.site_ind(site)
 
+        # array namespace
+        xp = t.get_namespace()
+        # random namespace
+        if backend_random is None:
+            rxp = xp
+            convert = False
+        elif backend_random == "numpy":
+            rxp = get_namespace("numpy")
+            convert = xp is not rxp
+        else:
+            rxp = get_namespace(backend_random)
+            convert = False
+
         # diagonal of reduced density matrix = probs
         tii = t.contract(t.H, output_inds=(ind,))
-        pi = do("to_numpy", tii.data).real
-        pi /= pi.sum()
+        pi = xp.real(tii.data)
 
-        rng = np.random.default_rng(seed)
+        if convert:
+            pi = xp.to_numpy(pi)
+
+        pi = pi / rxp.sum(pi)
         if outcome is None:
             # sample an outcome
-            outcome = rng.choice(pi.size, p=pi)
-        outcome = int(outcome)
+            rng = rxp.random.default_rng(seed)
+            outcome = rng.choice(rxp.size(pi), p=pi)
+
+        if backend_random == "numpy":
+            # XXX: unnecessary? numpy always returns int for scalar size?
+            outcome = int(outcome)
 
         if get == "outcome":
             return outcome
@@ -3759,13 +3793,23 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
     measure_ = functools.partialmethod(measure, inplace=True)
 
-    def sample_configuration(self, seed=None, info=None):
+    def sample_configuration(
+        self,
+        seed=None,
+        backend_random="numpy",
+        info=None,
+    ):
         """Sample a configuration from this MPS.
 
         Parameters
         ----------
         seed : None, int, or np.random.Generator, optional
             A random seed or generator to use.
+        backend_random : {'numpy', None, ...}, optional
+            The backend to use for random sampling. If ``None``, will be
+            inferred from the tensor data. By default numpy is used meaning the
+            probability distributions are always converted to numpy arrays, for
+            consistency.
         info : dict, optional
             If given, will be used to infer and store various extra
             information. Currently the key "cur_orthog" is used to store the
@@ -3773,8 +3817,24 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         """
         import numpy as np
 
+        # array namespace
+        xp = self.get_namespace()
+        # random namespace
+        if backend_random is None:
+            # use array backend
+            rxp = xp
+            convert = False
+        elif backend_random == "numpy":
+            # use numpy to sample regardless of array backend
+            rxp = get_namespace("numpy")
+            convert = xp is not rxp
+        else:
+            # manual backend
+            rxp = get_namespace(backend_random)
+            convert = False
+
         # if seed is already a generator this simply returns it
-        rng = np.random.default_rng(seed)
+        rng = rxp.random.default_rng(seed)
 
         # right canonicalize
         psi = self.canonicalize(0, info=info)
@@ -3788,14 +3848,16 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             ix = psi.site_ind(i)
             # contract diagonal to get probabilities
             pi = (ki & bi).contract(output_inds=[ix]).data
+            pi = xp.real(pi)
 
-            # sample outcome using numpy
-            pi = do("to_numpy", pi).real
-            pi /= pi.sum()
-            xi = rng.choice(pi.size, p=pi)
+            if convert:
+                pi = xp.to_numpy(pi)
+
+            pi = pi / rxp.sum(pi)
+            xi = rng.choice(rxp.size(pi), p=pi)
             config.append(xi)
             # track local probability
-            omega *= pi[xi]
+            omega = omega * pi[xi]
 
             # project outcome
             psi.isel_({ix: xi})
@@ -3805,7 +3867,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         return config, omega
 
-    def sample(self, C, seed=None, info=None):
+    def sample(self, C, seed=None, backend_random="numpy", info=None):
         """Generate ``C`` samples rom this MPS, along with their probabilities.
 
         Parameters
@@ -3814,6 +3876,11 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             The number of samples to generate.
         seed : None, int, or np.random.Generator, optional
             A random seed or generator to use.
+        backend_random : {'numpy', None, ...}, optional
+            The backend to use for random sampling. If ``None``, will be
+            inferred from the tensor data. By default numpy is used meaning the
+            probability distributions are always converted to numpy arrays, for
+            consistency.
         info : dict, optional
             If given, will be used to infer and store various extra
             information. Currently the key "cur_orthog" is used to store the
@@ -3833,9 +3900,23 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         # do right canonicalization once (supplying info avoids re-performing)
         psi0 = self.canonicalize(0, info=info)
 
-        rng = np.random.default_rng(seed)
+        if backend_random is None:
+            # use array backend
+            rxp = psi0.get_namespace()
+        elif backend_random == "numpy":
+            # use numpy to sample regardless of array backend
+            rxp = get_namespace("numpy")
+        else:
+            # manual backend
+            rxp = get_namespace(backend_random)
+
+        rng = rxp.random.default_rng(seed)
         for _ in range(C):
-            yield psi0.sample_configuration(seed=rng, info=info)
+            yield psi0.sample_configuration(
+                seed=rng,
+                info=info,
+                backend_random=backend_random,
+            )
 
 
 class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):

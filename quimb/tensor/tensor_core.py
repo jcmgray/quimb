@@ -11654,7 +11654,9 @@ class TensorNetwork(object):
 
     @property
     def dtype_name(self):
-        """The name of the data type of the array elements."""
+        """The name of the data type of the array elements, asssuming it to be
+        the same for all tensors.
+        """
         return next(iter(self.tensor_map.values())).dtype_name
 
     @property

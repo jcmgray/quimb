@@ -24,12 +24,13 @@ Release notes for `quimb`.
 - [`LocalHamGen.apply_to_arrays`](quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.apply_to_arrays): support pytree parameter arrays such as `symmray`.
 - add [`Tensor.get_namespace`](quimb.tensor.tensor_core.Tensor.get_namespace) and [`TensorNetwork.get_namespace`](quimb.tensor.tensor_core.TensorNetwork.get_namespace) for getting a [reusable data array namespace](https://autoray.readthedocs.io/en/latest/automatic_dispatch.html#namespace-api)
 - [`TensorNetwork.isel`](quimb.tensor.tensor_core.TensorNetwork.isel): use `take` where possible to better support e.g. `torch.vmap` across amplitudes.
+- [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure), and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample: add `backend_random` option for specifying which backend to use for random number generation when sampling, this can be set for example to `jax` to make the whole process jittable, but by default is `numpy`, regardless of the actual array backend.
 
 **Bug fixes:**
 
 - fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) when `insert_into is None`.
 - tensor network drawing, ensure hyper indices can be specified as `output_inds`.
-
+- fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) when using jax arrays ({issue}`340`).
 
 (whats-new-1-11-2)=
 ## v1.11.2 (2025-07-30)
