@@ -37,7 +37,6 @@ dependencies = [
     "tqdm>=4",
 ]
 
-
 [project.optional-dependencies]
 recommended = [
     "autograd",
@@ -48,10 +47,6 @@ recommended = [
     "networkx",
     "plotly",
     "pygraphviz",
-]
-tensor = [
-    "matplotlib>=2.0",
-    "networkx>=2.3"
 ]
 advanced_solvers = [
     "mpi4py",
@@ -64,7 +59,7 @@ tests = [
     "pytest-cov"
 ]
 docs = [
-    "astroid<3.0.0",
+    "astroid",
     "doc2dash>=2.4.1",
     "furo",
     "ipython!=8.7.0",
@@ -112,3 +107,110 @@ lint.ignore = ["E741"]
 [tool.black]
 line-length = 79
 target-version = ['py310']
+
+
+# ---------------------------------- pixi ----------------------------------- #
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+
+[tool.pixi.dependencies]
+autoray = "*"
+cotengra = "*"
+cytoolz = "*"
+numba = "*"
+numpy = "*"
+psutil = "*"
+scipy = "*"
+tqdm = "*"
+
+[tool.pixi.pypi-dependencies]
+quimb = { path = ".", editable = true }
+
+[tool.pixi.feature.full.dependencies]
+autograd= "*"
+cmaes= "*"
+graphviz = "*"
+matplotlib= "*"
+networkx= "*"
+plotly= "*"
+pygraphviz= "*"
+[tool.pixi.feature.full.pypi-dependencies]
+cotengrust= "*"
+[tool.pixi.feature.full.target.linux-64.pypi-dependencies]
+kahypar = "*"
+[tool.pixi.feature.full.target.osx-arm64.pypi-dependencies]
+kahypar = "*"
+
+[tool.pixi.feature.slepc]
+platforms = ["linux-64"]
+[tool.pixi.feature.slepc.dependencies]
+matplotlib = "*"
+mpi4py = "*"
+networkx = "*"
+openmpi = "*"
+petsc = { version = "*", build = "complex*" }
+petsc4py = "*"
+slepc = { version = "*", build = "complex*" }
+slepc4py = "*"
+
+[tool.pixi.feature.jax]
+platforms = ["linux-64"]
+[tool.pixi.feature.jax.pypi-dependencies]
+jax = { version = "*", extras = ["cpu"] }
+
+[tool.pixi.feature.torch]
+platforms = ["linux-64"]
+[tool.pixi.feature.torch.pypi-dependencies]
+torch = { version = "*", index = "https://download.pytorch.org/whl/cpu" }
+
+[tool.pixi.feature.tensorflow]
+platforms = ["linux-64"]
+[tool.pixi.feature.tensorflow.pypi-dependencies]
+tensorflow = "*"
+
+[tool.pixi.feature.tests.dependencies]
+coverage= "*"
+pytest= "*"
+pytest-cov= "*"
+
+[tool.pixi.feature.docs.dependencies]
+astroid = "*"
+doc2dash = "*"
+furo = "*"
+ipython = "*"
+myst-nb = "*"
+setuptools_scm = "*"
+sphinx-autoapi = "*"
+sphinx-copybutton = "*"
+sphinx-design = "*"
+sphinx = "*"
+
+[tool.pixi.feature.pyold.dependencies]
+python= "3.10.*"
+
+[tool.pixi.feature.pymid.dependencies]
+python= "3.12.*"
+
+[tool.pixi.feature.pynew.dependencies]
+python= "3.13.*"
+
+[tool.pixi.environments]
+testpynew = { features = ["pynew", "full", "tests"] }
+testpyold = { features = ["pyold", "full", "tests"] }
+testpymid = { features = ["pymid", "full", "tests"] }
+testjax = { features = ["pymid", "full", "jax", "tests"] }
+testtorch = { features = ["pymid", "full", "torch", "tests"] }
+testtensorflow = { features = ["pymid", "full", "tensorflow", "tests"] }
+testslepc = { features = ["pynew", "slepc", "tests"] }
+docs = { features = ["pynew", "docs"] }
+
+[tool.pixi.tasks]
+testmatrix = { cmd = "pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor", cwd = "." }
+testtensor = { cmd = "pytest tests/test_tensor --cov=quimb --cov-report=xml", cwd = "." }
+
+[tool.pixi.feature.docs.tasks]
+docs = { cmd = "sphinx-build -b html docs docs/_build/html", cwd = "." }
+docs-clean = { cmd = "rm -rf docs/_build", cwd = "." }
+docs-serve = { cmd = "python -m http.server -d docs/_build/html 8000", cwd = "." }

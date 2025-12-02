@@ -16,82 +16,71 @@ jobs:
     strategy:
       matrix:
         testset: [matrix, tensor]
-        conda-env: [base]
+        environment: [testpyold, testpynew]
         os: [ubuntu-latest]
-        python-version: ['3.10', '3.13']
         flaky: [false]
 
         include:
         - os: macos-latest
           testset: matrix
-          conda-env: base
-          python-version: '3.12'
+          environment: testpymid
           flaky: true
 
         - os: macos-latest
           testset: tensor
-          conda-env: base
-          python-version: '3.12'
+          environment: testpymid
           flaky: false
 
         - os: windows-latest
           testset: matrix
-          conda-env: openblas
-          python-version: '3.12'
+          environment: testpymid
           flaky: false
           env:
             KMP_DUPLICATE_LIB_OK: "True"
 
         - os: windows-latest
           testset: tensor
-          conda-env: openblas
-          python-version: '3.12'
+          environment: testpymid
           flaky: false
           env:
             KMP_DUPLICATE_LIB_OK: "True"
 
-        - conda-env: torch
+        - environment: testtorch
           testset: tensor
           os: ubuntu-latest
-          python-version: '3.12'
           flaky: false
 
-        - conda-env: jax
+        - environment: testjax
           testset: tensor
           os: ubuntu-latest
-          python-version: '3.12'
           flaky: false
 
-        - conda-env: tensorflow
+        - environment: testtensorflow
           testset: tensor
           os: ubuntu-latest
-          python-version: '3.12'
           flaky: false
 
-        - conda-env: slepc
+        - environment: testslepc
           testset: matrix
           os: ubuntu-latest
-          python-version: '3.12'
           flaky: false
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v3
+    - name: Setup pixi
+      uses: prefix-dev/setup-pixi@v0.9.3
       with:
-        miniforge-version: latest
-        conda-remove-defaults: "true"
-        python-version: ${{ matrix.python-version }}
-        environment-file: ci/requirements/py-${{ matrix.conda-env }}.yml
+        environments: ${{ matrix.environment }}
+
 
     - name: Matrix submodule tests with pytest
       if: ${{ matrix.testset == 'matrix' }}
-      run: pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor
+      run: pixi run -e ${{ matrix.environment }} testmatrix
 
     - name: Tensor tests with pytest
       if: ${{ matrix.testset == 'tensor' }}
-      run: pytest tests/test_tensor --cov=quimb --cov-report=xml
+      run: pixi run -e ${{ matrix.environment }} testtensor
 
     - name: Report to codecov
       uses: codecov/codecov-action@v4
