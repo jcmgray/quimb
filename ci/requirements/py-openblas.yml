@@ -1,7 +1,7 @@
 channels:
   - conda-forge
 dependencies:
-  - autoray>=0.8.3
+  - autoray>=0.8
   - blas=*=openblas
   - cotengra>=0.7.1
   - coverage

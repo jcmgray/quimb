@@ -2,7 +2,7 @@ channels:
   - pytorch
   - conda-forge
 dependencies:
-  - autoray>=0.8.3
+  - autoray>=0.8
   - cotengra>=0.7.1
   - coverage
   - cpuonly

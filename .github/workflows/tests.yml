@@ -18,26 +18,26 @@ jobs:
         testset: [matrix, tensor]
         conda-env: [base]
         os: [ubuntu-latest]
-        python-version: ['3.9', '3.12']
+        python-version: ['3.10', '3.13']
         flaky: [false]
 
         include:
         - os: macos-latest
           testset: matrix
           conda-env: base
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: true
 
         - os: macos-latest
           testset: tensor
           conda-env: base
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
 
         - os: windows-latest
           testset: matrix
           conda-env: openblas
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
           env:
             KMP_DUPLICATE_LIB_OK: "True"
@@ -45,7 +45,7 @@ jobs:
         - os: windows-latest
           testset: tensor
           conda-env: openblas
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
           env:
             KMP_DUPLICATE_LIB_OK: "True"
@@ -53,25 +53,25 @@ jobs:
         - conda-env: torch
           testset: tensor
           os: ubuntu-latest
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
 
         - conda-env: jax
           testset: tensor
           os: ubuntu-latest
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
 
         - conda-env: tensorflow
           testset: tensor
           os: ubuntu-latest
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
 
         - conda-env: slepc
           testset: matrix
           os: ubuntu-latest
-          python-version: '3.11'
+          python-version: '3.12'
           flaky: false
 
     steps:
