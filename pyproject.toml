@@ -33,7 +33,7 @@ dependencies = [
     "numba>=0.39",
     "numpy>=1.17",
     "psutil>=4.3.1",
-    "scipy>=1.0.0",
+    "scipy>=1.16.0",
     "tqdm>=4",
 ]
 
@@ -122,7 +122,7 @@ cytoolz = "*"
 numba = "*"
 numpy = "*"
 psutil = "*"
-scipy = "*"
+scipy = ">=1.16.0"
 tqdm = "*"
 
 [tool.pixi.pypi-dependencies]
@@ -188,7 +188,7 @@ sphinx-design = "*"
 sphinx = "*"
 
 [tool.pixi.feature.pyold.dependencies]
-python= "3.10.*"
+python= "3.11.*"
 
 [tool.pixi.feature.pymid.dependencies]
 python= "3.12.*"
