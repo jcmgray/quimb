@@ -47,10 +47,20 @@ def test_contract_double_layer_tree_exact(dtype):
     edges = qtn.edges_tree_rand(10, max_degree=3, seed=42)
     # generate a random tree product state and operator on this tree
     tps = qtn.TN_from_edges_rand(
-        edges, 3, phys_dim=2, site_ind_id="k{}", dtype=dtype
+        edges,
+        3,
+        phys_dim=2,
+        site_ind_id="k{}",
+        dtype=dtype,
+        seed=111,
     )
     tpo = qtn.TN_from_edges_rand(
-        edges, 3, phys_dim=2, site_ind_id=("k{}", "b{}"), dtype=dtype
+        edges,
+        3,
+        phys_dim=2,
+        site_ind_id=("k{}", "b{}"),
+        dtype=dtype,
+        seed=222,
     )
     # join into double layer tree
     tn = qtn.tensor_network_apply_op_vec(tpo, tps, contract=False)
