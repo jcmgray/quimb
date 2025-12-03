@@ -7,11 +7,12 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add basic introductio to the operator module - {ref}`operator-basics`
+- add basic introduction to the operator module - {ref}`operator-basics`
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
 - update infrastructure for TEBD and SimpleUpdate based algorithms.
 - [`schematic.Drawing`](quimb.schematic.drawing): add [`grid`](quimb.schematic.drawing.grid), [`grid3d`](quimb.schematic.drawing.grid3d), [`bezier`](quimb.schematic.drawing.bezier), [`star`](quimb.schematic.drawing.star), [`cross`](quimb.schematic.drawing.cross) and [`zigzag`](quimb.schematic.drawing.zigzag) methods.
 - [`schematic.Drawing`](quimb.schematic.drawing): add `relative` option to [`arrowhead`](quimb.schematic.drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.drawing.line).
+- add [`Drawing.scale_figsize`](quimb.schematic.Drawing.scale_figsize) for automatically setting the absolute figsize based on placed elements.
 - refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): add `adjust_lims` option

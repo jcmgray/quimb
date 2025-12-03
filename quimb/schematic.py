@@ -826,6 +826,9 @@ class Drawing:
             The width of the zig-zagging. Default is to aim for 8 zig-zags.
         extend : float, optional
             Only start zig-zagging after this distance from the end-points.
+        density : float, optional
+            The density of the zig-zags, where 1.0 is the default density
+            resulting in approximately 8 zig-zags along the line.
         preset : str, optional
             A preset style to use for the line.
         kwargs
@@ -1471,10 +1474,16 @@ class Drawing:
         overextend=0.0,
         ticklabels=True,
     ):
-        xmin = self._xmin - margin
-        xmax = self._xmax + margin
-        ymin = self._ymin - margin
-        ymax = self._ymax + margin
+        if self._xmin is None:
+            # nothing has been plotted yet
+            xmin, xmax = (-1, 1)
+            ymin, ymax = (-1, 1)
+        else:
+            xmin = self._xmin - margin
+            xmax = self._xmax + margin
+            ymin = self._ymin - margin
+            ymax = self._ymax + margin
+
         gxmin = floor(xmin)
         gxmax = ceil(xmax)
         gymin = floor(ymin)
@@ -1683,7 +1692,32 @@ class Drawing:
                 **style,
             )
 
+    def scale_figsize(self, scale=1.0):
+        """Scale this figure's size according to the plot limits, so that one
+        unit in the drawing corresponds to `scale` inches in the figure. Note
+        this should be called after all drawing including `.grid()` calls.
+        """
+        if self._xmin is None:
+            # nothing has been plotted yet
+            return
+        xrange = scale * abs(self._xmax - self._xmin)
+        yrange = scale * abs(self._ymax - self._ymin)
+        self.fig.set_size_inches(xrange, yrange)
+
     def savefig(self, fname, dpi=300, bbox_inches="tight"):
+        """Save this drawing to a file, using matplotlib's savefig and some
+        nicer defaults.
+
+        Parameters
+        ----------
+        fname : str
+            The filename to save to.
+        dpi : int, optional
+            The DPI to use. Default is 300.
+        bbox_inches : str or Bbox, optional
+            The bbox_inches parameter to pass to matplotlib's savefig.
+            Default is 'tight'.
+        """
         self.fig.savefig(fname, dpi=dpi, bbox_inches=bbox_inches)
 
 
