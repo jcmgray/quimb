@@ -337,15 +337,14 @@ def create_lazy_edge_map(tn: "TensorNetworkGen", site_tags=None):
         For each site tag, the other site tags it is connected to.
     """
     if site_tags is None:
-        site_tags = set(tn.site_tags)
-    else:
-        site_tags = set(site_tags)
+        site_tags = tn.site_tags
 
     edges = {}
-    neighbors = {}
+    neighbors = {tag: [] for tag in site_tags}
 
-    for ix in tn.ind_map:
-        ts = tn._inds_get(ix)
+    for ix, tids in tn.ind_map.items():
+        # for each tensor with this index, get all tags that are site tags
+        ts = [tn.tensor_map[tid] for tid in tids]
         tags = {tag for t in ts for tag in t.tags if tag in site_tags}
         if len(tags) >= 2:
             # index spans multiple sites
@@ -356,8 +355,8 @@ def create_lazy_edge_map(tn: "TensorNetworkGen", site_tags=None):
                 edges[(i, j)] = [ix]
 
                 # add to neighbor map
-                neighbors.setdefault(i, []).append(j)
-                neighbors.setdefault(j, []).append(i)
+                neighbors[i].append(j)
+                neighbors[j].append(i)
             else:
                 # already processed this edge
                 edges[(i, j)].append(ix)

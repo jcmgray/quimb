@@ -860,6 +860,14 @@ class TestMatrixProductOperator:
         t2 = h2.trace()
         assert_allclose(2 * t, t2)
 
+    @pytest.mark.parametrize("p", [2, 3, 4])
+    def test_add_mpo_length_1(self, p):
+        mpoa = qtn.MPO_rand(L=1, bond_dim=1, phys_dim=p)
+        mpob = qtn.MPO_rand(L=1, bond_dim=1, phys_dim=p)
+        mpoc = mpoa + mpob
+        assert mpoc[0].shape == (p, p)
+        assert_allclose(mpoc.to_dense(), mpoa.to_dense() + mpob.to_dense())
+
     def test_adding_mpo(self):
         h = qtn.MPO_ham_heis(6)
         hd = h.to_qarray()

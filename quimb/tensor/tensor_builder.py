@@ -4191,7 +4191,11 @@ def MPO_rand(
 
         def fill_fn(shape):
             data = base_fill_fn(shape)
-            trans = (0, 2, 1) if len(shape) == 3 else (0, 1, 3, 2)
+            trans = (
+                (0, 1, 3, 2) if len(shape) == 4
+                else (0, 2, 1) if len(shape) == 3
+                else (1, 0)  # L==1
+            )
             data += data.transpose(*trans).conj()
             return sensibly_scale(data)
 
