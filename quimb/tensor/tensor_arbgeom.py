@@ -340,7 +340,7 @@ def create_lazy_edge_map(tn: "TensorNetworkGen", site_tags=None):
         site_tags = tn.site_tags
 
     edges = {}
-    neighbors = {tag: [] for tag in site_tags}
+    neighbors = {tag: [] for tag in site_tags if tag in tn.tag_map}
 
     for ix, tids in tn.ind_map.items():
         # for each tensor with this index, get all tags that are site tags
