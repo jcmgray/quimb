@@ -643,7 +643,6 @@ class TorchHandler:
     def _setup_backend_fn(self, arrays):
         torch = get_torch()
         if self.jit_fn:
-
             # jit.trace only accepts a tuple of example tensors ->
             # so we need to further flatten the pytree of arrays
 
