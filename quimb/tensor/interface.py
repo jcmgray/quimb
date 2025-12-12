@@ -3,16 +3,29 @@ libraries.
 """
 
 import functools
+import operator
 
 from ..utils import tree_map
 from .tensor_core import Tensor, TensorNetwork
 
 
 class Placeholder:
-    __slots__ = ("shape",)
+    __slots__ = ("shape", "dtype")
 
     def __init__(self, x):
         self.shape = getattr(x, "shape", None)
+        self.dtype = getattr(x, "dtype", "unknown")
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @property
+    def size(self):
+        return functools.reduce(operator.mul, self.shape, 1)
+
+    def __len__(self):
+        return self.shape[0]
 
     def __repr__(self):
         return f"Placeholder(shape={self.shape})"
