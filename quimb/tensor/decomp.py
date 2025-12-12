@@ -24,6 +24,7 @@ from autoray import (
 
 from ..core import njit
 from ..linalg import base_linalg, rand_linalg
+from ..utils import parse_info_extras
 from .array_ops import isblocksparse, isfermionic
 
 
@@ -144,11 +145,14 @@ def _trim_and_renorm_svd_result(
     absorb,
     renorm,
     use_abs=False,
+    info=None,
 ):
     """Give full SVD decomposion result ``U``, ``s``, ``VH``, optionally trim,
     renormalize, and absorb the singular values. See ``svd_truncated`` for
     details.
     """
+    info = parse_info_extras(info, ("error",))
+
     if use_abs:
         sabs = do("abs", s)
     else:
@@ -193,6 +197,9 @@ def _trim_and_renorm_svd_result(
         n_chi = d
 
     if n_chi < d:
+        if "error" in info:
+            info["error"] = do("sqrt", do("sum", sabs[n_chi:] ** 2))
+
         s = s[:n_chi]
         U = U[:, :n_chi]
         VH = VH[:n_chi, :]
@@ -201,24 +208,32 @@ def _trim_and_renorm_svd_result(
             norm = (tot / csp[n_chi - 1]) ** (1 / pow)
             s *= norm
 
+    elif "error" in info:
+        # no truncation
+        info["error"] = 0.0
+
     # XXX: tensorflow can't multiply mixed dtypes
     if infer_backend(s) == "tensorflow":
         dtype = get_dtype_name(U)
         if "complex" in dtype:
             s = astype(s, dtype)
 
-    if absorb is None:
-        return U, s, VH
-    if absorb == -1:
-        U = rdmul(U, s)
-    elif absorb == 1:
-        VH = ldmul(s, VH)
-    else:
-        s = do("sqrt", s)
-        U = rdmul(U, s)
-        VH = ldmul(s, VH)
+    if absorb is not None:
+        # contract singular values into U and/or VH
+        if absorb == -1:
+            # 'left'
+            U = rdmul(U, s)
+        elif absorb == 1:
+            # 'right'
+            VH = ldmul(s, VH)
+        else:
+            # 'both'
+            s = do("sqrt", s)
+            U = rdmul(U, s)
+            VH = ldmul(s, VH)
+        s = None
 
-    return U, None, VH
+    return U, s, VH
 
 
 @compose
@@ -230,6 +245,7 @@ def svd_truncated(
     absorb=0,
     renorm=0,
     backend=None,
+    info=None,
 ):
     """Truncated svd or raw array ``x``.
 
@@ -239,14 +255,14 @@ def svd_truncated(
         Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
         ``max_bond`` is used.
     cutoff_mode : {1, 2, 3, 4, 5, 6}, optional
-        How to perform the trim:
+        How to perform the truncation based on ``cutoff``:
 
-            - 1: ['abs'], trim values below ``cutoff``
-            - 2: ['rel'], trim values below ``s[0] * cutoff``
-            - 3: ['sum2'], trim s.t. ``sum(s_trim**2) < cutoff``.
-            - 4: ['rsum2'], trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
-            - 5: ['sum1'], trim s.t. ``sum(s_trim**1) < cutoff``.
-            - 6: ['rsum1'], trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
+        - 1: ['abs'], trim values below ``cutoff``
+        - 2: ['rel'], trim values below ``s[0] * cutoff``
+        - 3: ['sum2'], trim s.t. ``sum(s_trim**2) < cutoff``.
+        - 4: ['rsum2'], trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
+        - 5: ['sum1'], trim s.t. ``sum(s_trim**1) < cutoff``.
+        - 6: ['rsum1'], trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
 
     max_bond : int, optional
         An explicit maximum bond dimension, use -1 for none.
@@ -255,6 +271,11 @@ def svd_truncated(
         None: don't absorb (return).
     renorm : {0, 1}, optional
         Whether to renormalize the singular values (depends on `cutoff_mode`).
+    backend : str or None, optional
+        The backend to use.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently only
+        supports the key 'error' for the truncation error.
     """
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
@@ -262,7 +283,15 @@ def svd_truncated(
     with backend_like(backend):
         U, s, VH = do("linalg.svd", x)
         return _trim_and_renorm_svd_result(
-            U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+            U,
+            s,
+            VH,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            max_bond=max_bond,
+            absorb=absorb,
+            renorm=renorm,
+            info=info,
         )
 
 
@@ -339,6 +368,7 @@ def _trim_and_renorm_svd_result_numba(
     absorb,
     renorm,
     use_abs=False,
+    calc_error=False,
 ):
     """Accelerated version of ``_trim_and_renorm_svd_result``."""
 
@@ -347,14 +377,25 @@ def _trim_and_renorm_svd_result_numba(
     else:
         sabs = s
 
+    # default values
+    if calc_error:
+        error = 0.0
+    else:
+        error = None
+
     if (cutoff > 0.0) or (renorm > 0):
         # need to dynamically truncate
         n_chi = _compute_number_svals_to_keep_numba(sabs, cutoff, cutoff_mode)
 
         if max_bond > 0:
+            # bond dimension limited by both cutoff and max_bond
             n_chi = min(n_chi, max_bond)
 
         if n_chi < s.size:
+            # some truncation needed
+            if calc_error:
+                error = np.sqrt(np.sum(sabs[n_chi:] ** 2))
+
             if renorm > 0:
                 f = _compute_svals_renorm_factor_numba(sabs, n_chi, renorm)
                 s = s[:n_chi] * f
@@ -365,58 +406,109 @@ def _trim_and_renorm_svd_result_numba(
             VH = VH[:n_chi, :]
 
     elif (max_bond != -1) and (max_bond < s.shape[0]):
-        # only maximum bond specified
+        # some truncation, but only maximum bond specified
+        if calc_error:
+            error = np.sqrt(np.sum(sabs[max_bond:] ** 2))
+
         U = U[:, :max_bond]
         s = s[:max_bond]
         VH = VH[:max_bond, :]
 
     s = np.ascontiguousarray(s)
 
-    if absorb is None:
-        return U, s, VH
-    elif absorb == -1:
-        U = rdmul_numba(U, s)
-    elif absorb == 1:
-        VH = ldmul_numba(s, VH)
-    else:
-        s **= 0.5
-        U = rdmul_numba(U, s)
-        VH = ldmul_numba(s, VH)
+    if absorb is not None:
+        # contract singular values into U and/or VH
+        if absorb == -1:
+            # 'left'
+            U = rdmul_numba(U, s)
+        elif absorb == 1:
+            # 'right'
+            VH = ldmul_numba(s, VH)
+        else:
+            # 'both'
+            s **= 0.5
+            U = rdmul_numba(U, s)
+            VH = ldmul_numba(s, VH)
+        s = None
 
-    return U, None, VH
+    return U, s, VH, error
 
 
 @njit  # pragma: no cover
 def svd_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    calc_error=False,
 ):
     """Accelerated version of ``svd_truncated`` for numpy arrays."""
     U, s, VH = np.linalg.svd(x, full_matrices=False)
 
     return _trim_and_renorm_svd_result_numba(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        calc_error=calc_error,
     )
 
 
 @svd_truncated.register("numpy")
 def svd_truncated_numpy(
-    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    info=None,
 ):
     """Numpy version of ``svd_truncated``, trying the accelerated version
     first, then falling back to the more stable scipy version.
     """
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
+
+    info = parse_info_extras(info, ("error",))
+    calc_error = "error" in info
+
     try:
-        return svd_truncated_numba(
-            x, cutoff, cutoff_mode, max_bond, absorb, renorm
+        U, s, VH, error = svd_truncated_numba(
+            x,
+            cutoff,
+            cutoff_mode,
+            max_bond,
+            absorb,
+            renorm,
+            calc_error=calc_error,
         )
     except ValueError as e:  # pragma: no cover
         warnings.warn(f"Got: {e}, falling back to scipy gesvd driver.")
         U, s, VH = scla.svd(x, full_matrices=False, lapack_driver="gesvd")
-        return _trim_and_renorm_svd_result_numba(
-            U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+
+        U, s, VH, error = _trim_and_renorm_svd_result_numba(
+            U,
+            s,
+            VH,
+            cutoff,
+            cutoff_mode,
+            max_bond,
+            absorb,
+            renorm,
+            calc_error=calc_error,
         )
+
+    if calc_error:
+        info["error"] = error
+
+    return U, s, VH
 
 
 @svd_truncated.register("autoray.lazy")
@@ -508,7 +600,13 @@ def svdvals(x):
 
 @njit  # pragma: no cover
 def _svd_via_eig_truncated_numba(
-    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    calc_error=False,
 ):
     """SVD-split via eigen-decomposition."""
     if x.shape[0] > x.shape[1]:
@@ -532,19 +630,47 @@ def _svd_via_eig_truncated_numba(
     U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
 
     return _trim_and_renorm_svd_result_numba(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        calc_error=calc_error,
     )
 
 
 def svd_via_eig_truncated(
-    x, cutoff=-1.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    info=None,
 ):
+    info = parse_info_extras(info, ("error",))
+
     if isinstance(x, np.ndarray):
-        return _svd_via_eig_truncated_numba(
-            x, cutoff, cutoff_mode, max_bond, absorb, renorm
+        calc_error = "error" in info
+        U, s, VH, error = _svd_via_eig_truncated_numba(
+            x,
+            cutoff,
+            cutoff_mode,
+            max_bond,
+            absorb,
+            renorm,
+            calc_error=calc_error,
         )
 
-    if x.shape[0] > x.shape[1]:
+        if calc_error:
+            info["error"] = error
+
+        return U, s, VH
+
+    elif x.shape[0] > x.shape[1]:
         # Get sU, V
         s2, V = do("linalg.eigh", dag(x) @ x)
         U = x @ V
@@ -565,7 +691,15 @@ def svd_via_eig_truncated(
     U, s, VH = do("flip", U, (1,)), do("flip", s, (0,)), do("flip", VH, (0,))
 
     return _trim_and_renorm_svd_result(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        info=info,
     )
 
 
@@ -652,9 +786,11 @@ def eigh_truncated_numba(
     # VH = ldmul_numba(sgn_numba(s), dag_numba(U))
     # s = np.abs(s)
 
-    return _trim_and_renorm_svd_result_numba(
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm, use_abs=True
     )
+
+    return U, s, VH
 
 
 def _choose_k(x, cutoff, max_bond):
@@ -686,9 +822,10 @@ def svds(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
         return svd_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
 
     U, s, VH = base_linalg.svds(x, k=k)
-    return _trim_and_renorm_svd_result_numba(
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
+    return U, s, VH
 
 
 def isvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
@@ -706,9 +843,10 @@ def isvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
 
     U, s, V = sli.svd(x, k)
     VH = dag_numba(V)
-    return _trim_and_renorm_svd_result_numba(
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
+    return U, s, VH
 
 
 def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
@@ -721,9 +859,10 @@ def _rsvd_numpy(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     else:
         U, s, VH = rand_linalg.rsvd(x, cutoff)
 
-    return _trim_and_renorm_svd_result_numba(
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
         U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
+    return U, s, VH
 
 
 def rsvd(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
@@ -758,9 +897,10 @@ def eigsh(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):
     s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
     V = ldmul_numba(sgn(s), dag_numba(U))
     s = np.abs(s)
-    return _trim_and_renorm_svd_result_numba(
+    U, s, V, _ = _trim_and_renorm_svd_result_numba(
         U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
     )
+    return U, s, V
 
 
 @compose

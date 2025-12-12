@@ -486,79 +486,81 @@ def tensor_split(
     bond_ind=None,
     right_inds=None,
     matrix_svals=False,
+    info=None,
     **kwargs,
 ):
-    """Decompose this tensor into two tensors.
+    """Decompose a tensor into two tensors by fusing its indices into left
+    and right sets, and performing a matrix decomposition.
 
     Parameters
     ----------
     T : Tensor or TNLinearOperator
         The tensor (network) to split.
     left_inds : str or sequence of str
-        The index or sequence of inds, which ``T`` should already have, to
-        split to the 'left'. You can supply ``None`` here if you supply
-        ``right_inds`` instead.
+        The index or sequence of inds, which `T` should already have, to
+        split to the 'left'. You can supply `None` here if you supply
+        `right_inds` instead.
     method : str, optional
         How to split the tensor, only some methods allow bond truncation:
 
-        - ``'svd'``: full SVD, allows truncation.
-        - ``'eig'``: full SVD via eigendecomp, allows truncation.
-        - ``'lu'``: full LU decomposition, allows truncation. This method
+        - `'svd'`: full SVD, allows truncation.
+        - `'eig'`: full SVD via eigendecomp, allows truncation.
+        - `'lu'`: full LU decomposition, allows truncation. This method
           favors tensor sparsity but is not rank optimal.
-        - ``'svds'``: iterative svd, allows truncation.
-        - ``'isvd'``: iterative svd using interpolative methods, allows
+        - `'svds'`: iterative svd, allows truncation.
+        - `'isvd'`: iterative svd using interpolative methods, allows
           truncation.
-        - ``'rsvd'`` : randomized iterative svd with truncation.
-        - ``'eigh'``: full eigen-decomposition, tensor must he hermitian.
-        - ``'eigsh'``: iterative eigen-decomposition, tensor must be hermitian.
-        - ``'qr'``: full QR decomposition.
-        - ``'lq'``: full LR decomposition.
-        - ``'polar_right'``: full polar decomposition as ``A = UP``.
-        - ``'polar_left'``: full polar decomposition as ``A = PU``.
-        - ``'cholesky'``: full cholesky decomposition, tensor must be positive.
+        - `'rsvd'` : randomized iterative svd with truncation.
+        - `'eigh'`: full eigen-decomposition, tensor must he hermitian.
+        - `'eigsh'`: iterative eigen-decomposition, tensor must be hermitian.
+        - `'qr'`: full QR decomposition.
+        - `'lq'`: full LQ decomposition.
+        - `'polar_right'`: full polar decomposition as `A = UP`.
+        - `'polar_left'`: full polar decomposition as `A = PU`.
+        - `'cholesky'`: full cholesky decomposition, tensor must be positive.
 
     get : {None, 'arrays', 'tensors', 'values'}
         If given, what to return instead of a TN describing the split:
 
-        - ``None``: a tensor network of the two (or three) tensors.
-        - ``'arrays'``: the raw data arrays as a tuple ``(l, r)`` or
-          ``(l, s, r)`` depending on ``absorb``.
-        - ``'tensors '``: the new tensors as a tuple ``(Tl, Tr)`` or
-          ``(Tl, Ts, Tr)`` depending on ``absorb``.
-        - ``'values'``: only compute and return the singular values ``s``.
+        - `None`: a tensor network of the two (or three) tensors.
+        - `'arrays'`: the raw data arrays as a tuple `(l, r)` or
+          `(l, s, r)` depending on `absorb`.
+        - `'tensors '`: the new tensors as a tuple `(Tl, Tr)` or
+          `(Tl, Ts, Tr)` depending on `absorb`.
+        - `'values'`: only compute and return the singular values `s`.
 
     absorb : {'both', 'left', 'right', None}, optional
         Whether to absorb the singular values into both, the left, or the right
-        unitary matrix respectively, or neither. If neither (``absorb=None``)
+        unitary matrix respectively, or neither. If neither (`absorb=None`)
         then the singular values will be returned separately in their own
-        1D tensor or array. In that case if ``get=None`` the tensor network
+        1D tensor or array. In that case if `get=None` the tensor network
         returned will have a hyperedge corresponding to the new bond index
-        connecting three tensors. If ``get='tensors'`` or ``get='arrays'`` then
-        a tuple like ``(left, s, right)`` is returned.
+        connecting three tensors. If `get='tensors'` or `get='arrays'` then
+        a tuple like `(left, s, right)` is returned.
     max_bond : None or int
         If integer, the maximum number of singular values to keep, regardless
-        of ``cutoff``.
+        of `cutoff`.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
         rank revealing methods (not QR, LQ, or cholesky).
     cutoff_mode : {'sum2', 'rel', 'abs', 'rsum2'}
         Method with which to apply the cutoff threshold:
 
-        - ``'rel'``: values less than ``cutoff * s[0]`` discarded.
-        - ``'abs'``: values less than ``cutoff`` discarded.
-        - ``'sum2'``: sum squared of values discarded must be ``< cutoff``.
-        - ``'rsum2'``: sum squared of values discarded must be less than
-          ``cutoff`` times the total sum of squared values.
-        - ``'sum1'``: sum values discarded must be ``< cutoff``.
-        - ``'rsum1'``: sum of values discarded must be less than ``cutoff``
+        - `'rel'`: values less than `cutoff * s[0]` discarded.
+        - `'abs'`: values less than `cutoff` discarded.
+        - `'sum2'`: sum squared of values discarded must be `< cutoff`.
+        - `'rsum2'`: sum squared of values discarded must be less than
+          `cutoff` times the total sum of squared values.
+        - `'sum1'`: sum values discarded must be `< cutoff`.
+        - `'rsum1'`: sum of values discarded must be less than `cutoff`
           times the total sum of values.
 
     renorm : {None, bool, or int}, optional
         Whether to renormalize the kept singular values, assuming the bond has
         a canonical environment, corresponding to maintaining the frobenius
-        or nuclear norm. If ``None`` (the default) then this is automatically
-        turned on only for ``cutoff_method in {'sum2', 'rsum2', 'sum1',
-        'rsum1'}`` with ``method in {'svd', 'eig', 'eigh'}``.
+        or nuclear norm. If `None` (the default) then this is automatically
+        turned on only for `cutoff_method in {'sum2', 'rsum2', 'sum1',
+        'rsum1'}` with `method in {'svd', 'eig', 'eigh'}`.
     ltags : sequence of str, optional
         Add these new tags to the left tensor.
     rtags : sequence of str, optional
@@ -567,24 +569,28 @@ def tensor_split(
         Add these new tags to the singular value tensor.
     bond_ind : str, optional
         Explicitly name the new bond, else a random one will be generated.
-        If ``matrix_svals=True`` then this should be a tuple of two indices,
+        If `matrix_svals=True` then this should be a tuple of two indices,
         one for the left and right bond respectively.
     right_inds : sequence of str, optional
         Explicitly give the right indices, otherwise they will be worked out.
         This is a minor performance feature.
     matrix_svals : bool, optional
-        If ``True``, return the singular values as a diagonal 2D array or
+        If `True`, return the singular values as a diagonal 2D array or
         Tensor, otherwise return them as a 1D array. This is only relevant if
         returning the singular value in some form.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently only
+        supports the key 'error' for the truncation error, which is only
+        computed if `method in {"svd", "eig"}`.
 
     Returns
     -------
     TensorNetwork or tuple[Tensor] or tuple[array] or 1D-array
-        Depending on if ``get`` is ``None``, ``'tensors'``, ``'arrays'``, or
-        ``'values'``. In the first three cases, if ``absorb`` is set, then the
-        returned objects correspond to ``(left, right)`` whereas if
-        ``absorb=None`` the returned objects correspond to
-        ``(left, singular_values, right)``.
+        Depending on if `get` is `None`, `'tensors'`, `'arrays'`, or
+        `'values'`. In the first three cases, if `absorb` is set, then the
+        returned objects correspond to `(left, right)` whereas if
+        `absorb=None` the returned objects correspond to
+        `(left, singular_values, right)`.
     """
     check_opt("get", get, _VALID_SPLIT_GET)
 
@@ -627,12 +633,23 @@ def tensor_split(
             s = do("diag", s)
         return s
 
-    opts = _parse_split_opts(
-        method, cutoff, absorb, max_bond, cutoff_mode, renorm
+    kwargs.update(
+        # cached lookup of various defaults
+        _parse_split_opts(
+            method,
+            cutoff,
+            absorb,
+            max_bond,
+            cutoff_mode,
+            renorm,
+        )
     )
+    if info is not None:
+        kwargs["info"] = info
 
-    # `s` itself will be None unless `absorb=None` is specified
-    left, s, right = _SPLIT_FNS[method](array, **opts, **kwargs)
+    # do the matrix decomposition!
+    left, s, right = _SPLIT_FNS[method](array, **kwargs)
+    # note `s` itself will be None unless `absorb=None` is specified
 
     if nleft != 1:
         # unfuse dangling left indices
