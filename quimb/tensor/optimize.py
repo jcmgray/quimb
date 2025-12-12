@@ -616,20 +616,25 @@ def get_torch():
 
 
 class TorchHandler:
-    def __init__(self, jit_fn=False, device=None):
+    def __init__(self, jit_fn=False, device=None, dtype=None):
         torch = get_torch()
         self.jit_fn = jit_fn
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype)
+        self.dtype = dtype
 
     def to_variable(self, x):
         torch = get_torch()
-        return torch.tensor(x).to(self.device).requires_grad_()
+        return torch.as_tensor(
+            x, device=self.device, dtype=self.dtype
+        ).requires_grad_()
 
     def to_constant(self, x):
         torch = get_torch()
-        return torch.tensor(x).to(self.device)
+        return torch.as_tensor(x, device=self.device, dtype=self.dtype)
 
     def setup_fn(self, fn):
         self._fn = fn
