@@ -35,6 +35,10 @@ DONE::
 
 """
 
+from .builder import (
+    SparseOperatorBuilder,
+    get_mat,
+)
 from .hilbertspace import (
     HilbertSpace,
 )
@@ -43,10 +47,6 @@ from .models import (
     fermi_hubbard_spinless_from_edges,
     heisenberg_from_edges,
     rand_operator,
-)
-from .builder import (
-    get_mat,
-    SparseOperatorBuilder,
 )
 
 __all__ = (

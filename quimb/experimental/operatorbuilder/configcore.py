@@ -1119,7 +1119,7 @@ def build_coo_numba_core(
         The column indices for the sparse matrix in COO format.
     """
     if symmetry == 0:
-        # unconstrained hilbert space
+        # unconstrained qubit hilbert space
         (n,) = sector
         return build_coo_numba_core_nosymm(
             n, coupling_map, dtype, world_size, world_rank

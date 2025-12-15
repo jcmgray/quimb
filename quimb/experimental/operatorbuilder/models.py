@@ -1,5 +1,5 @@
-from .hilbertspace import HilbertSpace, parse_edges_to_unique
 from .builder import SparseOperatorBuilder
+from .hilbertspace import HilbertSpace, parse_edges_to_unique
 
 
 def heisenberg_from_edges(
