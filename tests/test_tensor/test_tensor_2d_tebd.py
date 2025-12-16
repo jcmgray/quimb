@@ -1,5 +1,5 @@
-import itertools
 import importlib
+import itertools
 
 import pytest
 

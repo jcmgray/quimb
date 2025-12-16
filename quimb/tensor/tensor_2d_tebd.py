@@ -17,7 +17,13 @@ from .tensor_2d import (
     gen_2d_bonds,
     plaquette_to_sites,
 )
-from .tensor_arbgeom_tebd import LocalHamGen, SimpleUpdateGen, TEBDGen
+from .tensor_arbgeom_tebd import (
+    ComputeEnergyMixin,
+    GateBasicMixin,
+    GateSimpleUpdateMixin,
+    LocalHamGen,
+    TEBDSweepMixin,
+)
 
 
 class LocalHam2D(LocalHamGen):
@@ -212,22 +218,30 @@ class LocalHam2D(LocalHamGen):
     graph = draw
 
 
-class ComputeEnergyBoundary:
+class ComputeEnergyBoundary(ComputeEnergyMixin):
     """Mixin class to add energy computation to TEBD2D classes."""
 
-    def set_default_boundary_opts(self, chi=None):
-        # parse energy computation options
+    def setup_energy_opts(
+        self,
+        chi=None,
+        compute_energy_every=None,
+        compute_energy_final=True,
+        compute_energy_opts=None,
+        compute_energy_fn=None,
+        compute_energy_per_site=False,
+    ):
+        super().setup_energy_opts(
+            compute_energy_every=compute_energy_every,
+            compute_energy_final=compute_energy_final,
+            compute_energy_opts=compute_energy_opts,
+            compute_energy_fn=compute_energy_fn,
+            compute_energy_per_site=compute_energy_per_site,
+        )
         if chi is None:
             chi = max(8, self.D**2)
         self.compute_energy_opts["max_bond"] = chi
         self.compute_energy_opts.setdefault("cutoff", 0.0)
         self.compute_energy_opts.setdefault("normalized", True)
-
-    def compute_energy(self):
-        """Compute and return the energy of the current state."""
-        return self.state.compute_local_expectation(
-            self.ham.terms, **self.compute_energy_opts
-        )
 
     @property
     def chi(self):
@@ -240,13 +254,26 @@ class ComputeEnergyBoundary:
     def chi(self, value):
         self.compute_energy_opts["max_bond"] = round(value)
 
+    def compute_energy(self):
+        """Compute and return the total energy of the current state, using
+        boundary contraction.
+        """
+        return self.state.compute_local_expectation(
+            self.ham.terms,
+            **self.compute_energy_opts,
+        )
+
     def _get_repr_info(self):
         info = super()._get_repr_info()
         info["chi"] = self.chi
         return info
 
 
-class TEBD2D(TEBDGen, ComputeEnergyBoundary):
+class TEBD2D(
+    TEBDSweepMixin,
+    GateBasicMixin,
+    ComputeEnergyBoundary,
+):
     """Generic class for performing two dimensional time evolving block
     decimation, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
@@ -256,78 +283,88 @@ class TEBD2D(TEBDGen, ComputeEnergyBoundary):
 
     Parameters
     ----------
-    psi0 : TensorNetwork2DVector
+    psi0 : PEPS
         The initial state.
     ham : LocalHam2D
-        The Hamtiltonian consisting of local terms.
+        The local hamiltonian.
     tau : float, optional
-        The default local exponent, if considered as time real values here
-        imply imaginary time.
-    max_bond : {'psi0', int, None}, optional
-        The maximum bond dimension to keep when applying each gate.
+        The default time step to use.
+    D : int, optional
+        The maximum bond dimension, by default the current maximum bond of
+        ``psi0``.
+    cutoff : float, optional
+        The singular value cutoff to use when applying gates.
+    imag : bool, optional
+        Whether to evolve in imaginary time (default) or real time.
     gate_opts : dict, optional
-        Supplied to :meth:`quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`,
-        in addition to ``max_bond``. By default ``contract`` is set to
-        'reduce-split' and ``cutoff`` is set to ``0.0``.
-    ordering : str, tuple[tuple[int]], callable, optional
-        How to order the terms, if a string is given then use this as the
-        strategy given to
-        :meth:`~quimb.tensor.tensor_2d_tebd.LocalHam2D.get_auto_ordering`. An
-        explicit list of coordinate pairs can also be given. The default is to
-        greedily form an 'edge coloring' based on the sorted list of
-        Hamiltonian pair coordinates. If a callable is supplied it will be used
-        to generate the ordering before each sweep.
+        Other options to supply to the gate application method,
+        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_`.
+    ordering : None, str or callable, optional
+        The ordering of the terms to apply, by default this will be determined
+        automatically. It can be a string to be supplied to
+        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHam2D.get_auto_ordering`,
+        a callable which returns an ordering when called, or a fixed sequence
+        of coordinate pairs.
     second_order_reflect : bool, optional
-        If ``True``, then apply each layer of gates in ``ordering`` forward
-        with half the time step, then the same with reverse order.
-    compute_energy_every : None or int, optional
-        How often to compute and record the energy. If a positive integer 'n',
-        the energy is computed *before* every nth sweep (i.e. including before
-        the zeroth).
+        Whether to use a second order Trotter decomposition by reflecting the
+        ordering.
+    compute_energy_every : int, optional
+        Compute the energy every this many steps.
     compute_energy_final : bool, optional
-        Whether to compute and record the energy at the end of the sweeps
-        regardless of the value of ``compute_energy_every``. If you start
-        sweeping again then this final energy is the same as the zeroth of the
-        next set of sweeps and won't be recomputed.
+        Whether to compute the energy at the end.
     compute_energy_opts : dict, optional
-        Supplied to
-        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`. By
-        default ``max_bond`` is set to ``max(8, D**2)`` where ``D`` is the
-        maximum bond to use for applying the gate, ``cutoff`` is set to ``0.0``
-        and ``normalized`` is set to ``True``.
+        Options to supply to the energy computation method,
+        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`.
     compute_energy_fn : callable, optional
-        Supply your own function to compute the energy, it should take the
-        ``TEBD2D`` object as its only argument.
+        A custom function to compute the energy, with signature
+        ``fn(tebd: TEBD2D)``, where ``tebd`` is this instance.
+    compute_energy_per_site : bool, optional
+        Whether to compute the energy per site.
+    tol : float, optional
+        If not ``None``, stop when either energy difference falls below this
+        value, or maximum singluar value changes fall below this value.
+    tol_energy_diff : float, optional
+        If not ``None``, stop when specifically the energy difference falls
+        below this value.
     callback : callable, optional
-        A custom callback to run after every sweep, it should take the
-        ``TEBD2D`` object as its only argument. If it returns any value
-        that boolean evaluates to ``True`` then terminal the evolution.
-    progbar : boolean, optional
-        Whether to show a live progress bar during the evolution.
-    kwargs
-        Extra options for the specific ``TEBD2D`` subclass.
+        A function to call after each step, with signature
+        ``fn(tebd: TEBD2D)``, where ``tebd`` is this instance.
+    keep_best : bool, optional
+        Whether to keep track of the best state and energy. If ``True``, the
+        best state found during evolution will be stored in the ``best``
+        attribute.
+    plot_every : int, optional
+        Whether to plot the energy and energy difference every this many steps.
+    progbar : bool, optional
+        Whether to show a progress bar during evolution.
 
     Attributes
     ----------
-    state : TensorNetwork2DVector
+    state : PEPS
         The current state.
-    ham : LocalHam2D
-        The Hamiltonian being used to evolve.
+    D : int
+        The maximum bond dimension.
+    n : int
+        The number of sweeps performed.
     energy : float
-        The current of the current state, this will trigger a computation if
-        the energy at this iteration hasn't been computed yet.
+        The energy of the current state, computed only if necessary.
     energies : list[float]
-        The energies that have been computed, if any.
-    its : list[int]
-        The corresponding sequence of iteration numbers that energies have been
-        computed at.
+        The history of computed energies.
+    energy_diffs : list[float]
+        The history of energy differences.
+    energy_ns : list[int]
+        The iteration numbers at which energies were computed.
     taus : list[float]
-        The corresponding sequence of time steps that energies have been
-        computed at.
+        The time steps used at each energy computation.
     best : dict
-        If ``keep_best`` was set then the best recorded energy and the
-        corresponding state that was computed - keys ``'energy'`` and
-        ``'state'`` respectively.
+        If ``keep_best`` is ``True``, this dictionary will contain the best
+        energy found during evolution under the key ``'energy'``, the state
+        which achieved this energy under the key ``'state'``, and the iteration
+        number under the key ``'it'``.
+
+    See Also
+    --------
+    SimpleUpdate
     """
 
     def __init__(
@@ -336,6 +373,7 @@ class TEBD2D(TEBDGen, ComputeEnergyBoundary):
         ham,
         tau=0.01,
         D=None,
+        cutoff=1e-10,
         chi=None,
         imag=True,
         gate_opts=None,
@@ -346,31 +384,40 @@ class TEBD2D(TEBDGen, ComputeEnergyBoundary):
         compute_energy_opts=None,
         compute_energy_fn=None,
         compute_energy_per_site=False,
+        tol=None,
+        tol_energy_diff=None,
         callback=None,
         keep_best=False,
+        plot_every=None,
         progbar=True,
-        **kwargs,
     ):
-        super().__init__(
-            psi0=psi0,
-            ham=ham,
+        self.setup_sweep_opts(
+            psi0,
+            ham,
             tau=tau,
-            D=D,
             imag=imag,
-            gate_opts=gate_opts,
             ordering=ordering,
             second_order_reflect=second_order_reflect,
+            tol=tol,
+            tol_energy_diff=tol_energy_diff,
+            callback=callback,
+            keep_best=keep_best,
+            plot_every=plot_every,
+            progbar=progbar,
+        )
+        self.setup_gate_opts(
+            D=D,
+            cutoff=cutoff,
+            gate_opts=gate_opts,
+        )
+        self.setup_energy_opts(
+            chi=chi,
             compute_energy_every=compute_energy_every,
             compute_energy_final=compute_energy_final,
             compute_energy_opts=compute_energy_opts,
             compute_energy_fn=compute_energy_fn,
             compute_energy_per_site=compute_energy_per_site,
-            callback=callback,
-            keep_best=keep_best,
-            progbar=progbar,
-            **kwargs,
         )
-        self.set_default_boundary_opts(chi=chi)
 
 
 def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
@@ -383,21 +430,21 @@ def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
     tn.equalize_norms_(value=value)
 
 
-class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
-    """A simple subclass of ``TEBD2D`` that overrides two key methods in
-    order to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges
-    are stored separately from the main PEPS in the ``gauges`` attribute.
-    Before and after a gate is applied they are absorbed and then extracted.
-    When accessing the ``state`` attribute they are automatically inserted or
-    you can call ``get_state(absorb_gauges=False)`` to lazily add them as
-    hyperedge weights only. Reference: https://arxiv.org/abs/0806.3719.
+class SimpleUpdate(
+    TEBDSweepMixin,
+    GateSimpleUpdateMixin,
+    ComputeEnergyBoundary,
+):
+    """Simple Update algorithm for OBC 2D PEPS, storing gauges separately, and
+    using boundary contraction to compute energy.
+    Reference: https://arxiv.org/abs/0806.3719.
 
     Parameters
     ----------
     psi0 : PEPS
         The initial state.
     ham : LocalHam2D
-        The Hamtiltonian consisting of local terms.
+        The local hamiltonian.
     tau : float, optional
         The default time step to use.
     D : int, optional
@@ -408,6 +455,8 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
         ``max(8, D**2)``.
     cutoff : float, optional
         The singular value cutoff to use when applying gates.
+    imag : bool, optional
+        Whether to evolve in imaginary time (default) or real time.
     gate_opts : dict, optional
         Other options to supply to the gate application method,
         :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_simple_`.
@@ -425,7 +474,7 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
     compute_energy_final : bool, optional
         Whether to compute the energy at the end.
     compute_energy_opts : dict, optional
-        Other options (beyond ``max_bond`` which is set by ``chi``) supplied to
+        Options to supply to the energy computation method,
         :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`.
     compute_energy_fn : callable, optional
         A custom function to compute the energy, with signature
@@ -490,6 +539,10 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
         The maximum singular value difference during each gauge equilibration.
     gauge_diffs : list[float]
         The history of maximum gauge differences after each sweep.
+
+    See Also
+    --------
+    TEBD2D, SimpleUpdateGen
     """
 
     def __init__(
@@ -502,6 +555,7 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
         cutoff=1e-10,
         imag=True,
         gate_opts=None,
+        gauge_smudge=1e-6,
         ordering=None,
         second_order_reflect=False,
         update="sequential",
@@ -511,42 +565,49 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
         compute_energy_fn=None,
         compute_energy_per_site=False,
         tol=None,
+        tol_energy_diff=None,
         equilibrate_every=None,
         equilibrate_start=True,
         equilibrate_opts=None,
         gauge_diff_period=None,
         callback=None,
         keep_best=False,
+        plot_every=None,
         progbar=True,
-        **kwargs,
     ):
-        super().__init__(
-            psi0=psi0,
-            ham=ham,
+        self.setup_sweep_opts(
+            psi0,
+            ham,
             tau=tau,
-            D=D,
-            cutoff=cutoff,
             imag=imag,
-            gate_opts=gate_opts,
             ordering=ordering,
             second_order_reflect=second_order_reflect,
+            tol=tol,
+            tol_energy_diff=tol_energy_diff,
+            callback=callback,
+            keep_best=keep_best,
+            plot_every=plot_every,
+            progbar=progbar,
+        )
+        self.setup_gate_opts(
+            D=D,
+            cutoff=cutoff,
+            gate_opts=gate_opts,
+            gauge_smudge=gauge_smudge,
+            equilibrate_every=equilibrate_every,
+            equilibrate_start=equilibrate_start,
+            equilibrate_opts=equilibrate_opts,
+            gauge_diff_period=gauge_diff_period,
             update=update,
+        )
+        self.setup_energy_opts(
+            chi=chi,
             compute_energy_every=compute_energy_every,
             compute_energy_final=compute_energy_final,
             compute_energy_opts=compute_energy_opts,
             compute_energy_fn=compute_energy_fn,
             compute_energy_per_site=compute_energy_per_site,
-            tol=tol,
-            equilibrate_every=equilibrate_every,
-            equilibrate_start=equilibrate_start,
-            equilibrate_opts=equilibrate_opts,
-            gauge_diff_period=gauge_diff_period,
-            callback=callback,
-            keep_best=keep_best,
-            progbar=progbar,
-            **kwargs,
         )
-        self.set_default_boundary_opts(chi=chi)
 
 
 def gate_full_update_als(
@@ -851,8 +912,8 @@ class FullUpdate(TEBD2D):
     fit_strategy : {'als', 'autodiff-fidelity'}, optional
         Core method used to fit the gate application.
 
-            * ``'als'``: alternating least squares
-            * ``'autodiff-fidelity'``: local fidelity using autodiff
+        * ``'als'``: alternating least squares
+        * ``'autodiff-fidelity'``: local fidelity using autodiff
 
     fit_opts : dict, optional
         Advanced options for the gate application fitting functions. Defaults
@@ -861,10 +922,10 @@ class FullUpdate(TEBD2D):
         How often to recompute the environments used to the fit the gate
         application:
 
-            * ``'term'``: every gate
-            * ``'group'``: every set of commuting gates (the default)
-            * ``'sweep'``: every total sweep
-            * int: every ``x`` number of total sweeps
+        * ``'term'``: every gate
+        * ``'group'``: every set of commuting gates (the default)
+        * ``'sweep'``: every total sweep
+        * int: every ``x`` number of total sweeps
 
     pre_normalize : bool, optional
         Actively renormalize the state using the computed environments.

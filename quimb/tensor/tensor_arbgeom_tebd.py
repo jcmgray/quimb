@@ -483,110 +483,22 @@ class LocalHamGen:
     graph = draw
 
 
-class TEBDGen:
+class TEBDSweepMixin:
     """Generic class for performing time evolving block decimation on an
     arbitrary graph, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
-    The gate and energy computation methods can be overridden to create
-    different algorithms.
-
-    Parameters
-    ----------
-    psi0 : TensorNetworkGenVector
-        The initial state.
-    ham : LocalHamGen
-        The local hamiltonian.
-    tau : float, optional
-        The default time step to use.
-    D : int, optional
-        The maximum bond dimension, by default the current maximum bond of
-        ``psi0``.
-    cutoff : float, optional
-        The singular value cutoff to use when applying gates.
-    imag : bool, optional
-        Whether to evolve in imaginary time (default) or real time.
-    gate_opts : dict, optional
-        Other options to supply to the gate application method,
-        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_`.
-    ordering : None, str or callable, optional
-        The ordering of the terms to apply, by default this will be determined
-        automatically. It can be a string to be supplied to
-        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
-        a callable which returns an ordering when called, or a fixed sequence
-        of coordinate pairs.
-    second_order_reflect : bool, optional
-        Whether to use a second order Trotter decomposition by reflecting the
-        ordering.
-    compute_energy_every : int, optional
-        Compute the energy every this many steps.
-    compute_energy_final : bool, optional
-        Whether to compute the energy at the end.
-    compute_energy_opts : dict, optional
-        Options to supply to the energy computation method,
-        :func:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.compute_local_expectation_cluster`.
-    compute_energy_fn : callable, optional
-        A custom function to compute the energy, with signature ``fn(su)``,
-        where ``su`` is this instance.
-    compute_energy_per_site : bool, optional
-        Whether to compute the energy per site.
-    tol : float, optional
-        If not ``None``, a stopping criterion
-    tol_energy_diff : float, optional
-        If not ``None``, stop when specifically the energy difference falls
-        below this value.
-    callback : callable, optional
-        A function to call after each step, with signature
-        ``fn(su: TEBDGen)``.
-    keep_best : bool, optional
-        Whether to keep track of the best state and energy. If ``True``, the
-        best state found during evolution will be stored in the ``best``
-        attribute.
-    plot_every : int, optional
-        Whether to plot the energy and energy difference every this many steps.
-    progbar : bool, optional
-        Whether to show a progress bar during evolution, by default ``True``.
-
-    Attributes
-    ----------
-    state : TensorNetworkGenVector
-        The current state.
-    D : int
-        The maximum bond dimension.
-    n : int
-        The number of sweeps performed.
-    energy : float
-        The energy of the current state, computed only if necessary.
-    energies : list[float]
-        The history of computed energies.
-    energy_diffs : list[float]
-        The history of energy differences.
-    energy_ns : list[int]
-        The iteration numbers at which energies were computed.
-    taus : list[float]
-        The time steps used at each energy computation.
-    best : dict
-        If ``keep_best`` is ``True``, this dictionary will contain the best
-        energy found during evolution under the key ``'energy'``, the state
-        which achieved this energy under the key ``'state'``, and the iteration
-        number under the key ``'it'``.
+    The gate and energy computation methods should be provided via other mixins
+    to create different algorithms.
     """
 
-    def __init__(
+    def setup_sweep_opts(
         self,
         psi0: TensorNetworkGenVector,
         ham: LocalHamGen,
         tau=0.01,
-        D=None,
-        cutoff=1e-10,
         imag=True,
-        gate_opts=None,
         ordering=None,
         second_order_reflect=False,
-        compute_energy_every=None,
-        compute_energy_final=True,
-        compute_energy_opts=None,
-        compute_energy_fn=None,
-        compute_energy_per_site=False,
         tol=None,
         tol_energy_diff=None,
         callback=None,
@@ -594,18 +506,6 @@ class TEBDGen:
         plot_every=None,
         progbar=True,
     ):
-        # storage
-        self._n = 0
-        self.taus = array.array("d")
-        self.energy_ns = array.array("L")
-        self.energies = array.array("d")
-        self.energy_diffs = array.array("d")
-        self.egrdm = ExponentialGeometricRollingDiffMean()
-
-        self.keep_best = bool(keep_best)
-        self.best = dict(energy=float("inf"), state=None, it=None)
-        self.stop = False
-
         self.imag = imag
         if not imag:
             raise NotImplementedError("Real time evolution not tested yet.")
@@ -622,24 +522,40 @@ class TEBDGen:
         self.tau = tau
         self.last_tau = 0.0
 
-        # parse gate application options
-        if D is None:
-            D = self._psi.max_bond()
-        self.gate_opts = ensure_dict(gate_opts)
-        self.gate_opts["max_bond"] = D
-        self.gate_opts.setdefault("cutoff", cutoff)
-        self.gate_opts.setdefault("contract", "reduce-split")
-
-        # parse energy computation options
-        self.compute_energy_opts = ensure_dict(compute_energy_opts)
-        self.compute_energy_every = compute_energy_every
-        self.compute_energy_final = compute_energy_final
-        self.compute_energy_fn = compute_energy_fn
-        self.compute_energy_per_site = bool(compute_energy_per_site)
-
         # trotterization options
         self.ordering = ordering
         self.second_order_reflect = second_order_reflect
+
+        # storage
+        self._n = 0
+        self.taus = array.array("d")
+        self.keep_best = bool(keep_best)
+        self.best = dict(energy=float("inf"), state=None, it=None)
+        self.stop = False
+
+    @property
+    def state(self):
+        """Return a copy of the current state."""
+        return self.get_state()
+
+    @state.setter
+    def state(self, psi):
+        self.set_state(psi)
+
+    @property
+    def n(self):
+        """The number of sweeps performed."""
+        return self._n
+
+    @property
+    def D(self):
+        """The maximum bond dimension."""
+        return self.gate_opts["max_bond"]
+
+    @D.setter
+    def D(self, value):
+        """The maximum bond dimension."""
+        self.gate_opts["max_bond"] = round(value)
 
     @property
     def ordering(self):
@@ -783,78 +699,7 @@ class TEBDGen:
         finally:
             pbar.close()
 
-    @property
-    def state(self):
-        """Return a copy of the current state."""
-        return self.get_state()
-
-    @state.setter
-    def state(self, psi):
-        self.set_state(psi)
-
-    @property
-    def n(self):
-        """The number of sweeps performed."""
-        return self._n
-
-    @property
-    def D(self):
-        """The maximum bond dimension."""
-        return self.gate_opts["max_bond"]
-
-    @D.setter
-    def D(self, value):
-        """The maximum bond dimension."""
-        self.gate_opts["max_bond"] = round(value)
-
-    def _check_energy(self):
-        """Logic for maybe computing the energy if needed."""
-        if self.energy_ns and (self._n == self.energy_ns[-1]):
-            # only compute if haven't already
-            return self.energies[-1]
-
-        if self.compute_energy_fn is not None:
-            en = self.compute_energy_fn(self)
-        else:
-            en = self.compute_energy()
-
-        if self.compute_energy_per_site:
-            en = en / self.ham.nsites
-
-        self.energy_ns.append(self._n)
-        self.taus.append(float(self.last_tau))
-
-        # update the energy and possibly the best state
-        self.energies.append(float(en))
-        if self.keep_best and en < self.best["energy"]:
-            self.best["energy"] = en
-            self.best["state"] = self.state
-            self.best["it"] = self._n
-
-        # update the rolling energy difference mean
-        self.egrdm.update(float(en), self._n)
-        self.energy_diffs.append(self.egrdm.value)
-
-        return self.energies[-1]
-
-    @property
-    def energy(self):
-        """Return the energy of current state, computing it only if necessary."""
-        return self._check_energy()
-
     # ------- abstract methods that subclasses might want to override ------- #
-
-    def get_state(self) -> TensorNetworkGenVector:
-        """The default method for retrieving the current state - simply a copy.
-        Subclasses can override this to perform additional transformations.
-        """
-        return self._psi.copy()
-
-    def set_state(self, psi: TensorNetworkGenVector):
-        """The default method for setting the current state - simply a copy.
-        Subclasses can override this to perform additional transformations.
-        """
-        self._psi = psi.copy()
 
     def presweep(self):
         """Perform any computations required before the sweep (and energy
@@ -880,20 +725,6 @@ class TEBDGen:
         """
         if self.plot_every is not None and (self._n % self.plot_every == 0):
             self.plot(clear_previous=True)
-
-    def gate(self, U, where):
-        """Perform single gate ``U`` at coordinate pair ``where``. This is the
-        the most common method to override.
-        """
-        self._psi.gate_(U, where, **self.gate_opts)
-
-    def compute_energy(self):
-        """Compute and return the energy of the current state. Subclasses can
-        override this with a custom method to compute the energy.
-        """
-        return self._psi.compute_local_expectation_cluster(
-            terms=self.ham.terms, **self.compute_energy_opts
-        )
 
     def assemble_plot_data(self):
         return {
@@ -938,141 +769,144 @@ class TEBDGen:
         return s
 
 
-class SimpleUpdateGen(TEBDGen):
-    """Simple update for arbitrary geometry hamiltonians.
-
-    Parameters
-    ----------
-    psi0 : TensorNetworkGenVector
-        The initial state.
-    ham : LocalHamGen
-        The local hamiltonian.
-    tau : float, optional
-        The default time step to use.
-    D : int, optional
-        The maximum bond dimension, by default the current maximum bond of
-        ``psi0``.
-    cutoff : float, optional
-        The singular value cutoff to use when applying gates.
-    imag : bool, optional
-        Whether to evolve in imaginary time (default) or real time.
-    gate_opts : dict, optional
-        Other options to supply to the gate application method,
-        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_simple_`.
-    ordering : None, str or callable, optional
-        The ordering of the terms to apply, by default this will be determined
-        automatically. It can be a string to be supplied to
-        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
-        a callable which returns an ordering when called, or a fixed sequence
-        of coordinate pairs.
-    second_order_reflect : bool, optional
-        Whether to use a second order Trotter decomposition by reflecting the
-        ordering.
-    compute_energy_every : int, optional
-        Compute the energy every this many steps.
-    compute_energy_final : bool, optional
-        Whether to compute the energy at the end.
-    compute_energy_opts : dict, optional
-        Options to supply to the energy computation method,
-        :func:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.compute_local_expectation_cluster`.
-    compute_energy_fn : callable, optional
-        A custom function to compute the energy, with signature
-        ``fn(su: SimpleUpdateGen)``, where ``su`` is this instance.
-    compute_energy_per_site : bool, optional
-        Whether to compute the energy per site.
-    tol : float, optional
-        If not ``None``, stop when either energy difference falls below this
-        value, or maximum singluar value changes fall below this value.
-    tol_energy_diff : float, optional
-        If not ``None``, stop when specifically the energy difference falls
-        below this value.
-    equilibrate_every : int, optional
-        Equilibrate the gauges every this many steps.
-    equilibrate_start : bool, optional
-        Whether to equilibrate the gauges at the start, regardless of
-        ``equilibrate_every``.
-    equilibrate_opts : dict, optional
-        Default options to supply to the gauge equilibration method, see
-        :meth:`quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple`. By
-        default `max_iterations` is set to 100 and `tol` to 1e-3.
-    callback : callable, optional
-        A function to call after each step, with signature
-        ``fn(su: SimpleUpdateGen)``.
-    keep_best : bool, optional
-        Whether to keep track of the best state and energy. If ``True``, the
-        best state found during evolution will be stored in the ``best``
-        attribute.
-    plot_every : int, optional
-        Whether to plot the energy and energy difference every this many steps.
-    progbar : bool, optional
-        Whether to show a progress bar during evolution.
-
-    Attributes
-    ----------
-    state : TensorNetworkGenVector
-        The current state.
-    D : int
-        The maximum bond dimension.
-    n : int
-        The number of sweeps performed.
-    energy : float
-        The energy of the current state, computed only if necessary.
-    energies : list[float]
-        The history of computed energies.
-    energy_diffs : list[float]
-        The history of energy differences.
-    energy_ns : list[int]
-        The iteration numbers at which energies were computed.
-    taus : list[float]
-        The time steps used at each energy computation.
-    best : dict
-        If ``keep_best`` is ``True``, this dictionary will contain the best
-        energy found during evolution under the key ``'energy'``, the state
-        which achieved this energy under the key ``'state'``, and the iteration
-        number under the key ``'it'``.
-    equilibration_ns : list[int]
-        The iteration numbers at which gauge equilibration was performed.
-    equilibration_iterations : list[int]
-        The number of iterations taken during each gauge equilibration.
-    equilibration_max_sdiffs : list[float]
-        The maximum singular value difference during each gauge equilibration.
-    gauge_diffs : list[float]
-        The history of maximum gauge differences after each sweep.
-    """
-
-    def __init__(
+class ComputeEnergyMixin:
+    def setup_energy_opts(
         self,
-        psi0: TensorNetworkGenVector,
-        ham: LocalHamGen,
-        tau=0.01,
-        D=None,
-        cutoff=1e-10,
-        imag=True,
-        gate_opts=None,
-        gauge_smudge=1e-6,
-        ordering=None,
-        second_order_reflect=False,
-        update="sequential",
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
         compute_energy_fn=None,
         compute_energy_per_site=False,
-        tol=None,
-        tol_energy_diff=None,
+    ):
+        # setup general energy computation options
+        self.compute_energy_opts = ensure_dict(compute_energy_opts)
+        self.compute_energy_every = compute_energy_every
+        self.compute_energy_final = compute_energy_final
+        self.compute_energy_fn = compute_energy_fn
+        self.compute_energy_per_site = bool(compute_energy_per_site)
+
+        # storage
+        self.energy_ns = array.array("L")
+        self.energies = array.array("d")
+        self.energy_diffs = array.array("d")
+        self.egrdm = ExponentialGeometricRollingDiffMean()
+
+    def _check_energy(self):
+        """Logic for maybe computing the energy if needed."""
+        if self.energy_ns and (self._n == self.energy_ns[-1]):
+            # only compute if haven't already
+            return self.energies[-1]
+
+        if self.compute_energy_fn is not None:
+            en = self.compute_energy_fn(self)
+        else:
+            en = self.compute_energy()
+
+        if self.compute_energy_per_site:
+            en = en / self.ham.nsites
+
+        self.energy_ns.append(self._n)
+        self.taus.append(float(self.last_tau))
+
+        # update the energy and possibly the best state
+        self.energies.append(float(en))
+        if self.keep_best and en < self.best["energy"]:
+            self.best["energy"] = en
+            self.best["state"] = self.state
+            self.best["it"] = self._n
+
+        # update the rolling energy difference mean
+        self.egrdm.update(float(en), self._n)
+        self.energy_diffs.append(self.egrdm.value)
+
+        return self.energies[-1]
+
+    @property
+    def energy(self):
+        """Return the energy of current state, computing it only if necessary."""
+        return self._check_energy()
+
+
+class ComputeEnergyClusterMixin(ComputeEnergyMixin):
+    """Mixin class to add basic cluster energy computation to TEBD like
+    classes, that works for arbitrary geometries.
+    """
+
+    def compute_energy(self):
+        """Compute and return the energy of the current state using cluster
+        methods.
+        """
+        # use local cluster wit gauges if available and not turned off
+        kwargs = {}
+        if "gauges" not in self.compute_energy_opts:
+            kwargs["gauges"] = getattr(self, "gauges", None)
+
+        return self._psi.compute_local_expectation_cluster(
+            terms=self.ham.terms,
+            **self.compute_energy_opts,
+            **kwargs,
+        )
+
+
+class GateBasicMixin:
+    def setup_gate_opts(
+        self,
+        D=None,
+        cutoff=1e-10,
+        gate_opts=None,
+    ):
+        self.gate_opts = ensure_dict(gate_opts)
+        # gating options
+        if D is None:
+            D = self._psi.max_bond()
+        self.gate_opts.setdefault("max_bond", D)
+        self.gate_opts.setdefault("cutoff", cutoff)
+        self.gate_opts.setdefault("contract", "reduce-split")
+
+    def gate(self, U, where):
+        """Perform single gate ``U`` at coordinate pair ``where``. This is the
+        the most common method to override.
+        """
+        self._psi.gate_(U, where, **self.gate_opts)
+
+    def get_state(self) -> TensorNetworkGenVector:
+        """The default method for retrieving the current state - simply a copy.
+        Subclasses can override this to perform additional transformations.
+        """
+        return self._psi.copy()
+
+    def set_state(self, psi: TensorNetworkGenVector):
+        """The default method for setting the current state - simply a copy.
+        Subclasses can override this to perform additional transformations.
+        """
+        self._psi = psi.copy()
+
+
+class GateSimpleUpdateMixin:
+    """Mixin class to use simple update style gating, with separately
+    maintained `gauges` living on the bonds, which are optionally equilibrated
+    periodically."""
+
+    def setup_gate_opts(
+        self,
+        D=None,
+        cutoff=1e-10,
+        gate_opts=None,
+        gauge_smudge=1e-6,
         equilibrate_every=None,
         equilibrate_start=True,
         equilibrate_opts=None,
         gauge_diff_period=None,
-        callback=None,
-        keep_best=False,
-        plot_every=None,
-        progbar=True,
-        **kwargs,
+        update="sequential",
     ):
+        if D is None:
+            D = self._psi.max_bond()
+
         # gating options
         self.gate_opts = ensure_dict(gate_opts)
-        self.gate_opts.setdefault("gauge_smudge", gauge_smudge)
+        self.gate_opts.setdefault("max_bond", D)
+        self.gate_opts.setdefault("cutoff", cutoff)
+        self.gate_opts.setdefault("smudge", gauge_smudge)
 
         # gauge equilibration options
         if equilibrate_every is None:
@@ -1106,29 +940,62 @@ class SimpleUpdateGen(TEBDGen):
         self._next_psi = None
         self._next_gauges = None
 
-        super().__init__(
-            psi0,
-            ham,
-            tau=tau,
-            D=D,
-            cutoff=cutoff,
-            imag=imag,
-            gate_opts=gate_opts,
-            ordering=ordering,
-            second_order_reflect=second_order_reflect,
-            compute_energy_every=compute_energy_every,
-            compute_energy_final=compute_energy_final,
-            compute_energy_opts=compute_energy_opts,
-            compute_energy_fn=compute_energy_fn,
-            compute_energy_per_site=compute_energy_per_site,
-            tol=tol,
-            tol_energy_diff=tol_energy_diff,
-            callback=callback,
-            keep_best=keep_best,
-            progbar=progbar,
-            plot_every=plot_every,
-            **kwargs,
-        )
+        if self.equilibrate_start:
+            # can't perform during initial set_state as options not setup yet
+            self.equilibrate()
+
+    @property
+    def gauges(self):
+        """Return a copy of the current gauges."""
+        return self._gauges
+
+    def set_state(self, psi, gauges=None):
+        """Set the current state and possibly the gauges."""
+
+        if isinstance(psi, (tuple, list)):
+            psi, gauges = psi
+
+        self._psi = psi.copy()
+        if gauges is None:
+            self._gauges = {}
+            self._psi.gauge_all_simple_(max_iterations=1, gauges=self._gauges)
+        else:
+            self._gauges = dict(gauges)
+
+        if getattr(self, "equilibrate_start", False):
+            # might not have setup equilibration options yet
+            self.equilibrate()
+
+    def get_state(self, absorb_gauges=True):
+        """Return the current state, possibly absorbing the gauges.
+
+        Parameters
+        ----------
+        absorb_gauges : bool or "return", optional
+            Whether to absorb the gauges into the state or not. If `True`, a
+            standard PEPS is returned with the gauges absorbed. If `False``,
+            the gauges are added to the tensor network but uncontracted. If
+            "return", the gauges are returned separately.
+
+        Returns
+        -------
+        psi : TensorNetwork
+            The current state.
+        gauges : dict
+            The current gauges, if ``absorb_gauges == "return"``.
+        """
+        psi = self._psi.copy()
+
+        if absorb_gauges == "return":
+            return psi, self._gauges.copy()
+
+        if absorb_gauges:
+            psi.gauge_simple_insert(self._gauges)
+        else:
+            for ix, g in self._gauges.items():
+                psi |= Tensor(g, inds=[ix])
+
+        return psi
 
     def gate(self, G, where):
         """Application of a single gate ``G`` at ``where``."""
@@ -1138,6 +1005,10 @@ class SimpleUpdateGen(TEBDGen):
             gauges=self._gauges,
             **self.gate_opts,
         )
+
+    def normalize(self):
+        """Normalize the state and simple gauges."""
+        self._psi.normalize_simple(self._gauges)
 
     def equilibrate(self, **kwargs):
         """Equilibrate the gauges with the current state (like evolving with
@@ -1265,70 +1136,6 @@ class SimpleUpdateGen(TEBDGen):
         self.gauges_prev[p] = self._gauges.copy()
         self.normalize()
 
-    def normalize(self):
-        """Normalize the state and simple gauges."""
-        self._psi.normalize_simple(self._gauges)
-
-    def compute_energy(self):
-        """Default estimate of the energy."""
-        return self._psi.compute_local_expectation_cluster(
-            terms=self.ham.terms,
-            gauges=self._gauges,
-            **self.compute_energy_opts,
-        )
-
-    @property
-    def gauges(self):
-        """Return a copy of the current gauges."""
-        return self._gauges
-
-    def set_state(self, psi, gauges=None):
-        """Set the current state and possibly the gauges."""
-
-        if isinstance(psi, (tuple, list)):
-            psi, gauges = psi
-
-        self._psi = psi.copy()
-        if gauges is None:
-            self._gauges = {}
-            self._psi.gauge_all_simple_(max_iterations=1, gauges=self._gauges)
-        else:
-            self._gauges = dict(gauges)
-
-        if self.equilibrate_start:
-            self.equilibrate()
-
-    def get_state(self, absorb_gauges=True):
-        """Return the current state, possibly absorbing the gauges.
-
-        Parameters
-        ----------
-        absorb_gauges : bool or "return", optional
-            Whether to absorb the gauges into the state or not. If `True`, a
-            standard PEPS is returned with the gauges absorbed. If `False``,
-            the gauges are added to the tensor network but uncontracted. If
-            "return", the gauges are returned separately.
-
-        Returns
-        -------
-        psi : TensorNetwork
-            The current state.
-        gauges : dict
-            The current gauges, if ``absorb_gauges == "return"``.
-        """
-        psi = self._psi.copy()
-
-        if absorb_gauges == "return":
-            return psi, self._gauges.copy()
-
-        if absorb_gauges:
-            psi.gauge_simple_insert(self._gauges)
-        else:
-            for ix, g in self._gauges.items():
-                psi |= Tensor(g, inds=[ix])
-
-        return psi
-
     def assemble_plot_data(self):
         data = super().assemble_plot_data()
         data["gauge_diffs"] = {
@@ -1340,3 +1147,325 @@ class SimpleUpdateGen(TEBDGen):
             "y": self.equilibration_iterations,
         }
         return data
+
+
+class TEBDGen(
+    GateBasicMixin,
+    TEBDSweepMixin,
+    ComputeEnergyClusterMixin,
+):
+    """Basic arbitrary geometry TEBD class, combining the basic gate
+    application with cluster energy computation. This basic version might not
+    perform very well and instead should be customized (either via gate_opts
+    or via subclassing) for better performance.
+
+    Parameters
+    ----------
+    psi0 : TensorNetworkGenVector
+        The initial state.
+    ham : LocalHamGen
+        The local hamiltonian.
+    tau : float, optional
+        The default time step to use.
+    D : int, optional
+        The maximum bond dimension, by default the current maximum bond of
+        ``psi0``.
+    cutoff : float, optional
+        The singular value cutoff to use when applying gates.
+    imag : bool, optional
+        Whether to evolve in imaginary time (default) or real time.
+    gate_opts : dict, optional
+        Other options to supply to the gate application method,
+        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_`.
+    ordering : None, str or callable, optional
+        The ordering of the terms to apply, by default this will be determined
+        automatically. It can be a string to be supplied to
+        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
+        a callable which returns an ordering when called, or a fixed sequence
+        of coordinate pairs.
+    second_order_reflect : bool, optional
+        Whether to use a second order Trotter decomposition by reflecting the
+        ordering.
+    compute_energy_every : int, optional
+        Compute the energy every this many steps.
+    compute_energy_final : bool, optional
+        Whether to compute the energy at the end.
+    compute_energy_opts : dict, optional
+        Options to supply to the energy computation method,
+        :func:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.compute_local_expectation_cluster`.
+    compute_energy_fn : callable, optional
+        A custom function to compute the energy, with signature
+        ``fn(su: TEBDGen)``, where ``su`` is this instance.
+    compute_energy_per_site : bool, optional
+        Whether to compute the energy per site.
+    tol : float, optional
+        If not ``None``, stop when either energy difference falls below this
+        value, or maximum singluar value changes fall below this value.
+    tol_energy_diff : float, optional
+        If not ``None``, stop when specifically the energy difference falls
+        below this value.
+    callback : callable, optional
+        A function to call after each step, with signature
+        ``fn(su: TEBDGen)``, where ``su`` is this instance.
+    keep_best : bool, optional
+        Whether to keep track of the best state and energy. If ``True``, the
+        best state found during evolution will be stored in the ``best``
+        attribute.
+    plot_every : int, optional
+        Whether to plot the energy and energy difference every this many steps.
+    progbar : bool, optional
+        Whether to show a progress bar during evolution.
+
+    Attributes
+    ----------
+    state : TensorNetworkGenVector
+        The current state.
+    D : int
+        The maximum bond dimension.
+    n : int
+        The number of sweeps performed.
+    energy : float
+        The energy of the current state, computed only if necessary.
+    energies : list[float]
+        The history of computed energies.
+    energy_diffs : list[float]
+        The history of energy differences.
+    energy_ns : list[int]
+        The iteration numbers at which energies were computed.
+    taus : list[float]
+        The time steps used at each energy computation.
+    best : dict
+        If ``keep_best`` is ``True``, this dictionary will contain the best
+        energy found during evolution under the key ``'energy'``, the state
+        which achieved this energy under the key ``'state'``, and the iteration
+        number under the key ``'it'``.
+
+    See Also
+    --------
+    SimpleUpdateGen
+    """
+
+    def __init__(
+        self,
+        psi0: TensorNetworkGenVector,
+        ham: LocalHamGen,
+        tau=0.01,
+        D=None,
+        cutoff=1e-10,
+        imag=True,
+        gate_opts=None,
+        ordering=None,
+        second_order_reflect=False,
+        compute_energy_every=None,
+        compute_energy_final=True,
+        compute_energy_opts=None,
+        compute_energy_fn=None,
+        compute_energy_per_site=False,
+        tol=None,
+        tol_energy_diff=None,
+        callback=None,
+        keep_best=False,
+        plot_every=None,
+        progbar=True,
+    ):
+        self.setup_sweep_opts(
+            psi0,
+            ham,
+            tau=tau,
+            imag=imag,
+            ordering=ordering,
+            second_order_reflect=second_order_reflect,
+            tol=tol,
+            tol_energy_diff=tol_energy_diff,
+            callback=callback,
+            keep_best=keep_best,
+            plot_every=plot_every,
+            progbar=progbar,
+        )
+        self.setup_gate_opts(
+            D=D,
+            cutoff=cutoff,
+            gate_opts=gate_opts,
+        )
+        self.setup_energy_opts(
+            compute_energy_every=compute_energy_every,
+            compute_energy_final=compute_energy_final,
+            compute_energy_opts=compute_energy_opts,
+            compute_energy_fn=compute_energy_fn,
+            compute_energy_per_site=compute_energy_per_site,
+        )
+
+
+class SimpleUpdateGen(
+    TEBDSweepMixin,
+    GateSimpleUpdateMixin,
+    ComputeEnergyClusterMixin,
+):
+    """Simple update for arbitrary geometry hamiltonians, storing gauges
+    separately and using them and the cluster approximation to compute
+    energies. Reference: https://arxiv.org/abs/0806.3719.
+
+    Parameters
+    ----------
+    psi0 : TensorNetworkGenVector
+        The initial state.
+    ham : LocalHamGen
+        The local hamiltonian.
+    tau : float, optional
+        The default time step to use.
+    D : int, optional
+        The maximum bond dimension, by default the current maximum bond of
+        ``psi0``.
+    cutoff : float, optional
+        The singular value cutoff to use when applying gates.
+    imag : bool, optional
+        Whether to evolve in imaginary time (default) or real time.
+    gate_opts : dict, optional
+        Other options to supply to the gate application method,
+        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_simple_`.
+    ordering : None, str or callable, optional
+        The ordering of the terms to apply, by default this will be determined
+        automatically. It can be a string to be supplied to
+        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
+        a callable which returns an ordering when called, or a fixed sequence
+        of coordinate pairs.
+    second_order_reflect : bool, optional
+        Whether to use a second order Trotter decomposition by reflecting the
+        ordering.
+    compute_energy_every : int, optional
+        Compute the energy every this many steps.
+    compute_energy_final : bool, optional
+        Whether to compute the energy at the end.
+    compute_energy_opts : dict, optional
+        Options to supply to the energy computation method,
+        :func:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.compute_local_expectation_cluster`.
+    compute_energy_fn : callable, optional
+        A custom function to compute the energy, with signature
+        ``fn(su: SimpleUpdateGen)``, where ``su`` is this instance.
+    compute_energy_per_site : bool, optional
+        Whether to compute the energy per site.
+    tol : float, optional
+        If not ``None``, stop when either energy difference falls below this
+        value, or maximum singluar value changes fall below this value.
+    tol_energy_diff : float, optional
+        If not ``None``, stop when specifically the energy difference falls
+        below this value.
+    equilibrate_every : int, optional
+        Equilibrate the gauges every this many steps.
+    equilibrate_start : bool, optional
+        Whether to equilibrate the gauges at the start, regardless of
+        ``equilibrate_every``.
+    equilibrate_opts : dict, optional
+        Default options to supply to the gauge equilibration method, see
+        :meth:`quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple`. By
+        default `max_iterations` is set to 100 and `tol` to 1e-3.
+    callback : callable, optional
+        A function to call after each step, with signature
+        ``fn(su: SimpleUpdateGen)``.
+    keep_best : bool, optional
+        Whether to keep track of the best state and energy. If ``True``, the
+        best state found during evolution will be stored in the ``best``
+        attribute.
+    plot_every : int, optional
+        Whether to plot the energy and energy difference every this many steps.
+    progbar : bool, optional
+        Whether to show a progress bar during evolution.
+
+    Attributes
+    ----------
+    state : TensorNetworkGenVector
+        The current state.
+    D : int
+        The maximum bond dimension.
+    n : int
+        The number of sweeps performed.
+    energy : float
+        The energy of the current state, computed only if necessary.
+    energies : list[float]
+        The history of computed energies.
+    energy_diffs : list[float]
+        The history of energy differences.
+    energy_ns : list[int]
+        The iteration numbers at which energies were computed.
+    taus : list[float]
+        The time steps used at each energy computation.
+    best : dict
+        If ``keep_best`` is ``True``, this dictionary will contain the best
+        energy found during evolution under the key ``'energy'``, the state
+        which achieved this energy under the key ``'state'``, and the iteration
+        number under the key ``'it'``.
+    equilibration_ns : list[int]
+        The iteration numbers at which gauge equilibration was performed.
+    equilibration_iterations : list[int]
+        The number of iterations taken during each gauge equilibration.
+    equilibration_max_sdiffs : list[float]
+        The maximum singular value difference during each gauge equilibration.
+    gauge_diffs : list[float]
+        The history of maximum gauge differences after each sweep.
+
+    See Also
+    --------
+    TEBDGen
+    """
+
+    def __init__(
+        self,
+        psi0: TensorNetworkGenVector,
+        ham: LocalHamGen,
+        tau=0.01,
+        D=None,
+        cutoff=1e-10,
+        imag=True,
+        gate_opts=None,
+        gauge_smudge=1e-6,
+        ordering=None,
+        second_order_reflect=False,
+        update="sequential",
+        compute_energy_every=None,
+        compute_energy_final=True,
+        compute_energy_opts=None,
+        compute_energy_fn=None,
+        compute_energy_per_site=False,
+        tol=None,
+        tol_energy_diff=None,
+        equilibrate_every=None,
+        equilibrate_start=True,
+        equilibrate_opts=None,
+        gauge_diff_period=None,
+        callback=None,
+        keep_best=False,
+        plot_every=None,
+        progbar=True,
+    ):
+        self.setup_sweep_opts(
+            psi0,
+            ham,
+            tau=tau,
+            imag=imag,
+            ordering=ordering,
+            second_order_reflect=second_order_reflect,
+            tol=tol,
+            tol_energy_diff=tol_energy_diff,
+            callback=callback,
+            keep_best=keep_best,
+            plot_every=plot_every,
+            progbar=progbar,
+        )
+        self.setup_gate_opts(
+            D=D,
+            cutoff=cutoff,
+            gate_opts=gate_opts,
+            gauge_smudge=gauge_smudge,
+            equilibrate_every=equilibrate_every,
+            equilibrate_start=equilibrate_start,
+            equilibrate_opts=equilibrate_opts,
+            gauge_diff_period=gauge_diff_period,
+            update=update,
+        )
+        self.setup_energy_opts(
+            compute_energy_every=compute_energy_every,
+            compute_energy_final=compute_energy_final,
+            compute_energy_opts=compute_energy_opts,
+            compute_energy_fn=compute_energy_fn,
+            compute_energy_per_site=compute_energy_per_site,
+        )
