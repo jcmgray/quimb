@@ -11,6 +11,7 @@ from .contraction import contract_strategy
 from .drawing import get_colors
 from .optimize import TNOptimizer
 from .tensor_2d import (
+    PEPS,
     calc_plaquette_map,
     calc_plaquette_sizes,
     gen_2d_bonds,
@@ -393,7 +394,7 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
 
     Parameters
     ----------
-    psi0 : TensorNetwork2DVector
+    psi0 : PEPS
         The initial state.
     ham : LocalHam2D
         The Hamtiltonian consisting of local terms.
@@ -402,83 +403,99 @@ class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
     D : int, optional
         The maximum bond dimension, by default the current maximum bond of
         ``psi0``.
+    chi : int, optional
+        The bond dimension to use when computing the energy. By default
+        ``max(8, D**2)``.
+    cutoff : float, optional
+        The singular value cutoff to use when applying gates.
     gate_opts : dict, optional
-        Supplied to :meth:`quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`,
-        in addition to ``max_bond``. By default ``contract`` is set to
-        'reduce-split' and ``cutoff`` is set to ``0.0``.
-    ordering : str, tuple[tuple[int]], callable, optional
-        How to order the terms, if a string is given then use this as the
-        strategy given to
-        :meth:`~quimb.tensor.tensor_2d_tebd.LocalHam2D.get_auto_ordering`. An
-        explicit list of coordinate pairs can also be given. The default is to
-        greedily form an 'edge coloring' based on the sorted list of
-        Hamiltonian pair coordinates. If a callable is supplied it will be used
-        to generate the ordering before each sweep.
+        Other options to supply to the gate application method,
+        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_simple_`.
+    ordering : None, str or callable, optional
+        The ordering of the terms to apply, by default this will be determined
+        automatically. It can be a string to be supplied to
+        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
+        a callable which returns an ordering when called, or a fixed sequence
+        of coordinate pairs.
     second_order_reflect : bool, optional
-        If ``True``, then apply each layer of gates in ``ordering`` forward
-        with half the time step, then the same with reverse order.
-    compute_energy_every : None or int, optional
-        How often to compute and record the energy. If a positive integer 'n',
-        the energy is computed *before* every nth sweep (i.e. including before
-        the zeroth).
+        Whether to use a second order Trotter decomposition by reflecting the
+        ordering.
+    compute_energy_every : int, optional
+        Compute the energy every this many steps.
     compute_energy_final : bool, optional
-        Whether to compute and record the energy at the end of the sweeps
-        regardless of the value of ``compute_energy_every``. If you start
-        sweeping again then this final energy is the same as the zeroth of the
-        next set of sweeps and won't be recomputed.
+        Whether to compute the energy at the end.
     compute_energy_opts : dict, optional
-        Supplied to
-        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`. By
-        default ``max_bond`` is set to ``max(8, D**2)`` where ``D`` is the
-        maximum bond to use for applying the gate, ``cutoff`` is set to ``0.0``
-        and ``normalized`` is set to ``True``.
+        Other options (beyond ``max_bond`` which is set by ``chi``) supplied to
+        :meth:`~quimb.tensor.tensor_2d.PEPS.compute_local_expectation`.
     compute_energy_fn : callable, optional
-        Supply your own function to compute the energy, it should take the
-        ``TEBD2D`` object as its only argument.
+        A custom function to compute the energy, with signature
+        ``fn(su: SimpleUpdate)``, where ``su`` is this instance.
+    compute_energy_per_site : bool, optional
+        Whether to compute the energy per site.
+    tol : float, optional
+        If not ``None``, stop when either energy difference falls below this
+        value, or maximum singluar value changes fall below this value.
+    tol_energy_diff : float, optional
+        If not ``None``, stop when specifically the energy difference falls
+        below this value.
+    equilibrate_every : int, optional
+        Equilibrate the gauges every this many steps.
+    equilibrate_start : bool, optional
+        Whether to equilibrate the gauges at the start, regardless of
+        ``equilibrate_every``.
+    equilibrate_opts : dict, optional
+        Default options to supply to the gauge equilibration method, see
+        :meth:`quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple`. By
+        default `max_iterations` is set to 100 and `tol` to 1e-3.
     callback : callable, optional
-        A custom callback to run after every sweep, it should take the
-        ``TEBD2D`` object as its only argument. If it returns any value
-        that boolean evaluates to ``True`` then terminal the evolution.
-    progbar : boolean, optional
-        Whether to show a live progress bar during the evolution.
-    gauge_renorm : bool, optional
-        Whether to actively renormalize the singular value gauges.
-    gauge_smudge : float, optional
-        A small offset to use when applying the guage and its inverse to avoid
-        numerical problems.
-    condition_tensors : bool, optional
-        Whether to actively equalize tensor norms for numerical stability.
-    condition_balance_bonds : bool, optional
-        If and when equalizing tensor norms, whether to also balance bonds as
-        an additional conditioning.
+        A function to call after each step, with signature
+        ``fn(su: SimpleUpdate)``.
+    keep_best : bool, optional
+        Whether to keep track of the best state and energy. If ``True``, the
+        best state found during evolution will be stored in the ``best``
+        attribute.
+    plot_every : int, optional
+        Whether to plot the energy and energy difference every this many steps.
+    progbar : bool, optional
+        Whether to show a progress bar during evolution.
 
     Attributes
     ----------
-    state : TensorNetwork2DVector
+    state : PEPS
         The current state.
-    ham : LocalHam2D
-        The Hamiltonian being used to evolve.
+    D : int
+        The maximum bond dimension.
+    n : int
+        The number of sweeps performed.
     energy : float
-        The current of the current state, this will trigger a computation if
-        the energy at this iteration hasn't been computed yet.
+        The energy of the current state, computed only if necessary.
     energies : list[float]
-        The energies that have been computed, if any.
-    its : list[int]
-        The corresponding sequence of iteration numbers that energies have been
-        computed at.
+        The history of computed energies.
+    energy_diffs : list[float]
+        The history of energy differences.
+    energy_ns : list[int]
+        The iteration numbers at which energies were computed.
     taus : list[float]
-        The corresponding sequence of time steps that energies have been
-        computed at.
+        The time steps used at each energy computation.
     best : dict
-        If ``keep_best`` was set then the best recorded energy and the
-        corresponding state that was computed - keys ``'energy'`` and
-        ``'state'`` respectively.
+        If ``keep_best`` is ``True``, this dictionary will contain the best
+        energy found during evolution under the key ``'energy'``, the state
+        which achieved this energy under the key ``'state'``, and the iteration
+        number under the key ``'it'``.
+    equilibration_ns : list[int]
+        The iteration numbers at which gauge equilibration was performed.
+    equilibration_iterations : list[int]
+        The number of iterations taken during each gauge equilibration.
+    equilibration_max_sdiffs : list[float]
+        The maximum singular value difference during each gauge equilibration.
+    gauge_diffs : list[float]
+        The history of maximum gauge differences after each sweep.
     """
 
     def __init__(
         self,
-        psi0,
-        ham,
+        psi0: PEPS,
+        ham: LocalHam2D,
         tau=0.01,
         D=None,
         chi=None,

@@ -17,8 +17,8 @@ from ..utils import (
 from ..utils import progbar as Progbar
 from ..utils_plot import default_to_neutral_style
 from .drawing import get_colors, get_positions
-from .tensor_core import Tensor
 from .tensor_arbgeom import TensorNetworkGenVector
+from .tensor_core import Tensor
 
 
 def edge_coloring(
@@ -496,6 +496,79 @@ class TEBDGen:
         The initial state.
     ham : LocalHamGen
         The local hamiltonian.
+    tau : float, optional
+        The default time step to use.
+    D : int, optional
+        The maximum bond dimension, by default the current maximum bond of
+        ``psi0``.
+    cutoff : float, optional
+        The singular value cutoff to use when applying gates.
+    imag : bool, optional
+        Whether to evolve in imaginary time (default) or real time.
+    gate_opts : dict, optional
+        Other options to supply to the gate application method,
+        :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_`.
+    ordering : None, str or callable, optional
+        The ordering of the terms to apply, by default this will be determined
+        automatically. It can be a string to be supplied to
+        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
+        a callable which returns an ordering when called, or a fixed sequence
+        of coordinate pairs.
+    second_order_reflect : bool, optional
+        Whether to use a second order Trotter decomposition by reflecting the
+        ordering.
+    compute_energy_every : int, optional
+        Compute the energy every this many steps.
+    compute_energy_final : bool, optional
+        Whether to compute the energy at the end.
+    compute_energy_opts : dict, optional
+        Options to supply to the energy computation method,
+        :func:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.compute_local_expectation_cluster`.
+    compute_energy_fn : callable, optional
+        A custom function to compute the energy, with signature ``fn(su)``,
+        where ``su`` is this instance.
+    compute_energy_per_site : bool, optional
+        Whether to compute the energy per site.
+    tol : float, optional
+        If not ``None``, a stopping criterion
+    tol_energy_diff : float, optional
+        If not ``None``, stop when specifically the energy difference falls
+        below this value.
+    callback : callable, optional
+        A function to call after each step, with signature
+        ``fn(su: TEBDGen)``.
+    keep_best : bool, optional
+        Whether to keep track of the best state and energy. If ``True``, the
+        best state found during evolution will be stored in the ``best``
+        attribute.
+    plot_every : int, optional
+        Whether to plot the energy and energy difference every this many steps.
+    progbar : bool, optional
+        Whether to show a progress bar during evolution, by default ``True``.
+
+    Attributes
+    ----------
+    state : TensorNetworkGenVector
+        The current state.
+    D : int
+        The maximum bond dimension.
+    n : int
+        The number of sweeps performed.
+    energy : float
+        The energy of the current state, computed only if necessary.
+    energies : list[float]
+        The history of computed energies.
+    energy_diffs : list[float]
+        The history of energy differences.
+    energy_ns : list[int]
+        The iteration numbers at which energies were computed.
+    taus : list[float]
+        The time steps used at each energy computation.
+    best : dict
+        If ``keep_best`` is ``True``, this dictionary will contain the best
+        energy found during evolution under the key ``'energy'``, the state
+        which achieved this energy under the key ``'state'``, and the iteration
+        number under the key ``'it'``.
     """
 
     def __init__(
@@ -888,7 +961,10 @@ class SimpleUpdateGen(TEBDGen):
         :meth:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_simple_`.
     ordering : None, str or callable, optional
         The ordering of the terms to apply, by default this will be determined
-        automatically.
+        automatically. It can be a string to be supplied to
+        :meth:`quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.get_auto_ordering`,
+        a callable which returns an ordering when called, or a fixed sequence
+        of coordinate pairs.
     second_order_reflect : bool, optional
         Whether to use a second order Trotter decomposition by reflecting the
         ordering.
@@ -900,13 +976,16 @@ class SimpleUpdateGen(TEBDGen):
         Options to supply to the energy computation method,
         :func:`quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.compute_local_expectation_cluster`.
     compute_energy_fn : callable, optional
-        A custom function to compute the energy, with signature ``fn(su)``,
-        where ``su`` is this instance.
+        A custom function to compute the energy, with signature
+        ``fn(su: SimpleUpdateGen)``, where ``su`` is this instance.
     compute_energy_per_site : bool, optional
         Whether to compute the energy per site.
     tol : float, optional
         If not ``None``, stop when either energy difference falls below this
         value, or maximum singluar value changes fall below this value.
+    tol_energy_diff : float, optional
+        If not ``None``, stop when specifically the energy difference falls
+        below this value.
     equilibrate_every : int, optional
         Equilibrate the gauges every this many steps.
     equilibrate_start : bool, optional
@@ -920,9 +999,45 @@ class SimpleUpdateGen(TEBDGen):
         A function to call after each step, with signature
         ``fn(su: SimpleUpdateGen)``.
     keep_best : bool, optional
-        Whether to keep track of the best state and energy.
+        Whether to keep track of the best state and energy. If ``True``, the
+        best state found during evolution will be stored in the ``best``
+        attribute.
+    plot_every : int, optional
+        Whether to plot the energy and energy difference every this many steps.
     progbar : bool, optional
         Whether to show a progress bar during evolution.
+
+    Attributes
+    ----------
+    state : TensorNetworkGenVector
+        The current state.
+    D : int
+        The maximum bond dimension.
+    n : int
+        The number of sweeps performed.
+    energy : float
+        The energy of the current state, computed only if necessary.
+    energies : list[float]
+        The history of computed energies.
+    energy_diffs : list[float]
+        The history of energy differences.
+    energy_ns : list[int]
+        The iteration numbers at which energies were computed.
+    taus : list[float]
+        The time steps used at each energy computation.
+    best : dict
+        If ``keep_best`` is ``True``, this dictionary will contain the best
+        energy found during evolution under the key ``'energy'``, the state
+        which achieved this energy under the key ``'state'``, and the iteration
+        number under the key ``'it'``.
+    equilibration_ns : list[int]
+        The iteration numbers at which gauge equilibration was performed.
+    equilibration_iterations : list[int]
+        The number of iterations taken during each gauge equilibration.
+    equilibration_max_sdiffs : list[float]
+        The maximum singular value difference during each gauge equilibration.
+    gauge_diffs : list[float]
+        The history of maximum gauge differences after each sweep.
     """
 
     def __init__(
@@ -944,16 +1059,17 @@ class SimpleUpdateGen(TEBDGen):
         compute_energy_fn=None,
         compute_energy_per_site=False,
         tol=None,
+        tol_energy_diff=None,
         equilibrate_every=None,
         equilibrate_start=True,
         equilibrate_opts=None,
         gauge_diff_period=None,
         callback=None,
         keep_best=False,
+        plot_every=None,
         progbar=True,
         **kwargs,
     ):
-
         # gating options
         self.gate_opts = ensure_dict(gate_opts)
         self.gate_opts.setdefault("gauge_smudge", gauge_smudge)
@@ -1006,9 +1122,11 @@ class SimpleUpdateGen(TEBDGen):
             compute_energy_fn=compute_energy_fn,
             compute_energy_per_site=compute_energy_per_site,
             tol=tol,
+            tol_energy_diff=tol_energy_diff,
             callback=callback,
             keep_best=keep_best,
             progbar=progbar,
+            plot_every=plot_every,
             **kwargs,
         )
 
