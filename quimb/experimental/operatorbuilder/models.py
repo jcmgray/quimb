@@ -186,7 +186,7 @@ def fermi_hubbard_from_edges(
 
     if hilbert_space is None:
         hilbert_space = HilbertSpace(
-            sites=[(s, coo) for coo in sites for s in "↑↓"],
+            sites=[(s, coo) for s in "↑↓" for coo in sites],
             order=order,
             sector=sector,
             symmetry=symmetry,
