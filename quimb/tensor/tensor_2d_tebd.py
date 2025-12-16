@@ -6,7 +6,6 @@ import numpy as np
 import scipy.sparse.linalg as spla
 from autoray import conj, dag, do, reshape
 
-from ..utils import pairwise
 from ..utils_plot import default_to_neutral_style
 from .contraction import contract_strategy
 from .drawing import get_colors
@@ -15,14 +14,9 @@ from .tensor_2d import (
     calc_plaquette_map,
     calc_plaquette_sizes,
     gen_2d_bonds,
-    gen_long_range_path,
-    gen_long_range_swap_path,
-    nearest_neighbors,
     plaquette_to_sites,
-    swap_path_to_long_range_path,
 )
-from .tensor_arbgeom_tebd import LocalHamGen, TEBDGen
-from .tensor_core import Tensor
+from .tensor_arbgeom_tebd import LocalHamGen, SimpleUpdateGen, TEBDGen
 
 
 class LocalHam2D(LocalHamGen):
@@ -217,10 +211,47 @@ class LocalHam2D(LocalHamGen):
     graph = draw
 
 
-class TEBD2D(TEBDGen):
+class ComputeEnergyBoundary:
+    """Mixin class to add energy computation to TEBD2D classes."""
+
+    def set_default_boundary_opts(self, chi=None):
+        # parse energy computation options
+        if chi is None:
+            chi = max(8, self.D**2)
+        self.compute_energy_opts["max_bond"] = chi
+        self.compute_energy_opts.setdefault("cutoff", 0.0)
+        self.compute_energy_opts.setdefault("normalized", True)
+
+    def compute_energy(self):
+        """Compute and return the energy of the current state."""
+        return self.state.compute_local_expectation(
+            self.ham.terms, **self.compute_energy_opts
+        )
+
+    @property
+    def chi(self):
+        """The bond dimensino to use for contracting the boundary for when
+        computing the energy.
+        """
+        return self.compute_energy_opts["max_bond"]
+
+    @chi.setter
+    def chi(self, value):
+        self.compute_energy_opts["max_bond"] = round(value)
+
+    def _get_repr_info(self):
+        info = super()._get_repr_info()
+        info["chi"] = self.chi
+        return info
+
+
+class TEBD2D(TEBDGen, ComputeEnergyBoundary):
     """Generic class for performing two dimensional time evolving block
     decimation, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
+    The only difference between this and `TEBDGen` is that the default energy
+    computation uses boundary contraction specific to 2D tensor networks, with
+    a default boundary bond dimension of ``max(8, D**2)``.
 
     Parameters
     ----------
@@ -317,6 +348,7 @@ class TEBD2D(TEBDGen):
         callback=None,
         keep_best=False,
         progbar=True,
+        **kwargs,
     ):
         super().__init__(
             psi0=psi0,
@@ -335,34 +367,9 @@ class TEBD2D(TEBDGen):
             callback=callback,
             keep_best=keep_best,
             progbar=progbar,
+            **kwargs,
         )
-
-        # parse energy computation options
-        if chi is None:
-            chi = max(8, self.D**2)
-        self.compute_energy_opts["max_bond"] = chi
-        self.compute_energy_opts.setdefault("cutoff", 0.0)
-        self.compute_energy_opts.setdefault("normalized", True)
-
-    def compute_energy(self):
-        """Compute and return the energy of the current state."""
-        return self.state.compute_local_expectation(
-            self.ham.terms, **self.compute_energy_opts
-        )
-
-    @property
-    def chi(self):
-        return self.compute_energy_opts["max_bond"]
-
-    @chi.setter
-    def chi(self, value):
-        self.compute_energy_opts["max_bond"] = round(value)
-
-    def __repr__(self):
-        s = "<{}(n={}, tau={}, D={}, chi={})>"
-        return s.format(
-            self.__class__.__name__, self.n, self.tau, self.D, self.chi
-        )
+        self.set_default_boundary_opts(chi=chi)
 
 
 def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
@@ -375,7 +382,7 @@ def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
     tn.equalize_norms_(value=value)
 
 
-class SimpleUpdate(TEBD2D):
+class SimpleUpdate(SimpleUpdateGen, ComputeEnergyBoundary):
     """A simple subclass of ``TEBD2D`` that overrides two key methods in
     order to keep 'diagonal gauges' living on the bonds of a PEPS. The gauges
     are stored separately from the main PEPS in the ``gauges`` attribute.
@@ -391,10 +398,10 @@ class SimpleUpdate(TEBD2D):
     ham : LocalHam2D
         The Hamtiltonian consisting of local terms.
     tau : float, optional
-        The default local exponent, if considered as time real values here
-        imply imaginary time.
-    max_bond : {'psi0', int, None}, optional
-        The maximum bond dimension to keep when applying each gate.
+        The default time step to use.
+    D : int, optional
+        The maximum bond dimension, by default the current maximum bond of
+        ``psi0``.
     gate_opts : dict, optional
         Supplied to :meth:`quimb.tensor.tensor_2d.TensorNetwork2DVector.gate`,
         in addition to ``max_bond``. By default ``contract`` is set to
@@ -444,15 +451,6 @@ class SimpleUpdate(TEBD2D):
     condition_balance_bonds : bool, optional
         If and when equalizing tensor norms, whether to also balance bonds as
         an additional conditioning.
-    long_range_use_swaps : bool, optional
-        If there are long range terms, whether to use swap gates to apply the
-        terms. If ``False``, a long range blob tensor (which won't scale well
-        for long distances) is formed instead.
-    long_range_path_sequence : str or callable, optional
-        If there are long range terms how to generate the path between the two
-        coordinates. If callable, should take the two coordinates and return a
-        sequence of  coordinates that links them, else passed to
-        ``gen_long_range_swap_path``.
 
     Attributes
     ----------
@@ -484,202 +482,54 @@ class SimpleUpdate(TEBD2D):
         tau=0.01,
         D=None,
         chi=None,
-        gauge_renorm=True,
-        gauge_smudge=1e-6,
-        condition_tensors=True,
-        condition_balance_bonds=True,
-        long_range_use_swaps=False,
-        long_range_path_sequence="random",
+        cutoff=1e-10,
         imag=True,
         gate_opts=None,
         ordering=None,
         second_order_reflect=False,
+        update="sequential",
         compute_energy_every=None,
         compute_energy_final=True,
         compute_energy_opts=None,
         compute_energy_fn=None,
         compute_energy_per_site=False,
+        tol=None,
+        equilibrate_every=None,
+        equilibrate_start=True,
+        equilibrate_opts=None,
+        gauge_diff_period=None,
         callback=None,
         keep_best=False,
         progbar=True,
+        **kwargs,
     ):
         super().__init__(
             psi0=psi0,
             ham=ham,
             tau=tau,
             D=D,
-            chi=chi,
+            cutoff=cutoff,
             imag=imag,
             gate_opts=gate_opts,
             ordering=ordering,
             second_order_reflect=second_order_reflect,
+            update=update,
             compute_energy_every=compute_energy_every,
             compute_energy_final=compute_energy_final,
             compute_energy_opts=compute_energy_opts,
             compute_energy_fn=compute_energy_fn,
             compute_energy_per_site=compute_energy_per_site,
+            tol=tol,
+            equilibrate_every=equilibrate_every,
+            equilibrate_start=equilibrate_start,
+            equilibrate_opts=equilibrate_opts,
+            gauge_diff_period=gauge_diff_period,
             callback=callback,
             keep_best=keep_best,
             progbar=progbar,
+            **kwargs,
         )
-        self.gauge_renorm = gauge_renorm
-        self.gauge_smudge = gauge_smudge
-        self.condition_tensors = condition_tensors
-        self.condition_balance_bonds = condition_balance_bonds
-        self.gate_opts["long_range_use_swaps"] = long_range_use_swaps
-        self.long_range_path_sequence = long_range_path_sequence
-
-    def _initialize_gauges(self):
-        """Create unit singular values, stored as tensors."""
-        # create the gauges like whatever data array is in the first site.
-        data00 = next(iter(self._psi.tensor_map.values())).data
-
-        self._gauges = dict()
-        for ija, ijb in self._psi.gen_bond_coos():
-            bnd = self._psi.bond(ija, ijb)
-            d = self._psi.ind_size(bnd)
-            Tsval = Tensor(
-                do("ones", (d,), dtype=data00.dtype, like=data00),
-                inds=[bnd],
-                tags=[
-                    self._psi.site_tag(*ija),
-                    self._psi.site_tag(*ijb),
-                    "SU_gauge",
-                ],
-            )
-            self._gauges[tuple(sorted((ija, ijb)))] = Tsval
-
-    @property
-    def gauges(self):
-        """The dictionary of bond pair coordinates to Tensors describing the
-        weights (``t = gauges[pair]; t.data``) and index
-        (``t = gauges[pair]; t.inds[0]``) of all the gauges.
-        """
-        return self._gauges
-
-    @property
-    def long_range_use_swaps(self):
-        return self.gate_opts["long_range_use_swaps"]
-
-    @long_range_use_swaps.setter
-    def long_range_use_swaps(self, b):
-        self.gate_opts["long_range_use_swaps"] = bool(b)
-
-    def gate(self, U, where):
-        """Like ``TEBD2D.gate`` but absorb and extract the relevant gauges
-        before and after each gate application.
-        """
-        ija, ijb = where
-
-        if callable(self.long_range_path_sequence):
-            long_range_path_sequence = self.long_range_path_sequence(ija, ijb)
-        else:
-            long_range_path_sequence = self.long_range_path_sequence
-
-        if self.long_range_use_swaps:
-            path = tuple(
-                gen_long_range_swap_path(
-                    ija, ijb, sequence=long_range_path_sequence
-                )
-            )
-            string = swap_path_to_long_range_path(path, ija)
-        else:
-            # get the string linking the two sites
-            string = path = tuple(
-                gen_long_range_path(
-                    ija, ijb, sequence=long_range_path_sequence
-                )
-            )
-
-        def env_neighbours(i, j):
-            return tuple(
-                filter(
-                    lambda coo: self._psi.valid_coo((coo))
-                    and coo not in string,
-                    nearest_neighbors((i, j)),
-                )
-            )
-
-        # get the relevant neighbours for string of sites
-        neighbours = {site: env_neighbours(*site) for site in string}
-
-        # absorb the 'outer' gauges from these neighbours
-        for site in string:
-            Tij = self._psi[site]
-            for neighbour in neighbours[site]:
-                Tsval = self._gauges[tuple(sorted((site, neighbour)))]
-                Tij.multiply_index_diagonal_(
-                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge)
-                )
-
-        # absorb the inner bond gauges equally into both sites along string
-        for site_a, site_b in pairwise(string):
-            Ta, Tb = self._psi[site_a], self._psi[site_b]
-            Tsval = self._gauges[tuple(sorted((site_a, site_b)))]
-            (bnd,) = Tsval.inds
-            Ta.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
-            Tb.multiply_index_diagonal_(ind=bnd, x=Tsval.data**0.5)
-
-        # perform the gate, retrieving new bond singular values
-        info = dict()
-        self._psi.gate_(
-            U,
-            where,
-            absorb=None,
-            info=info,
-            long_range_path_sequence=path,
-            **self.gate_opts,
-        )
-
-        # set the new singualar values all along the chain
-        for site_a, site_b in pairwise(string):
-            bond_pair = tuple(sorted((site_a, site_b)))
-            (s,) = info.values()
-            if self.gauge_renorm:
-                # keep the singular values from blowing up
-                s = s / do("max", s)
-            Tsval = self._gauges[bond_pair]
-            Tsval.modify(data=s)
-
-        # absorb the 'outer' gauges from these neighbours
-        for site in string:
-            Tij = self._psi[site]
-            for neighbour in neighbours[site]:
-                Tsval = self._gauges[tuple(sorted((site, neighbour)))]
-                Tij.multiply_index_diagonal_(
-                    ind=Tsval.inds[0], x=(Tsval.data + self.gauge_smudge) ** -1
-                )
-
-    def get_state(self, absorb_gauges=True):
-        """Return the state, with the diagonal bond gauges either absorbed
-        equally into the tensors on either side of them
-        (``absorb_gauges=True``, the default), or left lazily represented in
-        the tensor network with hyperedges (``absorb_gauges=False``).
-        """
-        psi = self._psi.copy()
-
-        if not absorb_gauges:
-            for Tsval in self._gauges.values():
-                psi &= Tsval
-        else:
-            for (ija, ijb), Tsval in self._gauges.items():
-                (bnd,) = Tsval.inds
-                Ta = psi[ija]
-                Tb = psi[ijb]
-                Ta.multiply_index_diagonal_(bnd, Tsval.data**0.5)
-                Tb.multiply_index_diagonal_(bnd, Tsval.data**0.5)
-
-        if self.condition_tensors:
-            conditioner(psi, balance_bonds=self.condition_balance_bonds)
-
-        return psi
-
-    def set_state(self, psi):
-        """Set the wavefunction state, this resets the environment gauges to
-        unity.
-        """
-        self._psi = psi.copy()
-        self._initialize_gauges()
+        self.set_default_boundary_opts(chi=chi)
 
 
 def gate_full_update_als(

@@ -18,6 +18,7 @@ from ..utils import progbar as Progbar
 from ..utils_plot import default_to_neutral_style
 from .drawing import get_colors, get_positions
 from .tensor_core import Tensor
+from .tensor_arbgeom import TensorNetworkGenVector
 
 
 def edge_coloring(
@@ -486,12 +487,21 @@ class TEBDGen:
     """Generic class for performing time evolving block decimation on an
     arbitrary graph, i.e. applying the exponential of a Hamiltonian using
     a product formula that involves applying local exponentiated gates only.
+    The gate and energy computation methods can be overridden to create
+    different algorithms.
+
+    Parameters
+    ----------
+    psi0 : TensorNetworkGenVector
+        The initial state.
+    ham : LocalHamGen
+        The local hamiltonian.
     """
 
     def __init__(
         self,
-        psi0,
-        ham,
+        psi0: TensorNetworkGenVector,
+        ham: LocalHamGen,
         tau=0.01,
         D=None,
         cutoff=1e-10,
@@ -761,13 +771,13 @@ class TEBDGen:
 
     # ------- abstract methods that subclasses might want to override ------- #
 
-    def get_state(self):
+    def get_state(self) -> TensorNetworkGenVector:
         """The default method for retrieving the current state - simply a copy.
         Subclasses can override this to perform additional transformations.
         """
         return self._psi.copy()
 
-    def set_state(self, psi):
+    def set_state(self, psi: TensorNetworkGenVector):
         """The default method for setting the current state - simply a copy.
         Subclasses can override this to perform additional transformations.
         """
@@ -845,9 +855,14 @@ class TEBDGen:
         data = self.assemble_plot_data()
         return plot_multi_series_zoom(data, **kwargs)
 
+    def _get_repr_info(self):
+        return {"n": self.n, "tau": self.last_tau, "D": self.D}
+
     def __repr__(self):
-        s = "<{}(n={}, tau={}, D={})>"
-        return s.format(self.__class__.__name__, self.n, self.tau, self.D)
+        s = f"<{self.__class__.__name__}("
+        s += ", ".join(f"{k}={v}" for k, v in self._get_repr_info().items())
+        s += ")>"
+        return s
 
 
 class SimpleUpdateGen(TEBDGen):
@@ -902,7 +917,8 @@ class SimpleUpdateGen(TEBDGen):
         :meth:`quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple`. By
         default `max_iterations` is set to 100 and `tol` to 1e-3.
     callback : callable, optional
-        A function to call after each step, with signature ``fn(su)``.
+        A function to call after each step, with signature
+        ``fn(su: SimpleUpdateGen)``.
     keep_best : bool, optional
         Whether to keep track of the best state and energy.
     progbar : bool, optional
@@ -911,13 +927,14 @@ class SimpleUpdateGen(TEBDGen):
 
     def __init__(
         self,
-        psi0,
-        ham,
+        psi0: TensorNetworkGenVector,
+        ham: LocalHamGen,
         tau=0.01,
         D=None,
         cutoff=1e-10,
         imag=True,
         gate_opts=None,
+        gauge_smudge=1e-6,
         ordering=None,
         second_order_reflect=False,
         update="sequential",
@@ -936,6 +953,12 @@ class SimpleUpdateGen(TEBDGen):
         progbar=True,
         **kwargs,
     ):
+
+        # gating options
+        self.gate_opts = ensure_dict(gate_opts)
+        self.gate_opts.setdefault("gauge_smudge", gauge_smudge)
+
+        # gauge equilibration options
         if equilibrate_every is None:
             equilibrate_every = 0
         elif equilibrate_every == "sweep":

@@ -83,7 +83,7 @@ class TestSimpleUpdate:
         D = 2
 
         ham = qtn.ham_2d_heis(Lx, Ly)
-        psi0 = qtn.PEPS.rand(Lx, Ly, D)
+        psi0 = qtn.PEPS.rand(Lx, Ly, D, seed=42)
 
         def to_backend(x):
             import autoray

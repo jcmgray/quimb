@@ -473,10 +473,11 @@ def tensor_network_ag_gate(
 
         - False: no tags are propagated
         - True: all tags are propagated
-        - 'register': only site tags corresponding to ``where`` are
-            added.
-        - 'sites': all site tags on the current sites are propgated,
-            resulting in a lightcone like tagging.
+        - 'register': if the gate itself is being split, for each part of the
+          attached gate, only propagate the site tag of the site it is attached
+          to / 'sits above'.
+        - 'sites': all site tags on the current sites are propagated, resulting
+          in a 'lightcone' like tagging.
 
     info : None or dict, optional
         Used to store extra optional information such as the singular
