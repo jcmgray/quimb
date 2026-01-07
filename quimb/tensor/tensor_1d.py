@@ -3786,8 +3786,14 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
                 tn[i].retag_({tn.site_tag(i): tn.site_tag(i - 1)})
             tn._L = L - 1
         else:
-            # simply re-expand tensor dimensions (with zeros)
-            t.new_ind(ind, size=d, axis=-1)
+            # re-expand index, populating non-measured outcomes with zeros
+            zeros = xp.zeros_like(t.data)
+            arrays = [zeros] * d
+            arrays[outcome] = t.data
+            t.modify(
+                data=xp.stack(arrays, axis=-1),
+                inds=(*t.inds, ind)
+            )
 
         return outcome, tn
 
