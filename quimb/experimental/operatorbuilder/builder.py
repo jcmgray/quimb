@@ -114,7 +114,7 @@ def jordan_wigner_transform(terms, site_to_reg=None, reg_to_site=None):
             terms_jordan_wigner[term] = coeff
             continue
 
-        ops, site = zip(*term)
+        ops, _ = zip(*term)
         if {"+", "-"}.intersection(ops):
             # need to insert jordan-wigner strings
             new_term = []
@@ -175,7 +175,7 @@ def simplify_single_site_ops(coeff, ops):
         return 0, None
 
     # find the reference operator that maps to this matrix
-    for op in _OPMAP:
+    for op in _OPMAP.keys():
         ref_mat = get_mat(op)
         ref_coeff = ref_mat.flat[np.argmax(np.abs(ref_mat))]
         if (
@@ -888,6 +888,78 @@ class SparseOperatorBuilder:
             self.hilbert_space.flatconfig_to_config(bj) for bj in bjs
         ]
         return coupled_configs, cijs
+
+    def evaluate_exact_flatconfigs(self, fn_amplitude, progbar=False):
+        """Calculate the expectation value of this operator with respect to
+        a wavefunction provided as a function with signature::
+
+            fn_amplitude(flatconfig: ndarray[np.uint8]) -> z: float | complex
+
+        """
+        O = 0.0
+        p = 0.0
+
+        if progbar:
+            import tqdm
+
+            iterator = tqdm.tqdm(range(self.hilbert_space.size))
+        else:
+            iterator = range(self.hilbert_space.size)
+
+        for r in iterator:
+            flatconfig = self.hilbert_space.rank_to_flatconfig(r)
+
+            xpsi = fn_amplitude(flatconfig)
+            if not xpsi:
+                continue
+
+            pi = abs(xpsi) ** 2
+            p += pi
+
+            Oloc = 0.0
+            for fy, hxy in zip(*self.flatconfig_coupling(flatconfig)):
+                ypsi = fn_amplitude(fy)
+                Oloc = Oloc + hxy * ypsi / xpsi
+
+            O += Oloc * pi
+
+        return O / p
+
+    def evaluate_exact_configs(self, fn_amplitude, progbar=False):
+        """Calculate the expectation value of this operator with respect to
+        a wavefunction provided as a function with signature::
+
+            fn_amplitude(config: dict[site, int]) -> z: float | complex
+
+        """
+        O = 0.0
+        p = 0.0
+
+        if progbar:
+            import tqdm
+
+            iterator = tqdm.tqdm(range(self.hilbert_space.size))
+        else:
+            iterator = range(self.hilbert_space.size)
+
+        for r in iterator:
+            config = self.hilbert_space.rank_to_config(r)
+
+            xpsi = fn_amplitude(config)
+            if not xpsi:
+                continue
+
+            pi = abs(xpsi) ** 2
+            p += pi
+
+            Oloc = 0.0
+            for fy, hxy in zip(*self.config_coupling(config)):
+                ypsi = fn_amplitude(fy)
+                Oloc = Oloc + hxy * ypsi / xpsi
+
+            O += Oloc * pi
+
+        return O / p
 
     def build_coo_data(
         self, sector=None, symmetry=None, dtype=None, parallel=False
