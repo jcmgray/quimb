@@ -2,6 +2,49 @@ from .builder import SparseOperatorBuilder
 from .hilbertspace import HilbertSpace, parse_edges_to_unique
 
 
+def make_edge_factory(coeff):
+    """Ensure `coeff` is a function that takes two sites and returns an edge
+    coeff."""
+    if isinstance(coeff, dict):
+
+        def edge_factory(cooa, coob):
+            try:
+                return coeff[(cooa, coob)]
+            except KeyError:
+                return coeff[(coob, cooa)]
+
+    elif callable(coeff):
+        edge_factory = coeff
+
+    else:
+
+        def edge_factory(cooa, coob):
+            # constant
+            return coeff
+
+    return edge_factory
+
+
+def make_node_factory(coeff):
+    """Ensure `coeff` is a function that takes a site and returns a node
+    coeff."""
+    if isinstance(coeff, dict):
+
+        def node_factory(coo):
+            return coeff[coo]
+
+    elif callable(coeff):
+        node_factory = coeff
+
+    else:
+
+        def node_factory(coo):
+            # constant
+            return coeff
+
+    return node_factory
+
+
 def heisenberg_from_edges(
     edges,
     j=1.0,
@@ -37,15 +80,17 @@ def heisenberg_from_edges(
     edges : Iterable[tuple[hashable, hashable]]
         The edges, as pairs of hashable 'sites', that define the graph.
         Multiple edges are allowed, and will be treated as a single edge.
-    j : float or tuple[float, float, float], optional
+    j : float or tuple[float, float, float] or dict or callable, optional
         The Heisenberg exchange coupling constant(s). If a single float is
         given, it is used for all three terms. If a tuple of three floats is
         given, they are used for the xx, yy, and zz terms respectively. Note
         that positive values of ``j`` correspond to antiferromagnetic coupling.
-    b : float or tuple[float, float, float], optional
+        A dict or callable can be supplied to have edge-dependent couplings.
+    b : float or tuple[float, float, float] or dict or callable, optional
         The magnetic field strength(s). If a single float is given, it is used
         taken as a z-field. If a tuple of three floats is given, they are used
-        for the x, y, and z fields respectively.
+        for the x, y, and z fields respectively. A dict or callable can be
+        supplied to have site-dependent fields.
     order : callable or sequence of hashable objects, optional
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
@@ -68,16 +113,6 @@ def heisenberg_from_edges(
     H : SparseOperatorBuilder
         The Hamiltonian as a SparseOperatorBuilder object.
     """
-    try:
-        jx, jy, jz = j
-    except TypeError:
-        jx, jy, jz = j, j, j
-
-    try:
-        bx, by, bz = b
-    except TypeError:
-        bx, by, bz = 0, 0, b
-
     sites, edges = parse_edges_to_unique(edges)
 
     if hilbert_space is None:
@@ -90,7 +125,17 @@ def heisenberg_from_edges(
 
     H = SparseOperatorBuilder(hilbert_space=hilbert_space, dtype=dtype)
 
+    j_factory = make_edge_factory(j)
+    b_factory = make_node_factory(b)
+
     for cooa, coob in edges:
+        # get possibly edge-dependent couplings
+        jab = j_factory(cooa, coob)
+        try:
+            jx, jy, jz = jab
+        except TypeError:
+            jx, jy, jz = jab, jab, jab
+
         if jx == jy:
             # keep things real
             H += jx / 2, ("+", cooa), ("-", coob)
@@ -102,6 +147,12 @@ def heisenberg_from_edges(
         H += jz, ("sz", cooa), ("sz", coob)
 
     for site in sites:
+        # get possibly site-dependent field
+        b = b_factory(site)
+        try:
+            bx, by, bz = b
+        except TypeError:
+            bx, by, bz = 0, 0, b
         H += bx, ("sx", site)
         H += by, ("sy", site)
         H += bz, ("sz", site)
@@ -119,6 +170,7 @@ def fermi_hubbard_from_edges(
     symmetry=None,
     hilbert_space=None,
     dtype=None,
+    pauli_decompose=False,
 ):
     r"""Create a Fermi-Hubbard Hamiltonian on the graph defined by ``edges``.
     The Hamiltonian is given by:
@@ -154,12 +206,17 @@ def fermi_hubbard_from_edges(
     edges : Iterable[tuple[hashable, hashable]]
         The edges, as pairs of hashable 'sites', that define the graph.
         Multiple edges are allowed, but will be treated as a single edge.
-    t : float, optional
-        The hopping amplitude. Default is 1.0.
-    U : float, optional
-        The on-site interaction strength. Default is 1.0.
-    mu : float, optional
-        The chemical potential. Default is 0.0.
+    t : float or tuple[float, float] or dict or callable, optional
+        The hopping amplitude. Default is 1.0. If a tuple it specifies the up
+        and down spin hoppings respectively. A dict or callable can be supplied
+        to have edge-dependent hoppings.
+    U : float or dict or callable, optional
+        The on-site interaction strength. Default is 1.0. A dict or callable
+        can be supplied to have site-dependent interactions.
+    mu : float or tuple[float, float] or dict or callable, optional
+        The chemical potential. Default is 0.0. If a tuple it specifies the up
+        and down spin chemical potentials respectively. A dict or callable can
+        be supplied to have site-dependent chemical potentials.
     order : callable or sequence of hashable objects, optional
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
@@ -176,6 +233,9 @@ def fermi_hubbard_from_edges(
     dtype : {None, str, type}, optional
         The data type of the Hamiltonian. If None, a default dtype will be
         used, np.float64 for real and np.complex128 for complex.
+    pauli_decompose : bool, optional
+        Whether to decompose the Hamiltonian into Pauli strings after
+        Jordan-Wigner transforming. Default is False.
 
     Returns
     -------
@@ -192,23 +252,43 @@ def fermi_hubbard_from_edges(
             symmetry=symmetry,
         )
 
-    H = SparseOperatorBuilder(hilbert_space=hilbert_space, dtype=dtype)
+    H = SparseOperatorBuilder(
+        hilbert_space=hilbert_space,
+        dtype=dtype,
+        jordan_wigner=True,
+        pauli_decompose=pauli_decompose,
+    )
+
+    t_factory = make_edge_factory(t)
+    U_factory = make_node_factory(U)
+    mu_factory = make_node_factory(mu)
 
     for cooa, coob in edges:
-        # hopping
-        for s in "↑↓":
-            H += -t, ("+", (s, cooa)), ("-", (s, coob))
-            H += -t, ("+", (s, coob)), ("-", (s, cooa))
+        # hopping, possibly edge and spin-dependent
+        t = t_factory(cooa, coob)
+        try:
+            t_u, t_d = t
+        except TypeError:
+            t_u, t_d = t, t
+        H -= t_u, ("+", ("↑", cooa)), ("-", ("↑", coob))
+        H -= t_u, ("+", ("↑", coob)), ("-", ("↑", cooa))
+        H -= t_d, ("+", ("↓", cooa)), ("-", ("↓", coob))
+        H -= t_d, ("+", ("↓", coob)), ("-", ("↓", cooa))
 
     for coo in sites:
-        # interaction
+        # interaction, possibly site-dependent
+        U = U_factory(coo)
         H += U, ("n", ("↑", coo)), ("n", ("↓", coo))
 
-        # chemical potential
-        H += -mu, ("n", ("↑", coo))
-        H += -mu, ("n", ("↓", coo))
+        # chemical potential, possibly site and spin-dependent
+        mu = mu_factory(coo)
+        try:
+            mu_u, mu_d = mu
+        except TypeError:
+            mu_u, mu_d = mu, mu
+        H -= mu_u, ("n", ("↑", coo))
+        H -= mu_d, ("n", ("↓", coo))
 
-    H.jordan_wigner_transform()
     return H
 
 
@@ -217,11 +297,13 @@ def fermi_hubbard_spinless_from_edges(
     t=1.0,
     V=0.0,
     mu=0.0,
+    delta=0.0,
     order=None,
     sector=None,
     symmetry=None,
     hilbert_space=None,
     dtype=None,
+    pauli_decompose=False,
 ):
     r"""Create a spinless Fermi-Hubbard Hamiltonian on the graph defined by
     ``edges``. The Hamiltonian is given by:
@@ -242,6 +324,12 @@ def fermi_hubbard_spinless_from_edges(
         \mu
         \sum_{i}^{|V|}
         n_i
+        +
+        \Delta
+        \sum_{\{i,j\}}^{|E|}
+        \left(
+        c_i^\dagger c_j^\dagger + c_j c_i
+        \right)
 
     where :math:`\{i,j\}` are the edges of the graph, and :math:`c_i` is the
     fermionic annihilation operator acting on site :math:`i`. The Jordan-Wigner
@@ -258,6 +346,8 @@ def fermi_hubbard_spinless_from_edges(
         The nearest neighbor interaction strength. Default is 0.0.
     mu : float, optional
         The chemical potential. Default is 0.0.
+    delta : float, optional
+        The superconducting pairing strength. Default is 0.0.
     order : callable or sequence of hashable objects, optional
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
@@ -274,6 +364,9 @@ def fermi_hubbard_spinless_from_edges(
     dtype : {None, str, type}, optional
         The data type of the Hamiltonian. If None, a default dtype will be
         used, np.float64 for real and np.complex128 for complex.
+    pauli_decompose : bool, optional
+        Whether to decompose the Hamiltonian into Pauli strings after
+        Jordan-Wigner transforming. Default is False.
 
     Returns
     -------
@@ -290,21 +383,38 @@ def fermi_hubbard_spinless_from_edges(
             symmetry=symmetry,
         )
 
-    H = SparseOperatorBuilder(hilbert_space=hilbert_space, dtype=dtype)
+    H = SparseOperatorBuilder(
+        hilbert_space=hilbert_space,
+        dtype=dtype,
+        jordan_wigner=True,
+        pauli_decompose=pauli_decompose,
+    )
+
+    t_factory = make_edge_factory(t)
+    V_factory = make_edge_factory(V)
+    mu_factory = make_node_factory(mu)
+    delta_factory = make_edge_factory(delta)
 
     for cooa, coob in edges:
-        # hopping
-        H += -t, ("+", cooa), ("-", coob)
-        H += -t, ("+", coob), ("-", cooa)
+        # hopping, possibly edge-dependent
+        t = t_factory(cooa, coob)
+        H -= t, ("+", cooa), ("-", coob)
+        H -= t, ("+", coob), ("-", cooa)
 
-        # nearest neighbor interaction
+        # nearest neighbor interaction, possibly edge-dependent
+        V = V_factory(cooa, coob)
         H += V, ("n", cooa), ("n", coob)
 
-    # chemical potential
-    for coo in sites:
-        H += -mu, ("n", coo)
+        # pairing, possibly edge-dependent
+        delta = delta_factory(cooa, coob)
+        H += delta, ("+", cooa), ("+", coob)
+        H += delta, ("-", coob), ("-", cooa)
 
-    H.jordan_wigner_transform()
+    # chemical potential, possibly site-dependent
+    for coo in sites:
+        mu = mu_factory(coo)
+        H -= mu, ("n", coo)
+
     return H
 
 
