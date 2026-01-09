@@ -1,4 +1,4 @@
-# Tensor Network Examples
+# Examples: Tensor Network
 
 ```{toctree}
 :numbered:
@@ -23,7 +23,7 @@
 ```
 
 
-# Matrix Examples
+# Examples: Matrix
 
 ```{toctree}
 :numbered:
@@ -35,7 +35,7 @@
 ```
 
 
-# Other Examples
+# Examples: Other
 
 ```{toctree}
 :numbered:

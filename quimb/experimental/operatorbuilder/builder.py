@@ -25,7 +25,7 @@ _OPMAP = {
     "y": {0: (1, 1.0j), 1: (0, -1.0j)},
     "z": {0: (0, 1.0), 1: (1, -1.0)},
     # ZX=iY: 'real Y'
-    "zx": {0: (1, -1.0), 1: (0, 1.0)},
+    "ⴵ": {0: (1, -1.0), 1: (0, 1.0)},
     # spin 1/2 matrices (scaled paulis)
     "sx": {0: (1, 0.5), 1: (0, 0.5)},
     "sy": {0: (1, 0.5j), 1: (0, -0.5j)},
@@ -277,7 +277,7 @@ def get_pauli_decomp(op, atol=1e-12, use_zx=False):
     atol : float, optional
         The absolute tolerance for considering coefficients to be null.
     use_zx : bool, optional
-        Whether to decompose in terms of the real `ZX = iY` instead of `Y`.
+        Whether to decompose in terms of the real `ⴵ = ZX = iY` instead of `Y`.
 
     Returns
     -------
@@ -309,7 +309,7 @@ def get_pauli_decomp(op, atol=1e-12, use_zx=False):
     if use_zx:
         # convert Y -> -iZX
         terms = [
-            (-1j * coeff, "zx") if op == "y" else (coeff, op)
+            (-1j * coeff, "ⴵ") if op == "y" else (coeff, op)
             for coeff, op in terms
         ]
 
@@ -328,7 +328,7 @@ def pauli_decompose(terms, atol=1e-12, use_zx=False, site_to_reg=None):
         The absolute tolerance for considering coefficients after
         decomposition to be null.
     use_xz : bool, optional
-        Whether to decompose in terms of the real `ZX = iY` instead of `Y`.
+        Whether to decompose in terms of the real `ⴵ = ZX = iY` instead of `Y`.
     site_to_reg : callable, optional
         A function that maps a site to a linear register index. If not
         provided, the sites are assumed to be linear integers already.
@@ -352,9 +352,7 @@ def pauli_decompose(terms, atol=1e-12, use_zx=False, site_to_reg=None):
                 # extend with weighted pauli ...
                 (coeff_t * dcoeff, (*ops_t, (dop, reg)))
                 # ... for each weighted pauli in the decomposition
-                for dcoeff, dop in get_pauli_decomp(
-                    op, atol=atol, use_zx=use_zx
-                )
+                for dcoeff, dop in get_pauli_decomp(op, atol, use_zx)
                 # ... for each term in current sum
                 for coeff_t, ops_t in new_ts
             ]
@@ -541,6 +539,18 @@ class SparseOperatorBuilder:
         the terms in the operator. If the operator is complex, will be set to
         ``np.complex128``. If the operator is real, will be set to
         ``np.float64``. Individual building methods can override this.
+    jordan_wigner : bool, optional
+        Whether to apply the Jordan-Wigner transformation to the terms
+        automatically when processing them. This prepends pauli Z strings to
+        all creation and annihilation operators.
+    pauli_decompose : bool or "zx", optional
+        Whether to apply the Pauli decomposition to the terms automatically
+        when processing them. This decomposes all local operators into sums of
+        Pauli operators. If "zx" is supplied, the decomposition is done in
+        terms of the real `ZX = iY` operator instead of `Y`.
+    atol : float, optional
+        The absolute tolerance for considering coefficients to be null when
+        simplifying and decomposing terms.
     """
 
     def __init__(
@@ -548,13 +558,22 @@ class SparseOperatorBuilder:
         terms=(),
         hilbert_space: HilbertSpace = None,
         dtype=None,
+        jordan_wigner=False,
+        pauli_decompose=False,
+        atol=1e-12,
     ):
         self._sites_used = set()
         self._hilbert_space = hilbert_space
 
+        # terms as they are supplied by user
         self._terms_raw = {}
-        self._terms_transformed = None
-        self._terms = None
+        # terms after processing (jordan-wigner, pauli decomp, simplification)
+        self._terms_final = None
+
+        # processing flags
+        self._transform_jordan_wigner = jordan_wigner
+        self._transform_pauli_decompose = pauli_decompose
+        self._atol = atol
 
         self._dtype = dtype
         self._coupling_maps = {}
@@ -597,28 +616,53 @@ class SparseOperatorBuilder:
         """
         return tuple((coeff, ops) for ops, coeff in self._terms_raw.items())
 
-    def _get_terms_current(self):
-        if self._terms is not None:
-            # have existing processed terms
-            return self._terms
-        elif self._terms_transformed is not None:
-            # have existing transformed terms
-            return self._terms_transformed
-        else:
-            # no existing terms, take raw
-            return self._terms_raw
-
     def _reset_caches(self):
+        """Reset any cached representations of the operator, used whenever the
+        terms are modified in any way, and thus require reprocessing.
+        """
         self._cache.clear()
         self._coupling_maps.clear()
-
-    def _finalize(self):
-        if self._terms is None:
-            self.simplify()
+        self._terms_final = None
 
     def _get_terms_final(self):
-        self._finalize()
-        return self._terms
+        """Get the processed terms, applying any requested transformations, if
+        not already done.
+        """
+        if self._terms_final is None:
+            # need to (re)process raw terms to final terms
+            terms = self._terms_raw
+
+            # 1. jordan wigner transform before anything else
+            if self._transform_jordan_wigner:
+                terms = jordan_wigner_transform(
+                    terms=terms,
+                    site_to_reg=self.site_to_reg,
+                    reg_to_site=self.reg_to_site,
+                )
+
+            terms = simplify(
+                terms=terms,
+                atol=self._atol,
+                site_to_reg=self.site_to_reg,
+            )
+
+            # 2. pauli decomposition next
+            if self._transform_pauli_decompose:
+                terms = pauli_decompose(
+                    terms=terms,
+                    atol=self._atol,
+                    use_zx=self._transform_pauli_decompose == "zx",
+                    site_to_reg=self.site_to_reg,
+                )
+
+            # 3. finally simplify into strict form last
+            self._terms_final = simplify(
+                terms=terms,
+                atol=self._atol,
+                site_to_reg=self.site_to_reg,
+            )
+
+        return self._terms_final
 
     @property
     def terms(self):
@@ -714,8 +758,6 @@ class SparseOperatorBuilder:
             coeff = coeff.real
 
         self._terms_raw[ops] = coeff
-        self._terms_transformed = None
-        self._terms = None
         self._reset_caches()
 
     def __iadd__(self, term):
@@ -726,60 +768,57 @@ class SparseOperatorBuilder:
         self.add_term(-term[0], *term[1:])
         return self
 
-    def jordan_wigner_transform(self):
-        """Transform the terms in this operator by pre-prending pauli Z
-        strings to all creation and annihilation operators. This is always
-        applied directly to the raw terms, so that the any fermionic ordering
-        is respected. Any further transformations (e.g. simplification or
-        pauli decomposition) should thus be applied after this transformation.
+    def jordan_wigner_transform(self, value=None):
+        """Toggle transforming the terms in this operator by pre-prending
+        pauli Z strings to all creation and annihilation operators. This is
+        always applied directly as the first processing step to the raw terms,
+        so that the fermionic ordering is respected.
 
         Note this doesn't decompose +, - into (X + iY) / 2 and (X - iY) / 2, it
-        just prepends Z strings. Call `pauli_decompose` after this to get the
-        full decomposition.
+        just prepends Z strings. Use `pauli_decompose` to get the full
+        decomposition.
 
         The placement of the Z strings is defined by the ordering of the
         hilbert space, by default, the sorted order of the site labels.
 
-        Calling this multiple times will reset the transformed terms and any
-        simplifications or decompositions that have been applied to the
-        transformed terms will be lost.
+        Parameters
+        ----------
+        value : bool, optional
+            Whether to apply the Jordan-Wigner transformation. If `None` (the
+            default) then this method acts as toggle. Whereas supplying `True`
+            or `False` explicitly sets or unsets the transformation.
         """
-        if self._terms_transformed is not None:
-            # already transformed, just reset transformed terms
-            self._terms_transformed = None
+        if value is None:
+            value = not self._transform_jordan_wigner
         else:
-            self._terms_transformed = jordan_wigner_transform(
-                terms=self._terms_raw,
-                site_to_reg=self.site_to_reg,
-                reg_to_site=self.reg_to_site,
-            )
-        # reset simplified terms
-        self._terms = None
+            value = bool(value)
+        self._transform_jordan_wigner = value
         self._reset_caches()
 
-    def simplify(self, atol=1e-12):
-        """Simplify terms so that each term is a string of single operators
-        acting on different sites. This assumes that operators on different
-        sites commute, and thus is always performed after transformations
-        such as Jordan-Wigner.
-        """
-        self._terms = simplify(
-            terms=self._get_terms_current(),
-            atol=atol,
-            site_to_reg=self.site_to_reg,
-        )
-        self._reset_caches()
-
-    def pauli_decompose(self, atol=1e-12, use_zx=False):
+    def pauli_decompose(self, value=None, atol=None, use_zx=False):
         """Transform the terms in this operator by decomposing them into
         Pauli strings.
+
+        Parameters
+        ----------
+        value : bool, optional
+            Whether to apply the Pauli decomposition. If `None` (the default)
+            then this method acts as toggle. Whereas supplying `True` or
+            `False` explicitly sets or unsets the transformation.
         """
-        self._terms = pauli_decompose(
-            terms=self._get_terms_current(),
-            atol=atol,
-            use_zx=use_zx,
-            site_to_reg=self.site_to_reg,
-        )
+        if value is None:
+            value = not self._transform_pauli_decompose
+        else:
+            value = bool(value)
+
+        if value and use_zx:
+            self._transform_pauli_decompose = "zx"
+        else:
+            self._transform_pauli_decompose = value
+
+        if atol is not None:
+            self._atol = atol
+
         self._reset_caches()
 
     def show(self, filler="."):
@@ -1649,13 +1688,18 @@ class SparseOperatorBuilder:
         return qtn.MatrixProductOperator(Wts, **mpo_opts)
 
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}"
-            f"(nsites={self.nsites}, "
-            f"nterms={self.nterms}, "
-            f"locality={self.locality})"
-            ")"
-        )
+        s = [f"{self.__class__.__name__}("]
+        s.append(f"nsites={self.nsites}")
+        s.append(f", nterms={self.nterms}")
+        s.append(f", locality={self.locality}")
+
+        if self._transform_jordan_wigner:
+            s.append(", jordan_wigner=True")
+        if self._transform_pauli_decompose:
+            s.append(f", pauli_decompose={self._transform_pauli_decompose}")
+
+        s.append(")")
+        return "".join(s)
 
     def build_matrix_ikron(self, **ikron_opts):
         """Build either the dense or sparse matrix of this operator via
