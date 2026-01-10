@@ -2306,8 +2306,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         where : sequence of int, optional
             The range of sites the MPO acts on, will be inferred from the
             support of the MPO if not given.
-        method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit'}, optional
-            The compression method to use.
+        method : {"direct", "lazy", "fit", ...}, optional
+            The compression method to use. If "lazy", the MPO is simply added
+            to the MPS without any contraction or compression. Else `method`
+            is passed to
+            :func:`~quimb.tensor.tensor_1d_compress.tensor_network_1d_compress`
+            and controls how the compression of the subsection is performed.
         transpose : bool, optional
             Whether to transpose the MPO before applying it. By default the
             lower inds of the MPO are contracted with the MPS, if transposed
@@ -2477,8 +2481,12 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             physical dimensions of the sites it acts on. Calculated if not
             supplied. If a single int, all sites are assumed to have this same
             dimension.
-        method : {'direct", 'dm', 'zipup', 'zipup-first', 'fit', ...}, optional
-            The compression method to use.
+        method : {"direct", "lazy", "fit", ...}, optional
+            The compression method to use. If "lazy", the MPO is simply added
+            to the MPS without any contraction or compression. Else `method`
+            is passed to
+            :func:`~quimb.tensor.tensor_1d_compress.tensor_network_1d_compress`
+            and controls how the compression of the subsection is performed.
         info : dict, optional
             If supplied, will be used to infer and store various extra
             information. Currently, the key "cur_orthog" is used to store the
