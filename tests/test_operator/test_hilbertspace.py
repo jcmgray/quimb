@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-import quimb.experimental.operatorbuilder as qop
+import quimb.operator as qop
 
 
 def test_basic_int():
@@ -22,12 +22,12 @@ def test_basic_int():
 
 
 def test_basic_sequence():
-    hs = qop.HilbertSpace(['a', 'b', 'c'], dims=3)
+    hs = qop.HilbertSpace(["a", "b", "c"], dims=3)
     print(hs)
     assert hs.nsites == 3
     assert hs.size == 27
     assert len(hs.sites) == 3
-    for i, s in enumerate(['a', 'b', 'c']):
+    for i, s in enumerate(["a", "b", "c"]):
         assert hs.site_to_reg(s) == i
         assert hs.reg_to_site(i) == s
 
@@ -91,9 +91,9 @@ def test_mixed_radix_sampling():
 
 @pytest.mark.parametrize("sector", [0, 1])
 def test_basic_z2_symmetry_sampling(sector):
-    hs = qop.HilbertSpace(6, sector=sector, symmetry='Z2')
+    hs = qop.HilbertSpace(6, sector=sector, symmetry="Z2")
     print(hs)
-    assert hs.size == 2**(hs.nsites - 1)
+    assert hs.size == 2 ** (hs.nsites - 1)
     for _ in range(100):
         config = hs.rand_config()
         assert sum(config.values()) % 2 == sector
@@ -103,7 +103,7 @@ def test_basic_z2_symmetry_sampling(sector):
 
 @pytest.mark.parametrize("sector", [0, 1, 2, 3, 4, 5, 6])
 def test_basic_u1_symmetry_sampling(sector):
-    hs = qop.HilbertSpace(6, symmetry='U1', sector=sector)
+    hs = qop.HilbertSpace(6, symmetry="U1", sector=sector)
     print(hs)
     assert hs.size == math.comb(6, sector)
     for _ in range(100):
@@ -117,9 +117,7 @@ def test_basic_u1_symmetry_sampling(sector):
 @pytest.mark.parametrize("sectorb", [0, 1, 2, 3, 4])
 def test_basic_u1u1_symmetry_sampling(sectora, sectorb):
     hs = qop.HilbertSpace(
-        10,
-        symmetry='U1U1',
-        sector=((6, sectora), (4, sectorb))
+        10, symmetry="U1U1", sector=((6, sectora), (4, sectorb))
     )
     print(hs)
     assert hs.size == math.comb(6, sectora) * math.comb(4, sectorb)

@@ -1,7 +1,7 @@
 import pytest
 from numpy.testing import assert_allclose
 
-import quimb.experimental.operatorbuilder as qop
+import quimb.operator as qop
 
 
 def assert_all_matrices_match(

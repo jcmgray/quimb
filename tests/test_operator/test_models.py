@@ -2,8 +2,8 @@ import pytest
 from numpy.testing import assert_allclose
 
 import quimb as qu
+import quimb.operator as qop
 import quimb.tensor as qtn
-import quimb.experimental.operatorbuilder as qop
 
 
 @pytest.mark.parametrize(

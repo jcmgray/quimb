@@ -7,6 +7,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- move the experimental `operatorbuilder` module to the main [`quimb.operator`](quimb.operator) module.
 - add basic introduction to the operator module - {ref}`operator-basics`
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add an `info` kwarg, supplying this with an empty dict or with the entry `'error'` will store the truncation error when using `method in {"svd", "eig"}`.
@@ -63,7 +64,7 @@ Release notes for `quimb`.
 - [`tn.add_tag`](quimb.tensor.tensor_core.TensorNetwork.add_tag): add a `record: Optional[dict]` kwarg, to allow for easy rewinding of temporary tags without tracking the actual networks.
 - add [`qu.plot`](quimb.utils_plot.plot) as a quick wrapper for calling `matplotlib.pyplot.plot` with the `quimb` style.
 - [`quimb.schematic`](quimb.schematic): add `zorder_delta` kwarg for fine adjustments to layering of objects in approximately the same position.
-- [`operatorbuilder`](quimb.experimental.operatorbuilder): big performance improvements and fixes for building matrix representations including Z2 symmetry. Add default `symmetry` and `sector` options that can be overridden at build time. Add lazy (slow, matrix free) 'apply' method. Add `pauli_decompose` transformation. Add experimental PEPO builder for nearest neighbor operators. Add unit tests.
+- [`operatorbuilder`](quimb.operator): big performance improvements and fixes for building matrix representations including Z2 symmetry. Add default `symmetry` and `sector` options that can be overridden at build time. Add lazy (slow, matrix free) 'apply' method. Add `pauli_decompose` transformation. Add experimental PEPO builder for nearest neighbor operators. Add unit tests.
 
 **Bug fixes:**
 
@@ -102,7 +103,7 @@ Release notes for `quimb`.
 - add "SX" and "SXDG" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#277`)
 - add "XXPLUSYY" and "XXPLUSYY" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#279`)
 - add progress bar to various `Circuit` methods ({pull}`#288`)
-- [`quimb.experimental.operatorbuilder`](quimb.experimental.operatorbuilder): fix MPO building for congested operators ({issue}`296` and {issue}`301`), allow arbitrary dtype ({issue}`289`). Fix building of sparse and matrix representations for non-translationally symmetric operators and operators with trivial (all identity) terms.
+- [`quimb.operator`](quimb.operator): fix MPO building for congested operators ({issue}`296` and {issue}`301`), allow arbitrary dtype ({issue}`289`). Fix building of sparse and matrix representations for non-translationally symmetric operators and operators with trivial (all identity) terms.
 
 **Bug fixes:**
 
@@ -181,7 +182,7 @@ Release notes for `quimb`.
 - add MPS sampling: [`MatrixProductState.sample_configuration`](quimb.tensor.tensor_1d.MatrixProductState.sample_configuration) and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample) (generating multiple samples) and use these for [`CircuitMPS.sample`](quimb.tensor.circuit.CircuitMPS.sample) and [`CircuitPermMPS.sample`](quimb.tensor.circuit.CircuitPermMPS.sample).
 - add basic [`.plot()`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen.plot) method for SimpleUpdate classes
 - add [`edges_1d_chain`](quimb.tensor.geometry.edges_1d_chain) for generating 1D chain edges
-- [operatorbuilder](quimb.experimental.operatorbuilder): better coefficient placement for long range MPO building
+- [operatorbuilder](quimb.operator): better coefficient placement for long range MPO building
 
 ---
 
