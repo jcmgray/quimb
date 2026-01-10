@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 (whats-new-1-12-0)=
-## v1.13.0 (unreleased)
+## v1.12.0 (unreleased)
 
 **Enhancements:**
 
@@ -12,11 +12,11 @@ Release notes for `quimb`.
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add an `info` kwarg, supplying this with an empty dict or with the entry `'error'` will store the truncation error when using `method in {"svd", "eig"}`.
 - update infrastructure for TEBD and SimpleUpdate based algorithms.
-- [`schematic.Drawing`](quimb.schematic.drawing): add [`grid`](quimb.schematic.drawing.grid), [`grid3d`](quimb.schematic.drawing.grid3d), [`bezier`](quimb.schematic.drawing.bezier), [`star`](quimb.schematic.drawing.star), [`cross`](quimb.schematic.drawing.cross) and [`zigzag`](quimb.schematic.drawing.zigzag) methods.
-- [`schematic.Drawing`](quimb.schematic.drawing): add `relative` option to [`arrowhead`](quimb.schematic.drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.drawing.line).
+- [`schematic.Drawing`](quimb.schematic.Drawing): add [`grid`](quimb.schematic.Drawing.grid), [`grid3d`](quimb.schematic.Drawing.grid3d), [`bezier`](quimb.schematic.Drawing.bezier), [`star`](quimb.schematic.Drawing.star), [`cross`](quimb.schematic.Drawing.cross) and [`zigzag`](quimb.schematic.Drawing.zigzag) methods.
+- [`schematic.Drawing`](quimb.schematic.Drawing): add `relative` option to [`arrowhead`](quimb.schematic.Drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.Drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.Drawing.line).
 - add [`Drawing.scale_figsize`](quimb.schematic.Drawing.scale_figsize) for automatically setting the absolute figsize based on placed elements.
 - refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
-- update the 2d specific [`SimpleUpdate`](quimb.tensor.tensor_2d_tebd.SimpleUpdate2D) to use the new infrastructure.
+- update the 2d specific [`SimpleUpdate`](quimb.tensor.tensor_2d_tebd.SimpleUpdate) to use the new infrastructure.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): add `adjust_lims` option
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): allow `autodiff_backend="torch"` with `jit_fn=True` to work with array backends with general pytree parameters, e.g. `symmray` arrays.
@@ -28,7 +28,7 @@ Release notes for `quimb`.
 - [`LocalHamGen.apply_to_arrays`](quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.apply_to_arrays): support pytree parameter arrays such as `symmray`.
 - add [`Tensor.get_namespace`](quimb.tensor.tensor_core.Tensor.get_namespace) and [`TensorNetwork.get_namespace`](quimb.tensor.tensor_core.TensorNetwork.get_namespace) for getting a [reusable data array namespace](https://autoray.readthedocs.io/en/latest/automatic_dispatch.html#namespace-api)
 - [`TensorNetwork.isel`](quimb.tensor.tensor_core.TensorNetwork.isel): use `take` where possible to better support e.g. `torch.vmap` across amplitudes.
-- [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure), and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample: add `backend_random` option for specifying which backend to use for random number generation when sampling, this can be set for example to `jax` to make the whole process jittable, but by default is `numpy`, regardless of the actual array backend.
+- [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure), and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample): add `backend_random` option for specifying which backend to use for random number generation when sampling, this can be set for example to `jax` to make the whole process jittable, but by default is `numpy`, regardless of the actual array backend.
 
 **Bug fixes:**
 
