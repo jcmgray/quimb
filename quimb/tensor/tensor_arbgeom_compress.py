@@ -106,6 +106,12 @@ def tensor_network_ag_compress_projector(
     # then compute projectors using local information
 
     for taga, tagb in edges:
+        #      │         │
+        #    ──O─┐ chi ┌─O──
+        #      │ └─▷═◁─┘ │
+        #      │ ┌┘   └┐ │
+        #    ──O─┘     └─O──
+        #    taga       tagb
         tn_calc.insert_compressor_between_regions_(
             [taga],
             [tagb],

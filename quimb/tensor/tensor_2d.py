@@ -2284,8 +2284,6 @@ class TensorNetwork2D(TensorNetworkGen):
         max_unfinished=1,
         around=None,
         equalize_norms=False,
-        canonize=False,
-        canonize_opts=None,
         final_contract=True,
         final_contract_opts=None,
         progbar=False,
@@ -2297,9 +2295,6 @@ class TensorNetwork2D(TensorNetworkGen):
         tn = self if inplace else self.copy()
 
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
-        if canonize:
-            canonize_opts = ensure_dict(canonize_opts)
-            canonize_opts.setdefault("max_iterations", 2)
 
         if progbar:
             pbar = Progbar()
@@ -2325,12 +2320,6 @@ class TensorNetwork2D(TensorNetworkGen):
         }
         separations = {
             d: boundaries[f"{d}max"] - boundaries[f"{d}min"] for d in "xy"
-        }
-        boundary_tags = {
-            "xmin": tn.x_tag(boundaries["xmin"]),
-            "xmax": tn.x_tag(boundaries["xmax"]),
-            "ymin": tn.y_tag(boundaries["ymin"]),
-            "ymax": tn.y_tag(boundaries["ymax"]),
         }
         if around is not None:
             if sequence is None:
@@ -2391,9 +2380,6 @@ class TensorNetwork2D(TensorNetworkGen):
                     f"Lx={separations['x'] + 1}, "
                     f"Ly={separations['y'] + 1}"
                 )
-
-            if canonize:
-                tn.select(boundary_tags[direction]).gauge_all_(**canonize_opts)
 
             if direction[0] == "x":
                 if direction[1:] == "min":
@@ -3373,6 +3359,8 @@ class TensorNetwork2D(TensorNetworkGen):
         direction,
         max_bond=None,
         cutoff=1e-10,
+        canonize=False,
+        canonize_opts=None,
         lazy=False,
         equalize_norms=False,
         optimize="auto-hq",
@@ -3420,7 +3408,19 @@ class TensorNetwork2D(TensorNetworkGen):
         check_opt("direction", direction, ("x", "y"))
 
         tn = self if inplace else self.copy()
-        tn_calc = tn.copy()
+
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            # extract simple gauges
+            gauges = {}
+            tn.gauge_all_simple_(gauges=gauges, **canonize_opts)
+            # compute projectors from gauged network
+            tn_calc = tn.copy()
+            # insert gauges back into target before inserting projectors
+            tn.gauge_simple_insert(gauges)
+        else:
+            gauges = None
+            tn_calc = tn.copy()
 
         r = Rotator2D(tn, None, None, f"{direction}min")
 
@@ -3455,11 +3455,12 @@ class TensorNetwork2D(TensorNetworkGen):
                     tn_calc.insert_compressor_between_regions(
                         ltags,
                         rtags,
-                        new_ltags=ltags,
-                        new_rtags=rtags,
-                        insert_into=tn,
                         max_bond=max_bond,
                         cutoff=cutoff,
+                        insert_into=tn,
+                        new_ltags=ltags,
+                        new_rtags=rtags,
+                        gauges=gauges,
                         **compress_opts,
                     )
 
@@ -3603,12 +3604,11 @@ class TensorNetwork2D(TensorNetworkGen):
                     f"contracting {direction}, Lx={tn.Lx}, Ly={tn.Ly}"
                 )
 
-            if canonize:
-                tn.gauge_all_(**canonize_opts)
-
             tn.coarse_grain_hotrg_(
                 direction=direction,
                 max_bond=max_bond,
+                canonize=canonize,
+                canonize_opts=canonize_opts,
                 cutoff=cutoff,
                 lazy=lazy,
                 equalize_norms=equalize_norms,
@@ -3739,6 +3739,8 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_opts["mode"] = mode
         contract_boundary_opts["compress_opts"] = compress_opts
         contract_boundary_opts["lazy"] = lazy
+        contract_boundary_opts["canonize"] = canonize
+        contract_boundary_opts["canonize_opts"] = canonize_opts
 
         if lazy:
             # we are implicitly asking for the tensor network
@@ -3757,8 +3759,6 @@ class TensorNetwork2D(TensorNetworkGen):
 
         return self._contract_interleaved_boundary_sequence(
             contract_boundary_opts=contract_boundary_opts,
-            canonize=canonize,
-            canonize_opts=canonize_opts,
             sequence=sequence,
             xmin=xmin,
             xmax=xmax,
