@@ -1,5 +1,5 @@
-"""Tools for 'symbolically' and consitently defining operators and
-hamiltonians, which can thenvbe built out into various matrix or tensor network
+"""Tools for 'symbolically' and consistently defining operators and
+hamiltonians, which can then be built out into various matrix or tensor network
 forms such as sparse matrices and MPOs.
 """
 
