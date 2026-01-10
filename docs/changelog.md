@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 (whats-new-1-12-0)=
-## v1.12.0 (unreleased)
+## v1.12.0 (2026-01-09)
 
 **Enhancements:**
 
