@@ -9,7 +9,7 @@ Release notes for `quimb`.
 
 - add basic introduction to the operator module - {ref}`operator-basics`
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): and an `info` kwarg, supplying this with an empty dict or with the entry `'error'` will store the truncation error when using `method in {"svd", "eig"}`.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add an `info` kwarg, supplying this with an empty dict or with the entry `'error'` will store the truncation error when using `method in {"svd", "eig"}`.
 - update infrastructure for TEBD and SimpleUpdate based algorithms.
 - [`schematic.Drawing`](quimb.schematic.drawing): add [`grid`](quimb.schematic.drawing.grid), [`grid3d`](quimb.schematic.drawing.grid3d), [`bezier`](quimb.schematic.drawing.bezier), [`star`](quimb.schematic.drawing.star), [`cross`](quimb.schematic.drawing.cross) and [`zigzag`](quimb.schematic.drawing.zigzag) methods.
 - [`schematic.Drawing`](quimb.schematic.drawing): add `relative` option to [`arrowhead`](quimb.schematic.drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.drawing.line).
@@ -34,6 +34,7 @@ Release notes for `quimb`.
 - fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) when `insert_into is None`.
 - tensor network drawing, ensure hyper indices can be specified as `output_inds`.
 - fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) when using jax arrays ({issue}`340`).
+- fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) when projecting and keeping a site site ({issue}`344`).
 
 (whats-new-1-11-2)=
 ## v1.11.2 (2025-07-30)
