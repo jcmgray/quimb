@@ -311,25 +311,15 @@ def fermi_hubbard_spinless_from_edges(
     .. math::
 
         H =
-        -t
-        \sum_{\{i,j\}}^{|E|}
-        \left(
-        c_i^\dagger c_j + c_j^\dagger c_i
-        \right)
+        -t \sum_{\{i,j\}}^{|E|}
+        \left( c_i^\dagger c_j + c_j^\dagger c_i \right)
         +
-        V
-        \sum_{\{i,j\}}^{|E|}
-        n_i n_j
+        V \sum_{\{i,j\}}^{|E|} n_i n_j
         -
-        \mu
-        \sum_{i}^{|V|}
-        n_i
+        \mu \sum_{i}^{|V|} n_i
         +
-        \Delta
-        \sum_{\{i,j\}}^{|E|}
-        \left(
-        c_i^\dagger c_j^\dagger + c_j c_i
-        \right)
+        \Delta \sum_{\{i,j\}}^{|E|}
+        \left( c_i^\dagger c_j^\dagger + c_j c_i \right)
 
     where :math:`\{i,j\}` are the edges of the graph, and :math:`c_i` is the
     fermionic annihilation operator acting on site :math:`i`. The Jordan-Wigner
@@ -340,14 +330,18 @@ def fermi_hubbard_spinless_from_edges(
     edges : Iterable[tuple[hashable, hashable]]
         The edges, as pairs of hashable 'sites', that define the graph.
         Multiple edges are allowed, but will be treated as a single edge.
-    t : float, optional
-        The hopping amplitude. Default is 1.0.
-    V : float, optional
-        The nearest neighbor interaction strength. Default is 0.0.
-    mu : float, optional
-        The chemical potential. Default is 0.0.
-    delta : float, optional
-        The superconducting pairing strength. Default is 0.0.
+    t : float or dict or callable, optional
+        The hopping amplitude. Default is 1.0. A dict or callable can be
+        supplied to have edge-dependent hoppings.
+    V : float or dict or callable, optional
+        The nearest neighbor interaction strength. Default is 0.0. A dict or
+        callable can be supplied to have edge-dependent interactions.
+    mu : float or dict or callable, optional
+        The chemical potential. Default is 0.0. A dict or callable can be
+        supplied to have site-dependent chemical potentials.
+    delta : float or dict or callable, optional
+        The superconducting pairing strength. Default is 0.0. A dict or
+        callable can be supplied to have edge-dependent pairings.
     order : callable or sequence of hashable objects, optional
         If provided, use this to order the sites. If a callable, it should be a
         sorting key. If a sequence, it should be a permutation of the sites,
