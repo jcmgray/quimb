@@ -24,10 +24,9 @@ from .core import (
     qu,
     rdmul,
 )
-from .linalg.base_linalg import eigh, norm, expm_multiply, Lazy
 from .linalg.approx_spectral import norm_fro_approx
-from .utils import continuous_progbar, progbar, ensure_dict
-
+from .linalg.base_linalg import Lazy, eigh, expm_multiply, norm
+from .utils import continuous_progbar, ensure_dict, progbar
 
 CALLABLE_TIME_INDEP_CLASSES = (LinearOperator, Lazy)
 
@@ -296,11 +295,10 @@ class Evolution(object):
 
     The evolution can be performed in a number of ways:
 
-        - diagonalise the Hamiltonian (or use already diagonalised system).
-        - integrate the complex ODE, that is, the Schrodinger equation, using
-          scipy. Here either a mid- or high-order Dormand-Prince adaptive
-          time stepping scheme is used (see
-          :class:`scipy.integrate.complex_ode`).
+    - diagonalise the Hamiltonian (or use already diagonalised system).
+    - integrate the complex ODE, that is, the Schrodinger equation, using
+      scipy. Here either a mid- or high-order Dormand-Prince adaptive time
+      stepping scheme is used (see :class:`scipy.integrate.complex_ode`).
 
     Parameters
     ----------
@@ -308,60 +306,57 @@ class Evolution(object):
         Inital state, either vector or operator. If vector, converted to ket.
     ham : operator, tuple (1d array, operator), or callable
         Governing Hamiltonian, if tuple then assumed to contain
-        ``(eigvals, eigvecs)`` of presolved system. If callable (but not a
-        SciPy ``LinearOperator``), assume a time-dependent hamiltonian such
-        that ``ham(t)`` is the Hamiltonian at time ``t``. In this case, the
-        latest call to ``ham`` will be cached (and made immutable) in case it
-        is needed by callbacks passed to ``compute``.
+        `(eigvals, eigvecs)` of presolved system. If callable (but not a SciPy
+        `LinearOperator`), assume a time-dependent hamiltonian such that
+        `ham(t)` is the Hamiltonian at time `t`. In this case, the latest call
+        to `ham` will be cached (and made immutable) in case it is needed by
+        callbacks passed to `compute`.
     t0 : float, optional
-        Initial time (i.e. time of state ``p0``), defaults to zero.
+        Initial time (i.e. time of state `p0`), defaults to zero.
     compute : callable, or dict of callable, optional
         Function(s) to compute on the state at each time step. Function(s)
         should take args (t, pt) or (t, pt, ham) if the Hamiltonian is
         required. If ham is required, it will be passed in to the function
-        exactly as given to this ``Evolution`` instance, except if ``method``
-        is ``'solve'``, in which case it will be passed in as the solved system
-        ``(eigvals, eigvecs)``. If supplied with:
+        exactly as given to this `Evolution` instance, except if `method` is
+        `'solve'`, in which case it will be passed in as the solved system
+        `(eigvals, eigvecs)`. If supplied with:
 
-            - single callable : ``Evolution.results`` will contain the results
-              as a list,
-            - dict of callables : ``Evolution.results`` will contain the
-              results as a dict of lists with corresponding keys to those
-              given in ``compute``.
+        - single callable : `Evolution.results` will contain the results as a
+          list,
+        - dict of callables : `Evolution.results` will contain the results as a
+          dict of lists with corresponding keys to those given in `compute`.
 
     int_stop : callable, optional
-        A condition to terminate the integration early if ``method`` is
-        ``'integrate'``. This callable is called at every successful
+        A condition to terminate the integration early if `method` is
+        `'integrate'`. This callable is called at every successful
         integration step and should take args (t, pt) or (t, pt, ham) similar
-        to the function(s) in the ``compute`` argument.  It should return
-        ``-1`` to stop the integration, otherwise it should return ``None``
-        or ``0``.
+        to the function(s) in the `compute` argument.  It should return
+        `-1` to stop the integration, otherwise it should return `None`
+        or `0`.
 
     method : {'integrate', 'solve', 'expm'}
         How to evolve the system:
 
-            - ``'integrate'``: use definite integration. Get system at each
-              time step, only need action of Hamiltonian on state. Generally
-              efficient.
-            - ``'solve'``: diagonalise dense hamiltonian. Best for small
-              systems and allows arbitrary time steps without loss of
-              precision.
-            - ``'expm'``: compute the evolved state using the action of the
-              operator exponential in a 'single shot' style. Only needs action
-              of Hamiltonian, for very large systems can use distributed MPI.
+        - `'integrate'`: use definite integration. Get system at each time
+          step, only need action of Hamiltonian on state. Generally efficient.
+        - `'solve'`: diagonalise dense hamiltonian. Best for small systems
+          and allows arbitrary time steps without loss of precision.
+        - `'expm'`: compute the evolved state using the action of the
+          operator exponential in a 'single shot' style. Only needs action
+          of Hamiltonian, for very large systems can use distributed MPI.
 
     int_small_step : bool, optional
-        If ``method='integrate'``, whether to use a low or high order
-        integrator to give naturally small or large steps.
+        If `method='integrate'`, whether to use a low or high order integrator
+        to give naturally small or large steps.
     expm_backend : {'auto', 'scipy', 'slepc'}
-        How to perform the expm_multiply function if ``method='expm'``. Can
-        further specifiy ``'slepc-krylov'``, or ``'slepc-expokit'``.
+        How to perform the expm_multiply function if `method='expm'`. Can
+        further specifiy `'slepc-krylov'`, or `'slepc-expokit'`.
     expm_opts : dict
-        Supplied to :func:`~quimb.linalg.base_linalg.expm_multiply`
-        function if ``method='expm'``.
+        Supplied to :func:`~quimb.linalg.base_linalg.expm_multiply` function if
+        `method='expm'`.
     progbar : bool, optional
-        Whether to show a progress bar when calling ``at_times`` or integrating
-        with the ``update_to`` method.
+        Whether to show a progress bar when calling `at_times` or integrating
+        with the `update_to` method.
     """
 
     def __init__(
@@ -411,9 +406,8 @@ class Evolution(object):
         if method == "solve" or isinstance(ham, (tuple, list)):
             if isinstance(ham, LinearOperator):
                 raise TypeError(
-                    "You can't use the 'solve' method "
-                    "with an abstract linear operator "
-                    "Hamiltonian."
+                    "You can't use the 'solve' method with an "
+                    "abstract linear operator Hamiltonian."
                 )
             elif self._timedep:
                 raise TypeError(
@@ -429,9 +423,8 @@ class Evolution(object):
         elif method == "expm":
             if isinstance(ham, LinearOperator):
                 raise TypeError(
-                    "You can't use the 'expm' method "
-                    "with an abstract linear operator "
-                    "Hamiltonian."
+                    "You can't use the 'expm' method with an "
+                    "abstract linear operator Hamiltonian."
                 )
             elif self._timedep:
                 raise TypeError(
