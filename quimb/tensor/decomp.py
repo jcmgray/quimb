@@ -1382,6 +1382,9 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
         else:
             keep = -1
 
+    if isfermionic(x2) and x2.indices[1].dual:
+        x2 = x2.phase_flip(1)
+
     try:
         # attempt faster hermitian eigendecomposition
         U, s2, VH = eigh_truncated(
