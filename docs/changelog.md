@@ -2,6 +2,20 @@
 
 Release notes for `quimb`.
 
+(whats-new-1-12-1)=
+## v1.12.1 (2026-01-12)
+
+**Breaking Changes**
+
+- bump minimum required python version to 3.11
+
+
+**Bug fixes:**
+
+- fix [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen) mixin inheritance order.
+- fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) for fermionic tensor networks with bond signature +-.
+
+
 (whats-new-1-12-0)=
 ## v1.12.0 (2026-01-09)
 
