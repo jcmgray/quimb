@@ -270,9 +270,9 @@ class ComputeEnergyBoundary(ComputeEnergyMixin):
 
 
 class TEBD2D(
-    TEBDSweepMixin,
-    GateBasicMixin,
     ComputeEnergyBoundary,
+    GateBasicMixin,
+    TEBDSweepMixin,
 ):
     """Generic class for performing two dimensional time evolving block
     decimation, i.e. applying the exponential of a Hamiltonian using
@@ -431,9 +431,9 @@ def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
 
 
 class SimpleUpdate(
-    TEBDSweepMixin,
-    GateSimpleUpdateMixin,
     ComputeEnergyBoundary,
+    GateSimpleUpdateMixin,
+    TEBDSweepMixin,
 ):
     """Simple Update algorithm for OBC 2D PEPS, storing gauges separately, and
     using boundary contraction to compute energy.

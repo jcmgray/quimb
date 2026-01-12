@@ -1150,9 +1150,9 @@ class GateSimpleUpdateMixin:
 
 
 class TEBDGen(
+    ComputeEnergyClusterMixin,
     GateBasicMixin,
     TEBDSweepMixin,
-    ComputeEnergyClusterMixin,
 ):
     """Basic arbitrary geometry TEBD class, combining the basic gate
     application with cluster energy computation. This basic version might not
@@ -1297,9 +1297,9 @@ class TEBDGen(
 
 
 class SimpleUpdateGen(
-    TEBDSweepMixin,
-    GateSimpleUpdateMixin,
     ComputeEnergyClusterMixin,
+    GateSimpleUpdateMixin,
+    TEBDSweepMixin,
 ):
     """Simple update for arbitrary geometry hamiltonians, storing gauges
     separately and using them and the cluster approximation to compute
