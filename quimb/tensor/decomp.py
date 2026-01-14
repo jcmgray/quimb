@@ -1208,7 +1208,7 @@ def isometrize_qr(x, backend=None):
         # stabilize qr by fixing diagonal of R in canonical, positive form (we
         # don't actaully do anything to R, just absorb the necessary sign -> Q)
         rd = do("diag", R)
-        s = do("sign", rd) + (rd == 0)
+        s = sgn(rd)
         Q = Q * reshape(s, (1, -1))
         return Q
 
