@@ -1,3 +1,7 @@
+"""Tools for building projected entangled pair operators (PEPOs) from arbitrary
+local terms.
+"""
+
 import quimb.tensor as qtn
 
 

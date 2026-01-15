@@ -1,3 +1,12 @@
+"""Predefined hamiltonians for various models:
+
+- Heisenberg model
+- Fermi-Hubbard model
+- Spinless Fermi-Hubbard model
+- Random operators
+
+"""
+
 from .builder import SparseOperatorBuilder
 from .hilbertspace import HilbertSpace, parse_edges_to_unique
 

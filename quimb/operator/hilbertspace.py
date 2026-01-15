@@ -188,9 +188,9 @@ class HilbertSpace:
     - *configuration*: a mapping from sites to their occupation number or spin
       state. This is a dictionary mapping from site to int.
     - *flat configuration*: a flat array of the occupation number or spin state
-      of each site in the order given by this Hilbert space. This is a 1D array
-      of length nsites with dtype np.uint8, for efficient manipulation with
-      numba and numpy.
+      of each site in the order given by this Hilbert space (i.e. a mapping of
+      register to int). This is a 1D array of length nsites with dtype
+      np.uint8, for efficient manipulation with numba and numpy.
     - *rank*: a linear index for a configuration in the Hilbert space, taking
       into account any symmetries and sectors. This is an integer in the range
       [0, size), where size is the size of the Hilbert space given the symmetry

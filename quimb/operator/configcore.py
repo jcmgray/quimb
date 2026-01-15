@@ -1,11 +1,6 @@
 """Numba accelerated tools for ranking, deranking and coupling
 'flat configs', used for constructing sparse matrices in a variety of
 Hilbert spaces, as well as applying operators to vectors in those spaces.
-
-
-TODO:
-- [ ] parallel: use threading_choose_num_blocks threading_get_block_range
-      to distribute work cyclically but still in blocks
 """
 
 import numpy as np

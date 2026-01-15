@@ -24,7 +24,7 @@ _OPMAP = {
     "x": {0: (1, 1.0), 1: (0, 1.0)},
     "y": {0: (1, 1.0j), 1: (0, -1.0j)},
     "z": {0: (0, 1.0), 1: (1, -1.0)},
-    # ZX=iY: 'real Y'
+    # ⴵ = ZX = iY: 'real Y'
     "ⴵ": {0: (1, -1.0), 1: (0, 1.0)},
     # spin 1/2 matrices (scaled paulis)
     "sx": {0: (1, 0.5), 1: (0, 0.5)},
@@ -697,7 +697,7 @@ class SparseOperatorBuilder:
             )
         return iscomplex
 
-    def add_term(self, *coeff_ops, atol=1e-12):
+    def add_term(self, *coeff_ops):
         """Add a term to the operator.
 
         Parameters
@@ -710,15 +710,17 @@ class SparseOperatorBuilder:
             ``operator`` can be:
 
             - ``'x'``, ``'y'``, ``'z'``: Pauli matrices
-            - ``'sx'``, ``'sy'``, ``'sz'``: spin operators (i.e. scaled
-                Pauli matrices)
+            - ``'sx'``, ``'sy'``, ``'sz'``: spin operators (i.e. scaled Pauli
+              matrices)
             - ``'+'``, ``'-'``: creation/annihilation operators
-            - ``'n'``, ``'sn'``, or ``'h'``: number, symmetric
-                number (n - 1/2) and hole (1 - n) operators
+            - ``'n'``, ``'sn'``, or ``'h'``: number, symmetric number (n - 1/2)
+              and hole (1 - n) operators.
 
             And ``site`` is a hashable object that represents the site that
-            the operator acts on.
-
+            the operator acts on. If this builder has an associated Hilbert
+            space already, the site must be present in that Hilbert space, else
+            a minimal Hilbert space will be constructed from the sites used,
+            when required.
         """
         if isinstance(coeff_ops[0], (tuple, list)):
             # assume coeff is 1.0
@@ -726,12 +728,12 @@ class SparseOperatorBuilder:
             ops = coeff_ops
         else:
             coeff, *ops = coeff_ops
-            if abs(coeff) < atol:
+            if abs(coeff) < self._atol:
                 # null-term
                 return
 
         # parse the operator specification
-        ops = tuple(tuple(op) for op in ops)
+        ops = tuple((operator, site) for operator, site in ops)
         for op, site in ops:
             # check that the site is valid if the Hilbert space is known
             if (
@@ -746,14 +748,14 @@ class SparseOperatorBuilder:
                 raise ValueError(f"Unknown operator '{op}'.")
 
         # if we have already seen this exact term, just add the coeff but note,
-        # we do not simplify equivalent terms here, in case its a fermionic
+        # we do not simplify equivalent terms here, in case it is fermionic
         coeff = self._terms_raw.pop(ops, 0.0) + coeff
 
-        if abs(coeff) < atol:
+        if abs(coeff) < self._atol:
             # null-term after combining coefficients
             return
 
-        if abs(coeff.imag) < atol:
+        if abs(coeff.imag) < self._atol:
             # if the coefficient is real, convert to real
             coeff = coeff.real
 
