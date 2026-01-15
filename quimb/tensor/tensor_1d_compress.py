@@ -23,7 +23,6 @@ from ..gen.rand import randn
 from .tensor_arbgeom import tensor_network_apply_op_vec
 from .tensor_arbgeom_compress import tensor_network_ag_compress
 from .tensor_builder import TN_matching, rand_tensor
-from .array_ops import isfermionic
 from .tensor_core import (
     Tensor,
     TensorNetwork,
@@ -497,6 +496,9 @@ def tensor_network_1d_compress_dm(
             preserve_tensor=True,
             optimize=optimize,
         )
+
+        # XXX: fermionic, see fix in squared_op_to_reduced_factor
+
         U, s, UH = rhoi.split(
             left_inds=left_inds,
             right_inds=right_inds,
@@ -1334,9 +1336,11 @@ def _tn1d_fit_sum_sweep_1site(
     N = len(site_tags)
     K = len(tn_overlaps)
 
-    fermion = isfermionic(tn_fit.tensors[0].data)
+    fermion = tn_fit.isfermionic()
     if fermion:
-        raise NotImplementedError("Fermionic 1-site fitting not implemented, use 2-site (bsz=2).")
+        raise NotImplementedError(
+            "Fermionic 1-site fitting not implemented, use 2-site (bsz=2)."
+        )
 
     if max_bond is not None:
         current_bond_dim = tn_fit.max_bond()
@@ -1519,9 +1523,9 @@ def _tn1d_fit_sum_sweep_2site(
         left_inds = tuple(ix for ix in tfi0.inds if ix != bond)
         right_inds = tuple(ix for ix in tfi1.inds if ix != bond)
         tfinew = None
-        
-        fermion = isfermionic(tfi0.data)
-        
+
+        fermion = tfi0.isfermionic()
+
         for k, tn_overlap in enumerate(tn_overlaps):
             # form local overlap
             tnik = (
@@ -1550,8 +1554,16 @@ def _tn1d_fit_sum_sweep_2site(
             if fermion:
                 # flip the dual indices of the environment legs if needed
                 lind_id, rind_id = None, None
-                lind_id = tfiknew.inds.index(left_env_ind) if left_env_ind is not None else None
-                rind_id = tfiknew.inds.index(right_env_ind) if right_env_ind is not None else None
+                lind_id = (
+                    tfiknew.inds.index(left_env_ind)
+                    if left_env_ind is not None
+                    else None
+                )
+                rind_id = (
+                    tfiknew.inds.index(right_env_ind)
+                    if right_env_ind is not None
+                    else None
+                )
                 if lind_id is not None and rind_id is not None:
                     if tfiknew.data.duals[lind_id]:
                         tfiknew.data.phase_flip(lind_id, inplace=True)
@@ -1570,7 +1582,7 @@ def _tn1d_fit_sum_sweep_2site(
             else:
                 tfinew += tfiknew
 
-        if fermion: 
+        if fermion:
             # when conjugating tn_fit (a ftn) the dual outer indices will be flipped (phase_dual=True)
             # but ftensor.conj() assumes phase_dual=False by default
             # we need to manually flip the dual 'physical' indices in tfinew before conjugating
@@ -1578,12 +1590,13 @@ def _tn1d_fit_sum_sweep_2site(
             dual_outer_axs = tuple(
                 ax
                 for ax, ix in enumerate(tfinew.inds)
-                if ix not in (left_env_ind, right_env_ind) and data.indices[ax].dual # or tfixnew.data.duals[ax]
+                if ix not in (left_env_ind, right_env_ind)
+                and data.indices[ax].dual  # or tfixnew.data.duals[ax]
             )
             if dual_outer_axs:
                 tfinew.modify(data=data.phase_flip(*dual_outer_axs))
-        
-        tfinew.conj_() 
+
+        tfinew.conj_()
 
         tfinew0, tfinew1 = tfinew.split(
             max_bond=max_bond,
@@ -1609,10 +1622,9 @@ def _tn1d_fit_sum_sweep_2site(
 
         if fermion:
             # deal with the global signs generated during conjugation
-            for ts in (tfi0|tfi1).tensors:
-                if len(ts.data._oddpos) % 2 == 1:
+            for ts in (tfi0 | tfi1).tensors:
+                if sum(m.parity for m in ts.data.dummy_modes) % 2 == 1:
                     ts.data.phase_global(inplace=True)
-
 
     return max_tdiff
 
