@@ -2,13 +2,8 @@
 
 Release notes for `quimb`.
 
-(whats-new-1-12-1)=
-## v1.12.1 (2026-01-12)
-
-**Breaking Changes**
-
-- bump minimum required python version to 3.11
-
+(whats-new-unreleased)=
+## Unreleased
 
 **Enhancements:**
 
@@ -17,6 +12,19 @@ Release notes for `quimb`.
 - add `phase_dual` option to [`TensorNetwork.conj`](quimb.tensor.tensor_core.TensorNetwork.conj).
 - rename `tensor_network_1d_compress_zipup_first` to [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_oversample) and standardise `oversample` arguments.
 - add [`tensor_network_1d_compress_srcmps_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_srcmps_oversample) and [`tensor_network_1d_compress_fit_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit_oversample) methods.
+
+
+**Bug fixes:**
+
+- fix [`isometrize_qr`](quimb.tensor.decomp.isometrize_qr) for complex torch arrays ({issue}`346`).
+
+
+(whats-new-1-12-1)=
+## v1.12.1 (2026-01-12)
+
+**Breaking Changes**
+
+- bump minimum required python version to 3.11
 
 
 **Bug fixes:**
