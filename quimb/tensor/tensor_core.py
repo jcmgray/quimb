@@ -2286,7 +2286,12 @@ class Tensor:
         return get_namespace(self._data)
 
     def iscomplex(self):
-        return iscomplex(self.data)
+        """Check if the underlying data array of this tensor has complex dtype."""
+        return iscomplex(self._data)
+
+    def isfermionic(self):
+        """Check if the underlying data array of this tensor is fermionic."""
+        return isfermionic(self._data)
 
     def astype(self, dtype, inplace=False):
         """Change the type of this tensor to ``dtype``."""
@@ -4726,7 +4731,13 @@ class TensorNetwork(object):
         self.reindex_(reindex_map)
         return self
 
-    def conj(self, mangle_inner=False, output_inds=None, inplace=False):
+    def conj(
+        self,
+        mangle_inner=False,
+        output_inds=None,
+        phase_dual=True,
+        inplace=False,
+    ):
         """Conjugate all the tensors in this network (leave all outer indices).
 
         Parameters
@@ -4738,6 +4749,10 @@ class TensorNetwork(object):
             If given, the indices to mangle will be restricted to those not in
             this list. This is only needed for (hyper) tensor networks where
             output indices are not given simply by those that appear once.
+        phase_dual : bool, optional
+            If the tensor data is fermionic, whether to phase flip any dual
+            outer indices, to ensure the correct behavior when forming local
+            cluster states. By default ``True``.
         inplace : bool, optional
             Whether to perform the conjugation inplace or not.
 
@@ -4761,9 +4776,8 @@ class TensorNetwork(object):
 
             tn.mangle_inner_(append=append, which=which)
 
-        # if we have fermionic data, need to phase dual outer indices
-        ex_data = next(iter(tn.tensor_map.values())).data
-        if isfermionic(ex_data):
+        if phase_dual and tn.isfermionic():
+            # if we have fermionic data, need to phase dual outer indices
             outer_inds = tn.outer_inds()
             for t in tn:
                 data = t.data
@@ -8142,7 +8156,7 @@ class TensorNetwork(object):
         if gauges is True:
             gauges = {}
             if gauge_boundary_only:
-                data_like = next(iter(tn.tensor_map.values())).data
+                data_like = tn._get_any_tensor().data
                 gauges = {
                     ix: do(
                         "ones",
@@ -11669,28 +11683,41 @@ class TensorNetwork(object):
         # TODO: support non numpy dtypes here
         return get_common_dtype(*self.arrays)
 
+    def _get_any_tensor(self) -> Tensor:
+        """Get any tensor from this network."""
+        return next(iter(self.tensor_map.values()), None)
+
     @property
     def dtype_name(self):
         """The name of the data type of the array elements, asssuming it to be
         the same for all tensors.
         """
-        return next(iter(self.tensor_map.values())).dtype_name
+        return self._get_any_tensor().dtype_name
 
     @property
     def backend(self):
         """Get the backend of any tensor in this network, asssuming it to be
         the same for all tensors.
         """
-        return next(iter(self.tensor_map.values())).backend
+        return self._get_any_tensor().backend
 
     def get_namespace(self):
         """Get the array namespace of any tensor in this network, asssuming
         it to be the same for all tensors.
         """
-        return next(iter(self.tensor_map.values())).get_namespace()
+        return self._get_any_tensor().get_namespace()
 
     def iscomplex(self):
-        return iscomplex(self)
+        """Check if the dtype of this TensorNetwork is complex, assuming it to
+        be the same for all tensors.
+        """
+        return self._get_any_tensor().iscomplex()
+
+    def isfermionic(self):
+        """Check if the tensors in this TensorNetwork are fermionic, assuming
+        it to be the same for all tensors.
+        """
+        return self._get_any_tensor().isfermionic()
 
     def astype(self, dtype, inplace=False):
         """Convert the type of all tensors in this network to ``dtype``."""

@@ -10,6 +10,12 @@ Release notes for `quimb`.
 - bump minimum required python version to 3.11
 
 
+**Enhancements:**
+
+- add [`Tensor.isfermionic`](quimb.tensor.tensor_core.Tensor.isfermionic) and [`TensorNetwork.isfermionic`](quimb.tensor.tensor_core.TensorNetwork.isfermionic) methods.
+- add `phase_dual` option to [`TensorNetwork.conj`](quimb.tensor.tensor_core.TensorNetwork.conj).
+
+
 **Bug fixes:**
 
 - fix [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen) mixin inheritance order.
