@@ -12,6 +12,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- add [`shift`](quimb.gen.operators.shift) and [`clock`](quimb.gen.operators.clock) operators.
 - add [`Tensor.isfermionic`](quimb.tensor.tensor_core.Tensor.isfermionic) and [`TensorNetwork.isfermionic`](quimb.tensor.tensor_core.TensorNetwork.isfermionic) methods.
 - add `phase_dual` option to [`TensorNetwork.conj`](quimb.tensor.tensor_core.TensorNetwork.conj).
 

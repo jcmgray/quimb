@@ -1,27 +1,26 @@
 """Functions for generating quantum operators."""
 
-import math
 import functools
 import itertools
+import math
 import operator
 
 import numpy as np
 import scipy.sparse as sp
 from scipy.special import comb
 
-from ..utils import isiterable, concat, unique
 from ..core import (
-    qarray,
-    make_immutable,
-    get_thread_pool,
-    par_reduce,
-    isreal,
-    qu,
     eye,
-    kron,
+    get_thread_pool,
     ikron,
+    isreal,
+    kron,
+    make_immutable,
+    par_reduce,
+    qarray,
+    qu,
 )
-
+from ..utils import concat, isiterable, unique
 
 # --------------------------------------------------------------------------- #
 #                      gates and other simple operators                       #
@@ -173,6 +172,66 @@ def pauli(xyz, dim=2, **kwargs):
     return op
 
 
+@functools.lru_cache(32)
+def shift(dim, power=1, **kwargs):
+    """Generate the cyclic shift operator for a subsystem of dimension
+    `dim`.
+
+    Parameters
+    ----------
+    dim : int
+        Dimension of the subsystem to shift.
+    power : int, optional
+        Number of places to shift by, defaults to 1. This is equivalent to
+        raising the operator to this power.
+    kwargs
+        Passed to :func:`quimbify`.
+
+    Returns
+    -------
+    S : qarray or sparse matrix
+        The shift operator, immutable.
+    """
+    power = power % dim  # wrap around
+
+    S = np.zeros((dim, dim), dtype=complex)
+    for i in range(dim):
+        S[(i + power) % dim, i] = 1.0
+
+    S = qu(S, **kwargs)
+    make_immutable(S)
+    return S
+
+
+@functools.lru_cache(8)
+def clock(dim, power=1, **kwargs):
+    """Generate the clock operator for a subsystem of dimension `dim`.
+
+    Parameters
+    ----------
+    dim : int
+        Dimension of the subsystem.
+    power : int, optional
+        Power to raise the operator to, defaults to 1.
+    kwargs
+        Passed to :func:`quimbify`.
+
+    Returns
+    -------
+    C : qarray or sparse matrix
+        The clock operator, immutable.
+    """
+    omega = np.exp(power * 2j * np.pi / dim)
+
+    C = np.zeros((dim, dim), dtype=complex)
+    for i in range(dim):
+        C[i, i] = omega**i
+
+    C = qu(C, **kwargs)
+    make_immutable(C)
+    return C
+
+
 @functools.lru_cache(8)
 def hadamard(dtype=complex, sparse=False):
     """The Hadamard gate."""
@@ -245,7 +304,7 @@ def U_gate(theta, phi, lamda, dtype=complex, sparse=False):
     U : (2, 2) array
         The unitary matrix, cached.
     """
-    from cmath import cos, sin, exp
+    from cmath import cos, exp, sin
 
     c2, s2 = cos(theta / 2), sin(theta / 2)
     U = qu(
@@ -356,7 +415,7 @@ def fsim(theta, phi, dtype=complex, **kwargs):
     convention with this gate varies. Here for example,
     ``fsim(- pi / 2, 0) == iswap()``.
     """
-    from cmath import cos, sin, exp
+    from cmath import cos, exp, sin
 
     a = cos(theta)
     b = -1j * sin(theta)
@@ -392,7 +451,7 @@ def fsimg(theta, zeta, chi, gamma, phi, dtype=complex, **kwargs):
     the sign convention with this gate varies. Here for example,
     ``fsimg(- pi / 2, 0, 0, 0,0) == iswap()``.
     """
-    from cmath import cos, sin, exp
+    from cmath import cos, exp, sin
 
     a1 = exp(-1j * (gamma + zeta)) * cos(theta)
     a2 = exp(-1j * (gamma - zeta)) * cos(theta)

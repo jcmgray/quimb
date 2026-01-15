@@ -10,8 +10,9 @@ except ImportError:
     # -- Source mode --
     try:
         # use setuptools_scm to get the current version from src using git
-        from setuptools_scm import get_version as _gv
         from pathlib import Path as _Path
+
+        from setuptools_scm import get_version as _gv
 
         __version__ = _gv(_Path(__file__).parent.parent)
     except ImportError:
@@ -120,22 +121,13 @@ from .evo import Evolution
 
 # Generating objects
 from .gen.operators import (
-    CNOT,
-    Rx,
-    Ry,
-    Rz,
-    S_gate,
-    T_gate,
-    U_gate,
-    Wsqrt,
-    Xsqrt,
-    Ysqrt,
-    Zsqrt,
     ccX,
     ccY,
     ccZ,
-    controlled,
+    clock,
+    CNOT,
     controlled_swap,
+    controlled,
     create,
     cswap,
     cX,
@@ -146,8 +138,8 @@ from .gen.operators import (
     fsim,
     fsimg,
     hadamard,
-    ham_heis,
     ham_heis_2D,
+    ham_heis,
     ham_hubbard_hardcore,
     ham_ising,
     ham_j1j2,
@@ -160,20 +152,30 @@ from .gen.operators import (
     pauli,
     phase_gate,
     rotation,
+    Rx,
+    Ry,
+    Rz,
+    S_gate,
+    shift,
     spin_operator,
     swap,
+    T_gate,
     toffoli,
+    U_gate,
+    Wsqrt,
+    Xsqrt,
+    Ysqrt,
     zspin_projector,
+    Zsqrt,
 )
 from .gen.rand import (
     gen_rand_haar_states,
-    rand,
     rand_haar_state,
     rand_herm,
     rand_iso,
     rand_ket,
-    rand_matrix,
     rand_matrix_product_state,
+    rand_matrix,
     rand_mera,
     rand_mix,
     rand_mps,
@@ -182,6 +184,7 @@ from .gen.rand import (
     rand_rho,
     rand_seperable,
     rand_uni,
+    rand,
     randn,
     seed_rand,
     set_rand_bitgen,
@@ -199,8 +202,8 @@ from .gen.states import (
     neel_state,
     perm_state,
     plus,
-    singlet,
     singlet_pairs,
+    singlet,
     thermal_state,
     up,
     w_state,
@@ -226,23 +229,23 @@ from .linalg.approx_spectral import (
 
 # Linear algebra functions
 from .linalg.base_linalg import (
-    Lazy,
     bound_spectrum,
     eig,
-    eigensystem,
     eigensystem_partial,
-    eigh,
+    eigensystem,
     eigh_window,
+    eigh,
     eigvals,
-    eigvalsh,
     eigvalsh_window,
+    eigvalsh,
     eigvecs,
-    eigvecsh,
     eigvecsh_window,
-    expm,
+    eigvecsh,
     expm_multiply,
+    expm,
     groundenergy,
     groundstate,
+    Lazy,
     norm,
     sqrtm,
     svd,
@@ -251,9 +254,9 @@ from .linalg.base_linalg import (
 from .linalg.mpi_launcher import can_use_mpi_pool, get_mpi_pool
 from .linalg.rand_linalg import estimate_rank, rsvd
 from .utils import (
-    LRU,
     format_number_with_error,
     load_from_disk,
+    LRU,
     oset,
     save_to_disk,
     tree_apply,
@@ -262,10 +265,10 @@ from .utils import (
     tree_unflatten,
 )
 from .utils_plot import (
-    plot,
-    NEUTRAL_STYLE,
     default_to_neutral_style,
+    NEUTRAL_STYLE,
     plot_multi_series_zoom,
+    plot,
 )
 
 warnings.filterwarnings("ignore", message="Caching is not available when ")
@@ -284,6 +287,7 @@ __all__ = [
     "ccY",
     "ccZ",
     "chop",
+    "clock",
     "CNOT",
     "computational_state",
     "concurrence",
@@ -454,6 +458,7 @@ __all__ = [
     "schmidt_gap",
     "seed_rand",
     "set_rand_bitgen",
+    "shift",
     "simulate_counts",
     "sin",
     "singlet_pairs",

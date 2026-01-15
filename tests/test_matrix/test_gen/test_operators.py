@@ -359,3 +359,65 @@ class TestHubbardSpinless:
         ens = [qu.expec(cn, qu.ptr(gs, dims, i)) for i in range(8)]
         for en in ens:
             assert en == pytest.approx(0.5, rel=1e-6)
+
+
+class TestShift:
+    @pytest.mark.parametrize("dim", [2, 3, 4])
+    @pytest.mark.parametrize("power", [1, 2, -1])
+    @pytest.mark.parametrize("sparse", [False, True])
+    def test_shift(self, dim, power, sparse):
+        S = qu.shift(dim, power=power, sparse=sparse)
+
+        # Check type
+        assert qu.issparse(S) == sparse
+
+        # Check action on basis states
+        for i in range(dim):
+            state = qu.basis_vec(i, dim)
+            target = (i + power) % dim
+            assert_allclose(S @ state, qu.basis_vec(target, dim))
+
+    def test_shift_power(self):
+        dim = 5
+        S1 = qu.shift(dim, power=1)
+        S2 = qu.shift(dim, power=2)
+        assert_allclose(S1 @ S1, S2)
+        assert_allclose(S1 @ S1.T, qu.eye(dim))  # Unitary
+
+
+class TestClock:
+    @pytest.mark.parametrize("dim", [2, 3, 4])
+    @pytest.mark.parametrize("power", [1, 2, -1])
+    @pytest.mark.parametrize("sparse", [False, True])
+    def test_clock(self, dim, power, sparse):
+        C = qu.clock(dim, power=power, sparse=sparse)
+
+        # Check type
+        assert qu.issparse(C) == sparse
+
+        # Check action on basis states
+        omega = np.exp(2j * np.pi * power / dim)
+        for i in range(dim):
+            state = qu.basis_vec(i, dim)
+            assert_allclose(C @ state, (omega**i) * state, atol=1e-12)
+
+    def test_clock_power(self):
+        dim = 5
+        C1 = qu.clock(dim, power=1)
+        C2 = qu.clock(dim, power=2)
+        assert_allclose(C1 @ C1, C2)
+        assert_allclose(C1 @ C1.conj().T, qu.eye(dim))  # Unitary
+
+
+def test_weyl_heisenberg_commutation():
+    dim = 4
+    X = qu.shift(dim)
+    Z = qu.clock(dim)
+
+    omega = np.exp(2j * np.pi / dim)
+
+    # Z @ X = omega * X @ Z
+    lhs = Z @ X
+    rhs = omega * X @ Z
+
+    assert_allclose(lhs, rhs, atol=1e-12)
