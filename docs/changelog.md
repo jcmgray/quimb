@@ -15,6 +15,8 @@ Release notes for `quimb`.
 - add [`shift`](quimb.gen.operators.shift) and [`clock`](quimb.gen.operators.clock) operators.
 - add [`Tensor.isfermionic`](quimb.tensor.tensor_core.Tensor.isfermionic) and [`TensorNetwork.isfermionic`](quimb.tensor.tensor_core.TensorNetwork.isfermionic) methods.
 - add `phase_dual` option to [`TensorNetwork.conj`](quimb.tensor.tensor_core.TensorNetwork.conj).
+- rename `tensor_network_1d_compress_zipup_first` to [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_oversample) and standardise `oversample` arguments.
+- add [`tensor_network_1d_compress_srcmps_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_srcmps_oversample) and [`tensor_network_1d_compress_fit_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit_oversample) methods.
 
 
 **Bug fixes:**
