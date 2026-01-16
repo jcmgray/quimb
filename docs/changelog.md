@@ -5,6 +5,12 @@ Release notes for `quimb`.
 (whats-new-unreleased)=
 ## Unreleased
 
+**Breaking Changes**
+
+- [`ham_hubbard_hardcore`](quimb.gen.operators.ham_hubbard_hardcore) fix description and sign convention of hopping strength `t`.
+- [`heisenberg_from_edges`](quimb.operator.models.heisenberg_from_edges) fix sign convention of magnetic field terms.
+
+
 **Enhancements:**
 
 - add [`shift`](quimb.gen.operators.shift) and [`clock`](quimb.gen.operators.clock) operators.
