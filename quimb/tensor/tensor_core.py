@@ -379,6 +379,7 @@ def rand_uuid(base=""):
 
 _VALID_SPLIT_GET = {None, "arrays", "tensors", "values"}
 _SPLIT_FNS = {
+    "identity": decomp.identity,
     "svd": decomp.svd_truncated,
     "eig": decomp.svd_via_eig_truncated,
     "lu": decomp.lu_truncated,
