@@ -793,10 +793,33 @@ def gen_sloops(
     return current_patches
 
 
-def gen_patches(tn, max_size, tids=None, grow_from="all"):
-    """Generate sets of tids that represent 'patches' of the tensor network,
+def gen_patches(
+    tn,
+    max_size,
+    tids=None,
+    grow_from="all",
+):
+    """Generate groups of tids that represent 'patches' of the tensor network,
     where each patch is a connected subgraph of the tensor network. Unlike
     generalized loops, patches can contain dangling nodes.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to find patches in.
+    max_size : int
+        Set the maximum number of tensors that can appear in a region.
+    tids : None or sequence of int, optional
+        If supplied, only yield patches containing these tids, see
+        ``grow_from``.
+    grow_from : {"all", "any"}, optional
+        Whether to grow patches from all tids at once ("all") or from any
+        individual tid ("any"). The subsequent patches yielded will either
+        contain all, or at least one of, `tids` specified respectively.
+
+    Yields
+    ------
+    tuple[int, ...]
     """
     if tids is None:
         # find regions anywhere
@@ -847,6 +870,39 @@ def gen_patches(tn, max_size, tids=None, grow_from="all"):
                     if nregion not in seen:
                         queue.append(nregion)
                         seen.add(nregion)
+
+
+def connected_bipartitions(tn):
+    """Generate all connected bipartitions of this tensor network, i.e.
+    pairs of sets of tids (A, B) such that A U B is the full set of tids,
+    A ∩ B = ∅, and both A and B are connected subgraphs.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to find bipartitions in.
+
+    Returns
+    -------
+    tuple[(frozenset[int, ...], frozenset[int, ...]), ...]
+        The connected bipartitions found, each given as a tuple of frozensets
+        of tids.
+    """
+    # first we generate all connected subgraphs of size 1 ... N-1
+    pairs = dict()
+    for pa in map(frozenset, tn.gen_patches(tn.num_tensors - 1)):
+        # complementary subgraph (may not be connected)
+        pairs[pa] = frozenset(tid for tid in tn.tensor_map if tid not in pa)
+
+    # then we check which complementary subgraphs are also connected
+    connected_bipartitions = []
+    while pairs:
+        pa, pb = pairs.popitem()
+        if pairs.pop(pb, None) is not None:
+            # if pb is also a connected patch, valid bipartition (& remove too)
+            connected_bipartitions.append((pa, pb))
+
+    return tuple(connected_bipartitions)
 
 
 def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):

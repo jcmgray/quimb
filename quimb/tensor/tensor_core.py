@@ -89,6 +89,7 @@ from .networking import (
     compute_hierarchical_ordering,
     compute_hierarchical_ssa_path,
     compute_shortest_distances,
+    connected_bipartitions,
     gen_all_paths_between_tids,
     gen_gloops,
     gen_inds_connected,
@@ -7184,6 +7185,7 @@ class TensorNetwork(object):
     compute_hierarchical_ordering = compute_hierarchical_ordering
     compute_hierarchical_ssa_path = compute_hierarchical_ssa_path
     compute_shortest_distances = compute_shortest_distances
+    connected_bipartitions = connected_bipartitions
     gen_all_paths_between_tids = gen_all_paths_between_tids
     gen_inds_connected = gen_inds_connected
     gen_loops = gen_loops

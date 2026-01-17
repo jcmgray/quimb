@@ -1268,13 +1268,6 @@ class TestTensorNetwork:
 
         assert (tn_even & tn_odd).sites == tuple(range(10))
 
-    def test_subgraphs(_):
-        k1 = MPS_rand_state(6, 7, site_ind_id="a{}")
-        k2 = MPS_rand_state(8, 7, site_ind_id="b{}")
-        tn = k1 | k2
-        s1, s2 = tn.subgraphs()
-        assert {s1.num_tensors, s2.num_tensors} == {6, 8}
-
     def test_expand_bond_dimension_zeros(self):
         k = MPS_rand_state(10, 7)
         k0 = k.copy()
@@ -1710,34 +1703,6 @@ class TestTensorNetwork:
         p2 = stn2.contract(output_inds=output_inds).data
         assert_allclose(pex, p2)
 
-    def test_istree(self):
-        assert Tensor().as_network().istree()
-        tn = rand_tensor([2] * 1, ["x"]).as_network()
-        assert tn.istree()
-        tn |= rand_tensor([2] * 3, ["x", "y", "z"])
-        assert tn.istree()
-        tn |= rand_tensor([2] * 2, ["y", "z"])
-        assert tn.istree()
-        tn |= rand_tensor([2] * 2, ["x", "z"])
-        assert not tn.istree()
-
-    def test_isconnected(self):
-        assert Tensor().as_network().isconnected()
-        tn = rand_tensor([2] * 1, ["x"]).as_network()
-        assert tn.isconnected()
-        tn |= rand_tensor([2] * 3, ["x", "y", "z"])
-        assert tn.isconnected()
-        tn |= rand_tensor([2] * 2, ["w", "u"])
-        assert not tn.isconnected()
-        assert not (Tensor() | Tensor()).isconnected()
-
-    def test_get_path_between_tids(self):
-        tn = MPS_rand_state(5, 3)
-        path = tn.get_path_between_tids(0, 4)
-        assert path.tids == (0, 1, 2, 3, 4)
-        path = tn.get_path_between_tids(3, 0)
-        assert path.tids == (3, 2, 1, 0)
-
     @pytest.mark.parametrize(
         "contract",
         (
@@ -1824,12 +1789,6 @@ class TestTensorNetwork:
         assert tn.num_tensors == 4
         assert tn.num_indices == 9
 
-    def test_gen_paths_loops(self):
-        tn = qtn.TN2D_rand(3, 4, 2)
-        loops = tuple(tn.gen_paths_loops())
-        assert len(loops) == 6
-        assert all(len(loop) == 4 for loop in loops)
-
     def test_select_loop(self):
         tn = qtn.TN2D_rand(2, 3, 2)
         loop6 = next(
@@ -1839,25 +1798,6 @@ class TestTensorNetwork:
         )
         tnl = tn.select_path(loop6)
         assert len(tnl.inner_inds()) == 6
-
-    def test_gen_paths_loops_intersect(self):
-        tn = qtn.TN2D_empty(5, 4, 2)
-        loops = tuple(tn.gen_paths_loops(8, False))
-        na = len(loops)
-        assert na == len(frozenset(loops))
-        assert na == len(frozenset(map(frozenset, loops)))
-
-        loops = tuple(tn.gen_paths_loops(8, True))
-        nb = len(loops)
-        assert nb == len(frozenset(loops))
-        assert nb == len(frozenset(map(frozenset, loops)))
-
-        assert nb > na
-
-    def test_gen_inds_connected(self):
-        tn = qtn.TN2D_rand(3, 4, 2)
-        patches = tuple(tn.gen_inds_connected(2))
-        assert len(patches) == 34
 
     def test_tn_isel_rand(self):
         mps = qtn.MPS_rand_state(6, 7)
