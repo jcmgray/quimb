@@ -217,6 +217,21 @@ class TestMatrixProductState:
         assert co == (8, 11)
         assert p.dtype == dtype
 
+    def test_non_inplace_canonicalize(self):
+        k1 = qtn.MPS_rand_state(3, 10, normalize=False)
+
+        k2 = k1.right_canonicalize(inplace=False)
+        assert k1 is not k2
+        assert k2.count_canonized() == (0, 2)
+
+        k3 = k1.left_canonicalize(inplace=False)
+        assert k1 is not k3
+        assert k3.count_canonized() == (2, 0)
+
+        k4 = k1.canonicalize(1, inplace=False)
+        assert k1 is not k4
+        assert k4.count_canonized() == (1, 1)
+
     def test_can_change_data(self):
         p = qtn.MPS_rand_state(3, 10)
         assert_allclose(p.H @ p, 1)
