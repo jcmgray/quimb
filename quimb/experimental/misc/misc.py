@@ -586,7 +586,8 @@ contract_greedily_ = functools.partialmethod(contract_greedily, inplace=True)
 
 def all_mode_renormalization():
     import numpy as np
-    from quimb.tensor.decomp import lq_stabilized, qr_stabilized, rdmul, ldmul
+
+    from quimb.tensor.decomp import ldmul, lq_stabilized, qr_stabilized, rdmul
 
     def make_random_truncator(d, chi, k=2):
         x = np.zeros((d, chi))

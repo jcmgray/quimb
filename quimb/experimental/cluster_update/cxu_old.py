@@ -8,7 +8,8 @@ def _compute_oblique_projectors_between_full_env_exact_tids(
     **fit_opts,
 ):
     from autoray import do
-    from quimb.tensor import rand_uuid, Tensor
+
+    from quimb.tensor import Tensor, rand_uuid
 
     k = self.copy()
 

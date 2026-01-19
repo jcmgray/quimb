@@ -3,12 +3,11 @@
 import array
 import random
 
-import numpy as np
 import autoray as ar
+import numpy as np
 
-from quimb.utils_plot import default_to_neutral_style
 from quimb import format_number_with_error
-
+from quimb.utils_plot import default_to_neutral_style
 
 # --------------------------------------------------------------------------- #
 

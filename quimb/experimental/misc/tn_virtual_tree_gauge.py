@@ -1,10 +1,12 @@
 import itertools
+
 from autoray import do
-from quimb.tensor.tensor_core import (
-    tensor_make_single_bond,
-    oset,
-)
+
 from quimb.tensor import decomp
+from quimb.tensor.tensor_core import (
+    oset,
+    tensor_make_single_bond,
+)
 
 
 def _get_multitree(

@@ -16,23 +16,24 @@ TODO::
 
 """
 
-import itertools
 import functools
+import itertools
+
+from quimb.tensor.tensor_1d import TensorNetwork1DVector
+from quimb.tensor.tensor_arbgeom import (
+    TensorNetworkGenVector,
+    _compute_expecs_maybe_in_parallel,
+    _tn_local_expectation,
+    oset,
+    rand_uuid,
+    tags_to_oset,
+)
 from quimb.tensor.tensor_core import (
-    Tensor,
     IsoTensor,
+    Tensor,
     oset_union,
     prod,
 )
-from quimb.tensor.tensor_arbgeom import (
-    TensorNetworkGenVector,
-    oset,
-    tags_to_oset,
-    rand_uuid,
-    _compute_expecs_maybe_in_parallel,
-    _tn_local_expectation,
-)
-from quimb.tensor.tensor_1d import TensorNetwork1DVector
 from quimb.utils import partition
 
 

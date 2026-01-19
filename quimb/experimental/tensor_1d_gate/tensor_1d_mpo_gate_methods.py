@@ -8,14 +8,13 @@ with an MPO on an MPS.
 
 from autoray import do
 
-from quimb.tensor.tensor_core import (
-    rand_uuid,
-    tensor_contract,
-    Tensor,
-)
-
 from quimb.tensor import decomp
 from quimb.tensor.tensor_1d_compress import mps_gate_with_mpo_lazy
+from quimb.tensor.tensor_core import (
+    Tensor,
+    rand_uuid,
+    tensor_contract,
+)
 
 
 def tensor_1d_compress_bidm(
