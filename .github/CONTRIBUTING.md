@@ -3,7 +3,6 @@
 Any contributions to ``quimb`` in the form of [pull requests](https://github.com/jcmgray/quimb/pulls) are very welcome! Consider also raising an [issue](https://github.com/jcmgray/quimb/issues) first. If this is the first time, the following might be useful introductions to github pull requests:
 
 * [Github - Creating a Pull Request](https://help.github.com/articles/creating-a-pull-request/)
-* [Thinkful - Pull Request Tutorial](https://www.thinkful.com/learn/github-pull-request-tutorial/)
 
 Additionally, make sure any new code is properly accompanied by working through the following checklist:
 

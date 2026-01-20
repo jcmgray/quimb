@@ -25,6 +25,7 @@ Release notes for `quimb`.
 
 - fix [`isometrize_qr`](quimb.tensor.decomp.isometrize_qr) for complex torch arrays ({issue}`346`).
 
+- fix [`right_canonicalize`](quimb.tensor.tensor_1d.TensorNetwork1DFlat.right_canonicalize) to return the right canonicalized tensor network ({issue}`347`)
 
 (whats-new-1-12-1)=
 ## v1.12.1 (2026-01-12)
