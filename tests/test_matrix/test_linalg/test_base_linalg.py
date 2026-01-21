@@ -1,5 +1,5 @@
-import pytest
 import numpy as np
+import pytest
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
 

@@ -1,9 +1,9 @@
 """Misc utility functions."""
 
-import math
 import collections
 import functools
 import itertools
+import math
 from importlib.util import find_spec
 
 try:

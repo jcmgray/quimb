@@ -5,8 +5,8 @@ import numpy.linalg as nla
 import scipy.linalg as scla
 
 import quimb as qu
-from .autoblock import eigensystem_autoblocked
 
+from .autoblock import eigensystem_autoblocked
 
 _NUMPY_EIG_FUNCS = {
     (True, True): nla.eigh,

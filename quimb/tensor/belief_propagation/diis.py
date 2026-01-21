@@ -1,10 +1,11 @@
 import autoray as ar
+
 from quimb.tensor import Tensor
 from quimb.utils import (
+    Leaf,
+    tree_apply,
     tree_map,
     tree_unflatten,
-    tree_apply,
-    Leaf,
 )
 
 

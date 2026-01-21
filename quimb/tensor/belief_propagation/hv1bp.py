@@ -3,6 +3,7 @@
 import autoray as ar
 
 from quimb.tensor.contraction import array_contract
+
 from .bp_common import (
     BeliefPropagationCommon,
     compute_all_index_marginals_from_messages,

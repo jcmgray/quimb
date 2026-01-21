@@ -10,8 +10,9 @@ And will display slightly different output for each that explains the
 three modes.
 """
 
-import quimb as qu
 from mpi4py import MPI
+
+import quimb as qu
 
 # Get some MPI information
 comm = MPI.COMM_WORLD

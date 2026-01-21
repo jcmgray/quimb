@@ -1,17 +1,17 @@
 """Manages the spawning of mpi processes to send to the various solvers."""
 
-import os
 import functools
+import os
 
 import numpy as np
 
+from ..core import _NUM_THREAD_WORKERS
 from .slepc_linalg import (
     eigs_slepc,
-    svds_slepc,
     mfn_multiply_slepc,
     ssolve_slepc,
+    svds_slepc,
 )
-from ..core import _NUM_THREAD_WORKERS
 
 # Work out if already running as mpi
 if (
@@ -143,6 +143,7 @@ class SynchroMPIPool:
 
     def __init__(self):
         import itertools
+
         from mpi4py import MPI
 
         self.comm = MPI.COMM_WORLD

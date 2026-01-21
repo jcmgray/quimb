@@ -1,32 +1,29 @@
-import pytest
-
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from quimb import (
-    ham_heis,
-    expec,
-    plus,
-    is_eigenvector,
     eigh,
+    expec,
+    ham_heis,
     heisenberg_energy,
+    is_eigenvector,
+    plus,
 )
-
 from quimb.tensor import (
-    MPS_rand_state,
-    MPS_product_state,
-    MPS_computational_state,
-    MPO_ham_ising,
-    MPO_ham_XY,
-    MPO_ham_heis,
-    MPO_ham_mbl,
-    MovingEnvironment,
     DMRG1,
     DMRG2,
     DMRGX,
+    MovingEnvironment,
+    MPO_ham_heis,
+    MPO_ham_ising,
+    MPO_ham_mbl,
+    MPO_ham_XY,
+    MPS_computational_state,
+    MPS_product_state,
+    MPS_rand_state,
     SpinHam1D,
 )
-
 
 np.random.seed(42)
 

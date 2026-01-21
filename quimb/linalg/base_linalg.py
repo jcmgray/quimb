@@ -7,22 +7,21 @@ import numpy as np
 import scipy.linalg as sla
 import scipy.sparse.linalg as spla
 
+from ..core import dag, isdense, issparse, ldmul, qarray, vdot
 from ..utils import raise_cant_find_library_function
-from ..core import qarray, dag, issparse, isdense, vdot, ldmul
+from . import SLEPC4PY_FOUND
 from .numpy_linalg import (
     eig_numpy,
     eigs_numpy,
     svds_numpy,
 )
-
 from .scipy_linalg import (
-    eigs_scipy,
     eigs_lobpcg,
     eigs_primme,
-    svds_scipy,
+    eigs_scipy,
     svds_primme,
+    svds_scipy,
 )
-from . import SLEPC4PY_FOUND
 
 if SLEPC4PY_FOUND:
     from .mpi_launcher import (
@@ -30,7 +29,7 @@ if SLEPC4PY_FOUND:
         mfn_multiply_slepc_spawn,
         svds_slepc_spawn,
     )
-    from .slepc_linalg import eigs_slepc, svds_slepc, mfn_multiply_slepc
+    from .slepc_linalg import eigs_slepc, mfn_multiply_slepc, svds_slepc
 else:  # pragma: no cover
     eigs_slepc = raise_cant_find_library_function("slepc4py")
     eigs_slepc_spawn = raise_cant_find_library_function("slepc4py")

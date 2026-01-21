@@ -1,7 +1,7 @@
 """Draw 2D and pseudo-3D diagrams programmatically using matplotlib."""
 
 import warnings
-from math import atan2, cos, pi, sin, ceil, floor, degrees
+from math import atan2, ceil, cos, degrees, floor, pi, sin
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt

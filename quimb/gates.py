@@ -6,6 +6,7 @@ gives instant access to the standard gate set {I, X, Y, ...}.
 """
 
 import functools
+
 from .gen import operators
 
 I, X, Y, Z = map(operators.pauli, "IXYZ")

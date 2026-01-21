@@ -1,8 +1,9 @@
 import pytest
+
 from quimb.utils import (
-    raise_cant_find_library_function,
     deprecated,
     oset,
+    raise_cant_find_library_function,
 )
 
 

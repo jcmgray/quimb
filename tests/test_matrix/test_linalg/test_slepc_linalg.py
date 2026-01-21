@@ -1,31 +1,31 @@
-from pytest import fixture, mark
 import numpy as np
 import scipy.sparse as sp
 from numpy.testing import assert_allclose
+from pytest import fixture, mark
 
 from quimb import (
-    qu,
-    rand_uni,
-    ldmul,
-    rand_matrix,
-    rand_herm,
-    rand_pos,
-    rand_ket,
     eigh,
     eye,
+    ldmul,
     norm,
+    qu,
+    rand_herm,
+    rand_ket,
+    rand_matrix,
+    rand_pos,
+    rand_uni,
 )
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import svds_scipy
 
 if SLEPC4PY_FOUND:
     from quimb.linalg.slepc_linalg import (
-        eigs_slepc,
-        svds_slepc,
         convert_mat_to_petsc,
-        new_petsc_vec,
+        eigs_slepc,
         mfn_multiply_slepc,
+        new_petsc_vec,
         ssolve_slepc,
+        svds_slepc,
     )
 
 

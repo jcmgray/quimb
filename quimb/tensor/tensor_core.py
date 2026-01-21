@@ -21,10 +21,10 @@ from autoray import (
     dag,
     do,
     get_dtype_name,
+    get_namespace,
     infer_backend,
     shape,
     size,
-    get_namespace,
 )
 
 try:
@@ -9888,8 +9888,8 @@ class TensorNetwork(object):
                 **compress_opts,
             )
         elif mode == "nystrom":
+            from .decomp import ldmul, rdmul, svd_truncated
             from .tensor_builder import rand_tensor
-            from .decomp import svd_truncated, rdmul, ldmul
 
             #
             max_bond = min(current_rank, max_bond)

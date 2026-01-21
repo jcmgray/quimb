@@ -1,40 +1,40 @@
-from pytest import fixture, mark, raises
 import numpy as np
-from numpy.testing import assert_allclose
 import scipy.sparse as sp
+from numpy.testing import assert_allclose
+from pytest import fixture, mark, raises
 
 from quimb import (
     qu,
-    rand_matrix,
     rand_ket,
+    rand_matrix,
 )
 from quimb.core import (
-    qarray,
+    dot,
+    dot_sparse,
     ensure_qarray,
-    issparse,
+    explt,
+    isbra,
     isdense,
+    isherm,
     isket,
     isop,
-    isbra,
+    issparse,
     isvec,
-    isherm,
-    mul,
-    dot,
-    vdot,
-    rdot,
-    ldmul,
-    rdmul,
-    outer,
-    explt,
-    make_immutable,
-    realify,
-    dot_sparse,
-    par_dot_csr_matvec,
+    kron,
     kron_dense,
     kron_sparse,
+    kronpow,
+    ldmul,
+    make_immutable,
+    mul,
+    outer,
+    par_dot_csr_matvec,
+    qarray,
+    rdmul,
+    rdot,
+    realify,
+    vdot,
 )
-from quimb.core import kron, kronpow
-
 
 # ----------------------------- FIXTURES ------------------------------------ #
 

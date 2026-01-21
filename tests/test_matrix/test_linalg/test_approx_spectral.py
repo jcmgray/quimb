@@ -1,39 +1,38 @@
-import pytest
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from quimb import (
-    prod,
-    rand_ket,
-    rand_pos,
-    rand_herm,
-    partial_transpose,
+    can_use_mpi_pool,
     eigvalsh,
-    neel_state,
+    entropy,
     ham_heis,
     logneg,
+    neel_state,
     negativity,
-    entropy,
-    can_use_mpi_pool,
+    partial_transpose,
+    prod,
+    rand_herm,
+    rand_ket,
+    rand_pos,
 )
-from quimb.utils import last
-
 from quimb.linalg.approx_spectral import (
-    lazy_ptr_ppt_linop,
-    construct_lanczos_tridiag,
-    lanczos_tridiag_eig,
     approx_spectral_function,
-    lazy_ptr_linop,
-    tr_abs_approx,
-    tr_exp_approx,
-    tr_sqrt_approx,
-    tr_xlogx_approx,
+    construct_lanczos_tridiag,
     entropy_subsys_approx,
+    lanczos_tridiag_eig,
+    lazy_ptr_linop,
+    lazy_ptr_ppt_linop,
     logneg_subsys_approx,
     negativity_subsys_approx,
     norm_fro,
     norm_fro_approx,
+    tr_abs_approx,
+    tr_exp_approx,
+    tr_sqrt_approx,
+    tr_xlogx_approx,
 )
+from quimb.utils import last
 
 MPI_PARALLEL = [False]
 if can_use_mpi_pool():

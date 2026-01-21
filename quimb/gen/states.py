@@ -1,23 +1,24 @@
 """Functions for generating quantum states."""
 
-import itertools
 import functools
+import itertools
 import math
+
 import numpy as np
 
 from ..core import (
     dag,
-    ldmul,
     dot,
-    make_immutable,
-    qu,
-    kron,
     eye,
     ikron,
+    kron,
     kronpow,
+    ldmul,
+    make_immutable,
+    qu,
 )
 from ..linalg.base_linalg import eigh
-from .operators import pauli, controlled
+from .operators import controlled, pauli
 
 
 def basis_vec(i, dim, ownership=None, **kwargs):

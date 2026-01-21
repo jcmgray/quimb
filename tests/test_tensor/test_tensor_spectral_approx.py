@@ -1,17 +1,17 @@
 from math import log2
-import pytest
+
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from quimb import (
-    seed_rand,
     approx_spectral_function,
     eigvalsh,
     logneg_subsys,
+    seed_rand,
 )
-from quimb.tensor import MPO_rand_herm, MPO_ham_heis, DMRG2
+from quimb.tensor import DMRG2, MPO_ham_heis, MPO_rand_herm
 from quimb.tensor.tensor_approx_spectral import construct_lanczos_tridiag_MPO
-
 
 np.random.seed(42)
 

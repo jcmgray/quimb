@@ -1,11 +1,11 @@
-from pytest import fixture, mark
 import numpy as np
-from numpy.testing import assert_equal, assert_allclose
+from numpy.testing import assert_allclose, assert_equal
+from pytest import fixture, mark
 
 import quimb as qu
 from quimb.linalg.numpy_linalg import (
-    sort_inds,
     eigs_numpy,
+    sort_inds,
 )
 
 

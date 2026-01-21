@@ -5,8 +5,8 @@ from numbers import Integral
 import numpy as np
 import scipy.linalg as sla
 
-from ..gen.rand import randn
 from ..core import dag, dot, njit
+from ..gen.rand import randn
 from ..utils import identity
 
 

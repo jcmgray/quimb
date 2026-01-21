@@ -1,10 +1,9 @@
-import pytest
-from numpy.testing import assert_allclose
 import numpy as np
+import pytest
 import scipy.sparse as sp
+from numpy.testing import assert_allclose
 
 import quimb as qu
-
 
 dtypes = [np.float32, np.float64, np.complex128, np.complex64]
 

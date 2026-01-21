@@ -1,22 +1,21 @@
-from pytest import fixture, mark, raises, skip
-
-from math import pi, gcd, cos
 from functools import reduce
+from math import cos, gcd, pi
 
 import numpy as np
 from numpy.testing import assert_allclose
+from pytest import fixture, mark, raises, skip
 
 import quimb as qu
 from quimb.evo import (
-    schrodinger_eq_ket,
-    schrodinger_eq_dop,
-    schrodinger_eq_dop_vectorized,
     lindblad_eq,
     lindblad_eq_vectorized,
+    schrodinger_eq_dop,
+    schrodinger_eq_dop_vectorized,
+    schrodinger_eq_ket,
 )
-from .test_linalg.test_slepc_linalg import slepc4py_test
-
 from quimb.linalg.base_linalg import eigs_scipy
+
+from .test_linalg.test_slepc_linalg import slepc4py_test
 
 
 @fixture

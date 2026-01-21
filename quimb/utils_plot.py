@@ -59,7 +59,8 @@ def default_to_neutral_style(fn):
 
 def _ensure_dict(k, v):
     import numpy as np
-    from .schematic import hash_to_color, get_color
+
+    from .schematic import get_color, hash_to_color
 
     # ensure is a dictionaty
     if not isinstance(v, dict):

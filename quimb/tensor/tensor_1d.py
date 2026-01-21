@@ -3800,10 +3800,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             zeros = xp.zeros_like(t.data)
             arrays = [zeros] * d
             arrays[outcome] = t.data
-            t.modify(
-                data=xp.stack(arrays, axis=-1),
-                inds=(*t.inds, ind)
-            )
+            t.modify(data=xp.stack(arrays, axis=-1), inds=(*t.inds, ind))
 
         return outcome, tn
 

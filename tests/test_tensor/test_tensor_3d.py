@@ -1,5 +1,5 @@
-import pytest
 import autoray as ar
+import pytest
 
 import quimb as qu
 import quimb.tensor as qtn

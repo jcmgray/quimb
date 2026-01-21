@@ -1,8 +1,8 @@
 import itertools
 
-import pytest
 import autoray as ar
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 import quimb as qu

@@ -1,24 +1,23 @@
-import pytest
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from quimb import (
+    can_use_mpi_pool,
+    eigh,
     rand_herm,
     rand_ket,
-    eigh,
-    can_use_mpi_pool,
 )
-
 from quimb.linalg import SLEPC4PY_FOUND
 from quimb.linalg.scipy_linalg import eigs_scipy
 
 if SLEPC4PY_FOUND:
     from quimb.linalg.mpi_launcher import (
-        eigs_slepc_spawn,
-        svds_slepc_spawn,
-        mfn_multiply_slepc_spawn,
         ALREADY_RUNNING_AS_MPI,
         NUM_MPI_WORKERS,
+        eigs_slepc_spawn,
+        mfn_multiply_slepc_spawn,
+        svds_slepc_spawn,
     )
 
 slepc4py_test = pytest.mark.skipif(

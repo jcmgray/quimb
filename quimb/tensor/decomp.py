@@ -27,7 +27,6 @@ from ..linalg import base_linalg, rand_linalg
 from ..utils import parse_info_extras
 from .array_ops import isblocksparse, isfermionic
 
-
 # some convenience functions for multiplying diagonals
 
 

@@ -1,6 +1,6 @@
+import numpy as np
 import pytest
 from pytest import approx
-import numpy as np
 
 import quimb as qu
 import quimb.tensor as qtn

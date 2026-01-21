@@ -1,9 +1,9 @@
 import itertools
 
-from pytest import fixture, raises, mark
-import scipy.sparse as sp
 import numpy as np
+import scipy.sparse as sp
 from numpy.testing import assert_allclose, assert_almost_equal
+from pytest import fixture, mark, raises
 
 import quimb as qu
 
