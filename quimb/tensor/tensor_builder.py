@@ -84,7 +84,7 @@ def rand_tensor(
     loc=0.0,
     left_inds=None,
     **randn_opts,
-):
+) -> Tensor:
     """Generate a random tensor with specified shape and inds.
 
     Parameters
@@ -120,7 +120,7 @@ def rand_tensor(
 
 
 @random_seed_fn
-def rand_phased(shape, inds, tags=None, dtype=complex):
+def rand_phased(shape, inds, tags=None, dtype=complex) -> Tensor:
     """Generate a random tensor with specified shape and inds, and randomly
     'phased' (distributed on the unit circle) data, such that
     ``T.H @ T == T.norm()**2 == T.size``.
@@ -153,7 +153,7 @@ def rand_symmetric_array(
     seed=None,
     dtype="float64",
     fill_fn=None,
-):
+) -> np.ndarray:
     """Get a random symmetric array, i.e. one that is invariant under
     permutation of its indices. It has `(ndim + d - 1) choose (d - 1)` unique
     elements.
@@ -200,7 +200,7 @@ def rand_symmetric_array(
 
 def rand_tensor_symmetric(
     d, inds, tags=None, dist="normal", loc=0.0, scale=1.0, seed=None
-):
+) -> Tensor:
     """Generate a random symmetric tensor with specified local dimension and
     inds.
 
@@ -235,7 +235,7 @@ def TN_from_sites_product_state(
     site_map,
     site_tag_id="I{}",
     site_ind_id="k{}",
-):
+) -> TensorNetworkGenVector:
     """A product state in general tensor network form.
 
     Parameters
@@ -253,23 +253,19 @@ def TN_from_sites_product_state(
     """
     sites = tuple(sorted(site_map))
 
-    tn = TensorNetwork(
-        [
-            Tensor(
-                data=site_map[site],
-                inds=[site_ind_id.format(site)],
-                tags=[site_tag_id.format(site)],
-            )
-            for site in sites
-        ]
-    )
-
-    return tn.view_as_(
-        TensorNetworkGenVector,
+    tn = TensorNetworkGenVector.new(
         sites=sites,
         site_tag_id=site_tag_id,
         site_ind_id=site_ind_id,
     )
+    for site in sites:
+        tn |= Tensor(
+            data=site_map[site],
+            inds=[site_ind_id.format(site)],
+            tags=[site_tag_id.format(site)],
+        )
+
+    return tn
 
 
 def TN_from_sites_computational_state(
@@ -277,7 +273,7 @@ def TN_from_sites_computational_state(
     site_tag_id="I{}",
     site_ind_id="k{}",
     dtype="float64",
-):
+) -> TensorNetworkGenVector:
     """A computational basis state in general tensor network form.
 
     Parameters
@@ -702,14 +698,14 @@ def TN_from_strings(
     contract_sites=True,
     fuse_multibonds=True,
     **contract_opts,
-):
+) -> TensorNetworkGen:
     if fill_fn is None:
         fill_fn = delta_array
 
     # find all unique sites
     sites = tuple(sorted(set.union(*map(set, strings))))
 
-    tn = TensorNetwork()
+    tn = TensorNetworkGen.new(sites=sites, site_tag_id=site_tag_id)
 
     # first place each string as a 1D tensor network
     for string in strings:
@@ -742,8 +738,6 @@ def TN_from_strings(
             inds = (string_inds[tuple(sorted((string[-2], string[-1])))],)
             tags = (site_tag_id.format(string[-1]),)
             tn |= Tensor(data=data, inds=inds, tags=tags)
-
-    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
 
     if random_rewire:
         rng = np.random.default_rng(random_rewire_seed)
@@ -979,7 +973,11 @@ def HTN_CP_from_sites_and_fill_fn(
     -------
     TensorNetworkGenVector
     """
-    tn = TensorNetwork([])
+    tn = TensorNetworkGenVector.new(
+        sites=sites,
+        site_tag_id=site_tag_id,
+        site_ind_id=site_ind_id,
+    )
 
     if bond_ind is None:
         bond_ind = rand_uuid()
@@ -991,12 +989,7 @@ def HTN_CP_from_sites_and_fill_fn(
             tags=site_tag_id.format(site),
         )
 
-    return tn.view_as_(
-        TensorNetworkGenVector,
-        sites=sites,
-        site_tag_id=site_tag_id,
-        site_ind_id=site_ind_id,
-    )
+    return tn
 
 
 def HTN_CP_operator_from_products(
@@ -1129,15 +1122,13 @@ def convert_to_2d(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     inplace=False,
-):
+) -> TensorNetwork2D:
     """Convert ``tn`` to a :class:`~quimb.tensor.tensor_2d.TensorNetwork2D`,
     assuming that is has a generic geometry with sites labelled by (i, j)
     coordinates already. Useful for constructing 2D tensor networks from
     functions that only require a list of edges etc.
     """
     import itertools
-
-    from quimb.tensor.tensor_2d import TensorNetwork2D
 
     tn2d = tn if inplace else tn.copy()
 
@@ -1175,7 +1166,7 @@ def TN2D_from_fill_fn(
     site_tag_id="I{},{}",
     x_tag_id="X{}",
     y_tag_id="Y{}",
-):
+) -> TensorNetwork2D:
     """A scalar 2D lattice tensor network with tensors filled by a function.
 
     Parameters
@@ -1208,7 +1199,14 @@ def TN2D_from_fill_fn(
     except TypeError:
         cyclic_x = cyclic_y = cyclic
 
-    ts = []
+    tn = TensorNetwork2D.new(
+        Lx=Lx,
+        Ly=Ly,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+    )
+
     bonds = collections.defaultdict(rand_uuid)
 
     for i, j in itertools.product(range(Lx), range(Ly)):
@@ -1235,18 +1233,9 @@ def TN2D_from_fill_fn(
             x_tag_id.format(i),
             y_tag_id.format(j),
         ]
-        ts.append(Tensor(data=data, inds=inds, tags=tags))
+        tn |= Tensor(data=data, inds=inds, tags=tags)
 
-    tn = TensorNetwork(ts)
-
-    return tn.view_as_(
-        TensorNetwork2D,
-        Lx=Lx,
-        Ly=Ly,
-        site_tag_id=site_tag_id,
-        x_tag_id=x_tag_id,
-        y_tag_id=y_tag_id,
-    )
+    return tn
 
 
 def TN2D_empty(
@@ -1258,7 +1247,7 @@ def TN2D_empty(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     dtype="float64",
-):
+) -> TensorNetwork2D:
     """A scalar 2D lattice tensor network initialized with empty tensors.
 
     Parameters
@@ -1311,7 +1300,7 @@ def TN2D_with_value(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     dtype=None,
-):
+) -> TensorNetwork2D:
     """A scalar 2D lattice tensor network with every element set to ``value``.
     This uses ``numpy.broadcast_to`` and therefore essentially no memory.
 
@@ -1371,7 +1360,7 @@ def TN2D_rand(
     scale=1,
     seed=None,
     dtype="float64",
-):
+) -> TensorNetwork2D:
     """A random scalar 2D lattice tensor network.
 
     Parameters
@@ -1433,7 +1422,7 @@ def TN2D_rand_symmetric(
     scale=1,
     seed=None,
     dtype="float64",
-):
+) -> TensorNetwork2D:
     """Create a random 2D lattice tensor network where every tensor is
     symmetric up to index permutations.
 
@@ -1500,7 +1489,7 @@ def TN2D_corner_double_line(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     **kwargs,
-):
+) -> TensorNetwork2D:
     """Build a 2D 'corner double line' (CDL) tensor network. Each plaquette
     contributes a matrix (by default the identity) at each corner, connected in
     a loop. The corners for each site are then grouped and optionally
@@ -1587,7 +1576,7 @@ def TN2D_rand_hidden_loop(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     **kwargs,
-):
+) -> TensorNetwork2D:
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     edges = tuple(gen_2d_bonds(Lx, Ly, cyclic=cyclic)) * line_density
@@ -1621,15 +1610,13 @@ def convert_to_3d(
     y_tag_id="Y{}",
     z_tag_id="Z{}",
     inplace=False,
-):
+) -> TensorNetwork3D:
     """Convert ``tn`` to a :class:`~quimb.tensor.tensor_3d.TensorNetwork3D`,
     assuming that is has a generic geometry with sites labelled by (i, j, k)
     coordinates already. Useful for constructing 3D tensor networks from
     functions that only require a list of edges etc.
     """
     import itertools
-
-    from quimb.tensor.tensor_3d import TensorNetwork3D
 
     tn3d = tn if inplace else tn.copy()
 
@@ -1673,7 +1660,7 @@ def TN3D_from_fill_fn(
     x_tag_id="X{}",
     y_tag_id="Y{}",
     z_tag_id="Z{}",
-):
+) -> TensorNetwork3D:
     """A scalar 3D lattice tensor network with tensors filled by a function.
 
     Parameters
@@ -1706,7 +1693,15 @@ def TN3D_from_fill_fn(
     except TypeError:
         cyclic_x = cyclic_y = cyclic_z = cyclic
 
-    ts = []
+    tn = TensorNetwork3D.new(
+        Lx=Lx,
+        Ly=Ly,
+        Lz=Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
     bonds = collections.defaultdict(rand_uuid)
 
     for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
@@ -1740,20 +1735,9 @@ def TN3D_from_fill_fn(
             y_tag_id.format(j),
             z_tag_id.format(k),
         ]
-        ts.append(Tensor(data=data, inds=inds, tags=tags))
+        tn |= Tensor(data=data, inds=inds, tags=tags)
 
-    tn = TensorNetwork(ts)
-
-    return tn.view_as_(
-        TensorNetwork3D,
-        Lx=Lx,
-        Ly=Ly,
-        Lz=Lz,
-        site_tag_id=site_tag_id,
-        x_tag_id=x_tag_id,
-        y_tag_id=y_tag_id,
-        z_tag_id=z_tag_id,
-    )
+    return tn
 
 
 def TN3D_empty(
@@ -1767,7 +1751,7 @@ def TN3D_empty(
     y_tag_id="Y{}",
     z_tag_id="Z{}",
     dtype="float64",
-):
+) -> TensorNetwork3D:
     """A scalar 3D lattice tensor network initialized with empty tensors.
 
     Parameters
@@ -1824,7 +1808,7 @@ def TN3D_with_value(
     y_tag_id="Y{}",
     z_tag_id="Z{}",
     dtype=None,
-):
+) -> TensorNetwork3D:
     """A scalar 2D lattice tensor network with every element set to ``value``.
     This uses ``numpy.broadcast_to`` and therefore essentially no memory.
 
@@ -1888,7 +1872,7 @@ def TN3D_rand(
     scale=1.0,
     seed=None,
     dtype="float64",
-):
+) -> TensorNetwork3D:
     """A random scalar 3D lattice tensor network.
 
     Parameters
@@ -1943,7 +1927,7 @@ def TN3D_corner_double_line(
     y_tag_id="Y{}",
     z_tag_id="Z{}",
     **kwargs,
-):
+) -> TensorNetwork3D:
     # start with a tiling of plaquettes (loop strings)
     strings = list(gen_3d_plaquettes(Lx, Ly, Lz, tiling=tiling))
 
@@ -1989,7 +1973,7 @@ def TN3D_rand_hidden_loop(
     y_tag_id="Y{}",
     z_tag_id="Z{}",
     **kwargs,
-):
+) -> TensorNetwork3D:
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     edges = tuple(gen_3d_bonds(Lx, Ly, Lz, cyclic=cyclic)) * line_density
@@ -2334,7 +2318,7 @@ def TN2D_classical_ising_partition_function(
     y_tag_id="Y{}",
     outputs=(),
     ind_id="s{},{}",
-):
+) -> TensorNetwork2D:
     """The tensor network representation of the 2D classical ising model
     partition function.
 
@@ -2389,7 +2373,13 @@ def TN2D_classical_ising_partition_function(
             outputs = (outputs,)
         outputs = set(outputs)
 
-    ts = []
+    tn = TensorNetwork2D.new(
+        Lx=Lx,
+        Ly=Ly,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+    )
     bonds = collections.defaultdict(rand_uuid)
 
     for ni, nj in itertools.product(range(Lx), range(Ly)):
@@ -2417,35 +2407,24 @@ def TN2D_classical_ising_partition_function(
         if site_is_output:
             inds.append(ind_id.format(ni, nj))
 
-        ts.append(
-            Tensor(
-                data=classical_ising_T_matrix(
-                    beta=beta,
-                    directions=directions,
-                    j=js,
-                    h=float(h),
-                    asymm=asymms,
-                    output=site_is_output,
-                ),
-                inds=inds,
-                tags=[
-                    site_tag_id.format(ni, nj),
-                    x_tag_id.format(ni),
-                    y_tag_id.format(nj),
-                ],
-            )
+        tn |= Tensor(
+            data=classical_ising_T_matrix(
+                beta=beta,
+                directions=directions,
+                j=js,
+                h=float(h),
+                asymm=asymms,
+                output=site_is_output,
+            ),
+            inds=inds,
+            tags=[
+                site_tag_id.format(ni, nj),
+                x_tag_id.format(ni),
+                y_tag_id.format(nj),
+            ],
         )
 
-    tn = TensorNetwork(ts)
-
-    return tn.view_as_(
-        TensorNetwork2D,
-        Lx=Lx,
-        Ly=Ly,
-        site_tag_id=site_tag_id,
-        x_tag_id=x_tag_id,
-        y_tag_id=y_tag_id,
-    )
+    return tn
 
 
 def TN3D_classical_ising_partition_function(
@@ -2462,7 +2441,7 @@ def TN3D_classical_ising_partition_function(
     z_tag_id="Z{}",
     outputs=(),
     ind_id="s{},{},{}",
-):
+) -> TensorNetwork3D:
     """Tensor network representation of the 3D classical ising model
     partition function.
 
@@ -2521,7 +2500,15 @@ def TN3D_classical_ising_partition_function(
             outputs = (outputs,)
         outputs = set(outputs)
 
-    ts = []
+    tn = TensorNetwork3D.new(
+        Lx=Lx,
+        Ly=Ly,
+        Lz=Lz,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+    )
     bonds = collections.defaultdict(rand_uuid)
 
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
@@ -2563,38 +2550,25 @@ def TN3D_classical_ising_partition_function(
         if site_is_output:
             inds.append(ind_id.format(ni, nj, nk))
 
-        ts.append(
-            Tensor(
-                data=classical_ising_T_matrix(
-                    beta=beta,
-                    directions=directions,
-                    j=js,
-                    h=float(h),
-                    asymm=asymms,
-                    output=site_is_output,
-                ),
-                inds=inds,
-                tags=[
-                    site_tag_id.format(ni, nj, nk),
-                    x_tag_id.format(ni),
-                    y_tag_id.format(nj),
-                    z_tag_id.format(nk),
-                ],
-            )
+        tn |= Tensor(
+            data=classical_ising_T_matrix(
+                beta=beta,
+                directions=directions,
+                j=js,
+                h=float(h),
+                asymm=asymms,
+                output=site_is_output,
+            ),
+            inds=inds,
+            tags=[
+                site_tag_id.format(ni, nj, nk),
+                x_tag_id.format(ni),
+                y_tag_id.format(nj),
+                z_tag_id.format(nk),
+            ],
         )
 
-    tn = TensorNetwork(ts)
-
-    return tn.view_as_(
-        TensorNetwork3D,
-        Lx=Lx,
-        Ly=Ly,
-        Lz=Lz,
-        site_tag_id=site_tag_id,
-        x_tag_id=x_tag_id,
-        y_tag_id=y_tag_id,
-        z_tag_id=z_tag_id,
-    )
+    return tn
 
 
 def HTN_classical_partition_function_from_edges(
@@ -2713,7 +2687,10 @@ def TN_classical_partition_function_from_edges(
     j_factory = parse_j_coupling_to_function(j)
 
     to_contract = collections.defaultdict(list)
-    ts = []
+    sites = tuple(sorted(set(concat(edges))))
+
+    tn = TensorNetworkGen.new(sites=sites, site_tag_id=site_tag_id)
+
     for node_a, node_b in gen_unique_edges(edges):
         # the variable indices (unless the node is
         # an output, these will be contracted)
@@ -2727,18 +2704,16 @@ def TN_classical_partition_function_from_edges(
         data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm="l")
         inds = [ix_a, bond_ab]
         tags = [site_tag_id.format(node_a)]
-        ts.append(Tensor(data=data, inds=inds, tags=tags))
+        tn |= Tensor(data=data, inds=inds, tags=tags)
 
         # right tensor factor
         data = classical_ising_sqrtS_matrix(beta=beta, j=j_ab, asymm="r")
         inds = [bond_ab, ix_b]
         tags = [site_tag_id.format(node_b)]
-        ts.append(Tensor(data=data, inds=inds, tags=tags))
+        tn |= Tensor(data=data, inds=inds, tags=tags)
 
         to_contract[ix_a].append(bond_ab)
         to_contract[ix_b].append(bond_ab)
-
-    sites = tuple(sorted(set(concat(edges))))
 
     if h != 0.0:
         if callable(h):
@@ -2752,19 +2727,16 @@ def TN_classical_partition_function_from_edges(
             data = classical_ising_H_matrix(beta, h=float(h_factory(node)))
             inds = [ind_id.format(node)]
             tags = [site_tag_id.format(node)]
-            ts.append(Tensor(data=data, inds=inds, tags=tags))
-            to_contract[ind_id.format(node)].extend(())
+            tn |= Tensor(data=data, inds=inds, tags=tags)
+            to_contract.setdefault(ind_id.format(node), [])
 
     for node in outputs:
         ix = ind_id.format(node)
         to_contract[ix].append(ix)
 
-    tn = TensorNetwork(ts)
-
     for ind, output_inds in to_contract.items():
         tn.contract_ind(ind, output_inds=output_inds)
 
-    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
     return tn
 
 
@@ -3112,15 +3084,15 @@ def TN_dimer_covering_from_edges(
         nodes2inds[ni].append(bond)
         nodes2inds[nj].append(bond)
 
-    ts = []
+    tn = TensorNetworkGen.new(
+        sites=tuple(sorted(nodes2inds)), site_tag_id=site_tag_id
+    )
+
     for node, inds in nodes2inds.items():
         data = dimer_data(len(inds), cover_count=cover_count, dtype=dtype)
         tag = site_tag_id.format(node)
-        ts.append(Tensor(data, inds=inds, tags=tag))
+        tn |= Tensor(data, inds=inds, tags=tag)
 
-    tn = TensorNetwork(ts)
-    sites = tuple(sorted(nodes2inds))
-    tn.view_as_(TensorNetworkGen, sites=sites, site_tag_id=site_tag_id)
     return tn
 
 
