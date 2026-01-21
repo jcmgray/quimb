@@ -12,6 +12,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 keywords = [
     "quantum",
@@ -180,6 +181,7 @@ doc2dash = "*"
 furo = "*"
 ipython = "*"
 myst-nb = "*"
+ruff = "*"
 setuptools_scm = "*"
 sphinx-autoapi = "*"
 sphinx-copybutton = "*"
@@ -213,3 +215,5 @@ testtensor = { cmd = "pytest tests/test_tensor --cov=quimb --cov-report=xml", cw
 docs = { cmd = "sphinx-build -b html docs docs/_build/html", cwd = "." }
 docs-clean = { cmd = "rm -rf docs/_build", cwd = "." }
 docs-serve = { cmd = "python -m http.server -d docs/_build/html 8000", cwd = "." }
+lint = { cmd = "ruff check --select I; ruff format --check", cwd = "." }
+format = { cmd = "ruff check --select I --fix; ruff format", cwd = "." }
