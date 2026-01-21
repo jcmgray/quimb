@@ -973,6 +973,8 @@ class TensorNetwork1DFlat(TensorNetwork1D):
             if bra is not None:
                 bra[0] /= factor
 
+        return mps
+
     right_canonicalize_ = functools.partialmethod(
         right_canonicalize, inplace=True
     )
