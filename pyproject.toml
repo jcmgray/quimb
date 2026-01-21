@@ -192,10 +192,10 @@ sphinx = "*"
 python= "3.11.*"
 
 [tool.pixi.feature.pymid.dependencies]
-python= "3.12.*"
+python= "3.13.*"
 
 [tool.pixi.feature.pynew.dependencies]
-python= "3.13.*"
+python= "3.14.*"
 
 [tool.pixi.environments]
 testpynew = { features = ["pynew", "full", "tests"] }
