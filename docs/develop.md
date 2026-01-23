@@ -12,6 +12,7 @@ Things to check if new functionality added:
    tensor network equivalent `quimb.tensor.__init__.py`).
 5. Add to changelog and elsewhere in docs.
 
+
 ## Running the Tests
 
 Testing `quimb` requires [pytest](https://docs.pytest.org/en/latest/index.html)
@@ -20,6 +21,17 @@ in the root `quimb` directory.
 
 The tests can also be run with pre-spawned mpi workers using the command
 `quimb-mpi-python -m pytest` (but not in syncro mode -- see {ref}`mpistuff`).
+
+
+## Formatting the Code
+
+`quimb` uses [`ruff`](https://docs.astral.sh/ruff/) to format imports and
+code style. You can use the pixi task `format` to install and run both:
+
+```bash
+pixi run format
+```
+
 
 ## Building the docs locally
 
@@ -33,6 +45,7 @@ and [furo](https://github.com/pradyunsg/furo).
 2. To start from scratch, remove the `_build` folder.
 3. Run `sphinx-build -b html . ./_build/html/`.
 4. Launch the page: `open _build/html/index.html`.
+
 
 ### Building the DocSet
 
@@ -53,6 +66,7 @@ new release:
 3. Edit the `docset.json`: update the `"version"` and add a new element below
   `"specific_versions"`.
 4. Commit and create a new Pull Request.
+
 
 ## Minting a Release
 
