@@ -11,6 +11,60 @@ dtypes = ["float32", "float64", "complex64", "complex128"]
     [
         "direct",
         "dm",
+        "zipup",
+        "zipup-first",
+        "zipup-oversample",
+        "src",
+        "src-first",
+        "src-oversample",
+        "srcmps",
+        "srcmps-first",
+        "srcmps-oversample",
+        "fit",
+        "fit-zipup",
+        "fit-projector",
+        "fit-oversample",
+    ],
+)
+@pytest.mark.parametrize("dtype", dtypes)
+@pytest.mark.parametrize("equalize_norms", [False])
+def test_basic_compress_double_mpo(method, dtype, equalize_norms):
+    L = 8
+    phys_dim = 2
+    Da = 3
+    Db = 2
+    method = "direct"
+
+    a = qtn.MPO_rand(L, bond_dim=Da, phys_dim=phys_dim, dtype=dtype, seed=42)
+    a.exponent = 2.0
+    b = qtn.MPO_rand(L, bond_dim=Db, phys_dim=phys_dim, dtype=dtype, seed=42)
+    b.exponent = -1.0
+    ab = b.gate_upper_with_op_lazy(a)
+    assert ab.exponent == 1.0
+
+    c = qtn.tensor_network_1d_compress(
+        ab,
+        max_bond=6,
+        method=method,
+        equalize_norms=equalize_norms,
+    )
+    assert c.istree()
+    assert c.max_bond() == 6
+
+    eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
+    assert c.distance_normalized(ab) < eps
+
+    # can use tighter tolerance when not comparing via overlap
+    dc = c.to_dense()
+    dab = a.to_dense() @ b.to_dense()
+    assert qu.norm(dab - dc) < 0.1 * eps
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "direct",
+        "dm",
         "fit",
         "zipup",
         "zipup-first",
