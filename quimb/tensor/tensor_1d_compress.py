@@ -309,6 +309,7 @@ def _form_final_tn_from_tensor_sequence(
         new = TensorNetwork(ts, virtual=True)
         # cast as whatever the input was e.g. MPS, MPO
         new.view_like_(tn)
+        new.exponent = tn.exponent
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(new, permute_arrays)
@@ -334,6 +335,7 @@ def tensor_network_1d_compress_dm(
     sweep_reverse=False,
     canonize=True,
     equalize_norms=False,
+    strip_exponent=False,
     inplace=False,
     **compress_opts,
 ):
@@ -382,6 +384,9 @@ def tensor_network_1d_compress_dm(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -442,6 +447,7 @@ def tensor_network_1d_compress_dm(
         drop_tags=True,
         optimize=optimize,
     )
+    left_envs[1].normalize_()
     for i in range(2, N):
         left_envs[i] = tensor_contract(
             left_envs[i - 1],
@@ -450,12 +456,14 @@ def tensor_network_1d_compress_dm(
             drop_tags=True,
             optimize=optimize,
         )
+        left_envs[i].normalize_()
 
     # build projectors and right environments
     Us = [None] * N
     right_env_ket = None
     right_env_bra = None
     new_bonds = collections.defaultdict(rand_uuid)
+    exponent = 0.0
 
     for i in range(N - 1, 0, -1):
         # form the reduced density matrix
@@ -548,19 +556,38 @@ def tensor_network_1d_compress_dm(
             right_ket_tensors.append(right_env_ket)
             right_bra_tensors.append(right_env_bra)
 
-        right_env_ket = tensor_contract(
-            *right_ket_tensors,
-            preserve_tensor=True,
-            drop_tags=True,
-            optimize=optimize,
-        )
+        if strip_exponent:
+            right_env_ket, result_exponent = tensor_contract(
+                *right_ket_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+                strip_exponent=strip_exponent,
+            )
+            exponent += result_exponent
+        else:
+            right_env_ket = tensor_contract(
+                *right_ket_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+            )
         # TODO: could compute this just as conjugated and relabelled ket env
-        right_env_bra = tensor_contract(
-            *right_bra_tensors,
-            preserve_tensor=True,
-            drop_tags=True,
-            optimize=optimize,
-        )
+        if strip_exponent:
+            right_env_bra, _ = tensor_contract(
+                *right_bra_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+                strip_exponent=strip_exponent,
+            )
+        else:
+            right_env_bra = tensor_contract(
+                *right_bra_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+            )
 
     # form the final site
     #
@@ -575,7 +602,7 @@ def tensor_network_1d_compress_dm(
         preserve_tensor=True,
     )
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         Us,
         normalize,
@@ -584,6 +611,10 @@ def tensor_network_1d_compress_dm(
         equalize_norms,
         inplace,
     )
+    if strip_exponent:
+        new.exponent += exponent
+
+    return new
 
 
 def tensor_network_1d_compress_zipup(
@@ -598,6 +629,7 @@ def tensor_network_1d_compress_zipup(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    strip_exponent=False,
     inplace=False,
     **compress_opts,
 ):
@@ -648,6 +680,9 @@ def tensor_network_1d_compress_zipup(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -682,12 +717,13 @@ def tensor_network_1d_compress_zipup(
         #     │ │ │ │ │ │ │ │ │ │
         #     ▶─▶─▶─▶─▶─▶─▶─▶─▶─○  MPS
         #
-        tn = tn.canonize_around_(site_tags[-1])
+        tn = tn.canonize_around_(site_tags[-1], equalize_norms=equalize_norms)
 
     # zip along the bonds
     ts = [None] * N
     bix = None
     Us = None
+    exponent = 0.0
     for i in range(N - 1, 0, -1):
         #          U*s VH
         #      │ │     │ │
@@ -702,9 +738,17 @@ def tensor_network_1d_compress_zipup(
                 *tn.select_tensors(site_tags[i]), optimize=optimize
             )
         else:
-            C = tensor_contract(
-                Us, *tn.select_tensors(site_tags[i]), optimize=optimize
-            )
+            if strip_exponent:
+                C, result_exponent = tensor_contract(
+                    Us, *tn.select_tensors(site_tags[i]), 
+                    optimize=optimize,
+                    strip_exponent=strip_exponent
+                )
+                exponent += result_exponent
+            else:
+                C = tensor_contract(
+                    Us, *tn.select_tensors(site_tags[i]), optimize=optimize
+                )
         #         i
         #      │  │    │ │
         #     ─▶──□━━━━◀━◀━
@@ -743,7 +787,7 @@ def tensor_network_1d_compress_zipup(
         Us, *tn.select_tensors(site_tags[0]), optimize=optimize
     )
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         ts,
         normalize,
@@ -752,6 +796,10 @@ def tensor_network_1d_compress_zipup(
         equalize_norms,
         inplace,
     )
+    if strip_exponent:
+        new.exponent += exponent
+
+    return new
 
 
 def _do_direct_sweep(
@@ -808,6 +856,7 @@ def tensor_network_1d_compress_zipup_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    strip_exponent=False,
     inplace=False,
     **compress_opts,
 ):
@@ -866,6 +915,9 @@ def tensor_network_1d_compress_zipup_oversample(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -924,6 +976,7 @@ def tensor_network_1d_compress_zipup_oversample(
         optimize=optimize,
         sweep_reverse=True,
         equalize_norms=equalize_norms,
+        strip_exponent=strip_exponent,
         inplace=inplace,
         **compress_opts,
     )
@@ -952,6 +1005,7 @@ def tensor_network_1d_compress_src(
     sweep_reverse=False,
     canonize=True,
     equalize_norms=False,
+    strip_exponent=False,
     inplace=False,
     **contract_opts,
 ):
@@ -992,6 +1046,9 @@ def tensor_network_1d_compress_src(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     contract_opts
@@ -1104,10 +1161,12 @@ def tensor_network_1d_compress_src(
             ),
             **contract_opts,
         )
+        left_envs[i].normalize_()
 
     # then we sweep in from the right
     Us = [None] * L
     right_envs = {}
+    exponent = 0.0
     for i in range(L - 1, 0, -1):
         # contract the environments with the current site
         #
@@ -1149,12 +1208,18 @@ def tensor_network_1d_compress_src(
         if i < L - 1:
             # include the right environment
             ts.append(right_envs[i])
-        right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
+        if strip_exponent:
+            right_envs[i - 1], result_exponent = tensor_contract(*ts, 
+                                                                 strip_exponent=strip_exponent, 
+                                                                 **contract_opts)
+            exponent += result_exponent
+        else:
+            right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
 
     # handle the final tensor
     Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         Us,
         normalize,
@@ -1164,6 +1229,10 @@ def tensor_network_1d_compress_src(
         inplace,
         tags_per_site=[ltn.tags for ltn in local_tns],
     )
+    if strip_exponent:
+        new.exponent += exponent
+
+    return new
 
 
 def tensor_network_1d_compress_src_oversample(
@@ -1181,6 +1250,7 @@ def tensor_network_1d_compress_src_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    strip_exponent=False,
     inplace=False,
     **compress_opts,
 ):
@@ -1234,6 +1304,9 @@ def tensor_network_1d_compress_src_oversample(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -1281,6 +1354,7 @@ def tensor_network_1d_compress_src_oversample(
         permute_arrays=False,  # handle after direct sweep
         sweep_reverse=True,  # handled above, opposite to direct sweep
         equalize_norms=equalize_norms,
+        strip_exponent=strip_exponent,
         optimize=optimize,
         inplace=inplace,
     )
@@ -1310,6 +1384,7 @@ def tensor_network_1d_compress_srcmps(
     canonize=True,
     equalize_norms=False,
     inplace=False,
+    strip_exponent=False,
     **contract_opts,
 ):
     """Compress any 1D-like tensor network using 'Successive Randomized
@@ -1350,6 +1425,9 @@ def tensor_network_1d_compress_srcmps(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     contract_opts
@@ -1418,6 +1496,7 @@ def tensor_network_1d_compress_srcmps(
         if i >= 2:
             ts.append(left_envs[i - 1])
         left_envs[i] = tensor_contract(*ts, **contract_opts)
+        left_envs[i].normalize_()
 
     # then we sweep in from the right
     Us = [None] * L
@@ -1466,12 +1545,18 @@ def tensor_network_1d_compress_srcmps(
         if i < L - 1:
             # include the right environment
             ts.append(right_envs[i])
-        right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
+        if strip_exponent:
+            right_envs[i - 1], result_exponent = tensor_contract(*ts, 
+                                                                 strip_exponent=strip_exponent, 
+                                                                 **contract_opts)
+            exponent += result_exponent
+        else:
+            right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
 
     # handle the final tensor
     Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         Us,
         normalize,
@@ -1481,6 +1566,10 @@ def tensor_network_1d_compress_srcmps(
         inplace,
         tags_per_site=[ltn.tags for ltn in local_tns],
     )
+    if strip_exponent:
+        new.exponent += exponent
+
+    return new
 
 
 def tensor_network_1d_compress_srcmps_oversample(
@@ -1498,6 +1587,7 @@ def tensor_network_1d_compress_srcmps_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    strip_exponent=False,
     inplace=False,
     **compress_opts,
 ):
@@ -1553,6 +1643,9 @@ def tensor_network_1d_compress_srcmps_oversample(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    strip_exponent : bool, optional
+        If `True`, the intermediate tensors are normalized during contraction,
+        and the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts
@@ -1600,6 +1693,7 @@ def tensor_network_1d_compress_srcmps_oversample(
         permute_arrays=False,  # handle after direct sweep
         sweep_reverse=True,  # handled above, opposite to direct sweep
         equalize_norms=equalize_norms,
+        strip_exponent=strip_exponent,
         optimize=optimize,
         inplace=inplace,
     )
