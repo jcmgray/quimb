@@ -1501,6 +1501,7 @@ def tensor_network_1d_compress_srcmps(
     # then we sweep in from the right
     Us = [None] * L
     right_envs = {}
+    exponent = 0.0
     for i in range(L - 1, 0, -1):
         # contract the environments with the current site
         #
