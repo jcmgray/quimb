@@ -27,8 +27,14 @@ dtypes = ["float32", "float64", "complex64", "complex128"]
     ],
 )
 @pytest.mark.parametrize("dtype", dtypes)
+@pytest.mark.parametrize("use_input_exponent", [False, True])
 @pytest.mark.parametrize("equalize_norms", [False])
-def test_basic_compress_double_mpo(method, dtype, equalize_norms):
+def test_basic_compress_double_mpo(
+    method,
+    dtype,
+    use_input_exponent,
+    equalize_norms,
+):
     L = 8
     phys_dim = 2
     Da = 3
@@ -36,11 +42,15 @@ def test_basic_compress_double_mpo(method, dtype, equalize_norms):
     method = "direct"
 
     a = qtn.MPO_rand(L, bond_dim=Da, phys_dim=phys_dim, dtype=dtype, seed=42)
-    a.exponent = 2.0
     b = qtn.MPO_rand(L, bond_dim=Db, phys_dim=phys_dim, dtype=dtype, seed=42)
-    b.exponent = -1.0
+    if use_input_exponent:
+        a.exponent = 2.0
+        b.exponent = -1.0
     ab = b.gate_upper_with_op_lazy(a)
-    assert ab.exponent == 1.0
+    if use_input_exponent:
+        assert ab.exponent == 1.0
+    else:
+        assert ab.exponent == 0.0
 
     c = qtn.tensor_network_1d_compress(
         ab,
