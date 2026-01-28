@@ -1512,8 +1512,6 @@ def maybe_unwrap(
     -------
     TensorNetwork, Tensor or scalar
     """
-    exponent = 0.0
-
     if isinstance(t, TensorNetwork):
         if equalize_norms is True:
             if strip_exponent:
@@ -1526,12 +1524,11 @@ def maybe_unwrap(
         if preserve_tensor_network or (t.num_tensors != 1):
             return t
 
-        if strip_exponent:
-            # extract from tn
-            exponent += t.exponent
-
-        # else get the single tensor
+        # else get the single tensor, first extracting exponent
+        exponent = t.exponent
         (t,) = t.tensor_map.values()
+    else:
+        exponent = 0.0
 
     # now we have Tensor
     if output_inds is not None and t.inds != output_inds:
@@ -1552,6 +1549,10 @@ def maybe_unwrap(
     if strip_exponent:
         # return mantissa and exponent separately
         return result, exponent
+
+    if not isinstance(exponent, float) or exponent != 0.0:
+        # avoid branching for backend array exponents
+        result = result * (10.0**exponent)
 
     return result
 

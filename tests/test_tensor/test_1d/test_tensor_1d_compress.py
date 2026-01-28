@@ -39,7 +39,6 @@ def test_basic_compress_double_mpo(
     phys_dim = 2
     Da = 3
     Db = 2
-    method = "direct"
 
     a = qtn.MPO_rand(L, bond_dim=Da, phys_dim=phys_dim, dtype=dtype, seed=42)
     b = qtn.MPO_rand(L, bond_dim=Db, phys_dim=phys_dim, dtype=dtype, seed=42)

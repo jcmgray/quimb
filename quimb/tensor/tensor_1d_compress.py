@@ -734,7 +734,8 @@ def tensor_network_1d_compress_zipup(
         else:
             if equalize_norms:
                 C, result_exponent = tensor_contract(
-                    Us, *tn.select_tensors(site_tags[i]), 
+                    Us,
+                    *tn.select_tensors(site_tags[i]),
                     optimize=optimize,
                     strip_exponent=True,
                 )
@@ -989,7 +990,7 @@ def tensor_network_1d_compress_src(
     cutoff=0.0,
     site_tags=None,
     normalize=False,
-    noise_mode="separable",
+    noise_mode="joint",
     permute_arrays=True,
     sweep_reverse=False,
     canonize=True,
@@ -1195,9 +1196,9 @@ def tensor_network_1d_compress_src(
             # include the right environment
             ts.append(right_envs[i])
         if equalize_norms:
-            right_envs[i - 1], result_exponent = tensor_contract(*ts, 
-                                                                 strip_exponent=True, 
-                                                                 **contract_opts)
+            right_envs[i - 1], result_exponent = tensor_contract(
+                *ts, strip_exponent=True, **contract_opts
+            )
             exponent += result_exponent
         else:
             right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
@@ -1525,9 +1526,9 @@ def tensor_network_1d_compress_srcmps(
             # include the right environment
             ts.append(right_envs[i])
         if equalize_norms:
-            right_envs[i - 1], result_exponent = tensor_contract(*ts, 
-                                                                 strip_exponent=True, 
-                                                                 **contract_opts)
+            right_envs[i - 1], result_exponent = tensor_contract(
+                *ts, strip_exponent=True, **contract_opts
+            )
             exponent += result_exponent
         else:
             right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
@@ -2565,7 +2566,7 @@ def tensor_network_1d_compress(
     compress_opts=None,
     inplace=False,
     **kwargs,
-):
+) -> TensorNetwork:
     """Compress a 1D-like tensor network using the specified method.
 
     Parameters
