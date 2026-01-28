@@ -2799,6 +2799,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             lni = (kr.H | kr).contract(optimize=optimize, **contract_opts)
             zvals.append((lni, C))
 
+        # XXX: handle .exponent
         return (combine_local_contractions(zvals) * nfactor) ** 0.5
 
     def compute_local_expectation_gloop_expand(

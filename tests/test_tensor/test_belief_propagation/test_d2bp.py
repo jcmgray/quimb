@@ -20,6 +20,19 @@ def test_contract(damping, dtype, diis):
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_contract_with_exponent(dtype):
+    tn = qtn.TN_rand_tree(
+        10, 3, phys_dim=2, max_degree=4, seed=42, dtype=dtype
+    )
+    Zex = tn.H @ tn
+    tn.equalize_norms_(1.7)
+    assert tn.exponent
+    bp = qbp.D2BP(tn)
+    bp.run()
+    assert bp.contract() == pytest.approx(Zex, rel=1e-5)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("local_convergence", [True, False])
 def test_tree_exact(dtype, local_convergence):
     psi = qtn.TN_rand_tree(20, 3, 2, dtype=dtype, seed=42)

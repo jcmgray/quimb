@@ -33,6 +33,18 @@ def test_contract_tree_exact(messages):
     assert Z == pytest.approx(Z_bp, rel=1e-12)
 
 
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_contract_with_exponent(dtype):
+    tn = qtn.TN_rand_tree(10, 3, max_degree=4, seed=42, dtype=dtype)
+    Zex = tn.contract()
+    tn.equalize_norms_(1.7)
+    assert tn.exponent
+    bp = qbp.HV1BP(tn)
+    bp.run()
+    assert bp.contract_dense() == pytest.approx(Zex, rel=1e-5)
+    assert bp.contract() == pytest.approx(Zex, rel=1e-5)
+
+
 @pytest.mark.parametrize("damping", [0.0, 0.1, 0.5])
 @pytest.mark.parametrize("diis", [False, True])
 def test_contract_normal(damping, diis):

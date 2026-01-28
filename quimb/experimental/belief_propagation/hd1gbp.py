@@ -243,12 +243,17 @@ class HD1GBP(BeliefPropagationCommon):
 
         return ts
 
-    def contract(self, strip_exponent=False, check_zero=True):
-        """Contract this tensor network given the current GBP messages.
+    def contract(
+        self,
+        strip_exponent=False,
+        check_zero=True,
+        **kwargs,
+    ):
+        """Contract this tensor network via GBP using the current messages.
 
         Parameters
         ----------
-        sstrip_exponent : bool, optional
+        strip_exponent : bool, optional
             Whether to strip the exponent from the final result. If ``True``
             then the returned result is ``(mantissa, exponent)``.
 
@@ -271,6 +276,9 @@ class HD1GBP(BeliefPropagationCommon):
             backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
+            mantissa=self.sign,
+            exponent=self.exponent,
+            **kwargs,
         )
 
     def draw(self, rhighlight=None, zfactor=2):

@@ -338,9 +338,11 @@ class HD1BP(BeliefPropagationCommon):
         return contract_hyper_messages(
             self.tn,
             self.messages,
+            backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
-            backend=self.backend,
+            mantissa=self.sign,
+            exponent=self.exponent,
         )
 
     def normalize_messages(self):
@@ -433,6 +435,8 @@ class HD1BP(BeliefPropagationCommon):
             strip_exponent=strip_exponent,
             check_zero=check_zero,
             backend=self.backend,
+            mantissa=self.sign,
+            exponent=self.exponent,
         )
 
 

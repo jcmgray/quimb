@@ -146,6 +146,7 @@ class L1BP(BeliefPropagationCommon):
                 self.contraction_tns[i, j] = tn_i_to_j
 
     def iterate(self, tol=5e-6):
+        """Perform one round of message passing."""
         if (not self.local_convergence) or (not self.touched):
             # assume if asked to iterate that we want to check all messages
             self.touched.update(
@@ -216,7 +217,10 @@ class L1BP(BeliefPropagationCommon):
             "max_mdiff": max_mdiff,
         }
 
-    def contract(self, strip_exponent=False, check_zero=True):
+    def contract(self, strip_exponent=False, check_zero=True, **kwargs):
+        """Contract the target tensor network via lazy belief propagation using
+        the current messages.
+        """
         zvals = []
         for site, tn_ic in self.local_tns.items():
             if site in self.neighbors:
@@ -251,6 +255,9 @@ class L1BP(BeliefPropagationCommon):
             backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
+            mantissa=self.sign,
+            exponent=self.exponent,
+            **kwargs,
         )
 
     def normalize_message_pairs(self):

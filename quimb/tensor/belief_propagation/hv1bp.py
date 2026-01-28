@@ -16,16 +16,13 @@ from .bp_common import (
 def _compute_all_hyperind_messages_tree_batched(bm):
     """ """
     ndim = len(bm)
+    xp = ar.get_namespace(bm)
 
     if ndim == 2:
         # shortcut for 'bonds', which just swap places
-        return ar.do("flip", bm, (0,))
+        return xp.flip(bm, (0,))
 
-    backend = ar.infer_backend(bm)
-    _prod = ar.get_lib_fn(backend, "prod")
-    _empty_like = ar.get_lib_fn(backend, "empty_like")
-
-    bmo = _empty_like(bm)
+    bmo = xp.empty_like(bm)
     queue = [(tuple(range(ndim)), 1, bm)]
 
     while queue:
@@ -48,10 +45,10 @@ def _compute_all_hyperind_messages_tree_batched(bm):
         bml, bmr = bm[:k], bm[k:]
 
         # contract the right messages to get new left array
-        xl = x * _prod(bmr, axis=0)
+        xl = x * xp.prod(bmr, axis=0)
 
         # contract the left messages to get new right array
-        xr = _prod(bml, axis=0) * x
+        xr = xp.prod(bml, axis=0) * x
 
         # add the queue for possible further halving
         queue.append((jl, xl, bml))
@@ -62,17 +59,17 @@ def _compute_all_hyperind_messages_tree_batched(bm):
 
 def _compute_all_hyperind_messages_prod_batched(bm, smudge_factor=1e-12):
     """ """
-    backend = ar.infer_backend(bm)
-    _prod = ar.get_lib_fn(backend, "prod")
-    _reshape = ar.get_lib_fn(backend, "reshape")
+    xp = ar.get_namespace(bm)
 
     ndim = len(bm)
     if ndim == 2:
         # shortcut for 'bonds', which just swap
-        return ar.do("flip", bm, (0,))
+        return xp.flip(bm, (0,))
 
-    combined = _prod(bm, axis=0)
-    return _reshape(combined, (1, *ar.shape(combined))) / (bm + smudge_factor)
+    combined = xp.prod(bm, axis=0)
+    return xp.reshape(combined, (1, *ar.shape(combined))) / (
+        bm + smudge_factor
+    )
 
 
 def _compute_all_tensor_messages_tree_batched(bx, bm):
@@ -233,12 +230,14 @@ def _gather_zb(zb, power=1.0):
     exponent : float
         The accumulated exponent.
     """
-    zb_mag = ar.do("abs", zb)
+    xp = ar.get_namespace(zb)
+
+    zb_mag = xp.abs(zb)
     zb_phase = zb / zb_mag
 
     # accumulate sign and exponent separately
-    sign = ar.do("prod", zb_phase)
-    exponent = ar.do("sum", ar.do("log10", zb_mag))
+    sign = xp.prod(zb_phase)
+    exponent = xp.sum(xp.log10(zb_mag))
 
     if power != 1.0:
         sign **= power
@@ -248,8 +247,10 @@ def _gather_zb(zb, power=1.0):
 
 
 def _contract_index_region_single(bm):
+    xp = ar.get_namespace(bm)
+
     # take product over input position and sum over variable
-    zb = ar.do("sum", ar.do("prod", bm, axis=0), axis=1)
+    zb = xp.sum(xp.prod(bm, axis=0), axis=1)
     # that just leaves broadcast dimension to take product over
     return _gather_zb(zb)
 
@@ -395,31 +396,27 @@ class HV1BP(BeliefPropagationCommon):
 
     @normalize.setter
     def normalize(self, normalize):
+        xp = self.tn.get_namespace()
+
         if callable(normalize):
             # custom normalization function
             _normalize = normalize
         elif normalize == "L1":
-            _abs = ar.get_lib_fn(self.backend, "abs")
-            _sum = ar.get_lib_fn(self.backend, "sum")
 
             def _normalize(bx):
-                bxn = _sum(_abs(bx), axis=-1, keepdims=True)
+                bxn = xp.sum(xp.abs(bx), axis=-1, keepdims=True)
                 bx /= bxn
 
         elif normalize == "L2":
-            _abs = ar.get_lib_fn(self.backend, "abs")
-            _sum = ar.get_lib_fn(self.backend, "sum")
 
             def _normalize(bx):
-                bxn = _sum(_abs(bx) ** 2, axis=-1, keepdims=True) ** 0.5
+                bxn = xp.sum(xp.abs(bx) ** 2, axis=-1, keepdims=True) ** 0.5
                 bx /= bxn
 
         elif normalize == "Linf":
-            _abs = ar.get_lib_fn(self.backend, "abs")
-            _max = ar.get_lib_fn(self.backend, "max")
 
             def _normalize(bx):
-                bxn = _max(_abs(bx), axis=-1, keepdims=True)
+                bxn = xp.max(xp.abs(bx), axis=-1, keepdims=True)
                 bx /= bxn
 
         else:
@@ -433,32 +430,26 @@ class HV1BP(BeliefPropagationCommon):
 
     @distance.setter
     def distance(self, distance):
+        xp = self.tn.get_namespace()
+
         if callable(distance):
             # custom normalization function
             _distance_fn = distance
 
         elif distance == "L1":
-            _abs = ar.get_lib_fn(self.backend, "abs")
-            _sum = ar.get_lib_fn(self.backend, "sum")
-            _max = ar.get_lib_fn(self.backend, "max")
 
             def _distance_fn(bx, by):
-                return _max(_sum(_abs(bx - by), axis=-1))
+                return xp.max(xp.sum(xp.abs(bx - by), axis=-1))
 
         elif distance == "L2":
-            _abs = ar.get_lib_fn(self.backend, "abs")
-            _sum = ar.get_lib_fn(self.backend, "sum")
-            _max = ar.get_lib_fn(self.backend, "max")
 
             def _distance_fn(bx, by):
-                return _max(_sum(_abs(bx - by) ** 2, axis=-1)) ** 0.5
+                return xp.max(xp.sum(xp.abs(bx - by) ** 2, axis=-1)) ** 0.5
 
         elif distance == "Linf":
-            _abs = ar.get_lib_fn(self.backend, "abs")
-            _max = ar.get_lib_fn(self.backend, "max")
 
             def _distance_fn(bx, by):
-                return _max(_abs(bx - by))
+                return xp.max(xp.abs(bx - by))
 
         else:
             raise ValueError(f"Unrecognized distance={distance}")
@@ -467,8 +458,7 @@ class HV1BP(BeliefPropagationCommon):
         self._distance_fn = _distance_fn
 
     def initialize_messages_batched(self, messages=None):
-        _stack = ar.get_lib_fn(self.backend, "stack")
-        _array = ar.get_lib_fn(self.backend, "array")
+        xp = self.tn.get_namespace()
 
         if isinstance(messages, dict):
             # 'dense' (i.e. non-batch) messages explicitly supplied
@@ -483,7 +473,7 @@ class HV1BP(BeliefPropagationCommon):
             messages = initialize_hyper_messages(self.tn)
         elif messages is None:
             # default to uniform messages
-            message_init_fn = ar.get_lib_fn(self.backend, "ones")
+            message_init_fn = self.tn.get_namespace().ones
         else:
             raise ValueError(f"Unrecognized messages={messages}")
 
@@ -567,8 +557,8 @@ class HV1BP(BeliefPropagationCommon):
             for rank, batch in batched_inputs.items():
                 if isinstance(messages, dict):
                     # stack given messages into single arrays
-                    batched_inputs[rank] = _stack(
-                        tuple(_stack(batch_p) for batch_p in batch)
+                    batched_inputs[rank] = xp.stack(
+                        tuple(xp.stack(batch_p) for batch_p in batch)
                     )
                 else:
                     # create message arrays directly
@@ -576,7 +566,7 @@ class HV1BP(BeliefPropagationCommon):
 
         # stack all tensors of each rank into a single array
         for rank, tensors in batched_tensors.items():
-            batched_tensors[rank] = _stack(tensors)
+            batched_tensors[rank] = xp.stack(tensors)
 
         # make numeric masks for updating output to input messages
         masks_m = {}
@@ -604,7 +594,7 @@ class HV1BP(BeliefPropagationCommon):
                 # first dimension is in/out
                 # second dimension is position or batch
                 # third dimension is stack index
-                mask = _array([[ma_pi, ma_bi], [ma_po, ma_bo]])
+                mask = xp.array([[ma_pi, ma_bi], [ma_po, ma_bo]])
                 masks[key] = mask
 
         self.batched_inputs_m = batched_inputs_m
@@ -789,8 +779,8 @@ class HV1BP(BeliefPropagationCommon):
             futs = [self.pool.submit(fn, *args) for fn, args in fn_args]
             results = [fut.result() for fut in futs]
 
-        sign = 1.0
-        exponent = 0.0
+        sign = self.sign
+        exponent = self.exponent
         for s, e in results:
             sign *= s
             exponent += e
@@ -807,9 +797,11 @@ class HV1BP(BeliefPropagationCommon):
         return contract_hyper_messages(
             self.tn,
             self.get_messages_dense(),
+            backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
-            backend=self.backend,
+            mantissa=self.sign,
+            exponent=self.exponent,
         )
 
 

@@ -299,9 +299,9 @@ class L2BP(BeliefPropagationCommon):
             tmi /= nij * nii / njj
             tmj /= nij * njj / nii
 
-    def contract(self, strip_exponent=False, check_zero=True):
-        """Estimate the contraction of the norm squared using the current
-        messages.
+    def contract(self, strip_exponent=False, check_zero=True, **kwargs):
+        """Contract the frobenius norm squared of the target tensor network via
+        lazy belief propagation using the current messages.
         """
         zvals = []
         for i, ket in self.local_tns.items():
@@ -334,6 +334,9 @@ class L2BP(BeliefPropagationCommon):
             backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
+            mantissa=self.sign**2,
+            exponent=self.exponent * 2,
+            **kwargs,
         )
 
     def partial_trace(

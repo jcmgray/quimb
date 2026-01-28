@@ -561,9 +561,11 @@ def combine_local_contractions(
 def contract_hyper_messages(
     tn,
     messages,
+    backend=None,
     strip_exponent=False,
     check_zero=True,
-    backend=None,
+    mantissa=None,
+    exponent=None,
 ):
     """Estimate the contraction of ``tn`` given ``messages``, via the
     exponential of the Bethe free entropy.
@@ -604,6 +606,8 @@ def contract_hyper_messages(
         backend=backend,
         strip_exponent=strip_exponent,
         check_zero=check_zero,
+        mantissa=mantissa,
+        exponent=exponent,
     )
 
 

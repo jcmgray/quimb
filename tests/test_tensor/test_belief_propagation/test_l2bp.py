@@ -15,6 +15,19 @@ def test_contract_tree_exact(dtype):
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_contract_with_exponent(dtype):
+    tn = qtn.TN_rand_tree(
+        10, 3, phys_dim=2, max_degree=4, seed=42, dtype=dtype
+    )
+    Zex = tn.H @ tn
+    tn.equalize_norms_(1.7)
+    assert tn.exponent
+    bp = qbp.L2BP(tn)
+    bp.run()
+    assert bp.contract() == pytest.approx(Zex, rel=1e-5)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
 def test_contract_loopy_approx(dtype):
     peps = qtn.PEPS.rand(3, 4, 3, dtype=dtype, seed=42)
     norm_ex = peps.H @ peps

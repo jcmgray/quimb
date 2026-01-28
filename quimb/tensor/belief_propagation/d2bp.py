@@ -382,14 +382,18 @@ class D2BP(BeliefPropagationCommon):
         self,
         strip_exponent=False,
         check_zero=True,
+        **kwargs,
     ):
-        """Estimate the total contraction, i.e. the 2-norm.
+        """Contract the frobenius norm squared of the target tensor network via
+        BP.
 
         Parameters
         ----------
         strip_exponent : bool, optional
             Whether to strip the exponent from the final result. If ``True``
             then the returned result is ``(mantissa, exponent)``.
+        check_zero : bool, optional
+            Whether to check for zero values and return zero early.
 
         Returns
         -------
@@ -416,10 +420,11 @@ class D2BP(BeliefPropagationCommon):
         return combine_local_contractions(
             zvals,
             backend=self.backend,
-            mantissa=self.sign,
-            exponent=self.exponent,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
+            mantissa=self.sign**2,
+            exponent=self.exponent * 2,
+            **kwargs,
         )
 
     def get_cluster_excited(
@@ -751,8 +756,8 @@ class D2BP(BeliefPropagationCommon):
 
         return combine_local_contractions(
             zvals,
-            mantissa=self.sign,
-            exponent=self.exponent,
+            mantissa=self.sign**2,
+            exponent=self.exponent * 2,
             backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,

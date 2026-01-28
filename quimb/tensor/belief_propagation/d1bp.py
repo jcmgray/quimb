@@ -428,7 +428,9 @@ class D1BP(BeliefPropagationCommon):
         check_zero=True,
         **kwargs,
     ):
-        """Estimate the contraction of the tensor network."""
+        """Contract the target tensor network via BP using the current
+        messages.
+        """
 
         zvals = [
             (self.local_tensor_contract(tid), 1) for tid in self.tn.tensor_map
