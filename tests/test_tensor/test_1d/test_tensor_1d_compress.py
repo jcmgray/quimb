@@ -60,6 +60,9 @@ def test_basic_compress_double_mpo(
     assert c.istree()
     assert c.max_bond() == 6
 
+    if equalize_norms is True:
+        assert c.exponent == 0.0
+
     eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
     assert c.distance_normalized(ab) < eps
 

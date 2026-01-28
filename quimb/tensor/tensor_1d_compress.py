@@ -278,15 +278,53 @@ def tensor_network_1d_compress_direct(
 
 
 def _form_final_tn_from_tensor_sequence(
-    tn,
-    ts,
-    normalize,
-    sweep_reverse,
-    permute_arrays,
-    equalize_norms,
-    inplace,
+    tn: TensorNetwork,
+    ts: list[Tensor],
+    normalize: bool,
+    sweep_reverse: bool,
+    permute_arrays: bool | str,
+    equalize_norms: bool | float,
+    inplace: bool,
     tags_per_site=None,
+    exponent=0.0,
 ):
+    """Form the final, compressed tensor network given the the original target
+    (uncompressed) tensor network and the new sequence of tensors, e.g.
+    sequence of unitaries from the dm method.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The original target tensor network.
+    ts : list of Tensor
+        The sequence of tensors describing the compressed tensor network,
+        assumed to be in 'right canonical' form.
+    normalize : bool
+        Whether to normalize the final tensor network, making use of the fact
+        that the output tensor network is in right canonical form.
+    sweep_reverse : bool
+        Whether to reverse the order the tensors are inserted, e.g. if
+        `site_tags` have been reversed, purely for cosmetic ordering of the
+        resulting `tensor_map`.
+    permute_arrays : bool or str
+        Whether to permute the array indices of the final tensor network into
+        canonical order. If ``True`` will use the default order, if any (e.g.
+        MatrixProductState), otherwise if a string this specifies a custom
+        order.
+    equalize_norms : bool or float
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is given, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`. If
+        ``True``, whatever current `.exponent` will be distributed equally
+        among the tensors.
+    inplace : bool
+        Whether to perform the compression inplace or not.
+    tags_per_site : sequence of sequence of str, optional
+        The tags to assign to each tensor in ``ts``, in order.
+    exponent : float
+        An exponent value to add to the final tensor network's existing
+        exponent, e.g. generated during the compression procedure.
+    """
     if tags_per_site is not None:
         for t, tags in zip(ts, tags_per_site):
             t.modify(tags=tags)
@@ -309,7 +347,9 @@ def _form_final_tn_from_tensor_sequence(
         new = TensorNetwork(ts, virtual=True)
         # cast as whatever the input was e.g. MPS, MPO
         new.view_like_(tn)
-        new.exponent = tn.exponent
+
+    # add the existing exponent to any generated during the compression
+    new.exponent = tn.exponent + exponent
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(new, permute_arrays)
@@ -608,9 +648,8 @@ def tensor_network_1d_compress_dm(
         permute_arrays,
         equalize_norms,
         inplace,
+        exponent=exponent,
     )
-    if equalize_norms:
-        new.exponent += exponent
 
     return new
 
@@ -790,9 +829,8 @@ def tensor_network_1d_compress_zipup(
         permute_arrays,
         equalize_norms,
         inplace,
+        exponent=exponent,
     )
-    if equalize_norms:
-        new.exponent += exponent
 
     return new
 
@@ -1215,9 +1253,8 @@ def tensor_network_1d_compress_src(
         equalize_norms,
         inplace,
         tags_per_site=[ltn.tags for ltn in local_tns],
+        exponent=exponent,
     )
-    if equalize_norms:
-        new.exponent += exponent
 
     return new
 
@@ -1545,9 +1582,8 @@ def tensor_network_1d_compress_srcmps(
         equalize_norms,
         inplace,
         tags_per_site=[ltn.tags for ltn in local_tns],
+        exponent=exponent,
     )
-    if equalize_norms:
-        new.exponent += exponent
 
     return new
 
@@ -2228,6 +2264,14 @@ def tensor_network_1d_compress_fit(
     # choose to conjugate the smaller, fitting network
     tn_fit = tn_fit.conj(inplace=inplace_fit)
     tn_fit.add_tag("__FIT__")
+
+    # make sure each TN has the same scaling exponent -> average of inputs
+    new_exponent = sum(tn.exponent for tn in tns) / len(tns)
+    if not isinstance(new_exponent, float) or new_exponent != 0.0:
+        for tn in tns:
+            tn.distribute_exponent(new_exponent=new_exponent)
+        tn_fit.distribute_exponent(new_exponent=new_exponent)
+
     # note these are all views of `tn_fit` and thus will update as it does
     tn_overlaps = [(tn_fit | tn) for tn in tns]
 
