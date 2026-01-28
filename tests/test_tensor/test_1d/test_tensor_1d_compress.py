@@ -28,7 +28,7 @@ dtypes = ["float32", "float64", "complex64", "complex128"]
 )
 @pytest.mark.parametrize("dtype", dtypes)
 @pytest.mark.parametrize("use_input_exponent", [False, True])
-@pytest.mark.parametrize("equalize_norms", [False])
+@pytest.mark.parametrize("equalize_norms", [False, True, 1.0])
 def test_basic_compress_double_mpo(
     method,
     dtype,
