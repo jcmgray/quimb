@@ -33,6 +33,9 @@ class MPS1BP(BeliefPropagationCommon):
     method : str, optional
         The method to use when compressing the message update tensor network.
         See `qtn.tensor_network_1d_compress` for options.
+    fit_messages : bool, optional
+        Whether to use the current message as a fit target when using 'fit'
+        or 'srcmps' compression methods. Default is True.
     compress_opts : dict, optional
         Additional options to pass to `qtn.tensor_network_1d_compress`.
     optimize : str, optional
@@ -50,7 +53,8 @@ class MPS1BP(BeliefPropagationCommon):
         site_tags=None,
         *,
         cutoff=0.0,
-        method="fit",
+        method="srcmps",
+        fit_messages=True,
         compress_opts=None,
         damping=0.0,
         update="sequential",
@@ -105,6 +109,7 @@ class MPS1BP(BeliefPropagationCommon):
         self.compress_opts.setdefault("method", method)
         self.compress_opts.setdefault("max_bond", max_bond)
         self.compress_opts.setdefault("cutoff", cutoff)
+        self.fit_messages = fit_messages
         self.backend = ar.infer_backend(next(t.data for t in tn))
         self.optimize = optimize
 
@@ -153,6 +158,11 @@ class MPS1BP(BeliefPropagationCommon):
         # form the message update tensor network
         tn_a_to_b = self.get_message_tn(a, b)
 
+        kwargs = {}
+        if self.compress_opts["method"] in ("fit", "srcmps"):
+            if self.fit_messages:
+                kwargs["tn_fit"] = self.messages[a, b]
+
         # compress it to MPS form
         qtn.tensor_network_1d_compress(
             tn_a_to_b,
@@ -160,6 +170,7 @@ class MPS1BP(BeliefPropagationCommon):
             normalize=True,
             inplace=True,
             **self.compress_opts,
+            **kwargs,
         )
 
         # remove all but layer tags so they don't propagate
