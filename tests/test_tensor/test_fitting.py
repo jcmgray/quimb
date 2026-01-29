@@ -36,6 +36,29 @@ def test_tensor_network_distance(method, normalized):
         assert d1 == pytest.approx(d2)
 
 
+@pytest.mark.parametrize("method", ("auto", "dense", "overlap"))
+@pytest.mark.parametrize(
+    "normalized",
+    (
+        True,
+        False,
+        "squared",
+        "infidelity",
+        "infidelity_sqrt",
+    ),
+)
+def test_distance_contract_structured_with_exponents(method, normalized):
+    a = qtn.MPS_rand_state(5, 3, seed=42)
+    b = qtn.MPS_rand_state(5, 3, seed=43)
+    dex = a.distance(b, method=method, normalized=normalized)
+    a.equalize_norms_(1.0)
+    assert a.exponent != 0.0
+    b.equalize_norms_(1.0)
+    assert b.exponent != 0.0
+    d = a.distance(b, method=method, normalized=normalized)
+    assert d == pytest.approx(dex)
+
+
 @pytest.mark.parametrize(
     "opts",
     [

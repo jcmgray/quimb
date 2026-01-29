@@ -253,7 +253,7 @@ def tensor_network_1d_compress_direct(
             max_bond=max_bond,
             cutoff=cutoff,
             cutoff_mode=cutoff_mode,
-            equalize_norms=equalize_norms,
+            equalize_norms=False,
             **compress_opts,
         )
         #     │ │ │ │ │ │ │ │ │ │
@@ -261,6 +261,9 @@ def tensor_network_1d_compress_direct(
         #                      :
         #                 : :  max_bond
         #               i-1 i
+        if equalize_norms:
+            # only rescale the non-isometric tensor
+            new.strip_exponent(new[site_tags[i - 1]], value=equalize_norms)
 
     if normalize:
         # make use of the fact that the output is in right canonical form
@@ -278,15 +281,53 @@ def tensor_network_1d_compress_direct(
 
 
 def _form_final_tn_from_tensor_sequence(
-    tn,
-    ts,
-    normalize,
-    sweep_reverse,
-    permute_arrays,
-    equalize_norms,
-    inplace,
+    tn: TensorNetwork,
+    ts: list[Tensor],
+    normalize: bool,
+    sweep_reverse: bool,
+    permute_arrays: bool | str,
+    equalize_norms: bool | float,
+    inplace: bool,
     tags_per_site=None,
+    exponent=0.0,
 ):
+    """Form the final, compressed tensor network given the the original target
+    (uncompressed) tensor network and the new sequence of tensors, e.g.
+    sequence of unitaries from the dm method.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The original target tensor network.
+    ts : list of Tensor
+        The sequence of tensors describing the compressed tensor network,
+        assumed to be in 'right canonical' form.
+    normalize : bool
+        Whether to normalize the final tensor network, making use of the fact
+        that the output tensor network is in right canonical form.
+    sweep_reverse : bool
+        Whether to reverse the order the tensors are inserted, e.g. if
+        `site_tags` have been reversed, purely for cosmetic ordering of the
+        resulting `tensor_map`.
+    permute_arrays : bool or str
+        Whether to permute the array indices of the final tensor network into
+        canonical order. If ``True`` will use the default order, if any (e.g.
+        MatrixProductState), otherwise if a string this specifies a custom
+        order.
+    equalize_norms : bool or float
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is given, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`. If
+        ``True``, whatever current `.exponent` will be distributed equally
+        among the tensors.
+    inplace : bool
+        Whether to perform the compression inplace or not.
+    tags_per_site : sequence of sequence of str, optional
+        The tags to assign to each tensor in ``ts``, in order.
+    exponent : float
+        An exponent value to add to the final tensor network's existing
+        exponent, e.g. generated during the compression procedure.
+    """
     if tags_per_site is not None:
         for t, tags in zip(ts, tags_per_site):
             t.modify(tags=tags)
@@ -294,6 +335,10 @@ def _form_final_tn_from_tensor_sequence(
     if normalize:
         # in right canonical form already
         ts[0].normalize_()
+        new_exponent = 0.0
+        equalize_norms = False
+    else:
+        new_exponent = tn.exponent + exponent
 
     if sweep_reverse:
         # this is purely cosmetic for ordering tensor_map dict entries
@@ -309,6 +354,9 @@ def _form_final_tn_from_tensor_sequence(
         new = TensorNetwork(ts, virtual=True)
         # cast as whatever the input was e.g. MPS, MPO
         new.view_like_(tn)
+
+    # add the existing exponent to any generated during the compression
+    new.exponent = new_exponent
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(new, permute_arrays)
@@ -380,7 +428,7 @@ def tensor_network_1d_compress_dm(
         Dummy argument to match the signature of other compression methods.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -442,6 +490,8 @@ def tensor_network_1d_compress_dm(
         drop_tags=True,
         optimize=optimize,
     )
+    if equalize_norms:
+        left_envs[1].normalize_()
     for i in range(2, N):
         left_envs[i] = tensor_contract(
             left_envs[i - 1],
@@ -450,12 +500,15 @@ def tensor_network_1d_compress_dm(
             drop_tags=True,
             optimize=optimize,
         )
+        if equalize_norms:
+            left_envs[i].normalize_()
 
     # build projectors and right environments
     Us = [None] * N
     right_env_ket = None
     right_env_bra = None
     new_bonds = collections.defaultdict(rand_uuid)
+    exponent = 0.0
 
     for i in range(N - 1, 0, -1):
         # form the reduced density matrix
@@ -548,19 +601,38 @@ def tensor_network_1d_compress_dm(
             right_ket_tensors.append(right_env_ket)
             right_bra_tensors.append(right_env_bra)
 
-        right_env_ket = tensor_contract(
-            *right_ket_tensors,
-            preserve_tensor=True,
-            drop_tags=True,
-            optimize=optimize,
-        )
+        if equalize_norms:
+            right_env_ket, result_exponent = tensor_contract(
+                *right_ket_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+                strip_exponent=True,
+            )
+            exponent += result_exponent
+        else:
+            right_env_ket = tensor_contract(
+                *right_ket_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+            )
         # TODO: could compute this just as conjugated and relabelled ket env
-        right_env_bra = tensor_contract(
-            *right_bra_tensors,
-            preserve_tensor=True,
-            drop_tags=True,
-            optimize=optimize,
-        )
+        if equalize_norms:
+            right_env_bra, _ = tensor_contract(
+                *right_bra_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+                strip_exponent=True,
+            )
+        else:
+            right_env_bra = tensor_contract(
+                *right_bra_tensors,
+                preserve_tensor=True,
+                drop_tags=True,
+                optimize=optimize,
+            )
 
     # form the final site
     #
@@ -575,7 +647,7 @@ def tensor_network_1d_compress_dm(
         preserve_tensor=True,
     )
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         Us,
         normalize,
@@ -583,7 +655,10 @@ def tensor_network_1d_compress_dm(
         permute_arrays,
         equalize_norms,
         inplace,
+        exponent=exponent,
     )
+
+    return new
 
 
 def tensor_network_1d_compress_zipup(
@@ -646,7 +721,7 @@ def tensor_network_1d_compress_zipup(
         canonical form instead of right canonical.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -682,12 +757,13 @@ def tensor_network_1d_compress_zipup(
         #     │ │ │ │ │ │ │ │ │ │
         #     ▶─▶─▶─▶─▶─▶─▶─▶─▶─○  MPS
         #
-        tn = tn.canonize_around_(site_tags[-1])
+        tn = tn.canonize_around_(site_tags[-1], equalize_norms=equalize_norms)
 
     # zip along the bonds
     ts = [None] * N
     bix = None
     Us = None
+    exponent = 0.0
     for i in range(N - 1, 0, -1):
         #          U*s VH
         #      │ │     │ │
@@ -702,9 +778,18 @@ def tensor_network_1d_compress_zipup(
                 *tn.select_tensors(site_tags[i]), optimize=optimize
             )
         else:
-            C = tensor_contract(
-                Us, *tn.select_tensors(site_tags[i]), optimize=optimize
-            )
+            if equalize_norms:
+                C, result_exponent = tensor_contract(
+                    Us,
+                    *tn.select_tensors(site_tags[i]),
+                    optimize=optimize,
+                    strip_exponent=True,
+                )
+                exponent += result_exponent
+            else:
+                C = tensor_contract(
+                    Us, *tn.select_tensors(site_tags[i]), optimize=optimize
+                )
         #         i
         #      │  │    │ │
         #     ─▶──□━━━━◀━◀━
@@ -743,7 +828,7 @@ def tensor_network_1d_compress_zipup(
         Us, *tn.select_tensors(site_tags[0]), optimize=optimize
     )
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         ts,
         normalize,
@@ -751,11 +836,14 @@ def tensor_network_1d_compress_zipup(
         permute_arrays,
         equalize_norms,
         inplace,
+        exponent=exponent,
     )
+
+    return new
 
 
 def _do_direct_sweep(
-    tn,
+    tn: TensorNetwork,
     site_tags,
     max_bond,
     cutoff,
@@ -775,13 +863,18 @@ def _do_direct_sweep(
             max_bond=max_bond,
             cutoff=cutoff,
             cutoff_mode=cutoff_mode,
-            equalize_norms=equalize_norms,
+            equalize_norms=False,
             **compress_opts,
         )
+        if equalize_norms:
+            # only rescale the non-isometric tensor
+            tn.strip_exponent(tn[site_tags[i - 1]], value=equalize_norms)
 
     if normalize:
         # make use of the fact that the output is in right canonical form
-        tn[site_tags[-1]].normalize_()
+        tn[site_tags[0]].normalize_()
+        tn.exponent = 0.0
+        equalize_norms = False
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(tn, permute_arrays)
@@ -864,7 +957,7 @@ def tensor_network_1d_compress_zipup_oversample(
         canonical form instead of right canonical.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -941,13 +1034,61 @@ def tensor_network_1d_compress_zipup_oversample(
     )
 
 
+def _src_get_local_noise_tensors(
+    noise_mode,
+    noise_dist,
+    max_bond,
+    Bix,
+    inds,
+    ind_sizes,
+    site_tag,
+):
+    # get random sampling tensors for the previous site
+    if noise_mode == "joint":
+        # one big noise tensor for all output legs on this site
+        tws = [
+            rand_tensor(
+                shape=(max_bond, *ind_sizes),
+                inds=(Bix, *inds),
+                tags=(site_tag,),
+                dist=noise_dist,
+            )
+        ]
+    elif noise_mode == "separable":
+        # one stack of noise vectors for each leg on this site
+        tws = [
+            rand_tensor(
+                shape=(max_bond, d),
+                inds=(Bix, ix),
+                tags=(site_tag,),
+                dist=noise_dist,
+            )
+            for ix, d in zip(inds, ind_sizes)
+        ]
+    elif noise_mode == "symmetric":
+        # reuse the same noise for all output legs on this site
+        shape = (max_bond, ind_sizes[0])
+        data = randn(shape, dist=noise_dist)
+        tws = [
+            Tensor(data=data, inds=(Bix, ix), tags=(site_tag,)) for ix in inds
+        ]
+    else:
+        raise ValueError(
+            f"Unknown noise mode {noise_mode!r}, "
+            "should be one of 'separable', 'symmetric', or 'joint'."
+        )
+
+    return tws
+
+
 def tensor_network_1d_compress_src(
     tn,
     max_bond,
     cutoff=0.0,
     site_tags=None,
     normalize=False,
-    noise_mode="separable",
+    noise_mode="joint",
+    noise_dist="normal",
     permute_arrays=True,
     sweep_reverse=False,
     canonize=True,
@@ -974,11 +1115,14 @@ def tensor_network_1d_compress_src(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
-    noise_mode : {'separable', 'symmetric', 'joint'}, optional
-        How to generate the random noise tensors. 'separable' generates a
+    noise_mode : {'joint', 'separable', 'symmetric'}, optional
+        How to generate the random noise tensors. 'joint' generates a single
+        random tensor for all outer indices on a site. 'separable' generates a
         random vector for each outer index. 'symmetric' reuses the same random
-        vector for all outer indices on a site. 'joint' generates a single
-        random tensor for all outer indices on a site.
+        vector for all outer indices on a site.
+    noise_dist : {"normal", "rademacher", ...}, optional
+        The distribution to use when generating the random noise tensors. See
+        :func:`~quimb.tensor.rand_tensor` for options.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -990,7 +1134,7 @@ def tensor_network_1d_compress_src(
         Whether to pseudo canonicalize the initial tensor network.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -1043,44 +1187,15 @@ def tensor_network_1d_compress_src(
     # first we form the left environment tensors with sampling noise
     left_envs = {}
     for i in range(1, L):
-        # get random sampling tensors for the previous site
-        if noise_mode == "separable":
-            # one stack of noise vectors for each leg on this site
-            tws = [
-                rand_tensor(
-                    shape=(max_bond, tn.ind_size(ix)),
-                    inds=(Bix, ix),
-                    tags=(site_tags[i - 1],),
-                    dist="rademacher",
-                )
-                for ix in local_inds[i - 1]
-            ]
-        elif noise_mode == "symmetric":
-            # reuse the same noise for all output legs on this site
-            shape = (max_bond, tn.ind_size(next(iter(local_inds[i - 1]))))
-            data = randn(shape, dist="rademacher")
-            tws = [
-                Tensor(data=data, inds=(Bix, ix), tags=(site_tags[i - 1],))
-                for ix in local_inds[i - 1]
-            ]
-        elif noise_mode == "joint":
-            # one big noise tensor for all output legs on this site
-            tws = [
-                rand_tensor(
-                    shape=(
-                        max_bond,
-                        *(tn.ind_size(ix) for ix in local_inds[i - 1]),
-                    ),
-                    inds=(Bix, *local_inds[i - 1]),
-                    tags=(site_tags[i - 1],),
-                    dist="rademacher",
-                )
-            ]
-        else:
-            raise ValueError(
-                f"Unknown noise mode {noise_mode!r}, "
-                "should be one of 'separable', 'symmetric', or 'joint'."
-            )
+        tws = _src_get_local_noise_tensors(
+            noise_mode=noise_mode,
+            noise_dist=noise_dist,
+            max_bond=max_bond,
+            Bix=Bix,
+            inds=local_inds[i - 1],
+            ind_sizes=[tn.ind_size(ix) for ix in local_inds[i - 1]],
+            site_tag=site_tags[i - 1],
+        )
         # contract it with the previous site and environment
         #
         #     bix
@@ -1104,10 +1219,13 @@ def tensor_network_1d_compress_src(
             ),
             **contract_opts,
         )
+        if equalize_norms:
+            left_envs[i].normalize_()
 
     # then we sweep in from the right
     Us = [None] * L
     right_envs = {}
+    exponent = 0.0
     for i in range(L - 1, 0, -1):
         # contract the environments with the current site
         #
@@ -1149,12 +1267,18 @@ def tensor_network_1d_compress_src(
         if i < L - 1:
             # include the right environment
             ts.append(right_envs[i])
-        right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
+        if equalize_norms:
+            right_envs[i - 1], result_exponent = tensor_contract(
+                *ts, strip_exponent=True, **contract_opts
+            )
+            exponent += result_exponent
+        else:
+            right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
 
     # handle the final tensor
     Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         Us,
         normalize,
@@ -1163,7 +1287,10 @@ def tensor_network_1d_compress_src(
         equalize_norms,
         inplace,
         tags_per_site=[ltn.tags for ltn in local_tns],
+        exponent=exponent,
     )
+
+    return new
 
 
 def tensor_network_1d_compress_src_oversample(
@@ -1232,7 +1359,7 @@ def tensor_network_1d_compress_src_oversample(
         canonical form instead of right canonical.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -1348,7 +1475,7 @@ def tensor_network_1d_compress_srcmps(
         canonical form instead of right canonical.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -1418,10 +1545,13 @@ def tensor_network_1d_compress_srcmps(
         if i >= 2:
             ts.append(left_envs[i - 1])
         left_envs[i] = tensor_contract(*ts, **contract_opts)
+        if equalize_norms:
+            left_envs[i].normalize_()
 
     # then we sweep in from the right
     Us = [None] * L
     right_envs = {}
+    exponent = 0.0
     for i in range(L - 1, 0, -1):
         # contract the environments with the current site
         #
@@ -1466,12 +1596,18 @@ def tensor_network_1d_compress_srcmps(
         if i < L - 1:
             # include the right environment
             ts.append(right_envs[i])
-        right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
+        if equalize_norms:
+            right_envs[i - 1], result_exponent = tensor_contract(
+                *ts, strip_exponent=True, **contract_opts
+            )
+            exponent += result_exponent
+        else:
+            right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
 
     # handle the final tensor
     Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
 
-    return _form_final_tn_from_tensor_sequence(
+    new = _form_final_tn_from_tensor_sequence(
         tn,
         Us,
         normalize,
@@ -1480,7 +1616,10 @@ def tensor_network_1d_compress_srcmps(
         equalize_norms,
         inplace,
         tags_per_site=[ltn.tags for ltn in local_tns],
+        exponent=exponent,
     )
+
+    return new
 
 
 def tensor_network_1d_compress_srcmps_oversample(
@@ -1551,7 +1690,7 @@ def tensor_network_1d_compress_srcmps_oversample(
         canonical form instead of right canonical.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -2036,7 +2175,7 @@ def tensor_network_1d_compress_fit(
         on the last sweep direction.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace_fit : bool, optional
         Whether to perform the compression inplace on the initial guess tensor
@@ -2159,6 +2298,14 @@ def tensor_network_1d_compress_fit(
     # choose to conjugate the smaller, fitting network
     tn_fit = tn_fit.conj(inplace=inplace_fit)
     tn_fit.add_tag("__FIT__")
+
+    # make sure each TN has the same scaling exponent -> average of inputs
+    new_exponent = sum(tn.exponent for tn in tns) / len(tns)
+    if not isinstance(new_exponent, float) or new_exponent != 0.0:
+        for tn in tns:
+            tn.distribute_exponent(new_exponent=new_exponent)
+        tn_fit.distribute_exponent(new_exponent=new_exponent)
+
     # note these are all views of `tn_fit` and thus will update as it does
     tn_overlaps = [(tn_fit | tn) for tn in tns]
 
@@ -2232,6 +2379,10 @@ def tensor_network_1d_compress_fit(
             tn_fit[site_tags[0]].normalize_()
         else:
             tn_fit[site_tags[-1]].normalize_()
+        tn_fit.exponent = 0.0
+        equalize_norms = False
+        if inplace:
+            tns[0].exponent = 0.0
 
     if inplace:
         tn0 = tns[0]
@@ -2391,7 +2542,7 @@ def tensor_network_1d_compress_fit_oversample(
         canonical form instead of right canonical.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
@@ -2497,7 +2648,7 @@ def tensor_network_1d_compress(
     compress_opts=None,
     inplace=False,
     **kwargs,
-):
+) -> TensorNetwork:
     """Compress a 1D-like tensor network using the specified method.
 
     Parameters
@@ -2554,7 +2705,7 @@ def tensor_network_1d_compress(
         also depends on the last sweep direction).
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
-        explicit value is give, then the norms will be set to that value, and
+        explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.

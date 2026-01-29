@@ -51,10 +51,12 @@ def test_contract_tags_strip_exponent(
     assert Z == pytest.approx(Zex, rel=1e-3)
 
 
+@pytest.mark.parametrize("insert_exponent", [False, True])
 @pytest.mark.parametrize("strip_exponent", [False, True])
 @pytest.mark.parametrize("equalize_norms", [False, 1.0, True])
 @pytest.mark.parametrize("inplace", [False, True])
 def test_contract_cumulative_strip_exponent(
+    insert_exponent,
     strip_exponent,
     equalize_norms,
     inplace,
@@ -62,6 +64,11 @@ def test_contract_cumulative_strip_exponent(
     mps = qtn.MPS_rand_state(7, 3)
     tn = mps.make_norm()
     Zex = tn.contract()
+
+    if insert_exponent:
+        mps.equalize_norms_(2.0)
+        tn = mps.make_norm()
+        assert tn.exponent != 0.0
 
     assert tn._CONTRACT_STRUCTURED
 

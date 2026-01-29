@@ -1512,8 +1512,6 @@ def maybe_unwrap(
     -------
     TensorNetwork, Tensor or scalar
     """
-    exponent = 0.0
-
     if isinstance(t, TensorNetwork):
         if equalize_norms is True:
             if strip_exponent:
@@ -1526,12 +1524,11 @@ def maybe_unwrap(
         if preserve_tensor_network or (t.num_tensors != 1):
             return t
 
-        if strip_exponent:
-            # extract from tn
-            exponent += t.exponent
-
-        # else get the single tensor
+        # else get the single tensor, first extracting exponent
+        exponent = t.exponent
         (t,) = t.tensor_map.values()
+    else:
+        exponent = 0.0
 
     # now we have Tensor
     if output_inds is not None and t.inds != output_inds:
@@ -1552,6 +1549,10 @@ def maybe_unwrap(
     if strip_exponent:
         # return mantissa and exponent separately
         return result, exponent
+
+    if not isinstance(exponent, float) or exponent != 0.0:
+        # avoid branching for backend array exponents
+        result = result * (10.0**exponent)
 
     return result
 
@@ -10359,21 +10360,29 @@ class TensorNetwork(object):
         t.modify(apply=lambda data: data / stripped_factor)
         self.exponent = self.exponent + do("log10", stripped_factor)
 
-    def distribute_exponent(self):
+    def distribute_exponent(self, new_exponent=0.0):
         """Distribute the exponent ``p`` of this tensor network (i.e.
         corresponding to ``tn * 10**p``) equally among all tensors.
+
+        Parameters
+        ----------
+        new_exponent : float, optional
+            The target exponent, by default ``0.0``, meaning the tensor network
+            is 'scaled' by a trivial factor of ``10**0 = 1``. A non-zero value
+            can be used to match the exponent of another tensor network etc.
         """
         # multiply each tensor by the nth root of 10**exponent
-        x = 10 ** (self.exponent / self.num_tensors)
+        x = 10 ** ((self.exponent - new_exponent) / self.num_tensors)
         self.multiply_each_(x)
 
-        # reset the exponent to zero
-        self.exponent = 0.0
+        # reset the exponent
+        self.exponent = new_exponent
 
     def equalize_norms(self, value=None, check_zero=False, inplace=False):
         """Make the Frobenius norm of every tensor in this TN equal without
         changing the overall value if ``value=None``, or set the norm of every
-        tensor to ``value`` by scalar multiplication only.
+        tensor to ``value`` by scalar multiplication only, accumulating the
+        overall scaling factor, log10, in ``tn.exponent``.
 
         Parameters
         ----------

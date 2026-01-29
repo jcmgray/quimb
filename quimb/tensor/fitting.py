@@ -21,11 +21,11 @@ def tensor_network_distance(
 
     .. math::
 
-            D(A, B)
-            = | A - B |_{\mathrm{fro}}
-            = \mathrm{Tr} [(A - B)^{\dagger}(A - B)]^{1/2}
-            = ( \langle A | A \rangle - 2 \mathrm{Re} \langle A | B \rangle|
-            + \langle B | B \rangle ) ^{1/2}
+        D(A, B)
+        = | A - B |_{\mathrm{fro}}
+        = \mathrm{Tr} [(A - B)^{\dagger}(A - B)]^{1/2}
+        = ( \langle A | A \rangle - 2 \mathrm{Re} \langle A | B \rangle|
+        + \langle B | B \rangle ) ^{1/2}
 
     which should have matching outer indices. Note the default approach to
     computing the norm is precision limited to about ``eps**0.5`` where ``eps``
@@ -124,17 +124,23 @@ def tensor_network_distance(
         # compute normalized infidelity
         return 1 - xAB**2 / (xAA * xBB)
 
-    if normalized == "infidelity_sqrt":
+    elif normalized == "infidelity_sqrt":
         # compute normalized sqrt infidelity
         return 1 - do("abs", xAB) / (xAA * xBB) ** 0.5
 
-    if normalized == "squared":
+    elif normalized == "squared":
         return (
             do("abs", xAA + xBB - 2 * xAB)
             # divide by average norm-squared of A and B
             * 2
             / (xAA + xBB)
         ) ** 0.5
+
+    elif isinstance(normalized, str):
+        raise ValueError(
+            f"Unknown normalized option: '{normalized}'. Should be one of "
+            "{True, False, 'infidelity', 'infidelity_sqrt', 'squared'}."
+        )
 
     dAB = do("abs", xAA + xBB - 2 * xAB) ** 0.5
 

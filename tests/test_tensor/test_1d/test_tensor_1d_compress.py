@@ -28,21 +28,45 @@ dtypes = ["float32", "float64", "complex64", "complex128"]
 )
 @pytest.mark.parametrize("dtype", dtypes)
 @pytest.mark.parametrize("use_input_exponent", [False, True])
-@pytest.mark.parametrize("equalize_norms", [False])
+@pytest.mark.parametrize("equalize_norms", [False, True, 1.0])
+@pytest.mark.parametrize("normalize", [False, True])
 def test_basic_compress_double_mpo(
     method,
     dtype,
     use_input_exponent,
     equalize_norms,
+    normalize,
 ):
+    import hashlib
+
     L = 8
     phys_dim = 2
     Da = 3
     Db = 2
-    method = "direct"
+    max_bond = 6
 
-    a = qtn.MPO_rand(L, bond_dim=Da, phys_dim=phys_dim, dtype=dtype, seed=42)
-    b = qtn.MPO_rand(L, bond_dim=Db, phys_dim=phys_dim, dtype=dtype, seed=42)
+    # turn case into a deterministic int [0, 2**32-1] for seeding
+    case_str = (
+        f"{method}-{dtype}-useexp{use_input_exponent}"
+        f"-eqn{equalize_norms}-norm{normalize}"
+    )
+    case_hash = hashlib.md5(case_str.encode()).hexdigest()
+    seed = int(case_hash, 16) % (2**32 - 1)
+
+    a = qtn.MPO_rand(
+        L,
+        bond_dim=Da,
+        phys_dim=phys_dim,
+        dtype=dtype,
+        seed=seed,
+    )
+    b = qtn.MPO_rand(
+        L,
+        bond_dim=Db,
+        phys_dim=phys_dim,
+        dtype=dtype,
+        seed=seed + 1,
+    )
     if use_input_exponent:
         a.exponent = 2.0
         b.exponent = -1.0
@@ -54,20 +78,28 @@ def test_basic_compress_double_mpo(
 
     c = qtn.tensor_network_1d_compress(
         ab,
-        max_bond=6,
+        max_bond=max_bond,
         method=method,
         equalize_norms=equalize_norms,
+        normalize=normalize,
     )
     assert c.istree()
-    assert c.max_bond() == 6
+    assert c.max_bond() == max_bond
+
+    if (equalize_norms is True) or normalize:
+        assert c.exponent == 0.0
 
     eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
-    assert c.distance_normalized(ab) < eps
+    if "src" in method:
+        # account for noise
+        eps *= 5
 
-    # can use tighter tolerance when not comparing via overlap
-    dc = c.to_dense()
-    dab = a.to_dense() @ b.to_dense()
-    assert qu.norm(dab - dc) < 0.1 * eps
+    if normalize:
+        assert c.norm() == pytest.approx(1.0, abs=eps)
+        # just use infidelity ~ cosine distance for normalized tensors
+        assert c.distance(ab, normalized="infidelity", method="dense") < eps
+    else:
+        assert c.distance_normalized(ab, method="dense") < eps
 
 
 @pytest.mark.parametrize(

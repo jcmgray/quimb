@@ -19,7 +19,8 @@ Release notes for `quimb`.
 - rename `tensor_network_1d_compress_zipup_first` to [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_oversample) and standardise `oversample` arguments.
 - add [`tensor_network_1d_compress_srcmps_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_srcmps_oversample) and [`tensor_network_1d_compress_fit_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit_oversample) methods.
 - add [`connected_bipartitions`](quimb.tensor.geometry.connected_bipartitions) for finding all connected bipartitions of a tensor network
-
+- [`tn.distribute_exponent`](quimb.tensor.tensor_core.TensorNetwork.distribute_exponent): add `new_exponent` option for specifying the new exponent value (default 0.0).
+- [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress): correctly handle input networks with non-zero exponents and `equalize_norms`.
 
 **Bug fixes:**
 
