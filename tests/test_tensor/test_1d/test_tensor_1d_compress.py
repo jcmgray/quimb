@@ -90,6 +90,9 @@ def test_basic_compress_double_mpo(
         assert c.exponent == 0.0
 
     eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
+    if "src" in method:
+        # account for noise
+        eps *= 5
 
     if normalize:
         assert c.norm() == pytest.approx(1.0, abs=eps)

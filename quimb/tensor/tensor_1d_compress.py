@@ -1034,6 +1034,53 @@ def tensor_network_1d_compress_zipup_oversample(
     )
 
 
+def _src_get_local_noise_tensors(
+    noise_mode,
+    noise_dist,
+    max_bond,
+    Bix,
+    inds,
+    ind_sizes,
+    site_tag,
+):
+    # get random sampling tensors for the previous site
+    if noise_mode == "joint":
+        # one big noise tensor for all output legs on this site
+        tws = [
+            rand_tensor(
+                shape=(max_bond, *ind_sizes),
+                inds=(Bix, *inds),
+                tags=(site_tag,),
+                dist=noise_dist,
+            )
+        ]
+    elif noise_mode == "separable":
+        # one stack of noise vectors for each leg on this site
+        tws = [
+            rand_tensor(
+                shape=(max_bond, d),
+                inds=(Bix, ix),
+                tags=(site_tag,),
+                dist=noise_dist,
+            )
+            for ix, d in zip(inds, ind_sizes)
+        ]
+    elif noise_mode == "symmetric":
+        # reuse the same noise for all output legs on this site
+        shape = (max_bond, ind_sizes[0])
+        data = randn(shape, dist=noise_dist)
+        tws = [
+            Tensor(data=data, inds=(Bix, ix), tags=(site_tag,)) for ix in inds
+        ]
+    else:
+        raise ValueError(
+            f"Unknown noise mode {noise_mode!r}, "
+            "should be one of 'separable', 'symmetric', or 'joint'."
+        )
+
+    return tws
+
+
 def tensor_network_1d_compress_src(
     tn,
     max_bond,
@@ -1073,6 +1120,9 @@ def tensor_network_1d_compress_src(
         random tensor for all outer indices on a site. 'separable' generates a
         random vector for each outer index. 'symmetric' reuses the same random
         vector for all outer indices on a site.
+    noise_dist : {"normal", "rademacher", ...}, optional
+        The distribution to use when generating the random noise tensors. See
+        :func:`~quimb.tensor.rand_tensor` for options.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1137,44 +1187,15 @@ def tensor_network_1d_compress_src(
     # first we form the left environment tensors with sampling noise
     left_envs = {}
     for i in range(1, L):
-        # get random sampling tensors for the previous site
-        if noise_mode == "joint":
-            # one big noise tensor for all output legs on this site
-            tws = [
-                rand_tensor(
-                    shape=(
-                        max_bond,
-                        *(tn.ind_size(ix) for ix in local_inds[i - 1]),
-                    ),
-                    inds=(Bix, *local_inds[i - 1]),
-                    tags=(site_tags[i - 1],),
-                    dist=noise_dist,
-                )
-            ]
-        elif noise_mode == "separable":
-            # one stack of noise vectors for each leg on this site
-            tws = [
-                rand_tensor(
-                    shape=(max_bond, tn.ind_size(ix)),
-                    inds=(Bix, ix),
-                    tags=(site_tags[i - 1],),
-                    dist=noise_dist,
-                )
-                for ix in local_inds[i - 1]
-            ]
-        elif noise_mode == "symmetric":
-            # reuse the same noise for all output legs on this site
-            shape = (max_bond, tn.ind_size(next(iter(local_inds[i - 1]))))
-            data = randn(shape, dist=noise_dist)
-            tws = [
-                Tensor(data=data, inds=(Bix, ix), tags=(site_tags[i - 1],))
-                for ix in local_inds[i - 1]
-            ]
-        else:
-            raise ValueError(
-                f"Unknown noise mode {noise_mode!r}, "
-                "should be one of 'separable', 'symmetric', or 'joint'."
-            )
+        tws = _src_get_local_noise_tensors(
+            noise_mode=noise_mode,
+            noise_dist=noise_dist,
+            max_bond=max_bond,
+            Bix=Bix,
+            inds=local_inds[i - 1],
+            ind_sizes=[tn.ind_size(ix) for ix in local_inds[i - 1]],
+            site_tag=site_tags[i - 1],
+        )
         # contract it with the previous site and environment
         #
         #     bix
