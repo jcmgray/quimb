@@ -250,8 +250,8 @@ def sensibly_scale(x):
     return x / norm_fro(x) ** (1.5 / ndim(x))
 
 
-@njit
-def _numba_find_diag_axes(x, atol=1e-12):  # pragma: no cover
+@njit  # pragma: no cover
+def _numba_find_diag_axes(x, atol=1e-12):
     """Numba-compiled array diagonal axis finder.
 
     Parameters
@@ -347,8 +347,8 @@ def find_diag_axes(x, atol=1e-12):
     return None
 
 
-@njit
-def _numba_find_antidiag_axes(x, atol=1e-12):  # pragma: no cover
+@njit  # pragma: no cover
+def _numba_find_antidiag_axes(x, atol=1e-12):
     """Numba-compiled array antidiagonal axis finder.
 
     Parameters
@@ -449,8 +449,8 @@ def find_antidiag_axes(x, atol=1e-12):
     return None
 
 
-@njit
-def _numba_find_columns(x, atol=1e-12):  # pragma: no cover
+@njit  # pragma: no cover
+def _numba_find_columns(x, atol=1e-12):
     """Numba-compiled single non-zero column axis finder.
 
     Parameters

@@ -703,7 +703,7 @@ def svd_via_eig_truncated(
 
 
 @njit  # pragma: no cover
-def svdvals_eig(x):  # pragma: no cover
+def svdvals_eig(x):
     """SVD-decomposition via eigen, but return singular values only."""
     if x.shape[0] > x.shape[1]:
         s2 = np.linalg.eigvalsh(dag_numba(x) @ x)
@@ -1421,7 +1421,7 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
 
 
 @squared_op_to_reduced_factor.register("numpy")
-@njit
+@njit  # pragma: no cover
 def squared_op_to_reduced_factor_numba(x2, dl, dr, right=True):
     s2, W = np.linalg.eigh(x2)
 

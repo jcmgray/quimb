@@ -7,13 +7,13 @@ import numpy as np
 from ..core import njit, qarray
 
 
-@njit
-def get_nz(A):  # pragma: no cover
+@njit  # pragma: no cover
+def get_nz(A):
     return np.nonzero(A)
 
 
-@njit
-def compute_blocks(ix, jx, d):  # pragma: no cover
+@njit  # pragma: no cover
+def compute_blocks(ix, jx, d):
     """Find the charge sectors (blocks in matrix terms) given element
     coordinates ``ix`` and ``jx`` and total size ``d``.
 
@@ -83,8 +83,8 @@ def compute_blocks(ix, jx, d):  # pragma: no cover
     return sorted([sorted(g) for g in groups if g])
 
 
-@njit
-def subselect(A, p):  # pragma: no cover
+@njit  # pragma: no cover
+def subselect(A, p):
     """Select only the intersection of rows and columns of ``A`` matching the
     basis indices ``p``. Faster than double numpy slicing.
 
@@ -124,8 +124,8 @@ def subselect(A, p):  # pragma: no cover
     return out
 
 
-@njit
-def subselect_set(A, B, p):  # pragma: no cover
+@njit  # pragma: no cover
+def subselect_set(A, B, p):
     """Set only the intersection of rows and colums of ``A`` matching the
     basis indices ``p`` to ``B``.
 
@@ -158,8 +158,8 @@ def subselect_set(A, B, p):  # pragma: no cover
 
 
 # XXX: want to cache this eventaully -> need parallel+cache numba support?
-@njit
-def _eigh_autoblocked(A, sort=True):  # pragma: no cover
+@njit  # pragma: no cover
+def _eigh_autoblocked(A, sort=True):
     d = A.shape[0]
 
     # allocate output arrays
@@ -198,8 +198,8 @@ def _eigh_autoblocked(A, sort=True):  # pragma: no cover
 
 
 # XXX: want to cache this eventaully -> need parallel+cache numba support?
-@njit
-def _eigvalsh_autoblocked(A, sort=True):  # pragma: no cover
+@njit  # pragma: no cover
+def _eigvalsh_autoblocked(A, sort=True):
     # as above but ignore eigenvector for extra speed
     d = A.shape[0]
 

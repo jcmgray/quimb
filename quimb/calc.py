@@ -1435,8 +1435,8 @@ def is_eigenvector(x, A, tol=1e-14):
     return abs(E**2 - E2) < tol
 
 
-@njit
-def page_entropy(sz_subsys, sz_total):  # pragma: no cover
+@njit  # pragma: no cover
+def page_entropy(sz_subsys, sz_total):
     """Calculate the page entropy, i.e. expected entropy for a subsytem
     of a random state in Hilbert space.
 

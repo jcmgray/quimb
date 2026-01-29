@@ -204,8 +204,8 @@ def rsvd_core(A, k, compute_uv=True, q=2, p=0, state=None, AH=None):
     return U, s, VH, G
 
 
-@njit
-def is_sorted(x):  # pragma: no cover
+@njit  # pragma: no cover
+def is_sorted(x):
     for i in range(x.size - 1):
         if x[i + 1] < x[i]:
             return False
@@ -282,8 +282,8 @@ def rsvd_iterate(
     return U, s, VH if compute_uv else s
 
 
-@njit
-def count_svdvals_needed(s, eps):  # pragma: no cover
+@njit  # pragma: no cover
+def count_svdvals_needed(s, eps):
     n = s.size
     thresh = eps * s[0]
     for i in range(n - 1, 0, -1):

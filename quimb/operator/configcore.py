@@ -11,7 +11,7 @@ nogil = True
 cache = True
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def _check_next_coupled_term(
     a, b, n, bi, bj, size_term, sizes_op, regs, xis, xjs, cijs
 ):
@@ -108,7 +108,7 @@ def _check_next_coupled_term(
     return a, b, valid, hij
 
 
-@njit(cache=cache, nogil=True)
+@njit(cache=cache, nogil=True)  # pragma: no cover
 def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
     """Get the coupled flat configurations for a given flat configuration
     and coupling map.
@@ -170,7 +170,7 @@ def flatconfig_coupling_numba(flatconfig, coupling_map, dtype=np.float64):
 # ----------------------- unconstrained hilbert space ----------------------- #
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def flatconfig_to_rank_nosymm(flatconfig):
     """Convert a flat config array to a rank, i.e. its position in the
     lexicographic ordering of all bitstrings of that length.
@@ -191,7 +191,7 @@ def flatconfig_to_rank_nosymm(flatconfig):
     return r
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_into_flatconfig_nosymm(flatconfig, r, n):
     """Inplace conversion of a rank to a flat config array.
 
@@ -210,7 +210,7 @@ def rank_into_flatconfig_nosymm(flatconfig, r, n):
         r >>= 1
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_to_flatconfig_nosymm(r, n):
     """Convert a rank to a flat config array.
 
@@ -232,7 +232,7 @@ def rank_to_flatconfig_nosymm(r, n):
     return flatconfig
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def build_coo_numba_core_nosymm(
     n,
     coupling_map,
@@ -284,7 +284,7 @@ def build_coo_numba_core_nosymm(
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def matvec_nosymm(
     x,
     out,
@@ -319,7 +319,7 @@ def matvec_nosymm(
 # ----------------- mixed-radix unconstrained hilbert space ----------------- #
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def calculate_strides(sizes):
     n = len(sizes)
     strides = np.ones(n, dtype=np.uint64)
@@ -328,7 +328,7 @@ def calculate_strides(sizes):
     return strides
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def flatconfig_to_rank_mixed_radix_nosymm(flatconfig, strides):
     """Convert a flat config array for a mixed size system to a rank, i.e. its
     position in the lexicographic ordering of all configurations.
@@ -351,7 +351,7 @@ def flatconfig_to_rank_mixed_radix_nosymm(flatconfig, strides):
     return r
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_into_flatconfig_mixed_radix_nosymm(flatconfig, r, sizes, strides):
     """Inplace conversion of a mixed-radix rank to a flat config array.
 
@@ -371,7 +371,7 @@ def rank_into_flatconfig_mixed_radix_nosymm(flatconfig, r, sizes, strides):
         flatconfig[i] = (r // strides[i]) % sizes[i]
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_to_flatconfig_mixed_radix_nosymm(
     r,
     sizes,
@@ -403,7 +403,7 @@ def rank_to_flatconfig_mixed_radix_nosymm(
 # --------------------- parity conserved hilbert space ---------------------- #
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def flatconfig_to_rank_z2(flatconfig):
     """Convert a flat config array to a z2 rank, i.e. its position in the
     lexicographic ordering of all bitstrings of even or odd parity.
@@ -425,7 +425,7 @@ def flatconfig_to_rank_z2(flatconfig):
     return r
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_into_flatconfig_z2(flatconfig, r, n, p):
     """Inplace conversion of a z2 rank to a flat config array.
 
@@ -449,7 +449,7 @@ def rank_into_flatconfig_z2(flatconfig, r, n, p):
     flatconfig[n - 1] = prem ^ p
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_to_flatconfig_z2(r, n, p):
     """Convert a z2 rank to a flat config array.
 
@@ -473,7 +473,7 @@ def rank_to_flatconfig_z2(r, n, p):
     return flatconfig
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def build_coo_numba_core_z2(
     n,
     p,
@@ -526,7 +526,7 @@ def build_coo_numba_core_z2(
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def matvec_z2(
     x,
     out,
@@ -562,7 +562,7 @@ def matvec_z2(
 # -------------------- particle conserved hilbert space --------------------- #
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def build_pascal_table(nmax):
     """Build the Pascal triangle table for the number of ways to choose k
     elements from n elements, i.e. the binomial coefficients.
@@ -588,7 +588,7 @@ def build_pascal_table(nmax):
     return pt
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def flatconfig_to_rank_u1_pascal(flatconfig, n, k, pt):
     """Given a flat config array, return the u1 rank of the config in the
     lexicographic ordering of all bitstrings of that length with hamming weight
@@ -621,7 +621,7 @@ def flatconfig_to_rank_u1_pascal(flatconfig, n, k, pt):
     return r
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_into_flatconfig_u1_pascal(flatconfig, r, n, k, pt):
     """Inplace conversion of a rank to a flat config array with hamming weight
     k.
@@ -654,7 +654,7 @@ def rank_into_flatconfig_u1_pascal(flatconfig, r, n, k, pt):
             flatconfig[i] = 0
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_to_flatconfig_u1_pascal(r, n, k, pt):
     """Convert a rank to a flat config array with hamming weight k.
 
@@ -679,7 +679,7 @@ def rank_to_flatconfig_u1_pascal(r, n, k, pt):
     return flatconfig
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def build_coo_numba_core_u1(
     n,
     k,
@@ -733,7 +733,7 @@ def build_coo_numba_core_u1(
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def matvec_u1(
     x,
     out,
@@ -770,7 +770,7 @@ def matvec_u1(
 # --------------------- doubly conserved hilbert space ---------------------- #
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def flatconfig_to_rank_u1u1_pascal(flatconfig, na, ka, nb, kb, pt):
     """Convert a flat config array to a doubly number conserved rank, i.e.
     its position in the ordering of all bitstrings of lenght `na + nb` with
@@ -803,7 +803,7 @@ def flatconfig_to_rank_u1u1_pascal(flatconfig, na, ka, nb, kb, pt):
     ) * Db + flatconfig_to_rank_u1_pascal(flatconfig[na:], nb, kb, pt)
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_into_flatconfig_u1u1_pascal(flatconfig, r, na, ka, nb, kb, pt):
     """Inplace conversion of a doubly number conserved rank to a flat config
     array.
@@ -833,7 +833,7 @@ def rank_into_flatconfig_u1u1_pascal(flatconfig, r, na, ka, nb, kb, pt):
     rank_into_flatconfig_u1_pascal(flatconfig[na:], r2, nb, kb, pt)
 
 
-@njit(cache=cache, nogil=nogil, inline="always")
+@njit(cache=cache, nogil=nogil, inline="always")  # pragma: no cover
 def rank_to_flatconfig_u1u1_pascal(r, na, ka, nb, kb, pt):
     """Convert a doubly number conserved rank to a flat config array.
 
@@ -863,7 +863,7 @@ def rank_to_flatconfig_u1u1_pascal(r, na, ka, nb, kb, pt):
     return flatconfig
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def build_coo_numba_core_u1u1(
     na,
     ka,
@@ -919,7 +919,7 @@ def build_coo_numba_core_u1u1(
     return data[:buf_ptr], rows[:buf_ptr], cols[:buf_ptr]
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def matvec_u1u1(
     x,
     out,
@@ -959,7 +959,7 @@ def matvec_u1u1(
 # ------------------------------- public api -------------------------------- #
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def rank_to_flatconfig(r, sector, symmetry=0, pt=None):
     """Convert a rank to a flat config array.
 
@@ -1014,7 +1014,7 @@ def rank_to_flatconfig(r, sector, symmetry=0, pt=None):
         )
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def flatconfig_to_rank(flatconfig, sector, symmetry=0, pt=None):
     """Convert a flat config array to a rank, i.e. its position in the
     lexicographic ordering of all bitstrings of that length.
@@ -1067,7 +1067,7 @@ def flatconfig_to_rank(flatconfig, sector, symmetry=0, pt=None):
         )
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def build_coo_numba_core(
     coupling_map,
     sector,
@@ -1141,7 +1141,7 @@ def build_coo_numba_core(
         )
 
 
-@njit(cache=cache, nogil=nogil)
+@njit(cache=cache, nogil=nogil)  # pragma: no cover
 def matvec_numba(
     x,
     out,

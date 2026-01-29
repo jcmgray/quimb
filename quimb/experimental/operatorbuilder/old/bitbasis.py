@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 
 
-@njit
+@njit  # pragma: no cover
 def get_local_size(n, rank, world_size):
     """Given global size n, and a rank in [0, world_size), return the size of
     the portion assigned to this rank.
@@ -11,7 +11,7 @@ def get_local_size(n, rank, world_size):
     return n // world_size + int(rank < cutoff_rank)
 
 
-@njit
+@njit  # pragma: no cover
 def get_local_range(n, rank, world_size):
     """Given global size n, and a rank in [0, world_size), return the range of
     indices assigned to this rank.
@@ -23,7 +23,7 @@ def get_local_range(n, rank, world_size):
     return ri, rf
 
 
-@njit
+@njit  # pragma: no cover
 def get_nth_bit(val, n):
     """Get the nth bit of val.
 
@@ -36,7 +36,7 @@ def get_nth_bit(val, n):
     return (val >> n) & 1
 
 
-@njit
+@njit  # pragma: no cover
 def flip_nth_bit(val, n):
     """Flip the nth bit of val.
 
@@ -49,7 +49,7 @@ def flip_nth_bit(val, n):
     return val ^ (1 << n)
 
 
-@njit
+@njit  # pragma: no cover
 def _recursively_fill_flatconfigs(flatconfigs, n, k, c, r):
     c0 = c * (n - k) // n
     # set the entries of the left binary subtree
@@ -64,7 +64,7 @@ def _recursively_fill_flatconfigs(flatconfigs, n, k, c, r):
         )
 
 
-@njit
+@njit  # pragma: no cover
 def get_all_equal_weight_flatconfigs(n, k):
     """Get every flat configuration of length n with k bits set."""
     c = comb(n, k)
@@ -73,7 +73,7 @@ def get_all_equal_weight_flatconfigs(n, k):
     return flatconfigs
 
 
-@njit
+@njit  # pragma: no cover
 def flatconfig_to_bit(flatconfig):
     """Given a flat configuration, return the corresponding bitstring."""
     b = 0
@@ -83,7 +83,7 @@ def flatconfig_to_bit(flatconfig):
     return b
 
 
-@njit
+@njit  # pragma: no cover
 def comb(n, k):
     """Compute the binomial coefficient n choose k."""
     r = 1
@@ -93,7 +93,7 @@ def comb(n, k):
     return r
 
 
-@njit
+@njit  # pragma: no cover
 def get_all_equal_weight_bits(n, k, dtype=np.int64):
     """Get an array of all 'bits' (integers), with n bits, and k of them set."""
     if k == 0:
@@ -112,7 +112,7 @@ def get_all_equal_weight_bits(n, k, dtype=np.int64):
     return b
 
 
-@njit
+@njit  # pragma: no cover
 def bit_to_rank(b, n, k):
     """Given a bitstring b, return the rank of the bitstring in the
     basis of all bitstrings of length n with k bits set. Adapted from
@@ -132,7 +132,7 @@ def bit_to_rank(b, n, k):
     return r
 
 
-@njit
+@njit  # pragma: no cover
 def rank_to_bit(r, n, k):
     """Given a rank r, return the bitstring of length n with k bits set
     that has rank r in the basis of all bitstrings of length n with k
@@ -153,7 +153,7 @@ def rank_to_bit(r, n, k):
     return b
 
 
-@njit
+@njit  # pragma: no cover
 def product_of_bits(b1, b2, n2, dtype=np.int64):
     """Get the outer product of two bit arrays.
 
@@ -228,13 +228,13 @@ def get_number_bitbasis(*nk_pairs, dtype=np.int64):
     return configs
 
 
-@njit
+@njit  # pragma: no cover
 def build_bitmap(configs):
     """Build of map of bits to linear indices, suitable for use with numba."""
     return {b: i for i, b in enumerate(configs)}
 
 
-@njit(nogil=True)
+@njit(nogil=True)  # pragma: no cover
 def coupled_bits_numba(bi, coupling_map):
     buf_ptr = 0
     bjs = np.empty(len(coupling_map), dtype=np.int64)
@@ -270,7 +270,7 @@ def coupled_bits_numba(bi, coupling_map):
     return bjs[:buf_ptr], cijs[:buf_ptr]
 
 
-@njit(nogil=True)
+@njit(nogil=True)  # pragma: no cover
 def _build_coo_numba_core(bits, coupling_map, bitmap=None, dtype=np.float64):
     # the bit map is needed if we only have a partial set of `bits`, which
     # might couple to other bits that are not in `bits` -> we need to look up
