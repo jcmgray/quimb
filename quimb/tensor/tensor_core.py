@@ -3114,7 +3114,18 @@ class Tensor:
         else:
             return conj(other.overlap(self, **contract_opts))
 
-    def normalize(self, inplace=False):
+    def normalize(self, inplace=False) -> "Tensor":
+        """Normalize this tensor by its Frobenius norm.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to perform the normalization inplace.
+
+        Returns
+        -------
+        Tensor
+        """
         T = self if inplace else self.copy()
         T.modify(data=T.data / T.norm(), left_inds=T.left_inds)
         return T

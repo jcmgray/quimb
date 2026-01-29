@@ -127,7 +127,7 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
     return tn
 
 
-def possibly_permute_(tn, permute_arrays):
+def possibly_permute_(tn: TensorNetwork, permute_arrays: bool | str):
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     if permute_arrays and hasattr(tn, "permute_arrays"):
         if permute_arrays is True:
@@ -139,7 +139,7 @@ def possibly_permute_(tn, permute_arrays):
 
 
 def tensor_network_1d_compress_direct(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -371,7 +371,7 @@ def _form_final_tn_from_tensor_sequence(
 
 
 def tensor_network_1d_compress_dm(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -662,7 +662,7 @@ def tensor_network_1d_compress_dm(
 
 
 def tensor_network_1d_compress_zipup(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
@@ -888,7 +888,7 @@ def _do_direct_sweep(
 
 
 def tensor_network_1d_compress_zipup_oversample(
-    tn,
+    tn: TensorNetwork,
     max_bond=None,
     max_bond_oversample=None,
     cutoff=1e-10,
@@ -1082,8 +1082,8 @@ def _src_get_local_noise_tensors(
 
 
 def tensor_network_1d_compress_src(
-    tn,
-    max_bond,
+    tn: TensorNetwork,
+    max_bond: int,
     cutoff=0.0,
     site_tags=None,
     normalize=False,
@@ -1294,8 +1294,8 @@ def tensor_network_1d_compress_src(
 
 
 def tensor_network_1d_compress_src_oversample(
-    tn,
-    max_bond,
+    tn: TensorNetwork,
+    max_bond: int,
     max_bond_oversample=None,
     cutoff=1e-10,
     cutoff_oversample=0.0,
@@ -1426,8 +1426,8 @@ def tensor_network_1d_compress_src_oversample(
 
 
 def tensor_network_1d_compress_srcmps(
-    tn,
-    max_bond,
+    tn: TensorNetwork,
+    max_bond: int,
     cutoff=0.0,
     tn_fit=None,
     site_tags=None,
@@ -1623,8 +1623,8 @@ def tensor_network_1d_compress_srcmps(
 
 
 def tensor_network_1d_compress_srcmps_oversample(
-    tn,
-    max_bond,
+    tn: TensorNetwork,
+    max_bond: int,
     max_bond_oversample=None,
     cutoff=1e-10,
     cutoff_oversample=0.0,
@@ -1761,8 +1761,8 @@ def tensor_network_1d_compress_srcmps_oversample(
 
 def _tn1d_fit_sum_sweep_1site(
     tn_fit: TensorNetwork,
-    tn_overlaps,
-    site_tags,
+    tn_overlaps: list[TensorNetwork],
+    site_tags: list[str],
     max_bond=None,
     cutoff=0.0,
     envs=None,
@@ -1889,9 +1889,9 @@ def _tn1d_fit_sum_sweep_1site(
 
 
 def _tn1d_fit_sum_sweep_2site(
-    tn_fit,
-    tn_overlaps,
-    site_tags,
+    tn_fit: TensorNetwork,
+    tn_overlaps: list[TensorNetwork],
+    site_tags: list[str],
     max_bond=None,
     cutoff=1e-10,
     envs=None,
@@ -2073,7 +2073,7 @@ def _tn1d_fit_sum_sweep_2site(
 
 
 def tensor_network_1d_compress_fit(
-    tns,
+    tns: TensorNetwork | list[TensorNetwork],
     max_bond=None,
     cutoff=None,
     tn_fit=None,
@@ -2405,8 +2405,8 @@ def tensor_network_1d_compress_fit(
 
 
 def tensor_network_1d_compress_fit_guess(
-    tn,
-    guess,
+    tn: TensorNetwork | list[TensorNetwork],
+    guess: str,
     max_bond=None,
     cutoff=1e-10,
     cutoff_fit=0.0,
@@ -2476,7 +2476,7 @@ tensor_network_1d_compress_fit_projector = functools.partial(
 
 
 def tensor_network_1d_compress_fit_oversample(
-    tn,
+    tn: TensorNetwork | list[TensorNetwork],
     max_bond=None,
     max_bond_oversample=None,
     cutoff=1e-10,
@@ -2635,7 +2635,7 @@ _TN1D_COMPRESS_METHODS = {
 
 
 def tensor_network_1d_compress(
-    tn,
+    tn: TensorNetwork | list[TensorNetwork],
     max_bond=None,
     cutoff=1e-10,
     method="dm",
@@ -2649,13 +2649,24 @@ def tensor_network_1d_compress(
     inplace=False,
     **kwargs,
 ) -> TensorNetwork:
-    """Compress a 1D-like tensor network using the specified method.
+    """Compress a 1D-like tensor network, or sequence of such networks
+    representing a sum, using the specified method, into an exactly 1D tensor
+    network of bond dimension `max_bond`. The only requirement is that each
+    tensor has exactly one of the site tags, which determines which site it
+    will be grouped and compressed into. Each such 'site' can have multiple
+    tensors and output indices. Long range bonds are handled automatically by
+    inserting identities, but note that this function is intended for 1D-like
+    *open boundary* tensor networks and always produces an open boundary
+    compressed tensor network. See :func:`tensor_network_ag_compress` for
+    arbitrary geometry tensor network compression methods for non 1D-like TNs.
 
     Parameters
     ----------
-    tn : TensorNetwork
-        The tensor network to compress. Every tensor should have exactly one of
-        the site tags. Each site can have multiple tensors and output indices.
+    tn : TensorNetwork or sequence of TensorNetwork
+        The tensor network(s) to compress. Every tensor should have exactly one
+        of the site tags. Each site can have multiple tensors and output
+        indices. If a sequence is given, these tensor networks will be
+        compressed as their sum (only supported by the 'fit' method).
     max_bond : int
         The maximum bond dimension to compress to.
     cutoff : float, optional
