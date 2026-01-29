@@ -253,7 +253,7 @@ def tensor_network_1d_compress_direct(
             max_bond=max_bond,
             cutoff=cutoff,
             cutoff_mode=cutoff_mode,
-            equalize_norms=equalize_norms,
+            equalize_norms=False,
             **compress_opts,
         )
         #     │ │ │ │ │ │ │ │ │ │
@@ -261,6 +261,9 @@ def tensor_network_1d_compress_direct(
         #                      :
         #                 : :  max_bond
         #               i-1 i
+        if equalize_norms:
+            # only rescale the non-isometric tensor
+            new.strip_exponent(new[site_tags[i - 1]], value=equalize_norms)
 
     if normalize:
         # make use of the fact that the output is in right canonical form
@@ -332,6 +335,10 @@ def _form_final_tn_from_tensor_sequence(
     if normalize:
         # in right canonical form already
         ts[0].normalize_()
+        new_exponent = 0.0
+        equalize_norms = False
+    else:
+        new_exponent = tn.exponent + exponent
 
     if sweep_reverse:
         # this is purely cosmetic for ordering tensor_map dict entries
@@ -349,7 +356,7 @@ def _form_final_tn_from_tensor_sequence(
         new.view_like_(tn)
 
     # add the existing exponent to any generated during the compression
-    new.exponent = tn.exponent + exponent
+    new.exponent = new_exponent
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(new, permute_arrays)
@@ -836,7 +843,7 @@ def tensor_network_1d_compress_zipup(
 
 
 def _do_direct_sweep(
-    tn,
+    tn: TensorNetwork,
     site_tags,
     max_bond,
     cutoff,
@@ -856,13 +863,18 @@ def _do_direct_sweep(
             max_bond=max_bond,
             cutoff=cutoff,
             cutoff_mode=cutoff_mode,
-            equalize_norms=equalize_norms,
+            equalize_norms=False,
             **compress_opts,
         )
+        if equalize_norms:
+            # only rescale the non-isometric tensor
+            tn.strip_exponent(tn[site_tags[i - 1]], value=equalize_norms)
 
     if normalize:
         # make use of the fact that the output is in right canonical form
-        tn[site_tags[-1]].normalize_()
+        tn[site_tags[0]].normalize_()
+        tn.exponent = 0.0
+        equalize_norms = False
 
     # possibly put the array indices in canonical order (e.g. when MPS or MPO)
     possibly_permute_(tn, permute_arrays)
@@ -1029,6 +1041,7 @@ def tensor_network_1d_compress_src(
     site_tags=None,
     normalize=False,
     noise_mode="joint",
+    noise_dist="normal",
     permute_arrays=True,
     sweep_reverse=False,
     canonize=True,
@@ -1055,11 +1068,11 @@ def tensor_network_1d_compress_src(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
-    noise_mode : {'separable', 'symmetric', 'joint'}, optional
-        How to generate the random noise tensors. 'separable' generates a
+    noise_mode : {'joint', 'separable', 'symmetric'}, optional
+        How to generate the random noise tensors. 'joint' generates a single
+        random tensor for all outer indices on a site. 'separable' generates a
         random vector for each outer index. 'symmetric' reuses the same random
-        vector for all outer indices on a site. 'joint' generates a single
-        random tensor for all outer indices on a site.
+        vector for all outer indices on a site.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1125,26 +1138,7 @@ def tensor_network_1d_compress_src(
     left_envs = {}
     for i in range(1, L):
         # get random sampling tensors for the previous site
-        if noise_mode == "separable":
-            # one stack of noise vectors for each leg on this site
-            tws = [
-                rand_tensor(
-                    shape=(max_bond, tn.ind_size(ix)),
-                    inds=(Bix, ix),
-                    tags=(site_tags[i - 1],),
-                    dist="rademacher",
-                )
-                for ix in local_inds[i - 1]
-            ]
-        elif noise_mode == "symmetric":
-            # reuse the same noise for all output legs on this site
-            shape = (max_bond, tn.ind_size(next(iter(local_inds[i - 1]))))
-            data = randn(shape, dist="rademacher")
-            tws = [
-                Tensor(data=data, inds=(Bix, ix), tags=(site_tags[i - 1],))
-                for ix in local_inds[i - 1]
-            ]
-        elif noise_mode == "joint":
+        if noise_mode == "joint":
             # one big noise tensor for all output legs on this site
             tws = [
                 rand_tensor(
@@ -1154,8 +1148,27 @@ def tensor_network_1d_compress_src(
                     ),
                     inds=(Bix, *local_inds[i - 1]),
                     tags=(site_tags[i - 1],),
-                    dist="rademacher",
+                    dist=noise_dist,
                 )
+            ]
+        elif noise_mode == "separable":
+            # one stack of noise vectors for each leg on this site
+            tws = [
+                rand_tensor(
+                    shape=(max_bond, tn.ind_size(ix)),
+                    inds=(Bix, ix),
+                    tags=(site_tags[i - 1],),
+                    dist=noise_dist,
+                )
+                for ix in local_inds[i - 1]
+            ]
+        elif noise_mode == "symmetric":
+            # reuse the same noise for all output legs on this site
+            shape = (max_bond, tn.ind_size(next(iter(local_inds[i - 1]))))
+            data = randn(shape, dist=noise_dist)
+            tws = [
+                Tensor(data=data, inds=(Bix, ix), tags=(site_tags[i - 1],))
+                for ix in local_inds[i - 1]
             ]
         else:
             raise ValueError(
@@ -2345,6 +2358,10 @@ def tensor_network_1d_compress_fit(
             tn_fit[site_tags[0]].normalize_()
         else:
             tn_fit[site_tags[-1]].normalize_()
+        tn_fit.exponent = 0.0
+        equalize_norms = False
+        if inplace:
+            tns[0].exponent = 0.0
 
     if inplace:
         tn0 = tns[0]
