@@ -183,10 +183,10 @@ ipython = "*"
 myst-nb = "*"
 ruff = "*"
 setuptools_scm = "*"
+sphinx = "*"
 sphinx-autoapi = "*"
 sphinx-copybutton = "*"
 sphinx-design = "*"
-sphinx = "*"
 
 [tool.pixi.feature.pyold.dependencies]
 python= "3.11.*"
@@ -208,8 +208,8 @@ testslepc = { features = ["pynew", "slepc", "tests"] }
 docs = { features = ["pynew", "docs"] }
 
 [tool.pixi.tasks]
-testmatrix = { cmd = "pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor", cwd = "." }
-testtensor = { cmd = "pytest tests/test_tensor --cov=quimb --cov-report=xml", cwd = "." }
+testmatrix = { cmd = "pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor", cwd = ".", default-environment = "testpynew" }
+testtensor = { cmd = "pytest tests/test_tensor --cov=quimb --cov-report=xml", cwd = ".", default-environment = "testpynew" }
 
 [tool.pixi.feature.docs.tasks]
 docs = { cmd = "sphinx-build -b html docs docs/_build/html", cwd = "." }
