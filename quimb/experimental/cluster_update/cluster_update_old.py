@@ -2,8 +2,8 @@
 
 import functools
 
-from quimb.tensor.tensor_arbgeom_tebd import SimpleUpdateGen
 from quimb.tensor.tensor_core import bonds, bonds_size, do, ensure_dict
+from quimb.tensor.tnag.tebd import SimpleUpdateGen
 
 
 def gate_inds_nn_fit(

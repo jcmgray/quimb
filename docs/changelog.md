@@ -9,24 +9,25 @@ Release notes for `quimb`.
 
 - [`ham_hubbard_hardcore`](quimb.gen.operators.ham_hubbard_hardcore) fix description and sign convention of hopping strength `t`.
 - [`heisenberg_from_edges`](quimb.operator.models.heisenberg_from_edges) fix sign convention of magnetic field terms.
-
+- the [`quimb.tensor`](quimb.tensor) submodule structure has been refactored with [`tn1d`](quimb.tensor.tn1d), [`tn2d`](quimb.tensor.tn2d), [`tn3d`](quimb.tensor.tn3d), and [`tnag`](quimb.tensor.tnag) submodules for better organization. Imports from old locations will still work, but are deprecated. Public classes and functions such as [`MatrixProductState`](quimb.tensor.tn1d.core.MatrixProductState) are directly accessible from the top level `quimb.tensor` module as before.
 
 **Enhancements:**
 
 - add [`shift`](quimb.gen.operators.shift) and [`clock`](quimb.gen.operators.clock) operators.
 - add [`Tensor.isfermionic`](quimb.tensor.tensor_core.Tensor.isfermionic) and [`TensorNetwork.isfermionic`](quimb.tensor.tensor_core.TensorNetwork.isfermionic) methods.
 - add `phase_dual` option to [`TensorNetwork.conj`](quimb.tensor.tensor_core.TensorNetwork.conj).
-- rename `tensor_network_1d_compress_zipup_first` to [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_oversample) and standardise `oversample` arguments.
-- add [`tensor_network_1d_compress_srcmps_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_srcmps_oversample) and [`tensor_network_1d_compress_fit_oversample`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit_oversample) methods.
+- rename `tensor_network_1d_compress_zipup_first` to [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup_oversample) and standardise `oversample` arguments.
+- add [`tensor_network_1d_compress_srcmps_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_srcmps_oversample) and [`tensor_network_1d_compress_fit_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_fit_oversample) methods.
 - add [`connected_bipartitions`](quimb.tensor.geometry.connected_bipartitions) for finding all connected bipartitions of a tensor network
 - [`tn.distribute_exponent`](quimb.tensor.tensor_core.TensorNetwork.distribute_exponent): add `new_exponent` option for specifying the new exponent value (default 0.0).
-- [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress): correctly handle input networks with non-zero exponents and `equalize_norms`.
+- [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress): correctly handle input networks with non-zero exponents and `equalize_norms`.
 
 **Bug fixes:**
 
 - fix [`isometrize_qr`](quimb.tensor.decomp.isometrize_qr) for complex torch arrays ({issue}`346`).
-- fix [`right_canonicalize`](quimb.tensor.tensor_1d.TensorNetwork1DFlat.right_canonicalize) to return the right canonicalized tensor network ({issue}`347`)
+- fix [`right_canonicalize`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.right_canonicalize) to return the right canonicalized tensor network ({issue}`347`)
 - ensure all belief propagation contraction methods correctly propagate the target tensor network's `.exponent`.
+
 
 (whats-new-1-12-1)=
 ## v1.12.1 (2026-01-12)
@@ -38,7 +39,7 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
-- fix [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen) mixin inheritance order.
+- fix [`SimpleUpdateGen`](quimb.tensor.tnag.tebd.SimpleUpdateGen) mixin inheritance order.
 - fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) for fermionic tensor networks with bond signature +-.
 
 
@@ -55,27 +56,27 @@ Release notes for `quimb`.
 - [`schematic.Drawing`](quimb.schematic.Drawing): add [`grid`](quimb.schematic.Drawing.grid), [`grid3d`](quimb.schematic.Drawing.grid3d), [`bezier`](quimb.schematic.Drawing.bezier), [`star`](quimb.schematic.Drawing.star), [`cross`](quimb.schematic.Drawing.cross) and [`zigzag`](quimb.schematic.Drawing.zigzag) methods.
 - [`schematic.Drawing`](quimb.schematic.Drawing): add `relative` option to [`arrowhead`](quimb.schematic.Drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.Drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.Drawing.line).
 - add [`Drawing.scale_figsize`](quimb.schematic.Drawing.scale_figsize) for automatically setting the absolute figsize based on placed elements.
-- refactor [`TEBDGen`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen)
-- update the 2d specific [`SimpleUpdate`](quimb.tensor.tensor_2d_tebd.SimpleUpdate) to use the new infrastructure.
+- refactor [`TEBDGen`](quimb.tensor.tnag.tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tnag.tebd.SimpleUpdateGen)
+- update the 2d specific [`SimpleUpdate`](quimb.tensor.tn1d.tebd.SimpleUpdate) to use the new infrastructure.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): add `adjust_lims` option
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): allow `autodiff_backend="torch"` with `jit_fn=True` to work with array backends with general pytree parameters, e.g. `symmray` arrays.
-- [`tn.gen_gloops`](quimb.tensor.tensor_core.TensorNetwork.gen_gloops) and [`tn.gen_gloops_sites`](quimb.tensor.tensor_arbgeom.TensorNetworkArbgeom.gen_gloops_sites): add `join_overlap` option. When building cluster by joining smaller generalized loops, this option controls how many nodes they need to overlap by to be joined together.
+- [`tn.gen_gloops`](quimb.tensor.tensor_core.TensorNetwork.gen_gloops) and [`tn.gen_gloops_sites`](quimb.tensor.tnag.core.TensorNetworkArbgeom.gen_gloops_sites): add `join_overlap` option. When building cluster by joining smaller generalized loops, this option controls how many nodes they need to overlap by to be joined together.
 - all message passing routines: add `callback` option
 - GBP: allow a message initilization function.
 - [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP): allow `messages` to be a callable initialization function.
-- [`MatrixProductState.gate_nonlocal`](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal): add `method="lazy"` option for lazily applying a non-local gate as a sub-MPO without contraction or compression.
-- [`LocalHamGen.apply_to_arrays`](quimb.tensor.tensor_arbgeom_tebd.LocalHamGen.apply_to_arrays): support pytree parameter arrays such as `symmray`.
+- [`MatrixProductState.gate_nonlocal`](quimb.tensor.tn1d.core.MatrixProductState.gate_nonlocal): add `method="lazy"` option for lazily applying a non-local gate as a sub-MPO without contraction or compression.
+- [`LocalHamGen.apply_to_arrays`](quimb.tensor.tnag.tebd.LocalHamGen.apply_to_arrays): support pytree parameter arrays such as `symmray`.
 - add [`Tensor.get_namespace`](quimb.tensor.tensor_core.Tensor.get_namespace) and [`TensorNetwork.get_namespace`](quimb.tensor.tensor_core.TensorNetwork.get_namespace) for getting a [reusable data array namespace](https://autoray.readthedocs.io/en/latest/automatic_dispatch.html#namespace-api)
 - [`TensorNetwork.isel`](quimb.tensor.tensor_core.TensorNetwork.isel): use `take` where possible to better support e.g. `torch.vmap` across amplitudes.
-- [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure), and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample): add `backend_random` option for specifying which backend to use for random number generation when sampling, this can be set for example to `jax` to make the whole process jittable, but by default is `numpy`, regardless of the actual array backend.
+- [`MatrixProductState.measure`](quimb.tensor.tn1d.core.MatrixProductState.measure), and [`MatrixProductState.sample`](quimb.tensor.tn1d.core.MatrixProductState.sample): add `backend_random` option for specifying which backend to use for random number generation when sampling, this can be set for example to `jax` to make the whole process jittable, but by default is `numpy`, regardless of the actual array backend.
 
 **Bug fixes:**
 
 - fix [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) when `insert_into is None`.
 - tensor network drawing, ensure hyper indices can be specified as `output_inds`.
-- fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) when using jax arrays ({issue}`340`).
-- fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) when projecting and keeping a site site ({issue}`344`).
+- fix [`MatrixProductState.measure`](quimb.tensor.tn1d.core.MatrixProductState.measure) when using jax arrays ({issue}`340`).
+- fix [`MatrixProductState.measure`](quimb.tensor.tn1d.core.MatrixProductState.measure) when projecting and keeping a site site ({issue}`344`).
 
 (whats-new-1-11-2)=
 ## v1.11.2 (2025-07-30)
@@ -98,8 +99,8 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add `create_bond` to [`tensor_canonize_bond`](quimb.tensor.tensor_core.tensor_canonize_bond) and [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond) for optionally creating a new bond between two tensors if they don't already share one. Add as a flag to [`TensorNetwork1DFlat.compress`](quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress) and related functions ({issue}`294`).
-- add [`ensure_bonds_exist`](quimb.tensor.tensor_1d.TensorNetwork1DFlat.ensure_bonds_exist) for ensuring that all bonds in a 1D flat tensor network exist. Use this in the `permute_arrays` methods and optionally in the `expand_bond_dimension` method.
+- add `create_bond` to [`tensor_canonize_bond`](quimb.tensor.tensor_core.tensor_canonize_bond) and [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond) for optionally creating a new bond between two tensors if they don't already share one. Add as a flag to [`TensorNetwork1DFlat.compress`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.compress) and related functions ({issue}`294`).
+- add [`ensure_bonds_exist`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.ensure_bonds_exist) for ensuring that all bonds in a 1D flat tensor network exist. Use this in the `permute_arrays` methods and optionally in the `expand_bond_dimension` method.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): permit empty network, and allow `color=True` to automatically color all tags.
 - [`tn.add_tag`](quimb.tensor.tensor_core.TensorNetwork.add_tag): add a `record: Optional[dict]` kwarg, to allow for easy rewinding of temporary tags without tracking the actual networks.
 - add [`qu.plot`](quimb.utils_plot.plot) as a quick wrapper for calling `matplotlib.pyplot.plot` with the `quimb` style.
@@ -108,9 +109,9 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
-- Fix [`TensorNetwork2D.compute_plaquette_environments`](quimb.tensor.tensor_2d.TensorNetwork2D.compute_plaquette_environments) for `mode="zipup"` and other boundary contraction methods that use the generic 1D compression algorithms.
+- Fix [`TensorNetwork2D.compute_plaquette_environments`](quimb.tensor.tn2d.core.TensorNetwork2D.compute_plaquette_environments) for `mode="zipup"` and other boundary contraction methods that use the generic 1D compression algorithms.
 - [`parse_openqasm2_str`](quimb.tensor.circuit.parse_openqasm2_str) allow custom gate names to start with the word `gate` ({issue}`312`).
-- [`MatrixProductState.gate_with_mpo`](quimb.tensor.tensor_1d.MatrixProductState.gate_with_mpo): fix bug to do with inplace argument ({issue}`313`).
+- [`MatrixProductState.gate_with_mpo`](quimb.tensor.tn1d.core.MatrixProductState.gate_with_mpo): fix bug to do with inplace argument ({issue}`313`).
 
 
 (whats-new-1-11-0)=
@@ -125,7 +126,7 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - [`Tensor`](quimb.tensor.tensor_core.Tensor): make binary operations (`+, -, *, /, **`) automatically align and broadcast indices. This would previously error.
-- [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure): add a `seed` kwarg
+- [`MatrixProductState.measure`](quimb.tensor.tn1d.core.MatrixProductState.measure): add a `seed` kwarg
 - belief propagation, implement DIIS (direct inversion in the iterative subspace)
 - belief propagation, unify various aspects such as message normalization and distance.
 - belief propagation, add a [`plot`](quimb.tensor.belief_propagation.bp_common.BeliefPropagationCommon.plot) method.
@@ -147,7 +148,7 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
-- fix [`MatrixProductState.measure`](quimb.tensor.tensor_1d.MatrixProductState.measure) for `cupy` backend arrays ({issue}`276`).
+- fix [`MatrixProductState.measure`](quimb.tensor.tn1d.core.MatrixProductState.measure) for `cupy` backend arrays ({issue}`276`).
 - fix `linalg.expm` dispatch ({issue}`275`)
 - fix 'dm' 1d compress method for disconnected subgraphs
 - fix docs source lookup in `quimb.tensor` module
@@ -176,7 +177,7 @@ Release notes for `quimb`.
 
 **Breaking Changes**
 
-- renamed `MatrixProductState.partial_trace` and `MatrixProductState.ptr` to [MatrixProductState.partial_trace_to_mpo](quimb.tensor.tensor_1d.MatrixProductState.partial_trace_to_mpo) to avoid confusion with other `partial_trace` methods that usually produce a dense matrix.
+- renamed `MatrixProductState.partial_trace` and `MatrixProductState.ptr` to [MatrixProductState.partial_trace_to_mpo](quimb.tensor.tn1d.core.MatrixProductState.partial_trace_to_mpo) to avoid confusion with other `partial_trace` methods that usually produce a dense matrix.
 
 **Enhancements:**
 
@@ -185,18 +186,18 @@ Release notes for `quimb`.
 - [`Circuit`](quimb.tensor.circuit.Circuit): by default turn on `simplify_equalize_norms` and use a `group_size=10` for sampling. This should result in faster and more stable sampling.
 - [`Circuit`](quimb.tensor.circuit.Circuit): use `numpy.random.default_rng` for random number generation.
 - add [`qtn.circ_a2a_rand`](quimb.tensor.circuit_gen.circ_a2a_rand) for generating random all-to-all circuits.
-- expose [`qtn.edge_coloring`](quimb.tensor.tensor_arbgeom_tebd.edge_coloring) as top level function and allow layers to be returned grouped.
+- expose [`qtn.edge_coloring`](quimb.tensor.tnag.tebd.edge_coloring) as top level function and allow layers to be returned grouped.
 - add docstring for [`tn.contract_compressed`](quimb.tensor.tensor_core.TensorNetwork.contract_compressed) and by default pick up important settings from the supplied contraction path optimizer (`max_bond` and `compress_late`)
 - add [`Tensor.rand_reduce`](quimb.tensor.tensor_core.Tensor.rand_reduce) for randomly removing a tensor index by contracting a random vector into it. One can also supply the value `"r"` to `isel` selectors to use this.
 - add `fit-zipup` and `fit-projector` shorthand methods to the general 1d tensor network compression function
-- add [`MatrixProductState.compute_local_expectation`](quimb.tensor.tensor_1d.MatrixProductState.compute_local_expectation) for computing many local expectations for a MPS at once, to match the interface for this method elsewhere. These can either be computed via canonicalization (`method="canonical"`), or via explicit left and right environment contraction (`method="envs"`)
+- add [`MatrixProductState.compute_local_expectation`](quimb.tensor.tn1d.core.MatrixProductState.compute_local_expectation) for computing many local expectations for a MPS at once, to match the interface for this method elsewhere. These can either be computed via canonicalization (`method="canonical"`), or via explicit left and right environment contraction (`method="envs"`)
 - specialize [`CircuitMPS.local_expectation`](quimb.tensor.circuit.CircuitMPS.local_expectation) to make use of the MPS form.
-- add [`PEPS.product_state`](quimb.tensor.tensor_2d.PEPS.product_state) for constructing a PEPS representing a product state.
-- add [`PEPS.vacuum`](quimb.tensor.tensor_2d.PEPS.vacuum) for constructing a PEPS representing the vacuum state $|000\ldots0\rangle$.
-- add [`PEPS.zeros`](quimb.tensor.tensor_2d.PEPS.zeros) for constructing a PEPS whose entries are all zero.
+- add [`PEPS.product_state`](quimb.tensor.tn2d.core.PEPS.product_state) for constructing a PEPS representing a product state.
+- add [`PEPS.vacuum`](quimb.tensor.tn2d.core.PEPS.vacuum) for constructing a PEPS representing the vacuum state $|000\ldots0\rangle$.
+- add [`PEPS.zeros`](quimb.tensor.tn2d.core.PEPS.zeros) for constructing a PEPS whose entries are all zero.
 - [`tn.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): improve scheduling and add `damping` and `touched_tids` options.
-- [`qtn.SimpleUpdateGen`](quimb.tensor.tensor_arbgeom_tebd.SimpleUpdateGen): add gauge difference update checking and `tol` and `equilibrate` settings. Update `.plot()` method. Default to a small `cutoff`.
-- add [`psi.sample_configuration_cluster`](quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.sample_configuration_cluster) for sampling a tensor network using the simple update or cluster style environment approximation.
+- [`qtn.SimpleUpdateGen`](quimb.tensor.tnag.tebd.SimpleUpdateGen): add gauge difference update checking and `tol` and `equilibrate` settings. Update `.plot()` method. Default to a small `cutoff`.
+- add [`psi.sample_configuration_cluster`](quimb.tensor.tnag.core.TensorNetworkGenVector.sample_configuration_cluster) for sampling a tensor network using the simple update or cluster style environment approximation.
 - add the new doc {ref}`ex-circuit-sampling`
 
 ---
@@ -219,8 +220,8 @@ Release notes for `quimb`.
 **Enhancements:**
 
 - support for numpy v2.0 and scipy v1.14
-- add MPS sampling: [`MatrixProductState.sample_configuration`](quimb.tensor.tensor_1d.MatrixProductState.sample_configuration) and [`MatrixProductState.sample`](quimb.tensor.tensor_1d.MatrixProductState.sample) (generating multiple samples) and use these for [`CircuitMPS.sample`](quimb.tensor.circuit.CircuitMPS.sample) and [`CircuitPermMPS.sample`](quimb.tensor.circuit.CircuitPermMPS.sample).
-- add basic [`.plot()`](quimb.tensor.tensor_arbgeom_tebd.TEBDGen.plot) method for SimpleUpdate classes
+- add MPS sampling: [`MatrixProductState.sample_configuration`](quimb.tensor.tn1d.core.MatrixProductState.sample_configuration) and [`MatrixProductState.sample`](quimb.tensor.tn1d.core.MatrixProductState.sample) (generating multiple samples) and use these for [`CircuitMPS.sample`](quimb.tensor.circuit.CircuitMPS.sample) and [`CircuitPermMPS.sample`](quimb.tensor.circuit.CircuitPermMPS.sample).
+- add basic [`.plot()`](quimb.tensor.tnag.tebd.TEBDGen.plot) method for SimpleUpdate classes
 - add [`edges_1d_chain`](quimb.tensor.geometry.edges_1d_chain) for generating 1D chain edges
 - [operatorbuilder](quimb.operator): better coefficient placement for long range MPO building
 
@@ -253,20 +254,20 @@ Release notes for `quimb`.
 
 - [`CircuitMPS`](quimb.tensor.circuit.CircuitMPS) now supports multi qubit gates, including arbitrary multi-controls (which are treated in a low-rank manner), and faster simulation via better orthogonality center tracking.
 - add [`CircuitPermMPS`](quimb.tensor.circuit.CircuitPermMPS)
-- add [`MatrixProductState.gate_nonlocal`](quimb.tensor.tensor_1d.MatrixProductState.gate_nonlocal) for applying a gate, supplied as a raw matrix, to a non-local and arbitrary number of sites. The kwarg `contract="nonlocal"` can be used to force this method, or the new option `"auto-mps"` will select this method if the gate is non-local ({issue}`230`)
-- add [`MatrixProductState.gate_with_mpo`](quimb.tensor.tensor_1d.MatrixProductState.gate_with_mpo) for applying an MPO to an MPS, and immediately compressing back to MPS form using [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
-- add [`MatrixProductState.gate_with_submpo`](quimb.tensor.tensor_1d.MatrixProductState.gate_with_submpo) for applying an MPO acting only of a subset of sites to an MPS
-- add [`MatrixProductOperator.from_dense`](quimb.tensor.tensor_1d.MatrixProductOperator.from_dense) for constructing MPOs from dense matrices, including an only subset of sites
-- add [`MatrixProductOperator.fill_empty_sites`](quimb.tensor.tensor_1d.MatrixProductOperator.fill_empty_sites) for 'completing' an MPO which only has tensors on a subset of sites with (by default) identities
--  [`MatrixProductState`](quimb.tensor.tensor_1d.MatrixProductState) and [`MatrixProductOperator`](quimb.tensor.tensor_1d.MatrixProductOperator), now support the ``sites`` kwarg in common constructors, enabling the TN to act on a subset of the full ``L`` sites.
+- add [`MatrixProductState.gate_nonlocal`](quimb.tensor.tn1d.core.MatrixProductState.gate_nonlocal) for applying a gate, supplied as a raw matrix, to a non-local and arbitrary number of sites. The kwarg `contract="nonlocal"` can be used to force this method, or the new option `"auto-mps"` will select this method if the gate is non-local ({issue}`230`)
+- add [`MatrixProductState.gate_with_mpo`](quimb.tensor.tn1d.core.MatrixProductState.gate_with_mpo) for applying an MPO to an MPS, and immediately compressing back to MPS form using [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress)
+- add [`MatrixProductState.gate_with_submpo`](quimb.tensor.tn1d.core.MatrixProductState.gate_with_submpo) for applying an MPO acting only of a subset of sites to an MPS
+- add [`MatrixProductOperator.from_dense`](quimb.tensor.tn1d.core.MatrixProductOperator.from_dense) for constructing MPOs from dense matrices, including an only subset of sites
+- add [`MatrixProductOperator.fill_empty_sites`](quimb.tensor.tn1d.core.MatrixProductOperator.fill_empty_sites) for 'completing' an MPO which only has tensors on a subset of sites with (by default) identities
+-  [`MatrixProductState`](quimb.tensor.tn1d.core.MatrixProductState) and [`MatrixProductOperator`](quimb.tensor.tn1d.core.MatrixProductOperator), now support the ``sites`` kwarg in common constructors, enabling the TN to act on a subset of the full ``L`` sites.
 - add [`TensorNetwork.drape_bond_between`](quimb.tensor.tensor_core.TensorNetwork.drape_bond_between) for 'draping' an existing bond between two tensors through a third
 - add [`Tensor.new_ind_pair_with_identity`](quimb.tensor.tensor_core.Tensor.new_ind_pair_with_identity)
 - TN2D, TN3D and arbitrary geom classical partition function builders ([`TN_classical_partition_function_from_edges`](quimb.tensor.tensor_builder.TN_classical_partition_function_from_edges)) now all support `outputs=` kwarg specifying non-marginalized variables
 - add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP)
-- add [`qtn.enforce_1d_like`](quimb.tensor.tensor_1d_compress.enforce_1d_like) for checking whether a tensor network is 1D-like, including automatically adding strings of identities between non-local bonds, expanding applicability of [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress)
-- add [`MatrixProductState.canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].
-- add [`MatrixProductState.left_canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.left_canonicalize) as (by default *non-inplace*) version of `left_canonize`, to follow the pattern of other tensor network methods. `left_canonize` is now an alias for `left_canonicalize_` [note trailing underscore].
-- add [`MatrixProductState.right_canonicalize`](quimb.tensor.tensor_1d.MatrixProductState.right_canonicalize) as (by default *non-inplace*) version of `right_canonize`, to follow the pattern of other tensor network methods. `right_canonize` is now an alias for `right_canonicalize_` [note trailing underscore].
+- add [`qtn.enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like) for checking whether a tensor network is 1D-like, including automatically adding strings of identities between non-local bonds, expanding applicability of [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress)
+- add [`MatrixProductState.canonicalize`](quimb.tensor.tn1d.core.MatrixProductState.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.left_canonicalize`](quimb.tensor.tn1d.core.MatrixProductState.left_canonicalize) as (by default *non-inplace*) version of `left_canonize`, to follow the pattern of other tensor network methods. `left_canonize` is now an alias for `left_canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.right_canonicalize`](quimb.tensor.tn1d.core.MatrixProductState.right_canonicalize) as (by default *non-inplace*) version of `right_canonize`, to follow the pattern of other tensor network methods. `right_canonize` is now an alias for `right_canonicalize_` [note trailing underscore].
 
 **Bug fixes:**
 
@@ -289,65 +290,65 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add `quimb.tensor.tensor_1d_compress.py` with functions for compressing generic
+- add `quimb.tensor.tn1d.compress.py` with functions for compressing generic
   1D tensor networks (with arbitrary local structure) using various methods.
   The methods are:
 
-  - The **'direct'** method: [`tensor_network_1d_compress_direct`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_direct)
-  - The **'dm'** (density matrix) method: [`tensor_network_1d_compress_dm`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_dm)
-  - The **'zipup'** method: [`tensor_network_1d_compress_zipup`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup)
-  - The **'zipup-first'** method: [`tensor_network_1d_compress_zipup_first`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_zipup_first)
-  - The 1 and 2 site **'fit'** or sweeping method: [`tensor_network_1d_compress_fit`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress_fit)
+  - The **'direct'** method: [`tensor_network_1d_compress_direct`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_direct)
+  - The **'dm'** (density matrix) method: [`tensor_network_1d_compress_dm`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_dm)
+  - The **'zipup'** method: [`tensor_network_1d_compress_zipup`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup)
+  - The **'zipup-first'** method: [`tensor_network_1d_compress_zipup_first`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup_first)
+  - The 1 and 2 site **'fit'** or sweeping method: [`tensor_network_1d_compress_fit`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_fit)
   - ... and some more niche methods for debugging and testing.
 
-  And can be accessed via the unified function [`tensor_network_1d_compress`](quimb.tensor.tensor_1d_compress.tensor_network_1d_compress).
+  And can be accessed via the unified function [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress).
   Boundary contraction in 2D can now utilize any of these methods.
-- add `quimb.tensor.tensor_arbgeom_compress.py` with functions for compressing
+- add `quimb.tensor.tnag.compress.py` with functions for compressing
   arbitrary geometry tensor networks using various methods. The methods are:
 
   - The **'local-early'** method:
-    [`tensor_network_ag_compress_local_early`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_local_early)
+    [`tensor_network_ag_compress_local_early`](quimb.tensor.tnag.compress.tensor_network_ag_compress_local_early)
   - The **'local-late'** method:
-    [`tensor_network_ag_compress_local_late`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_local_late)
+    [`tensor_network_ag_compress_local_late`](quimb.tensor.tnag.compress.tensor_network_ag_compress_local_late)
   - The **'projector'** method:
-    [`tensor_network_ag_compress_projector`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_projector)
+    [`tensor_network_ag_compress_projector`](quimb.tensor.tnag.compress.tensor_network_ag_compress_projector)
   - The **'superorthogonal'** method:
-    [`tensor_network_ag_compress_superorthogonal`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_superorthogonal)
+    [`tensor_network_ag_compress_superorthogonal`](quimb.tensor.tnag.compress.tensor_network_ag_compress_superorthogonal)
   - The **'l2bp'** method:
-    [`tensor_network_ag_compress_l2bp`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress_l2bp)
+    [`tensor_network_ag_compress_l2bp`](quimb.tensor.tnag.compress.tensor_network_ag_compress_l2bp)
 
   And can be accessed via the unified function
-  [`tensor_network_ag_compress`](quimb.tensor.tensor_arbgeom_compress.tensor_network_ag_compress).
+  [`tensor_network_ag_compress`](quimb.tensor.tnag.compress.tensor_network_ag_compress).
   1D compression can also fall back to these methods.
 - support PBC in
-  [`tn2d.contract_hotrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg),
-  [`tn2d.contract_ctmrg`](quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg),
-  [`tn3d.contract_hotrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_hotrg) and
+  [`tn2d.contract_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg),
+  [`tn2d.contract_ctmrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_ctmrg),
+  [`tn3d.contract_hotrg`](quimb.tensor.tn3d.core.TensorNetwork3D.contract_hotrg) and
   the new function
-  [`tn3d.contract_ctmrg`](quimb.tensor.tensor_3d.TensorNetwork3D.contract_ctmrg).
+  [`tn3d.contract_ctmrg`](quimb.tensor.tn3d.core.TensorNetwork3D.contract_ctmrg).
 - support PBC in
-  [`gen_2d_bonds`](quimb.tensor.tensor_2d.gen_2d_bonds) and
-  [`gen_3d_bonds`](quimb.tensor.tensor_3d.gen_3d_bonds), with ``cyclic`` kwarg.
+  [`gen_2d_bonds`](quimb.tensor.tn2d.core.gen_2d_bonds) and
+  [`gen_3d_bonds`](quimb.tensor.tn3d.core.gen_3d_bonds), with ``cyclic`` kwarg.
 - support PBC in
   [`TN2D_rand_hidden_loop`](quimb.tensor.tensor_builder.TN2D_rand_hidden_loop)
   and
   [`TN3D_rand_hidden_loop`](quimb.tensor.tensor_builder.TN3D_rand_hidden_loop),
   with ``cyclic`` kwarg.
 - support PBC in the various base PEPS and PEPO construction methods.
-- add [`tensor_network_apply_op_op`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_op)
+- add [`tensor_network_apply_op_op`](quimb.tensor.tnag.core.tensor_network_apply_op_op)
   for applying 'operator' TNs to 'operator' TNs.
-- tweak [`tensor_network_apply_op_vec`](quimb.tensor.tensor_arbgeom.tensor_network_apply_op_vec)
+- tweak [`tensor_network_apply_op_vec`](quimb.tensor.tnag.core.tensor_network_apply_op_vec)
   for applying 'operator' TNs to 'vector' or 'state' TNs.
-- add [`tnvec.gate_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenVector.gate_with_op_lazy)
+- add [`tnvec.gate_with_op_lazy`](quimb.tensor.tnag.core.TensorNetworkGenVector.gate_with_op_lazy)
   method for applying 'operator' TNs to 'vector' or 'state' TNs like $x \rightarrow A x$.
-- add [`tnop.gate_upper_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_upper_with_op_lazy)
+- add [`tnop.gate_upper_with_op_lazy`](quimb.tensor.tnag.core.TensorNetworkGenOperator.gate_upper_with_op_lazy)
   method for applying 'operator' TNs to the upper indices of 'operator' TNs like $B \rightarrow A B$.
-- add [`tnop.gate_lower_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_lower_with_op_lazy)
+- add [`tnop.gate_lower_with_op_lazy`](quimb.tensor.tnag.core.TensorNetworkGenOperator.gate_lower_with_op_lazy)
   method for applying 'operator' TNs to the lower indices of 'operator' TNs like $B \rightarrow B A$.
-- add [`tnop.gate_sandwich_with_op_lazy`](quimb.tensor.tensor_arbgeom.TensorNetworkGenOperator.gate_sandwich_with_op_lazy)
+- add [`tnop.gate_sandwich_with_op_lazy`](quimb.tensor.tnag.core.TensorNetworkGenOperator.gate_sandwich_with_op_lazy)
   method for applying 'operator' TNs to the upper and lower indices of 'operator' TNs like $B \rightarrow A B A^\dagger$.
 - unify all TN summing routines into
-  [`tensor_network_ag_sum](quimb.tensor.tensor_arbgeom.tensor_network_ag_sum),
+  [`tensor_network_ag_sum](quimb.tensor.tnag.core.tensor_network_ag_sum),
   which allows summing any two tensor networks with matching site tags and
   outer indices, replacing specific MPS, MPO, PEPS, PEPO, etc. summing routines.
 - add [`rand_symmetric_array`](quimb.tensor.tensor_builder.rand_symmetric_array),
@@ -403,7 +404,7 @@ Release notes for `quimb`.
 
 - add [`TensorNetwork.visualize_tensors`](quimb.tensor.drawing.visualize_tensors)
   for visualizing the actual data entries of an entire tensor network.
-- add [`ham.build_mpo_propagator_trotterized`](quimb.tensor.tensor_1d_tebd.LocalHam1D.build_mpo_propagator_trotterized)
+- add [`ham.build_mpo_propagator_trotterized`](quimb.tensor.tn1d.tebd.LocalHam1D.build_mpo_propagator_trotterized)
   for building a trotterized propagator from a local 1D hamiltonian. This
   also includes updates for creating 'empty' tensor networks using
   [`TensorNetwork.new`](quimb.tensor.tensor_core.TensorNetwork.new), and
@@ -467,7 +468,7 @@ Release notes for `quimb`.
 - add [TensorNetwork.compress_all_1d](quimb.tensor.TensorNetwork.compress_all_1d)
   for compressing generic tensor networks that you promise have a 1D topology,
   without casting as a [TensorNetwork1D](quimb.tensor.TensorNetwork1D).
-- add [MatrixProductState.from_fill_fn](quimb.tensor.tensor_1d.MatrixProductState.from_fill_fn)
+- add [MatrixProductState.from_fill_fn](quimb.tensor.tn1d.core.MatrixProductState.from_fill_fn)
   for constructing MPS from a function that fills the tensors.
 - add [Tensor.idxmin](quimb.tensor.Tensor.idxmin) and
   [Tensor.idxmax](quimb.tensor.Tensor.idxmax) for finding the index of the
@@ -547,12 +548,12 @@ Release notes for `quimb`.
   methos, for some RG style algorithms.
 - add the `mode="projector"` option for 2D tensor network contractions
 - add HOTRG style coarse graining and contraction in 2D and 3D. See
-  {meth}`~quimb.tensor.tensor_2d.TensorNetwork2D.coarse_grain_hotrg`,
-  {meth}`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_hotrg`,
-  {meth}`~quimb.tensor.tensor_3d.TensorNetwork3D.coarse_grain_hotrg`, and
-  {meth}`~quimb.tensor.tensor_3d.TensorNetwork3D.contract_hotrg`,
+  {meth}`~quimb.tensor.tn2d.core.TensorNetwork2D.coarse_grain_hotrg`,
+  {meth}`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg`,
+  {meth}`~quimb.tensor.tn3d.core.TensorNetwork3D.coarse_grain_hotrg`, and
+  {meth}`~quimb.tensor.tn3d.core.TensorNetwork3D.contract_hotrg`,
 - add CTMRG style contraction for 2D tensor networks:
-  {meth}`~quimb.tensor.tensor_2d.TensorNetwork2D.contract_ctmrg`
+  {meth}`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_ctmrg`
 - add 2D tensor network 'corner double line' (CDL) builders:
   {func}`~quimb.tensor.tensor_builder.TN2D_corner_double_line`
 - update the docs to use the [furo](https://pradyunsg.me/furo/) theme,
@@ -619,7 +620,7 @@ Release notes for `quimb`.
 **Enhancements**
 
 - unify much functionality from 1D, 2D and 3D into general arbitrary geometry
-  class {class}`quimb.tensor.tensor_arbgeom.TensorNetworkGen`
+  class {class}`quimb.tensor.tnag.core.TensorNetworkGen`
 - refactor contraction, allowing using cotengra directly
 - add {meth}`~quimb.tensor.tensor_core.Tensor.visualize` for visualizing the
   actual data entries of an arbitrarily high dimensional tensor
@@ -680,7 +681,7 @@ Release notes for `quimb`.
 - Allow the {class}`~quimb.evo.Evolution` callback `compute=` to optionally access the Hamiltonian ({pull}`49`).
 - Added {meth}`quimb.tensor.tensor_core.Tensor.randomize` and {meth}`quimb.tensor.tensor_core.TensorNetwork.randomize` to randomize tensor and tensor network entries.
 - Automatically squeeze tensor networks when rank-simplifying.
-- Add {meth}`~quimb.tensor.tensor_1d.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
+- Add {meth}`~quimb.tensor.tn1d.core.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
 - Add {func}`~quimb.tensor.tensor_builder.MPS_ghz_state` and {func}`~quimb.tensor.tensor_builder.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
 - Various changes in conjunction with [autoray](https://github.com/jcmgray/autoray) to improve the agnostic-ness of tensor network operations with respect to the backend array type.
 - Add {func}`~quimb.tensor.tensor_core.new_bond` on top of {meth}`quimb.tensor.tensor_core.Tensor.new_ind` and {meth}`quimb.tensor.tensor_core.Tensor.expand_ind` for more graph orientated construction of tensor networks, see {ref}`tn-creation-graph-style`.
@@ -726,11 +727,11 @@ Release notes for `quimb`.
 - TN: Add `'split-gate'` gate mode
 - TN: Add {class}`~quimb.tensor.optimize_tensorflow.TNOptimizer` for tensorflow based optimization
   of arbitrary, contstrained tensor networks.
-- TN: Add {meth}`quimb.tensor.tensor_1d.Dense1D.rand`
+- TN: Add {meth}`quimb.tensor.tn1d.core.Dense1D.rand`
 - TN: Add {func}`~quimb.tensor.tensor_core.connect` to conveniently set a shared index for tensors
 - TN: make many more tensor operations agnostic of the array backend (e.g. numpy, cupy,
   tensorflow, ...)
-- TN: allow {func}`~quimb.tensor.tensor_1d.align_TN_1D` to take an MPO as the first argument
+- TN: allow {func}`~quimb.tensor.tn1d.core.align_TN_1D` to take an MPO as the first argument
 - TN: add {meth}`~quimb.tensor.tensor_builder.SpinHam1D.build_sparse`
 - TN: add {meth}`quimb.tensor.tensor_core.Tensor.unitize` and {meth}`quimb.tensor.tensor_core.TensorNetwork.unitize` to impose unitary/isometric constraints on tensors specfied using the `left_inds` kwarg
 - Many updates to tensor network quantum circuit

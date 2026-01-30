@@ -506,7 +506,7 @@ def single_random_estimate(
     info=None,
     **lanczos_opts,
 ):
-    from ..tensor.tensor_1d import MatrixProductOperator
+    from ..tensor.tn1d.core import MatrixProductOperator
 
     # choose normal (any LinearOperator) or MPO lanczos tridiag construction
     if isinstance(A, MatrixProductOperator):

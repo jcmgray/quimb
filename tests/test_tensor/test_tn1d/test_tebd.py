@@ -4,7 +4,7 @@ from pytest import approx
 
 import quimb as qu
 import quimb.tensor as qtn
-from quimb.tensor.tensor_1d_tebd import OTOC_local
+from quimb.tensor.tn1d.tebd import OTOC_local
 
 
 class TestTEBD:

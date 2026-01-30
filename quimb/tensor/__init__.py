@@ -49,58 +49,6 @@ from .interface import (
 from .optimize import (
     TNOptimizer,
 )
-from .tensor_1d import (
-    Dense1D,
-    MatrixProductOperator,
-    MatrixProductState,
-    SuperOperator1D,
-    TensorNetwork1D,
-    TNLinearOperator1D,
-    align_TN_1D,
-    expec_TN_1D,
-    gate_TN_1D,
-    superop_TN_1D,
-)
-from .tensor_1d_compress import (
-    enforce_1d_like,
-    tensor_network_1d_compress,
-)
-from .tensor_1d_tebd import (
-    NNI,
-    TEBD,
-    LocalHam1D,
-)
-from .tensor_2d import (
-    PEPO,
-    PEPS,
-    TensorNetwork2D,
-    gen_2d_bonds,
-)
-from .tensor_2d_tebd import (
-    TEBD2D,
-    FullUpdate,
-    LocalHam2D,
-    SimpleUpdate,
-)
-from .tensor_3d import (
-    PEPS3D,
-    TensorNetwork3D,
-    gen_3d_bonds,
-)
-from .tensor_3d_tebd import (
-    LocalHam3D,
-)
-from .tensor_arbgeom import (
-    tensor_network_align,
-    tensor_network_apply_op_op,
-    tensor_network_apply_op_vec,
-)
-from .tensor_arbgeom_tebd import (
-    LocalHamGen,
-    SimpleUpdateGen,
-    TEBDGen,
-    edge_coloring,
-)
 from .tensor_builder import (
     MPS_COPY,
     HTN2D_classical_ising_partition_function,
@@ -208,15 +156,72 @@ from .tensor_core import (
     tensor_network_sum,
     tensor_split,
 )
-from .tensor_dmrg import (
+from .tn1d.compress import (
+    enforce_1d_like,
+    tensor_network_1d_compress,
+)
+from .tn1d.core import (
+    Dense1D,
+    MatrixProductOperator,
+    MatrixProductState,
+    SuperOperator1D,
+    TensorNetwork1D,
+    TNLinearOperator1D,
+    align_TN_1D,
+    expec_TN_1D,
+    gate_TN_1D,
+    superop_TN_1D,
+)
+from .tn1d.dmrg import (
     DMRG,
     DMRG1,
     DMRG2,
     DMRGX,
     MovingEnvironment,
 )
-from .tensor_mera import (
+from .tn1d.mera import (
     MERA,
+)
+from .tn1d.tebd import (
+    NNI,
+    TEBD,
+    LocalHam1D,
+)
+from .tn2d.core import (
+    PEPO,
+    PEPS,
+    TensorNetwork2D,
+    gen_2d_bonds,
+)
+from .tn2d.tebd import (
+    TEBD2D,
+    FullUpdate,
+    LocalHam2D,
+    SimpleUpdate,
+)
+from .tn3d.core import (
+    PEPS3D,
+    TensorNetwork3D,
+    gen_3d_bonds,
+)
+from .tn3d.tebd import (
+    LocalHam3D,
+)
+from .tnag.core import (
+    TensorNetworkGen,
+    TensorNetworkGenOperator,
+    TensorNetworkGenVector,
+    tensor_network_ag_gate,
+    tensor_network_ag_sum,
+    tensor_network_align,
+    tensor_network_apply_op_op,
+    tensor_network_apply_op_vec,
+)
+from .tnag.tebd import (
+    LocalHamGen,
+    SimpleUpdateGen,
+    TEBDGen,
+    edge_coloring,
 )
 
 __all__ = (
@@ -354,6 +359,8 @@ __all__ = (
     "tensor_fuse_squeeze",
     "tensor_linop_backend",
     "tensor_network_1d_compress",
+    "tensor_network_ag_gate",
+    "tensor_network_ag_sum",
     "tensor_network_align",
     "tensor_network_apply_op_op",
     "tensor_network_apply_op_vec",
@@ -368,6 +375,9 @@ __all__ = (
     "TensorNetwork1D",
     "TensorNetwork2D",
     "TensorNetwork3D",
+    "TensorNetworkGen",
+    "TensorNetworkGenOperator",
+    "TensorNetworkGenVector",
     "TN_classical_partition_function_from_edges",
     "TN_dimer_covering_from_edges",
     "TN_from_edges_and_fill_fn",
@@ -401,3 +411,42 @@ __all__ = (
     "TNOptimizer",
     "unpack",
 )
+
+
+# ------------------------------- deprecated -------------------------------- #
+
+# these modules are kept for backward compatibility but emit a warning at
+# import-time. Expose them lazily as attributes so importing `quimb.tensor`
+# itself doesn't immediately warn.
+_DEPRECATED_SUBMODULES = {
+    "tensor_1d": ".tensor_1d",
+    "tensor_1d_compress": ".tensor_1d_compress",
+    "tensor_1d_tebd": ".tensor_1d_tebd",
+    "tensor_2d": ".tensor_2d",
+    "tensor_2d_compress": ".tensor_2d_compress",
+    "tensor_2d_tebd": ".tensor_2d_tebd",
+    "tensor_3d": ".tensor_3d",
+    "tensor_3d_tebd": ".tensor_3d_tebd",
+    "tensor_arbgeom": ".tensor_arbgeom",
+    "tensor_arbgeom_compress": ".tensor_arbgeom_compress",
+    "tensor_arbgeom_tebd": ".tensor_arbgeom_tebd",
+    "tensor_dmrg": ".tensor_dmrg",
+    "tensor_mera": ".tensor_mera",
+}
+
+
+def __getattr__(name):
+    if name in _DEPRECATED_SUBMODULES:
+        import importlib
+
+        module = importlib.import_module(
+            _DEPRECATED_SUBMODULES[name], __name__
+        )
+        globals()[name] = module
+        return module
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()).union(_DEPRECATED_SUBMODULES))

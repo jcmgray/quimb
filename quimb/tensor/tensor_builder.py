@@ -26,18 +26,6 @@ from ..gen.rand import (
 from ..utils import concat, deprecated, unique
 from .array_ops import asarray, do, reshape, sensibly_scale
 from .contraction import array_contract
-from .tensor_1d import MatrixProductOperator, MatrixProductState
-from .tensor_1d_tebd import LocalHam1D
-from .tensor_2d import TensorNetwork2D, gen_2d_bonds, gen_2d_plaquettes
-from .tensor_2d_tebd import LocalHam2D
-from .tensor_3d import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
-from .tensor_3d_tebd import LocalHam3D
-from .tensor_arbgeom import (
-    TensorNetworkGen,
-    TensorNetworkGenOperator,
-    TensorNetworkGenVector,
-    create_lazy_edge_map,
-)
 from .tensor_core import (
     COPY_tensor,
     Tensor,
@@ -47,6 +35,18 @@ from .tensor_core import (
     tags_to_oset,
     tensor_direct_product,
     tensor_network_sum,
+)
+from .tn1d.core import MatrixProductOperator, MatrixProductState
+from .tn1d.tebd import LocalHam1D
+from .tn2d.core import TensorNetwork2D, gen_2d_bonds, gen_2d_plaquettes
+from .tn2d.tebd import LocalHam2D
+from .tn3d.core import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
+from .tn3d.tebd import LocalHam3D
+from .tnag.core import (
+    TensorNetworkGen,
+    TensorNetworkGenOperator,
+    TensorNetworkGenVector,
+    create_lazy_edge_map,
 )
 
 
@@ -1123,7 +1123,7 @@ def convert_to_2d(
     y_tag_id="Y{}",
     inplace=False,
 ) -> TensorNetwork2D:
-    """Convert ``tn`` to a :class:`~quimb.tensor.tensor_2d.TensorNetwork2D`,
+    """Convert ``tn`` to a :class:`~quimb.tensor.tn2d.core.TensorNetwork2D`,
     assuming that is has a generic geometry with sites labelled by (i, j)
     coordinates already. Useful for constructing 2D tensor networks from
     functions that only require a list of edges etc.
@@ -1611,7 +1611,7 @@ def convert_to_3d(
     z_tag_id="Z{}",
     inplace=False,
 ) -> TensorNetwork3D:
-    """Convert ``tn`` to a :class:`~quimb.tensor.tensor_3d.TensorNetwork3D`,
+    """Convert ``tn`` to a :class:`~quimb.tensor.tn3d.core.TensorNetwork3D`,
     assuming that is has a generic geometry with sites labelled by (i, j, k)
     coordinates already. Useful for constructing 3D tensor networks from
     functions that only require a list of edges etc.
@@ -3684,7 +3684,7 @@ def MPS_rand_state(
         Whether to generate a translationally invariant state,
         requires cyclic=True.
     mps_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
     """
     randn_opts = {"dist": dist, "loc": loc, "scale": scale, "dtype": dtype}
 
@@ -3848,7 +3848,7 @@ def MPS_ghz_state(L, dtype="float64", **mps_opts):
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
     mps_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
     """
     return MPS_COPY(L, dtype=dtype, **mps_opts) / 2**0.5
 
@@ -3863,7 +3863,7 @@ def MPS_w_state(L, dtype="float64", **mps_opts):
     dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
         The underlying data type.
     mps_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
     """
 
     def gen_arrays():
@@ -3892,7 +3892,7 @@ def MPS_rand_computational_state(L, dtype="float64", **mps_opts):
     dtype : {float, complex} or numpy dtype, optional
         Data type of the tensor network.
     mps_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
     """
     cstr = (choice(("0", "1")) for _ in range(L))
     return MPS_computational_state(cstr, dtype=dtype, **mps_opts)
@@ -3917,7 +3917,7 @@ def MPS_zero_state(
     dtype : {float, complex} or numpy dtype, optional
         Data type of the tensor network.
     mps_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductState`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
     """
 
     def fill_fn(shape):
@@ -3967,7 +3967,7 @@ def MPO_identity(
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
     """
     II = np.identity(phys_dim, dtype=dtype)
     cyc_dim = (1,) if cyclic else ()
@@ -4026,7 +4026,7 @@ def MPO_zeros(L, phys_dim=2, dtype="float64", cyclic=False, **mpo_opts):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -4079,7 +4079,7 @@ def MPO_product_operator(
     cyclic : bool, optional
         Whether to generate a cyclic MPO or not.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -4149,7 +4149,7 @@ def MPO_rand(
     herm : bool, optional
         Whether to make the matrix hermitian (or symmetric if real) or not.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
     """
     base_fill_fn = get_rand_fill_fn(
         dtype=dtype, dist=dist, loc=loc, scale=scale
@@ -4610,7 +4610,7 @@ class SpinHam1D:
     def build_local_ham(self, L=None, **local_ham_1d_opts):
         """Build a nearest neighbour interactor instance of this spin
         hamiltonian of size ``L``. See also
-        :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
+        :class:`~quimb.tensor.tn1d.tebd.LocalHam1D`.
 
         Parameters
         ----------
@@ -4683,7 +4683,7 @@ def MPO_ham_ising(L, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts or local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -4697,7 +4697,7 @@ def ham_1d_ising(
     L=None, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **local_ham_1d_opts
 ):
     r"""Ising Hamiltonian in
-    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam1D` form.
 
     .. math::
 
@@ -4722,7 +4722,7 @@ def ham_1d_ising(
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     mpo_opts or local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.LocalHam1D`.
 
     Returns
     -------
@@ -4785,7 +4785,7 @@ def MPO_ham_XY(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts or local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -4799,7 +4799,7 @@ def ham_1d_XY(
     L=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **local_ham_1d_opts
 ):
     r"""XY-Hamiltonian in
-    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam1D` form.
 
     .. math::
 
@@ -4827,7 +4827,7 @@ def ham_1d_XY(
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.LocalHam1D`.
 
     Returns
     -------
@@ -4892,7 +4892,7 @@ def MPO_ham_heis(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -4906,7 +4906,7 @@ def ham_1d_heis(
     L=None, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **local_ham_1d_opts
 ):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam1D` form.
 
     .. math::
 
@@ -4935,7 +4935,7 @@ def ham_1d_heis(
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam1D`.
 
     Returns
     -------
@@ -4979,7 +4979,7 @@ def MPO_ham_XXZ(L, delta, jxy=1.0, *, S=1 / 2, cyclic=False, **mpo_opts):
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -4992,7 +4992,7 @@ def ham_1d_XXZ(
     L=None, delta=None, jxy=1.0, *, S=1 / 2, cyclic=False, **local_ham_1d_opts
 ):
     r"""XXZ-Hamiltonian in
-    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam1D` form.
 
     .. math::
 
@@ -5022,7 +5022,7 @@ def ham_1d_XXZ(
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam1D`.
 
     Returns
     -------
@@ -5081,7 +5081,7 @@ def MPO_ham_bilinear_biquadratic(
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     mpo_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d.MatrixProductOperator`.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
     -------
@@ -5113,7 +5113,7 @@ def ham_1d_bilinear_biquadratic(
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
     local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D`.
+        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam1D`.
 
     Returns
     -------
@@ -5238,7 +5238,7 @@ def ham_1d_mbl(
     **local_ham_1d_opts,
 ):
     r"""The many-body-localized spin hamiltonian in
-    :class:`~quimb.tensor.tensor_1d_tebd.LocalHam1D` form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam1D` form.
 
     .. math::
 
@@ -5298,7 +5298,7 @@ NNI_ham_mbl = deprecated(ham_1d_mbl, "NNI_ham_mbl", "ham_1d_mbl")
 
 def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
     r"""Ising Hamiltonian in
-    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D` form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam2D` form.
 
     .. math::
 
@@ -5320,7 +5320,7 @@ def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
     bx : float, optional
         The X-magnetic field strength.
     local_ham_2d_opts
-        Supplied to :class:`~quimb.tensor.tensor_2d.LocalHam2D`.
+        Supplied to :class:`~quimb.tensor.tn2d.core.LocalHam2D`.
 
     Returns
     -------
@@ -5336,7 +5336,7 @@ def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
 
 def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`. form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`. form.
 
     .. math::
 
@@ -5362,7 +5362,7 @@ def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
     bz : float, optional
         The Z-magnetic field strength.
     local_ham_2d_opts
-        Supplied to :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`.
+        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`.
 
     Returns
     -------
@@ -5378,7 +5378,7 @@ def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
 
 def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`. form.
+    :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`. form.
 
     .. math::
 
@@ -5415,7 +5415,7 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
     bz : float, optional
         The Z-magnetic field strength.
     local_ham_2d_opts
-        Supplied to :class:`~quimb.tensor.tensor_2d_tebd.LocalHam2D`.
+        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`.
 
     Returns
     -------
@@ -5447,7 +5447,7 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
 
 def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`. form.
+    :class:`~quimb.tensor..tn3d.tebd.LocalHam3D`. form.
 
     .. math::
 
@@ -5475,7 +5475,7 @@ def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
     bz : float, optional
         The Z-magnetic field strength.
     local_ham_3d_opts
-        Supplied to :class:`~quimb.tensor.tensor_3d_tebd.LocalHam3D`.
+        Supplied to :class:`~quimb.tensor..tn3d.tebd.LocalHam3D`.
 
     Returns
     -------

@@ -557,7 +557,7 @@ class TestPEPO:
 
 class TestMisc:
     def test_calc_plaquette_sizes(self):
-        from quimb.tensor.tensor_2d import calc_plaquette_sizes
+        from quimb.tensor.tn2d.core import calc_plaquette_sizes
 
         H2 = {None: qu.ham_heis(2)}
         ham = qtn.LocalHam2D(10, 10, H2)
@@ -581,7 +581,7 @@ class TestMisc:
         )
 
     def test_calc_plaquette_map(self):
-        from quimb.tensor.tensor_2d import calc_plaquette_map
+        from quimb.tensor.tn2d.core import calc_plaquette_map
 
         plaquettes = [
             # 2x2 plaquette covering all sites

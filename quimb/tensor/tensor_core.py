@@ -6026,7 +6026,7 @@ class TensorNetwork(object):
                 left_inds=left_inds, right_inds=right_inds
             )
         else:
-            from .tensor_1d import TNLinearOperator1D
+            from .tn1d.core import TNLinearOperator1D
 
             # check if need to invert start stop as well
             if "!" in which:

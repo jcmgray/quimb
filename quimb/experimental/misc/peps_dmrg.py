@@ -1,4 +1,4 @@
-from quimb.tensor.tensor_arbgeom import *
+from quimb.tensor.tnag.core import *
 
 
 def virtual_bond_operator(

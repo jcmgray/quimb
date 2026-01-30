@@ -5,7 +5,6 @@ from itertools import chain, count, cycle
 import autoray as ar
 
 from quimb.gen.operators import swap
-from quimb.tensor.tensor_1d import maybe_factor_gate_into_tensor
 from quimb.tensor.tensor_core import (
     Tensor,
     bonds,
@@ -13,6 +12,7 @@ from quimb.tensor.tensor_core import (
     tags_to_oset,
     tensor_contract,
 )
+from quimb.tensor.tn1d.core import maybe_factor_gate_into_tensor
 from quimb.utils import pairwise
 
 

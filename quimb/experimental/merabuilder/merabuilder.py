@@ -19,20 +19,20 @@ TODO::
 import functools
 import itertools
 
-from quimb.tensor.tensor_1d import TensorNetwork1DVector
-from quimb.tensor.tensor_arbgeom import (
+from quimb.tensor.tensor_core import (
+    IsoTensor,
+    Tensor,
+    oset_union,
+    prod,
+)
+from quimb.tensor.tn1d.core import TensorNetwork1DVector
+from quimb.tensor.tnag.core import (
     TensorNetworkGenVector,
     _compute_expecs_maybe_in_parallel,
     _tn_local_expectation,
     oset,
     rand_uuid,
     tags_to_oset,
-)
-from quimb.tensor.tensor_core import (
-    IsoTensor,
-    Tensor,
-    oset_union,
-    prod,
 )
 from quimb.utils import partition
 

@@ -25,8 +25,6 @@ from ..utils import (
 )
 from ..utils import progbar as _progbar
 from . import array_ops as ops
-from .tensor_1d import Dense1D, MatrixProductOperator
-from .tensor_arbgeom import TensorNetworkGenOperator, TensorNetworkGenVector
 from .tensor_builder import (
     HTN_CP_operator_from_products,
     MPO_identity_like,
@@ -43,6 +41,8 @@ from .tensor_core import (
     tags_to_oset,
     tensor_contract,
 )
+from .tn1d.core import Dense1D, MatrixProductOperator
+from .tnag.core import TensorNetworkGenOperator, TensorNetworkGenVector
 
 
 def recursive_stack(x):
@@ -1574,7 +1574,7 @@ class Circuit:
         state is always copied and the tag ``PSI0`` added.
     gate_opts : dict_like, optional
         Default keyword arguments to supply to each
-        :func:`~quimb.tensor.tensor_1d.gate_TN_1D` call during the circuit.
+        :func:`~quimb.tensor.tn1d.core.gate_TN_1D` call during the circuit.
     gate_contract : str, optional
         Shortcut for setting the default `'contract'` option in `gate_opts`.
     gate_propagate_tags : str, optional

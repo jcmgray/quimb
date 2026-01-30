@@ -4,9 +4,9 @@ from autoray import do
 
 from quimb.tensor import TensorNetwork
 from quimb.tensor.decomp import compute_bondenv_projectors
-from quimb.tensor.tensor_arbgeom import TensorNetworkGenVector
-from quimb.tensor.tensor_arbgeom_tebd import SimpleUpdateGen
 from quimb.tensor.tensor_core import tensor_make_single_bond
+from quimb.tensor.tnag.core import TensorNetworkGenVector
+from quimb.tensor.tnag.tebd import SimpleUpdateGen
 
 
 def compress_between_tids_bondenv_exact(

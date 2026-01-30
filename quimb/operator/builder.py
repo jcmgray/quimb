@@ -1351,7 +1351,7 @@ class SparseOperatorBuilder:
         H : LocalHamGen
             The local Hamiltonian representation of this operator.
         """
-        from quimb.tensor.tensor_arbgeom_tebd import LocalHamGen
+        from quimb.tensor import LocalHamGen
 
         terms = self.build_local_terms(dtype=dtype)
 
