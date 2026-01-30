@@ -5774,13 +5774,13 @@ class TensorNetwork:
              :         gate_inds_inner
              :         :
              :         :   inds               inds
-             :  ┌────┐ :   : ┌────┬───        : ┌───────┬───
-             ───┤    ├──  a──┤    │          a──┤       │
-                │    │       │    ├───          │       ├───
-             ───┤gate├──  b──┤self│     -->  b──┤  new  │
-                │    │       │    ├───          │       ├───
-             ───┤    ├──  c──┤    │          c──┤       │
-                └────┘       └────┴───          └───────┴───
+             :  ┌────┐ :   : ┌────┬───       :  ┌────┐  ┌────┬───
+             ───┤    ├──  a──┤    │          a──┤    ├──┤    │
+                │    │       │    ├───          │    │  │    ├───
+             ───┤gate├──  b──┤self│     -->  b──┤    ├──┤    │
+                │    │       │    ├───          │    │  │    ├───
+             ───┤    ├──  c──┤    │          c──┤    ├──┤    │
+                └────┘       └────┴───          └────┘  └────┴───
 
         Where there can be arbitrary structure of tensors within both ``self``
         and ``gate``.
@@ -5793,13 +5793,13 @@ class TensorNetwork:
              :         gate_inds_inner
              :         :
              :         :   inds               inds
-             :  ┌────┐ :   : ┌────┬───        : ┌───────┬───
-             ───┤    ├──  a──┤    │          a──┤       │
-                │    │       │    ├───          │       ├───
-             ───┤gate├──  b──┤self│     -->  b──┤  new  │
-                │    │       │    ├───          │       ├───
-            x───┤    ├──y    └────┘          x──┤    ┌──┘
-                └────┘                          └────┴───y
+             :  ┌────┐ :   : ┌────┬───        :  ┌────┐  ┌────┬───
+             ───┤    ├──  a──┤    │          a───┤    ├──┤    │
+                │    │       │    ├───           │    │  │    ├───
+             ───┤gate├──  b──┤self│     -->  b───┤    ├──┤    │
+                │    │       │    ├───           │    │  │    ├───
+            x───┤    ├──y    └────┘          x───┤    │  └────┘
+                └────┘                           └────┴───y
 
         Which enables convinient construction of various tensor networks, for
         example propagators, from scratch.

@@ -186,7 +186,7 @@ def _tensor_network_gate_inds_eager_split(
         #
         #          │ │                │ │
         #        ╱ │ │   ╱    ->    ╱ │ │   ╱
-        #     ──▶──LGR──◀──      ──▶──L=R──◀──
+        #     ──▶──LGR──◀──      ──▶──L~R──◀──
         #      ╱       ╱          ╱       ╱
         #
         tl_R, *maybe_svals, tr_L = tlGr.split(
@@ -199,10 +199,10 @@ def _tensor_network_gate_inds_eager_split(
 
         # absorb reduced factors back into site tensors
         #
-        #          │ │             │   │
-        #        ╱ │ │   ╱         │╱  │╱
-        #     ──▶──L=R──◀──  ->  ──●───●──
-        #      ╱       ╱          ╱   ╱
+        #         │   │            │    │
+        #        ╱│   │  ╱         │╱   │╱
+        #     ──▶─L~~~R─◀──  ->  ──●~~~~●──
+        #      ╱       ╱          ╱    ╱
         #
         tln = tl_Q @ tl_R
         trn = tr_L @ tr_Q
@@ -215,7 +215,9 @@ def _tensor_network_gate_inds_eager_split(
 
     # update original tensors
     tl.modify(data=tln.transpose_like_(tl).data)
+    tl.add_tag(TG.tags)
     tr.modify(data=trn.transpose_like_(tr).data)
+    tr.add_tag(TG.tags)
 
 
 def _tensor_network_gate_inds_lazy_split(
@@ -514,12 +516,8 @@ def _tensor_network_gate_sandwich_inds_eager_split(
     reindex_map.update(dict(zip(inds_lower, new_lower)))
 
     # wrap the gates as tensors
-    TGu = Tensor(
-        G, inds=(*inds_upper, *new_upper), left_inds=new_upper, tags=tags
-    )
-    TGl = Tensor(
-        Gconj, inds=(*inds_lower, *new_lower), left_inds=new_lower, tags=tags
-    )
+    TGu = Tensor(G, inds=(*inds_upper, *new_upper))
+    TGl = Tensor(Gconj, inds=(*inds_lower, *new_lower))
 
     # get the two tensors to be gated
     kixl, kixr = inds_upper
@@ -634,7 +632,9 @@ def _tensor_network_gate_sandwich_inds_eager_split(
 
     # update original tensors
     tl.modify(data=tln.transpose_like_(tl).data)
+    tl.add_tag(tags)
     tr.modify(data=trn.transpose_like_(tr).data)
+    tr.add_tag(tags)
 
 
 def tensor_network_gate_sandwich_inds(

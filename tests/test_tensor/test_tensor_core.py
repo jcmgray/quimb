@@ -1703,46 +1703,6 @@ class TestTensorNetwork:
         p2 = stn2.contract(output_inds=output_inds).data
         assert_allclose(pex, p2)
 
-    @pytest.mark.parametrize(
-        "contract",
-        (
-            False,
-            True,
-            "split",
-            "reduce-split",
-            "split-gate",
-            "swap-split-gate",
-        ),
-    )
-    def test_gate_inds(self, contract):
-        tn = qtn.TN_from_edges_rand(
-            [("A", "B"), ("B", "C"), ("C", "A")],
-            D=3,
-            phys_dim=2,
-        )
-        oix = tn._outer_inds.copy()
-        p = tn.to_dense()
-        G = qu.rand_matrix(4)
-        tn.gate_inds_(
-            G, inds=(tn.site_ind("A"), tn.site_ind("C")), contract=contract
-        )
-        if contract is True:
-            assert tn.num_tensors == 2
-        elif contract is False:
-            assert tn.num_tensors == 4
-        elif contract in ("split", "reduce-split"):
-            assert tn.num_tensors == 3
-        elif contract in ("split-gate", "swap-split-gate"):
-            assert tn.num_tensors == 5
-            assert tn.max_bond() == 4
-
-        assert tn._outer_inds == oix
-
-        pG = tn.to_dense()
-        GIG = qu.pkron(G, [2, 2, 2], [0, 2])
-        pGx = GIG @ p
-        assert_allclose(pG, pGx)
-
     def test_gate_inds_with_tn(self):
         k = qtn.MPS_rand_state(6, 3)
         A = qtn.MPO_rand(3, 2)

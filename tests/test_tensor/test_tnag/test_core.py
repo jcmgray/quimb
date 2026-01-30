@@ -17,16 +17,25 @@ import quimb.tensor as qtn
         "auto-split-gate",
     ],
 )
-def test_gate_sandwich_basic_mpo(contract):
+@pytest.mark.parametrize("where", [[1], [2, 3]])
+def test_gate_sandwich_basic_mpo(contract, where):
     # apply arbitrary complex 2-site gate to random complex MPO
     mpo = qtn.MPO_rand(5, 3, dtype=complex, seed=42)
-    G = qu.rand_matrix(4, seed=42)
+    G = qu.rand_matrix(2 ** len(where), seed=42)
     # construct reference by densifying
     A = mpo.to_dense()
-    IGI = qu.ikron(G, [mpo.phys_dim()] * mpo.nsites, [2, 3])
+    IGI = qu.ikron(G, [mpo.phys_dim()] * mpo.nsites, where)
     GAG = IGI @ A @ IGI.H
     # apply gate via tensor network method
-    gmpo = mpo.gate_sandwich(G, where=[2, 3], contract=contract)
+    gmpo = mpo.gate_sandwich(
+        G,
+        where=where,
+        contract=contract,
+        tags="GATE",
+        tags_upper="KET",
+        tags_lower="BRA",
+    )
+    assert "GATE" in gmpo.tag_map
     d_gmpo = gmpo.to_dense()
     assert_allclose(d_gmpo, GAG)
 
