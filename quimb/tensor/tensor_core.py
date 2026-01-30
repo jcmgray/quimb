@@ -1050,7 +1050,7 @@ def tensor_multifuse(ts, inds, gauges=None):
         # contract into a single gauge
         gauges[inds[0]] = functools.reduce(lambda x, y: do("kron", x, y), gs)
 
-    if isblocksparse(ts[0].data):
+    if ts[0].isblocksparse():
         # need to drop unaligned sectors pre-fusing
         arrays = [t.data for t in ts]
         axes = [tuple(map(t.inds.index, inds)) for t in ts]
@@ -2290,6 +2290,10 @@ class Tensor:
     def iscomplex(self):
         """Check if the underlying data array of this tensor has complex dtype."""
         return iscomplex(self._data)
+
+    def isblocksparse(self):
+        """Check if the underlying data array of this tensor is block sparse."""
+        return isblocksparse(self._data)
 
     def isfermionic(self):
         """Check if the underlying data array of this tensor is fermionic."""
@@ -11296,6 +11300,12 @@ class TensorNetwork:
         be the same for all tensors.
         """
         return self._get_any_tensor().iscomplex()
+
+    def isblocksparse(self):
+        """Check if the tensors in this TensorNetwork are blocksparse, assuming
+        it to be the same for all tensors.
+        """
+        return self._get_any_tensor().isblocksparse()
 
     def isfermionic(self):
         """Check if the tensors in this TensorNetwork are fermionic, assuming

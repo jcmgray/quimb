@@ -117,9 +117,7 @@ def _tensor_network_gate_inds_eager_split(
 
     # NOTE: disabled for block sparse, where reduced split is always important
     # for keeping charge distributions across tensors stable
-    if ((len(bnds_l) <= 2) and (len(bnds_r) <= 2)) and not isblocksparse(
-        TG.data
-    ):
+    if ((len(bnds_l) <= 2) and (len(bnds_r) <= 2)) and not TG.isblocksparse():
         # reduce split is likely redundant (i.e. contracting pair
         # and splitting just as cheap as performing QR reductions)
         contract = "split"
