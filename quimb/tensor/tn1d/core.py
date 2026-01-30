@@ -3809,8 +3809,6 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             information. Currently the key "cur_orthog" is used to store the
             current orthogonality center.
         """
-        import numpy as np
-
         # array namespace
         xp = self.get_namespace()
         # random namespace

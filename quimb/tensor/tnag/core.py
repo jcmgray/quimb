@@ -434,7 +434,7 @@ def tensor_network_ag_sum(
 
 
 def tensor_network_ag_gate(
-    self: "TensorNetworkGen",
+    self: "TensorNetworkGenVector | TensorNetworkGenOperator",
     G,
     where,
     *,
@@ -450,9 +450,10 @@ def tensor_network_ag_gate(
 ):
     r"""Apply a gate to this vector tensor network at sites ``where``. This is
     essentially a wrapper around
-    :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds` apart from
-    ``where`` can be specified as a list of sites, and tags can be optionally,
-    intelligently propagated to the new gate tensor.
+    :meth:`~quimb.tensor.gating.tensor_network_gate_inds` or
+    :meth:`~quimb.tensor.gating.tensor_network_gate_sandwich_inds` apart from
+    ``where`` is specified as a list of sites, and tags can be optionally,
+    intelligently propagated to the new gate tensor(s).
 
     .. math::
 
@@ -468,7 +469,9 @@ def tensor_network_ag_gate(
     which : {None, 'sandwich', 'upper', 'lower'}, optional
         What indices to apply the gate to.
 
-        - None: apply to the site indices, `tn` must be a 'vector'.
+        - None: apply to site indices if `tn` is a 'vector', else apply to both
+          upper and lower indices ('sandwich') if `tn` is an 'operator'.
+        - "site": apply to the site indices, `tn` must be a 'vector'.
         - "sandwich" or "both": apply to both upper (ket-like) and lower
           (bra-like) indices like `G @ A @ G^\dagger`, `tn` must be an
           'operator'.
@@ -512,7 +515,7 @@ def tensor_network_ag_gate(
 
     Returns
     -------
-    TensorNetworkGenVector
+    TensorNetworkGenVector or TensorNetworkGenOperator
 
     See Also
     --------
@@ -527,16 +530,25 @@ def tensor_network_ag_gate(
 
     tags = tags_to_oset(tags)
 
-    if which in ("sandwich", "both"):
+    if which is None:
+        if isinstance(tn, TensorNetworkGenOperator):
+            which = "sandwich"
+        else:
+            # assume vector supplied
+            which = "site"
+    elif which == "both":
+        # shorter alias for sandwich
         which = "sandwich"
+
+    if which == "sandwich":
         inds_upper = tuple(map(tn.upper_ind, where))
         inds_lower = tuple(map(tn.lower_ind, where))
         inds = inds_upper + inds_lower
-        # repeat where for propagating tags below
+        # need where to match inds for propagating tags below
         where = (*where, *where)
     else:
         inds_upper = inds_lower = None
-        if which is None:
+        if which == "site":
             inds = tuple(map(tn.site_ind, where))
         elif which == "upper":
             inds = tuple(map(tn.upper_ind, where))
