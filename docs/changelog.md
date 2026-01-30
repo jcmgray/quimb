@@ -23,6 +23,7 @@ Release notes for `quimb`.
 - [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress): correctly handle input networks with non-zero exponents and `equalize_norms`.
 - add [`tensor_network_gate_sandwich_inds`](quimb.tensor.gating.tensor_network_gate_sandwich_inds) for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network.
 - [`tensor_network_ag_gate`](quimb.tensor.tnag.core.tensor_network_ag_gate): add `which="sandwich"` option for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network, default to this if the supplied tensor network is a [`TensorNetworkGenOperator`](quimb.tensor.tnag.core.TensorNetworkGenOperator).
+- add function [`tensor_network_ag_gate_simple`](quimb.tensor.tnag.core.tensor_network_ag_gate_simple) for applying a gate to a arbitrary geometry tensor network vector or operator, using simple update style `gauges` to perform any compression.
 
 **Bug fixes:**
 

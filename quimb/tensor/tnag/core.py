@@ -461,7 +461,7 @@ def tensor_network_ag_gate(
 
     Parameters
     ----------
-    G : array_ike
+    G : array_like
         The gate array to apply, should match or be factorable into the shape
         ``(*phys_dims, *phys_dims)``.
     where : node or sequence[node]
@@ -598,6 +598,95 @@ def tensor_network_ag_gate(
         for ix, site in zip(inds, where):
             (t,) = tn._inds_get(ix)
             t.add_tag(tn.site_tag(site))
+
+    return tn
+
+
+def tensor_network_ag_gate_simple(
+    self: "TensorNetworkGenVector | TensorNetworkGenOperator",
+    G,
+    where,
+    gauges,
+    renorm=True,
+    smudge=1e-12,
+    power=1.0,
+    info=None,
+    inplace=False,
+    **gate_opts,
+):
+    """Apply a gate to this tensor network at sites ``where``, using
+    simple update style gauging of the tensors first, as supplied in
+    ``gauges``. After applying the gate, the new singular values for the bond
+    are reinserted into ``gauges``, and the local tensors are ungauged.
+
+    Parameters
+    ----------
+    G : array_like
+        The gate array to apply, should match or be factorable into the shape
+        ``(*phys_dims, *phys_dims)``.
+    where : node or sequence[node]
+        The sites to apply the gate to.
+    gauges : dict[str, array_like]
+        The store of gauge bonds, the keys being indices and the values
+        being the vectors. Only keys present in this dictionary will be used.
+    renorm : bool, optional
+        Whether to renormalise the singular after the gate is applied,
+        before reinserting them into ``gauges``.
+    smudge : float, optional
+        A small value to add to the gauges before multiplying them in and
+        inverting them to avoid numerical issues.
+    power : float, optional
+        The power to raise the singular values to before multiplying them
+        in and inverting them.
+    gate_opts
+        Supplied to
+        :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
+    """
+    tn = self if inplace else self.copy()
+
+    if not isinstance(where, (tuple, list)):
+        where = (where,)
+
+    site_tags = tuple(map(tn.site_tag, where))
+    tids = tn._get_tids_from_tags(site_tags, "any")
+
+    if len(tids) == 1:
+        # gate acts on a single tensor
+        return tensor_network_ag_gate(
+            tn,
+            G=G,
+            where=where,
+            contract=True,
+            inplace=True,
+        )
+
+    gate_opts.setdefault("absorb", None)
+    gate_opts.setdefault("contract", "reduce-split")
+    tn_where = tn._select_tids(tids)
+
+    with tn_where.gauge_simple_temp(
+        gauges,
+        smudge=smudge,
+        power=power,
+        ungauge_inner=False,
+    ):
+        if info is None:
+            info = {}
+
+        tensor_network_ag_gate(
+            tn_where,
+            G=G,
+            where=where,
+            info=info,
+            inplace=True,
+            **gate_opts,
+        )
+
+        # inner ungauging is performed by tracking the new singular values
+        (((_, ix), s),) = info.items()
+        if renorm:
+            s = s / do("linalg.norm", s)
+        gauges[ix] = s
 
     return tn
 
@@ -1604,78 +1693,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
     gate = tensor_network_ag_gate
     gate_ = functools.partialmethod(tensor_network_ag_gate, inplace=True)
-
-    def gate_simple_(
-        self,
-        G,
-        where,
-        gauges,
-        renorm=True,
-        smudge=1e-12,
-        power=1.0,
-        info=None,
-        **gate_opts,
-    ):
-        """Apply a gate to this vector tensor network at sites ``where``, using
-        simple update style gauging of the tensors first, as supplied in
-        ``gauges``. The new singular values for the bond are reinserted into
-        ``gauges``.
-
-        Parameters
-        ----------
-        G : array_like
-            The gate to be applied.
-        where : node or sequence[node]
-            The sites to apply the gate to.
-        gauges : dict[str, array_like]
-            The store of gauge bonds, the keys being indices and the values
-            being the vectors. Only bonds present in this dictionary will be
-            used.
-        renorm : bool, optional
-            Whether to renormalise the singular after the gate is applied,
-            before reinserting them into ``gauges``.
-        smudge : float, optional
-            A small value to add to the gauges before multiplying them in and
-            inverting them to avoid numerical issues.
-        power : float, optional
-            The power to raise the singular values to before multiplying them
-            in and inverting them.
-        gate_opts
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
-        """
-        if isinstance(where, int):
-            where = (where,)
-
-        site_tags = tuple(map(self.site_tag, where))
-        tids = self._get_tids_from_tags(site_tags, "any")
-
-        if len(tids) == 1:
-            # gate acts on a single tensor
-            return self.gate_(G, where, contract=True)
-
-        gate_opts.setdefault("absorb", None)
-        gate_opts.setdefault("contract", "reduce-split")
-        tn_where = self._select_tids(tids)
-
-        with tn_where.gauge_simple_temp(
-            gauges,
-            smudge=smudge,
-            power=power,
-            ungauge_inner=False,
-        ):
-            if info is None:
-                info = {}
-
-            tn_where.gate_(G, where, info=info, **gate_opts)
-
-            # inner ungauging is performed by tracking the new singular values
-            (((_, ix), s),) = info.items()
-            if renorm:
-                s = s / do("linalg.norm", s)
-            gauges[ix] = s
-
-        return self
+    gate_simple = tensor_network_ag_gate_simple
+    gate_simple_ = functools.partialmethod(
+        tensor_network_ag_gate_simple, inplace=True
+    )
 
     def gate_fit_local_(
         self,
@@ -3593,13 +3614,14 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         if which == "lower":
             return self[site].ind_size(self.lower_ind(site))
 
+    gate = tensor_network_ag_gate
+    gate_ = functools.partialmethod(tensor_network_ag_gate, inplace=True)
     gate_sandwich = functools.partialmethod(
         tensor_network_ag_gate, which="sandwich"
     )
     gate_sandwich_ = functools.partialmethod(
         tensor_network_ag_gate, which="sandwich", inplace=True
     )
-
     gate_upper = functools.partialmethod(tensor_network_ag_gate, which="upper")
     gate_upper_ = functools.partialmethod(
         tensor_network_ag_gate, which="upper", inplace=True
@@ -3607,6 +3629,10 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     gate_lower = functools.partialmethod(tensor_network_ag_gate, which="lower")
     gate_lower_ = functools.partialmethod(
         tensor_network_ag_gate, which="lower", inplace=True
+    )
+    gate_simple = tensor_network_ag_gate_simple
+    gate_simple_ = functools.partialmethod(
+        tensor_network_ag_gate_simple, inplace=True
     )
 
     def gate_upper_with_op_lazy(
