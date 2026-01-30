@@ -1,7 +1,34 @@
 import pytest
 from numpy.testing import assert_allclose
 
+import quimb as qu
 import quimb.tensor as qtn
+
+
+@pytest.mark.parametrize(
+    "contract",
+    [
+        True,
+        False,
+        "split",
+        "reduce-split",
+        "split-gate",
+        "swap-split-gate",
+        "auto-split-gate",
+    ],
+)
+def test_gate_sandwich_basic_mpo(contract):
+    # apply arbitrary complex 2-site gate to random complex MPO
+    mpo = qtn.MPO_rand(5, 3, dtype=complex, seed=42)
+    G = qu.rand_matrix(4, seed=42)
+    # construct reference by densifying
+    A = mpo.to_dense()
+    IGI = qu.ikron(G, [mpo.phys_dim()] * mpo.nsites, [2, 3])
+    GAG = IGI @ A @ IGI.H
+    # apply gate via tensor network method
+    gmpo = mpo.gate_sandwich(G, where=[2, 3], contract=contract)
+    d_gmpo = gmpo.to_dense()
+    assert_allclose(d_gmpo, GAG)
 
 
 @pytest.mark.parametrize("which_A", ["upper", "lower"])
@@ -102,7 +129,7 @@ def test_tensor_network_apply_op_op(which_A, which_B, contract, inplace):
     assert_allclose(AB.to_dense(), C)
 
 
-def test_gate_with_op():
+def test_gate_with_op_lazy():
     A = qtn.MPO_rand(5, 3, dtype=complex)
     x = qtn.MPS_rand_state(5, 3, dtype=complex)
     y = A.to_dense() @ x.to_dense()
@@ -110,7 +137,7 @@ def test_gate_with_op():
     assert_allclose(x.to_dense(), y)
 
 
-def test_gate_sandwich_with_op():
+def test_gate_sandwich_with_op_lazy():
     B = qtn.MPO_rand(5, 3, dtype=complex)
     A = qtn.MPO_rand(5, 3, dtype=complex)
     y = A.to_dense() @ B.to_dense() @ A.to_dense().conj().T

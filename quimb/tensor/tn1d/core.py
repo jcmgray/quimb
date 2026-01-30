@@ -97,24 +97,6 @@ def expec_TN_1D(*tns, compress=None, eps=1e-15):
     return expec_tn ^ ...
 
 
-def maybe_factor_gate_into_tensor(G, phys_dim, nsites, where):
-    # allow gate to be a matrix as long as it factorizes into tensor
-    shape_matches_2d = (ops.ndim(G) == 2) and (G.shape[1] == phys_dim**nsites)
-    shape_matches_nd = all(d == phys_dim for d in G.shape)
-
-    if shape_matches_2d:
-        G = ops.asarray(G)
-        if nsites >= 2:
-            G = reshape(G, [phys_dim] * 2 * nsites)
-
-    elif not shape_matches_nd:
-        raise ValueError(
-            f"Gate with shape {G.shape} doesn't match sites {where}."
-        )
-
-    return G
-
-
 def gate_TN_1D(
     tn,
     G,

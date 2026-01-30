@@ -437,10 +437,13 @@ def tensor_network_ag_gate(
     self: "TensorNetworkGen",
     G,
     where,
+    *,
+    which=None,
     contract=False,
     tags=None,
+    tags_upper=None,
+    tags_lower=None,
     propagate_tags=False,
-    which=None,
     info=None,
     inplace=False,
     **compress_opts,
@@ -462,14 +465,32 @@ def tensor_network_ag_gate(
         ``(*phys_dims, *phys_dims)``.
     where : node or sequence[node]
         The sites to apply the gate to.
+    which : {None, 'sandwich', 'upper', 'lower'}, optional
+        What indices to apply the gate to.
+
+        - None: apply to the site indices, `tn` must be a 'vector'.
+        - "sandwich" or "both": apply to both upper (ket-like) and lower
+          (bra-like) indices like `G @ A @ G^\dagger`, `tn` must be an
+          'operator'.
+        - "upper": apply to the upper (ket-like) indices, `tn` must be an
+          'operator'.
+        - "lower": apply to the lower (bra-like) indices, `tn` must be an
+          'operator'.
+
     contract : {False, True, 'split', 'reduce-split', 'split-gate',
                 'swap-split-gate', 'auto-split-gate'}, optional
         How to apply the gate, see
         :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
     tags : str or sequence of str, optional
-        Tags to add to the new gate tensor.
+        Tags to add to the new gate tensor(s).
+    tags_upper : str or sequence of str, optional
+        If ``which`` is "sandwich" or "upper", tags to add to the upper gate
+        tensor(s) only.
+    tags_lower : str or sequence of str, optional
+        If ``which`` is "sandwich" or "lower", tags to add to the lower gate
+        tensor(s) only.
     propagate_tags : {False, True, 'register', 'sites'}, optional
-        Whether to propagate tags to the new gate tensor::
+        What tags to propagate from the target sites to the new gate tensor(s):
 
         - False: no tags are propagated
         - True: all tags are propagated
@@ -501,18 +522,30 @@ def tensor_network_ag_gate(
 
     tn = self if inplace else self.copy()
 
-    if which is None:
-        site_ind_fn = tn.site_ind
-    elif which == "upper":
-        site_ind_fn = tn.upper_ind
-    elif which == "lower":
-        site_ind_fn = tn.lower_ind
-    else:
-        raise ValueError("`which` should be None, 'upper' or 'lower'.")
-
     if not isinstance(where, (tuple, list)):
         where = (where,)
-    inds = tuple(map(site_ind_fn, where))
+
+    tags = tags_to_oset(tags)
+
+    if which in ("sandwich", "both"):
+        which = "sandwich"
+        inds_upper = tuple(map(tn.upper_ind, where))
+        inds_lower = tuple(map(tn.lower_ind, where))
+        inds = inds_upper + inds_lower
+        # repeat where for propagating tags below
+        where = (*where, *where)
+    else:
+        inds_upper = inds_lower = None
+        if which is None:
+            inds = tuple(map(tn.site_ind, where))
+        elif which == "upper":
+            inds = tuple(map(tn.upper_ind, where))
+            tags.update(tags_to_oset(tags_upper))
+        elif which == "lower":
+            inds = tuple(map(tn.lower_ind, where))
+            tags.update(tags_to_oset(tags_lower))
+        else:
+            raise ValueError("`which` should be None, 'upper' or 'lower'.")
 
     # potentially add tags from current tensors to the new ones,
     # only do this if we are lazily adding the gate tensor(s)
@@ -523,13 +556,30 @@ def tensor_network_ag_gate(
         if propagate_tags == "sites":
             old_tags = tn.filter_valid_site_tags(old_tags)
 
-        tags = tags_to_oset(tags)
         tags.update(old_tags)
 
     # perform the actual gating
-    tn.gate_inds_(
-        G, inds, contract=contract, tags=tags, info=info, **compress_opts
-    )
+    if which == "sandwich":
+        tn.gate_sandwich_inds_(
+            G,
+            inds_upper,
+            inds_lower,
+            contract=contract,
+            tags=tags,
+            tags_upper=tags_upper,
+            tags_lower=tags_lower,
+            info=info,
+            **compress_opts,
+        )
+    else:
+        tn.gate_inds_(
+            G,
+            inds,
+            contract=contract,
+            tags=tags,
+            info=info,
+            **compress_opts,
+        )
 
     # possibly add tags based on where the gate was applied
     if propagate_tags == "register":
@@ -1931,15 +1981,15 @@ class TensorNetworkGenVector(TensorNetworkGen):
         return_all : bool, optional
             Whether to return all results, or just the summed expectation.
         rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computations or not::
+            Whether to perform the computations or not:
 
-                - False: perform the computation.
-                - 'tn': return the tensor networks of each local expectation,
-                  without running the path optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree`` for each local expectation.
-                - True: run the path optimizer and return the ``PathInfo`` for
-                  each local expectation.
+            - `False`: perform the computation.
+            - `'tn'`: return the tensor networks of each local expectation,
+              without running the path optimizer.
+            - `'tree'`: run the path optimizer and return the
+              ``cotengra.ContractonTree`` for each local expectation.
+            - `True`: run the path optimizer and return the ``PathInfo`` for
+              each local expectation.
 
         executor : Executor, optional
             If supplied compute the terms in parallel using this executor.
@@ -2210,15 +2260,15 @@ class TensorNetworkGenVector(TensorNetworkGen):
         max_bond : None or int, optional
             If specified, use compressed contraction.
         rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computations or not::
+            Whether to perform the computations or not:
 
-            - False: perform the computation.
-            - 'tn': return the tensor networks of each local expectation,
-                without running the path optimizer.
-            - 'tree': run the path optimizer and return the
-                ``cotengra.ContractonTree`` for each local expectation.
-            - True: run the path optimizer and return the ``PathInfo`` for
-                each local expectation.
+            - `False`: perform the computation.
+            - `'tn'`: return the tensor networks of each local expectation,
+              without running the path optimizer.
+            - `'tree'`: run the path optimizer and return the
+              ``cotengra.ContractonTree`` for each local expectation.
+            - `True`: run the path optimizer and return the ``PathInfo`` for
+              each local expectation.
 
         Returns
         -------
@@ -2341,15 +2391,15 @@ class TensorNetworkGenVector(TensorNetworkGen):
         return_all : bool, optional
             Whether to return all results, or just the summed expectation.
         rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computations or not::
+            Whether to perform the computations or not:
 
-                - False: perform the computation.
-                - 'tn': return the tensor networks of each local expectation,
-                  without running the path optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree`` for each local expectation.
-                - True: run the path optimizer and return the ``PathInfo`` for
-                  each local expectation.
+            - `False`: perform the computation.
+            - `'tn'`: return the tensor networks of each local expectation,
+              without running the path optimizer.
+            - `'tree'`: run the path optimizer and return the
+              ``cotengra.ContractonTree`` for each local expectation.
+            - `True`: run the path optimizer and return the ``PathInfo`` for
+              each local expectation.
 
         executor : Executor, optional
             If supplied compute the terms in parallel using this executor.
@@ -2963,14 +3013,14 @@ class TensorNetworkGenVector(TensorNetworkGen):
             Whether to symmetrize the reduced density matrix at the end. This
             should be unecessary if ``flatten`` is set to ``True``.
         rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computation or not::
+            Whether to perform the computation or not:
 
-                - False: perform the computation.
-                - 'tn': return the tensor network without running the path
-                  optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree``..
-                - True: run the path optimizer and return the ``PathInfo``.
+            - `False`: perform the computation.
+            - `'tn'`: return the tensor network without running the path
+              optimizer.
+            - `'tree'`: run the path optimizer and return the
+              ``cotengra.ContractonTree``..
+            - `True`: run the path optimizer and return the ``PathInfo``.
 
         contract_compressed_opts : dict, optional
             Additional keyword arguments to pass to
@@ -3103,14 +3153,14 @@ class TensorNetworkGenVector(TensorNetworkGen):
             density matrix at the end. This should be unecessary if ``flatten``
             is set to ``True``.
         rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computation or not::
+            Whether to perform the computation or not:
 
-                - False: perform the computation.
-                - 'tn': return the tensor network without running the path
-                  optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree``..
-                - True: run the path optimizer and return the ``PathInfo``.
+            - `False`: perform the computation.
+            - `'tn'`: return the tensor network without running the path
+              optimizer.
+            - `'tree'`: run the path optimizer and return the
+              ``cotengra.ContractonTree``..
+            - `True`: run the path optimizer and return the ``PathInfo``.
 
         contract_compressed_opts : dict, optional
             Additional keyword arguments to pass to
@@ -3188,15 +3238,15 @@ class TensorNetworkGenVector(TensorNetworkGen):
             ``rehease is not False``, this is ignored and a dict is always
             returned.
         rehearse : {False, 'tn', 'tree', True}, optional
-            Whether to perform the computations or not::
+            Whether to perform the computations or not:
 
-                - False: perform the computation.
-                - 'tn': return the tensor networks of each local expectation,
-                  without running the path optimizer.
-                - 'tree': run the path optimizer and return the
-                  ``cotengra.ContractonTree`` for each local expectation.
-                - True: run the path optimizer and return the ``PathInfo`` for
-                  each local expectation.
+            - `False`: perform the computation.
+            - `'tn'`: return the tensor networks of each local expectation,
+              without running the path optimizer.
+            - `'tree'`: run the path optimizer and return the
+              ``cotengra.ContractonTree`` for each local expectation.
+            - `True`: run the path optimizer and return the ``PathInfo`` for
+              each local expectation.
 
         executor : Executor, optional
             If supplied compute the terms in parallel using this executor.
@@ -3531,17 +3581,20 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         if which == "lower":
             return self[site].ind_size(self.lower_ind(site))
 
+    gate_sandwich = functools.partialmethod(
+        tensor_network_ag_gate, which="sandwich"
+    )
+    gate_sandwich_ = functools.partialmethod(
+        tensor_network_ag_gate, which="sandwich", inplace=True
+    )
+
     gate_upper = functools.partialmethod(tensor_network_ag_gate, which="upper")
     gate_upper_ = functools.partialmethod(
-        tensor_network_ag_gate,
-        which="upper",
-        inplace=True,
+        tensor_network_ag_gate, which="upper", inplace=True
     )
     gate_lower = functools.partialmethod(tensor_network_ag_gate, which="lower")
     gate_lower_ = functools.partialmethod(
-        tensor_network_ag_gate,
-        which="lower",
-        inplace=True,
+        tensor_network_ag_gate, which="lower", inplace=True
     )
 
     def gate_upper_with_op_lazy(

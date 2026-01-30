@@ -21,6 +21,7 @@ Release notes for `quimb`.
 - add [`connected_bipartitions`](quimb.tensor.geometry.connected_bipartitions) for finding all connected bipartitions of a tensor network
 - [`tn.distribute_exponent`](quimb.tensor.tensor_core.TensorNetwork.distribute_exponent): add `new_exponent` option for specifying the new exponent value (default 0.0).
 - [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress): correctly handle input networks with non-zero exponents and `equalize_norms`.
+- add [`tensor_network_gate_sandwich_inds`](quimb.tensor.gating.tensor_network_gate_sandwich_inds) for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network.
 
 **Bug fixes:**
 

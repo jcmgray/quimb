@@ -153,6 +153,7 @@ from .tensor_core import (
     tensor_network_fit_als,
     tensor_network_fit_autodiff,
     tensor_network_gate_inds,
+    tensor_network_gate_sandwich_inds,
     tensor_network_sum,
     tensor_split,
 )
@@ -368,6 +369,7 @@ __all__ = (
     "tensor_network_fit_als",
     "tensor_network_fit_autodiff",
     "tensor_network_gate_inds",
+    "tensor_network_gate_sandwich_inds",
     "tensor_network_sum",
     "tensor_split",
     "Tensor",

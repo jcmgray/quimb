@@ -5,6 +5,7 @@ from itertools import chain, count, cycle
 import autoray as ar
 
 from quimb.gen.operators import swap
+from quimb.tensor import ops
 from quimb.tensor.tensor_core import (
     Tensor,
     bonds,
@@ -12,8 +13,25 @@ from quimb.tensor.tensor_core import (
     tags_to_oset,
     tensor_contract,
 )
-from quimb.tensor.tn1d.core import maybe_factor_gate_into_tensor
 from quimb.utils import pairwise
+
+
+def maybe_factor_gate_into_tensor(G, phys_dim, nsites, where):
+    # allow gate to be a matrix as long as it factorizes into tensor
+    shape_matches_2d = (ops.ndim(G) == 2) and (G.shape[1] == phys_dim**nsites)
+    shape_matches_nd = all(d == phys_dim for d in G.shape)
+
+    if shape_matches_2d:
+        G = ops.asarray(G)
+        if nsites >= 2:
+            G = ar.reshape(G, [phys_dim] * 2 * nsites)
+
+    elif not shape_matches_nd:
+        raise ValueError(
+            f"Gate with shape {G.shape} doesn't match sites {where}."
+        )
+
+    return G
 
 
 def manhattan_distance(coo_a, coo_b):
