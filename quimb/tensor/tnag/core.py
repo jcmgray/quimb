@@ -455,9 +455,31 @@ def tensor_network_ag_gate(
     ``where`` is specified as a list of sites, and tags can be optionally,
     intelligently propagated to the new gate tensor(s).
 
+    For a 'vector' tensor network, this is like:
+
     .. math::
 
         | \psi \rangle \rightarrow G_\mathrm{where} | \psi \rangle
+
+
+    For an 'operator' tensor network, the default sandwich mode is like:
+
+    .. math::
+
+        X \rightarrow G_\mathrm{where} X G_\mathrm{where}^\dagger
+
+    Or if ``which`` is "upper" like:
+
+    .. math::
+
+        X \rightarrow G_\mathrm{where} X
+
+    Or if ``which`` is "lower" like:
+
+    .. math::
+
+        X \rightarrow X G_\mathrm{where}^T
+
 
     Parameters
     ----------
@@ -469,16 +491,17 @@ def tensor_network_ag_gate(
     which : {None, 'sandwich', 'upper', 'lower'}, optional
         What indices to apply the gate to.
 
-        - None: apply to site indices if `tn` is a 'vector', else apply to both
-          upper and lower indices ('sandwich') if `tn` is an 'operator'.
-        - "site": apply to the site indices, `tn` must be a 'vector'.
-        - "sandwich" or "both": apply to both upper (ket-like) and lower
-          (bra-like) indices like `G @ A @ G^\dagger`, `tn` must be an
+        - ``None``: apply to site indices if ``tn`` is a 'vector', else apply
+          to both upper and lower indices ('sandwich') if ``tn`` is an
           'operator'.
-        - "upper": apply to the upper (ket-like) indices, `tn` must be an
+        - ``"site"``: apply to the site indices, ``tn`` must be a 'vector'.
+        - ``"sandwich"`` or "both": apply to both upper (ket-like) and lower
+          (bra-like) indices like ``G @ A @ Gdag``, ``tn`` must be an
           'operator'.
-        - "lower": apply to the lower (bra-like) indices, `tn` must be an
-          'operator'.
+        - ``"upper"``: apply to the upper (ket-like) indices like ``G @ A``,
+          ``tn`` must be an 'operator'.
+        - ``"lower"``: apply to the lower (bra-like) indices like ``A @ G.T``,
+          ``tn`` must be an 'operator'.
 
     contract : {False, True, 'split', 'reduce-split', 'split-gate',
                 'swap-split-gate', 'auto-split-gate'}, optional
@@ -495,13 +518,13 @@ def tensor_network_ag_gate(
     propagate_tags : {False, True, 'register', 'sites'}, optional
         What tags to propagate from the target sites to the new gate tensor(s):
 
-        - False: no tags are propagated
-        - True: all tags are propagated
-        - 'register': if the gate itself is being split, for each part of the
-          attached gate, only propagate the site tag of the site it is attached
-          to / 'sits above'.
-        - 'sites': all site tags on the current sites are propagated, resulting
-          in a 'lightcone' like tagging.
+        - ``False``: no tags are propagated
+        - ``True``: all tags are propagated
+        - ``'register'``: if the gate itself is being split, for each part of
+          the attached gate, only propagate the site tag of the site it is
+          attached to / 'sits above'.
+        - ``'sites'``: all site tags on the current sites are propagated,
+          resulting in a 'lightcone' like tagging.
 
     info : None or dict, optional
         Used to store extra optional information such as the singular
@@ -953,8 +976,8 @@ class TensorNetworkGen(TensorNetwork):
     ):
         """Generate sets of sites that represent 'generalized loops' where
         every node is connected to at least two other loop nodes. This is a
-        simple wrapper around ``TensorNewtork.gen_gloops`` that works with the
-        sites rather than ``tids``.
+        simple wrapper around :meth:`~quimb.tensor.networking.gen_gloops`
+        that works with the sites rather than ``tids``.
 
         Parameters
         ----------
@@ -1069,11 +1092,11 @@ class TensorNetworkGen(TensorNetwork):
         strict_size=False,
         info=None,
     ):
-        r"""Parse the `sloops` argument to get the relevant simple loops for
-        the given `where` sites. If `sloops` is an integer, auto generate loops
-        locally, otherwise filter the given loops to only include those
-        relevant to `where`. Simple loops are loops where each site is
-        connected to exactly two other sites.
+        r"""Parse the ``sloops`` argument to get the relevant simple loops
+        for the given ``where`` sites. If ``sloops`` is an integer, auto
+        generate loops locally, otherwise filter the given loops to only
+        include those relevant to ``where``. Simple loops are loops where
+        each site is connected to exactly two other sites.
         """
         if isinstance(sloops, int):
             # auto generate sloops locally
@@ -1203,12 +1226,12 @@ class TensorNetworkGen(TensorNetwork):
         strict_size=False,
         info=None,
     ):
-        r"""Parse the `gloops` argument to get the relevant generalized loops
-        for the given `where` sites. If `gloops` is an integer, auto generate
-        loops locally, otherwise filter the given loops to only include those
-        relevant to `where`.
+        r"""Parse the ``gloops`` argument to get the relevant generalized
+        loops for the given ``where`` sites. If ``gloops`` is an integer,
+        auto generate loops locally, otherwise filter the given loops to only
+        include those relevant to ``where``.
 
-        An example loop with where=("A", "B"), for `grow_from='all'`::
+        An example loop with where=("A", "B"), for ``grow_from='all'``::
 
              |   |
             -o---o-
@@ -1216,7 +1239,7 @@ class TensorNetworkGen(TensorNetwork):
             -A---B-
              |   |
 
-        Setting `grow_from='any'` in would also generates loops like::
+        Setting ``grow_from='any'`` in would also generates loops like::
 
              |   |
             -o---o-
@@ -1225,16 +1248,16 @@ class TensorNetworkGen(TensorNetwork):
              |   |   |
 
         where only site A is part of the original, generating loop, but both
-        A and B are part of the returned cluster. For `"alldangle"` the same
+        A and B are part of the returned cluster. For ``"alldangle"`` the same
         cluster would be generated but its size would be considered 5.
 
         Parameters
         ----------
         tids : sequence[int], optional
-            The tensor ids to consider. Either this or `where` must be
+            The tensor ids to consider. Either this or ``where`` must be
             supplied.
         where : sequence[hashable], optional
-            The sites to consider. Either this or `tids` must be supplied.
+            The sites to consider. Either this or ``tids`` must be supplied.
         info : dict
             A dictionary to store information across different calls.
         gloops : None, int, or sequence of sequence of hashable, optional
@@ -1244,7 +1267,7 @@ class TensorNetworkGen(TensorNetwork):
             sequences, use those gloops.
         grow_from : {"all", "any"}, optional
             Whether to generate gloops that originally contain all or just
-            any of the target sites in `where`. The base sites are always
+            any of the target sites in ``where``. The base sites are always
             included in all returned gloops, even if they were not part of
             the supplied or auto-generated cluster.
 
@@ -1437,9 +1460,9 @@ def gauge_product_boundary_vector(
 
 
 def gloop_remove_dangling(sites, neighbors, where=()):
-    """Given cluster `sites` and edges given by the `neighbors` mapping, remove
-    all sites that are not connected to at least two other sites, reducing it
-    in this way to a generalised loop.
+    """Given cluster ``sites`` and edges given by the ``neighbors``
+    mapping, remove all sites that are not connected to at least two other
+    sites, reducing it in this way to a generalised loop.
 
     Parameters
     ----------
@@ -1610,7 +1633,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             not supplied.
         contract_opts
             Options to pass to
-            :meth:`~quimb.tensor.tensor_core.TensorNewtork.contract`.
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
 
         Returns
         -------
@@ -1727,7 +1750,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             size up to ``max_distance``, ensuring no dangling tensors.
         fillin : bool or int, optional
             Whether to fill in the local patch with additional tensors, or not.
-            `fillin` tensors are those connected by two or more bonds to the
+            ``fillin`` tensors are those connected by two or more bonds to the
             original local patch, the process is repeated int(fillin) times.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
@@ -2016,12 +2039,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computations or not:
 
-            - `False`: perform the computation.
-            - `'tn'`: return the tensor networks of each local expectation,
+            - ``False``: perform the computation.
+            - ``'tn'``: return the tensor networks of each local expectation,
               without running the path optimizer.
-            - `'tree'`: run the path optimizer and return the
+            - ``'tree'``: run the path optimizer and return the
               ``cotengra.ContractonTree`` for each local expectation.
-            - `True`: run the path optimizer and return the ``PathInfo`` for
+            - ``True``: run the path optimizer and return the ``PathInfo`` for
               each local expectation.
 
         executor : Executor, optional
@@ -2295,12 +2318,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computations or not:
 
-            - `False`: perform the computation.
-            - `'tn'`: return the tensor networks of each local expectation,
+            - ``False``: perform the computation.
+            - ``'tn'``: return the tensor networks of each local expectation,
               without running the path optimizer.
-            - `'tree'`: run the path optimizer and return the
+            - ``'tree'``: run the path optimizer and return the
               ``cotengra.ContractonTree`` for each local expectation.
-            - `True`: run the path optimizer and return the ``PathInfo`` for
+            - ``True``: run the path optimizer and return the ``PathInfo`` for
               each local expectation.
 
         Returns
@@ -2426,12 +2449,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computations or not:
 
-            - `False`: perform the computation.
-            - `'tn'`: return the tensor networks of each local expectation,
+            - ``False``: perform the computation.
+            - ``'tn'``: return the tensor networks of each local expectation,
               without running the path optimizer.
-            - `'tree'`: run the path optimizer and return the
+            - ``'tree'``: run the path optimizer and return the
               ``cotengra.ContractonTree`` for each local expectation.
-            - `True`: run the path optimizer and return the ``PathInfo`` for
+            - ``True``: run the path optimizer and return the ``PathInfo`` for
               each local expectation.
 
         executor : Executor, optional
@@ -2710,7 +2733,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             Whether and how to normalize the result.
 
             - True: uses "prod" if combine="prod", "local" if combine="sum".
-            - "prod": shorthand for `combine="prod"` and `normalized=True`.
+            - "prod": shorthand for ``combine="prod"`` and ``normalized=True``.
             - "local": each cluster within a term is normalized separately.
             - "separate": the expectation and normalization are computed
               separately and then combined for each term.
@@ -2926,7 +2949,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             Whether and how to normalize the result.
 
             - True: uses "prod" if combine="prod", "local" if combine="sum".
-            - "prod": shorthand for `combine="prod"` and `normalized=True`.
+            - "prod": shorthand for ``combine="prod"`` and ``normalized=True``.
             - "local": each cluster within a term is normalized separately.
             - "separate": the expectation and normalization are computed
               separately and then combined for each term.
@@ -3048,12 +3071,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computation or not:
 
-            - `False`: perform the computation.
-            - `'tn'`: return the tensor network without running the path
+            - ``False``: perform the computation.
+            - ``'tn'``: return the tensor network without running the path
               optimizer.
-            - `'tree'`: run the path optimizer and return the
+            - ``'tree'``: run the path optimizer and return the
               ``cotengra.ContractonTree``..
-            - `True`: run the path optimizer and return the ``PathInfo``.
+            - ``True``: run the path optimizer and return the ``PathInfo``.
 
         contract_compressed_opts : dict, optional
             Additional keyword arguments to pass to
@@ -3179,21 +3202,21 @@ class TensorNetworkGenVector(TensorNetworkGen):
             generally more complex to contract, the accuracy is usually much
             improved.
         normalized : bool, optional
-            If computing via `partial_trace`, whether to normalize the reduced
-            density matrix at the end.
+            If computing via ``partial_trace``, whether to normalize the
+            reduced density matrix at the end.
         symmetrized : {'auto', True, False}, optional
-            If computing via `partial_trace`, whether to symmetrize the reduced
-            density matrix at the end. This should be unecessary if ``flatten``
-            is set to ``True``.
+            If computing via ``partial_trace``, whether to symmetrize the
+            reduced density matrix at the end. This should be unecessary if
+            ``flatten`` is set to ``True``.
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computation or not:
 
-            - `False`: perform the computation.
-            - `'tn'`: return the tensor network without running the path
+            - ``False``: perform the computation.
+            - ``'tn'``: return the tensor network without running the path
               optimizer.
-            - `'tree'`: run the path optimizer and return the
+            - ``'tree'``: run the path optimizer and return the
               ``cotengra.ContractonTree``..
-            - `True`: run the path optimizer and return the ``PathInfo``.
+            - ``True``: run the path optimizer and return the ``PathInfo``.
 
         contract_compressed_opts : dict, optional
             Additional keyword arguments to pass to
@@ -3273,12 +3296,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         rehearse : {False, 'tn', 'tree', True}, optional
             Whether to perform the computations or not:
 
-            - `False`: perform the computation.
-            - `'tn'`: return the tensor networks of each local expectation,
+            - ``False``: perform the computation.
+            - ``'tn'``: return the tensor networks of each local expectation,
               without running the path optimizer.
-            - `'tree'`: run the path optimizer and return the
+            - ``'tree'``: run the path optimizer and return the
               ``cotengra.ContractonTree`` for each local expectation.
-            - `True`: run the path optimizer and return the ``PathInfo`` for
+            - ``True``: run the path optimizer and return the ``PathInfo`` for
               each local expectation.
 
         executor : Executor, optional
@@ -3439,8 +3462,8 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     """A tensor network which notionally has a single tensor and two outer
     indices per 'site', though these could be labelled arbitrarily and could
     also be linked in an arbitrary geometry by bonds. By convention, if
-    converted to a dense matrix, the 'upper' indices would be on the left and
-    the 'lower' indices on the right.
+    converted to a dense matrix, the 'upper' indices would be on the left
+    (ket-like) and the 'lower' indices on the right (bra-like).
     """
 
     _EXTRA_PROPS = (
@@ -3456,7 +3479,10 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         return self._upper_ind_id
 
     def upper_ind(self, site):
-        """Get the upper physical index name of ``site``."""
+        """Get the upper physical index name of ``site``. By convention these
+        are the 'ket-like' indices that would appear on the left of a dense
+        matrix representation.
+        """
         return self.upper_ind_id.format(site)
 
     def reindex_upper_sites(self, new_id, where=None, inplace=False):
@@ -3500,7 +3526,10 @@ class TensorNetworkGenOperator(TensorNetworkGen):
 
     @property
     def upper_inds(self):
-        """Return a tuple of all upper indices."""
+        """Return a tuple of all upper indices. By convention these are the
+        'ket-like' indices that would appear on the left of a dense matrix
+        representation.
+        """
         if getattr(self, "_upper_inds", None) is None:
             self._upper_inds = tuple(map(self.upper_ind, self.gen_site_coos()))
         return self._upper_inds
@@ -3518,7 +3547,10 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         return self._lower_ind_id
 
     def lower_ind(self, site):
-        """Get the lower physical index name of ``site``."""
+        """Get the lower physical index name of ``site``. By convention these
+        are the 'bra-like' indices that would appear on the right of a dense
+        matrix representation.
+        """
         return self.lower_ind_id.format(site)
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):
@@ -3562,7 +3594,10 @@ class TensorNetworkGenOperator(TensorNetworkGen):
 
     @property
     def lower_inds(self):
-        """Return a tuple of all lower indices."""
+        """Return a tuple of all lower indices. By convention these are the
+        'bra-like' indices that would appear on the right of a dense matrix
+        representation.
+        """
         if getattr(self, "_lower_inds", None) is None:
             self._lower_inds = tuple(map(self.lower_ind, self.gen_site_coos()))
         return self._lower_inds
@@ -3588,7 +3623,7 @@ class TensorNetworkGenOperator(TensorNetworkGen):
             would otherwise be ``'numpy'``.
         contract_opts
             Options to pass to
-            :meth:`~quimb.tensor.tensor_core.TensorNewtork.contract`.
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
 
         Returns
         -------
