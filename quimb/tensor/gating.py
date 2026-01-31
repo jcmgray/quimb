@@ -346,8 +346,7 @@ def tensor_network_gate_inds(
         shape ``(*phys_dims, *phys_dims)``.
     inds : str or sequence or str,
         The index or indices to apply the gate to.
-    contract : {False, True, 'split', 'reduce-split', 'split-gate',
-                'swap-split-gate', 'auto-split-gate'}, optional
+    contract : bool or str, optional
         How to apply the gate:
 
         - ``False``: gate is added to network lazily and nothing is contracted,
@@ -384,6 +383,7 @@ def tensor_network_gate_inds(
     compress_opts
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
         ``contract`` methods that involve splitting. Ignored otherwise.
+        Key options include `max_bond` and `cutoff`.
 
     Returns
     -------
@@ -652,6 +652,38 @@ def tensor_network_gate_sandwich_inds(
     network, i.e. applying ``G @ x @ G†`` to the indices given respectively by
     ``inds_upper`` and ``inds_lower``, then propagating them to the outside, to
     maintain the original index structure.
+
+    G : array_ike
+        The gate array to apply, should match or be factorable into the
+        shape ``(*phys_dims, *phys_dims)``.
+    inds_upper : str or sequence or str,
+        The upper (ket-like) index or indices to apply the gate to.
+    inds_lower : str or sequence or str,
+        The lower (bra-like) index or indices to apply the conjugate gate to.
+    contract : bool or str, optional
+        How to apply the gate, see
+        :meth:`~quimb.tensor.gating.tensor_network_gate_inds` for details and
+        pictorial representations.
+    tags : str or sequence of str, optional
+        Tags to add to both new gate tensors.
+    tags_upper : str or sequence of str, optional
+        Tags to add to the upper gate tensor only.
+    tags_lower : str or sequence of str, optional
+        Tags to add to the lower gate tensor only.
+    info : None or dict, optional
+        Used to store extra optional information such as the singular values if
+        not absorbed.
+    inplace : bool, optional
+        Whether to perform the gate operation inplace on the tensor network or
+        not.
+    compress_opts
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for any
+        ``contract`` methods that involve splitting. Ignored otherwise.
+        Key options include `max_bond` and `cutoff`.
+
+    Returns
+    -------
+    G_tn : TensorNetwork
     """
 
     tn = self if inplace else self.copy()

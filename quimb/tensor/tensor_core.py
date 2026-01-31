@@ -3705,24 +3705,25 @@ class TensorNetwork:
         changes to a Tensor's indices or tags will propagate to all TNs viewing
         that Tensor.
     check_collisions : bool, optional
-        If True, the default, then ``TensorNetwork`` instances with double
-        indices which match another ``TensorNetwork`` instances double indices
-        will have those indices' names mangled. Can be explicitly turned off
-        when it is known that no collisions will take place -- i.e. when not
-        adding any new tensors.
+        If True, the default, then ``TensorNetwork`` instances with bonds which
+        match another ``TensorNetwork`` instances bonds will have those
+        indices' names mangled. Can be explicitly turned off when it is known
+        that no collisions will take place, or one wants to explicitly allow
+        them.
 
     Attributes
     ----------
-    tensor_map : dict
+    tensor_map : dict[int, Tensor]
         Mapping of unique ids to tensors, like``{tensor_id: tensor, ...}``.
         I.e. this is where the tensors are 'stored' by the network.
-    tag_map : dict
-        Mapping of tags to a set of tensor ids which have those tags. I.e.
-        ``{tag: {tensor_id_1, tensor_id_2, ...}}``. Thus to select those
-        tensors could do: ``map(tensor_map.__getitem__, tag_map[tag])``.
-    ind_map : dict
-        Like ``tag_map`` but for indices. So ``ind_map[ind]]`` returns the
-        tensor ids of those tensors with ``ind``.
+    tag_map : dict[str, oset[int]]
+        Mapping of each tag to the ordered set of tensor ids which have that
+        tag, i.e. ``{tag: {tid0, tid1, ...}}``. One can thus select those with:
+        ``[tn.tensor_map[tid] for tid in tn.tag_map[tag]]``.
+    ind_map : dict[str, oset[int]]
+        Mapping of each index to the ordered set of tensor ids which have that
+        index, i.e. ``{ind: {tid0, tid1, ...}}``. One can thus select those
+        with: ``[tn.tensor_map[tid] for tid in tn.ind_map[ind]]``.
     exponent : float
         A scalar prefactor for the tensor network, stored in base 10 like
         ``10**exponent``. This is mostly for conditioning purposes and will be

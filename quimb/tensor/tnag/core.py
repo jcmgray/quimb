@@ -506,7 +506,7 @@ def tensor_network_ag_gate(
     contract : {False, True, 'split', 'reduce-split', 'split-gate',
                 'swap-split-gate', 'auto-split-gate'}, optional
         How to apply the gate, see
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
+        :meth:`~quimb.tensor.gating.tensor_network_gate_inds`.
     tags : str or sequence of str, optional
         Tags to add to the new gate tensor(s).
     tags_upper : str or sequence of str, optional
@@ -663,7 +663,7 @@ def tensor_network_ag_gate_simple(
         in and inverting them.
     gate_opts
         Supplied to
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.gate_inds`.
+        :meth:`~quimb.tensor.gating.tensor_network_gate_inds`.
     """
     tn = self if inplace else self.copy()
 
