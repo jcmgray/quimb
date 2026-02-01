@@ -236,6 +236,18 @@ def _trim_and_renorm_svd_result(
 
 
 @compose
+def identity(x, **kwargs):
+    """
+    No-op "decomposition" that leaves the input unchanged. Can be useful to quickly build a tensor network representing a given tensor "as is".
+    """
+
+    if x.shape[0] < x.shape[1]:
+        return do("eye", x.shape[0], like=x), None, x
+    else:
+        return x, None, do("eye", x.shape[1], like=x)
+
+
+@compose
 def svd_truncated(
     x,
     cutoff=-1.0,
