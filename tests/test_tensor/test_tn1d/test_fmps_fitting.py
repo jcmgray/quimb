@@ -27,8 +27,8 @@ def get_fpeps_and_norm():
     for ts in fpeps.tensors:
         ts.data.phase_sync(inplace=True)
     fpeps_norm = fpeps.make_norm()
-    # benchmark_norm = fpeps_norm.contract_boundary_from_xmax(xrange=(0, Lx-1), max_bond=256, cutoff=0.0, mode='direct').contract()
-    benchmark_norm = np.float64(9.347604511732736e18)
+    benchmark_norm = fpeps_norm.contract_boundary_from_xmax(xrange=(0, Lx-1), max_bond=256, cutoff=0.0, mode='direct').contract()
+    # benchmark_norm = np.float64(9.347604511732736e18)
     return fpeps_norm, benchmark_norm
 
 
