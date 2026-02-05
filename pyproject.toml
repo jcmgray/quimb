@@ -95,19 +95,10 @@ filterwarnings = ["once"]
 omit = ["*/quimb/experimental/*"]
 source = ["quimb"]
 
-[tool.pylama]
-ignore = "C901"
-max_line_length = 79
-
 [tool.ruff]
 line-length = 79
 target-version = "py311"
 lint.ignore = ["E741"]
-
-[tool.black]
-line-length = 79
-target-version = ['py311']
-
 
 # ---------------------------------- pixi ----------------------------------- #
 
@@ -170,7 +161,7 @@ platforms = ["linux-64"]
 [tool.pixi.feature.tensorflow.pypi-dependencies]
 tensorflow = "*"
 
-[tool.pixi.feature.tests.dependencies]
+[tool.pixi.feature.testing.dependencies]
 coverage= "*"
 pytest= "*"
 pytest-cov= "*"
@@ -187,33 +178,89 @@ sphinx = "*"
 sphinx-autoapi = "*"
 sphinx-copybutton = "*"
 sphinx-design = "*"
+[tool.pixi.feature.docs.pypi-dependencies]
+squeaky = "*"
 
 [tool.pixi.feature.pyold.dependencies]
 python= "3.11.*"
-
 [tool.pixi.feature.pymid.dependencies]
 python= "3.13.*"
-
 [tool.pixi.feature.pynew.dependencies]
 python= "3.14.*"
 
 [tool.pixi.environments]
-testpynew = { features = ["pynew", "full", "tests"] }
-testpyold = { features = ["pyold", "full", "tests"] }
-testpymid = { features = ["pymid", "full", "tests"] }
-testjax = { features = ["pymid", "full", "jax", "tests"] }
-testtorch = { features = ["pymid", "full", "torch", "tests"] }
-testtensorflow = { features = ["pymid", "full", "tensorflow", "tests"] }
-testslepc = { features = ["pynew", "slepc", "tests"] }
+testpynew = { features = ["pynew", "full", "testing"] }
+testpyold = { features = ["pyold", "full", "testing"] }
+testpymid = { features = ["pymid", "full", "testing"] }
+testjax = { features = ["pymid", "full", "jax", "testing"] }
+testtorch = { features = ["pymid", "full", "torch", "testing"] }
+testtensorflow = { features = ["pymid", "full", "tensorflow", "testing"] }
+testslepc = { features = ["pynew", "slepc", "testing"] }
 docs = { features = ["pynew", "docs"] }
 
-[tool.pixi.tasks]
-testmatrix = { cmd = "pytest tests/ --cov=quimb --cov-report=xml --ignore=tests/test_tensor", cwd = ".", default-environment = "testpynew" }
-testtensor = { cmd = "pytest tests/test_tensor --cov=quimb --cov-report=xml", cwd = ".", default-environment = "testpynew" }
+[tool.pixi.tasks.testmatrix]
+default-environment = "testpymid"
+cmd = """
+pytest \
+    tests/ \
+    --cov=quimb \
+    --cov-report=xml \
+    --ignore=tests/test_tensor \
+    --verbose \
+    --durations=10
+"""
+cwd = "."
+description = "Run all but the tensor tests."
 
-[tool.pixi.feature.docs.tasks]
-docs = { cmd = "sphinx-build -b html docs docs/_build/html", cwd = "." }
-docs-clean = { cmd = "rm -rf docs/_build", cwd = "." }
-docs-serve = { cmd = "python -m http.server -d docs/_build/html 8000", cwd = "." }
-lint = { cmd = "ruff check --select I; ruff format --check", cwd = "." }
-format = { cmd = "ruff check --select I --fix; ruff format", cwd = "." }
+[tool.pixi.tasks.testtensor]
+default-environment = "testpymid"
+cmd = """
+pytest \
+    tests/test_tensor \
+    --cov=quimb \
+    --cov-report=xml \
+    --verbose \
+    --durations=10
+"""
+cwd = "."
+description = "Run just the tensor tests."
+
+[tool.pixi.feature.docs.tasks.docs]
+cmd = "sphinx-build -b html docs docs/_build/html"
+cwd = "."
+description = "Build the HTML documentation."
+
+[tool.pixi.feature.docs.tasks.docs-clean]
+cmd = "rm -rf docs/_build"
+cwd = "."
+description = "Remove documentation build artifacts."
+
+[tool.pixi.feature.docs.tasks.docs-serve]
+cmd = "python -m http.server -d docs/_build/html 8000"
+cwd = "."
+description = "Serve the documentation locally."
+
+[tool.pixi.feature.docs.tasks.lint]
+cmd = """
+    ruff check --select I
+    && ruff format --check
+"""
+cwd = "."
+description = "Check code formatting and imports with ruff."
+
+[tool.pixi.feature.docs.tasks.format]
+cmd = """
+    ruff check --select I --fix
+    && ruff format
+"""
+cwd = "."
+description = "Apply code formatting and fix imports with ruff."
+
+[tool.pixi.feature.docs.tasks.format-all]
+cmd = """
+    ruff check --select I --fix
+    && ruff format
+    && find . -name "*.ipynb" -print0 | xargs -0 squeaky
+"""
+cwd = "."
+description = "Format all files including notebooks with squeaky."
