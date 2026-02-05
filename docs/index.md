@@ -4,11 +4,11 @@
 
 [![Tests](https://github.com/jcmgray/quimb/actions/workflows/tests.yml/badge.svg)](https://github.com/jcmgray/quimb/actions/workflows/tests.yml)
 [![Code Coverage](https://codecov.io/gh/jcmgray/quimb/branch/main/graph/badge.svg)](https://codecov.io/gh/jcmgray/quimb)
-[![Code Quality](https://app.codacy.com/project/badge/Grade/3c7462a3c45f41fd9d8f0a746a65c37c)](https://www.codacy.com/gh/jcmgray/quimb/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=jcmgray/quimb&amp;utm_campaign=Badge_Grade)
 [![Documentation Status](https://readthedocs.org/projects/quimb/badge/?version=latest)](http://quimb.readthedocs.io/en/latest/?badge=latest)
-[![JOSS Paper](http://joss.theoj.org/papers/10.21105/joss.00819/status.svg)](https://doi.org/10.21105/joss.00819)
 [![PyPI](https://img.shields.io/pypi/v/quimb?color=teal)](https://pypi.org/project/quimb/)
 [![Anaconda-Server Badge](https://anaconda.org/conda-forge/quimb/badges/version.svg)](https://anaconda.org/conda-forge/quimb)
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.00819/status.svg)](https://doi.org/10.21105/joss.00819)
+[![Pixi Badge](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/prefix-dev/pixi/main/assets/badge/v0.json)](https://pixi.sh)
 
 [`quimb`](https://github.com/jcmgray/quimb) is an easy but fast python library for *'quantum information many-body'* calculations, focusing primarily on **tensor networks**. The code is hosted on [github](https://github.com/jcmgray/quimb), and docs are hosted on [readthedocs](http://quimb.readthedocs.io/en/latest/). Functionality is split in two:
 
