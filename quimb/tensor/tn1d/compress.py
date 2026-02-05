@@ -3,12 +3,12 @@ network can locally have arbitrary structure and outer indices.
 
 - [x] the direct method
 - [x] the density matrix method
+- [x] successive randomized compression (SRC) method
+- [x] src-oversampled
 - [x] the zip-up method
-- [x] the zip-up first method
+- [x] the zip-up first / oversampled method
 - [x] the 1-site variational fit method, including sums of tensor networks
 - [x] the 2-site variational fit method, including sums of tensor networks
-- [x] the local projector method (CTMRG and HOTRG style)
-- [x] the autofit method (via non-1d specific ALS or autodiff)
 
 """
 

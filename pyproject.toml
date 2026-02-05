@@ -230,6 +230,11 @@ cmd = "sphinx-build -b html docs docs/_build/html"
 cwd = "."
 description = "Build the HTML documentation."
 
+[tool.pixi.feature.docs.tasks.readthedocs]
+cmd = "sphinx-build -T -b html docs $READTHEDOCS_OUTPUT/html"
+cwd = "."
+description = "Specific task for building docs on ReadTheDocs."
+
 [tool.pixi.feature.docs.tasks.docs-clean]
 cmd = "rm -rf docs/_build"
 cwd = "."
