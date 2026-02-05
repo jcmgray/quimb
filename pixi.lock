@@ -13742,17 +13742,17 @@ packages:
   timestamp: 1769662120052
 - pypi: ./
   name: quimb
-  version: 1.12.2.dev50+gb7855bca8.d20260205
-  sha256: d4cee27caca246c7c2aff27fe426192b4287941b06d65cb926da80e1662a844e
+  version: 1.12.2.dev51+g30c4876fe.d20260205
+  sha256: e32b61e33e4bc985713e760905c24dad8ab96ded4507da731e18ff94109cf0f8
   requires_dist:
-  - autoray
-  - cotengra
-  - cytoolz
-  - numba
-  - numpy
-  - psutil
-  - scipy
-  - tqdm
+  - autoray>=0.8
+  - cotengra>=0.7.1
+  - cytoolz>=0.8.0
+  - numba>=0.39
+  - numpy>=1.17
+  - psutil>=4.3.1
+  - scipy>=1.16.0
+  - tqdm>=4
   - mpi4py ; extra == 'advanced-solvers'
   - petsc4py ; extra == 'advanced-solvers'
   - slepc4py ; extra == 'advanced-solvers'
