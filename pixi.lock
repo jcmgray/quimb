@@ -13742,8 +13742,8 @@ packages:
   timestamp: 1769662120052
 - pypi: ./
   name: quimb
-  version: 1.12.2.dev45+gea339164e.d20260205
-  sha256: e1bf928210f5952b64979fb8d747c5916b58073bfcda142a85cde0dc6be7846d
+  version: 1.12.2.dev48+g23d46b3a5.d20260205
+  sha256: e32b61e33e4bc985713e760905c24dad8ab96ded4507da731e18ff94109cf0f8
   requires_dist:
   - autoray>=0.8
   - cotengra>=0.7.1
