@@ -25,6 +25,8 @@ Release notes for `quimb`.
 - add [`tensor_network_gate_sandwich_inds`](quimb.tensor.gating.tensor_network_gate_sandwich_inds) for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network.
 - [`tensor_network_ag_gate`](quimb.tensor.tnag.core.tensor_network_ag_gate): add `which="sandwich"` option for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network, default to this if the supplied tensor network is a [`TensorNetworkGenOperator`](quimb.tensor.tnag.core.TensorNetworkGenOperator).
 - add function [`tensor_network_ag_gate_simple`](quimb.tensor.tnag.core.tensor_network_ag_gate_simple) for applying a gate to a arbitrary geometry tensor network vector or operator, using simple update style `gauges` to perform any compression.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. Add several accelerations for this method. `"eig"` remains as a deprecated alias for `"svd:eig"`.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add `method="rfactor:eig"` and `method="lfactor:eig"` for computing *only* the right (s @ VH) or left (U @ s) factor of the SVD via eigen-decomposition, which can be much faster if only one of these is needed, especially for large rectangular tensors.
 
 **Bug fixes:**
 
@@ -55,7 +57,7 @@ Release notes for `quimb`.
 - move the experimental `operatorbuilder` module to the main [`quimb.operator`](quimb.operator) module.
 - add basic introduction to the operator module - {ref}`operator-basics`
 - add new example on tracing tensor network functions {ref}`ex_tracing_tn_functions`
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add an `info` kwarg, supplying this with an empty dict or with the entry `'error'` will store the truncation error when using `method in {"svd", "eig"}`.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add an `info` kwarg, supplying this with an empty dict or with the entry `'error'` will store the truncation error when using `method in {"svd", "svd:eig"}`.
 - update infrastructure for TEBD and SimpleUpdate based algorithms.
 - [`schematic.Drawing`](quimb.schematic.Drawing): add [`grid`](quimb.schematic.Drawing.grid), [`grid3d`](quimb.schematic.Drawing.grid3d), [`bezier`](quimb.schematic.Drawing.bezier), [`star`](quimb.schematic.Drawing.star), [`cross`](quimb.schematic.Drawing.cross) and [`zigzag`](quimb.schematic.Drawing.zigzag) methods.
 - [`schematic.Drawing`](quimb.schematic.Drawing): add `relative` option to [`arrowhead`](quimb.schematic.Drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.Drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.Drawing.line).

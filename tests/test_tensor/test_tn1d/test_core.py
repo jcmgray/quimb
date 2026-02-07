@@ -267,7 +267,7 @@ class TestMatrixProductState:
         assert max(p["I4"].shape) == 14
         assert_allclose(p.H @ p, 4)
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     @pytest.mark.parametrize("cutoff_mode", ["abs", "rel", "sum2"])
     def test_compress_mps(self, method, cutoff_mode):
         n = 10
@@ -292,7 +292,7 @@ class TestMatrixProductState:
         assert max(p2["I4"].shape) == 7
         assert_allclose(p2.H @ p, 2)
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     def test_compress_trim_max_bond(self, method):
         p0 = qtn.MPS_rand_state(20, 20)
         p = p0.copy()
@@ -330,7 +330,7 @@ class TestMatrixProductState:
         assert psi.bond_sizes() == [2, 4, 7, 7, 7, 7, 7, 7, 1]
         assert psi.calc_current_orthog_center() == (9, 9)
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     @pytest.mark.parametrize("form", ["left", "right", "raise"])
     def test_add_and_compress_mps(self, method, form):
         p = qtn.MPS_rand_state(10, 7)

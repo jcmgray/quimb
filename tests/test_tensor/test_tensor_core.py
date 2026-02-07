@@ -412,7 +412,7 @@ class TestBasicTensorOperations:
 
 
 class TestTensorFunctions:
-    @pytest.mark.parametrize("method", ["svd", "eig", "isvd", "svds"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig", "isvd", "svds"])
     @pytest.mark.parametrize("linds", [("a", "b", "d"), ("c", "e")])
     @pytest.mark.parametrize("cutoff", [-1.0, 1e-13, 1e-10])
     @pytest.mark.parametrize("cutoff_mode", ["abs", "rel", "sum2"])
@@ -476,7 +476,7 @@ class TestTensorFunctions:
         tc = tn.contract(output_inds=t.inds)
         assert_allclose(tc.data, t.data)
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     def test_singular_values(self, method):
         psim = Tensor(np.eye(2) * 2**-0.5, inds="ab")
         assert_allclose(psim.H @ psim, 1.0)
@@ -536,7 +536,7 @@ class TestTensorFunctions:
             qu.norm(x.data, "fro"), rel=0.1
         )
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     def test_renorm(self, method):
         U = qu.rand_uni(10)
         s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -577,13 +577,13 @@ class TestTensorFunctions:
         assert qtn.bonds_size(*tn1) == 6
         assert a_trc == pytest.approx(trc)
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     def test_entropy(self, method):
         psim = Tensor(np.eye(2) * 2**-0.5, inds="ab")
         assert_allclose(psim.H @ psim, 1.0)
         assert_allclose(psim.entropy("a", method=method) ** 2, 1)
 
-    @pytest.mark.parametrize("method", ["svd", "eig"])
+    @pytest.mark.parametrize("method", ["svd", "svd:eig"])
     def test_entropy_matches_dense(self, method):
         p = MPS_rand_state(5, 32)
         p_dense = p.to_qarray()
@@ -1393,7 +1393,9 @@ class TestTensorNetwork:
         x1 = (A & B).trace("a", "d")
         assert x1 == pytest.approx(x0)
 
-    @pytest.mark.parametrize("method", ["svd", "eig", "isvd", "svds", "rsvd"])
+    @pytest.mark.parametrize(
+        "method", ["svd", "svd:eig", "isvd", "svds", "rsvd"]
+    )
     def test_compress_between(self, method):
         A = rand_tensor((3, 4, 5), "abd", tags={"T1"})
         A.expand_ind("d", 10)
@@ -1404,7 +1406,9 @@ class TestTensorNetwork:
         tn.compress_between("T1", "T2", method=method, mode="basic")
         assert A.shared_bond_size(B) == 5
 
-    @pytest.mark.parametrize("method", ["svd", "eig", "isvd", "svds", "rsvd"])
+    @pytest.mark.parametrize(
+        "method", ["svd", "svd:eig", "isvd", "svds", "rsvd"]
+    )
     def test_compress_all(self, method):
         k = MPS_rand_state(10, 7)
         k += k

@@ -10,6 +10,7 @@ import operator
 import os
 import string
 import uuid
+import warnings
 import weakref
 from numbers import Integral
 
@@ -379,33 +380,51 @@ def rand_uuid(base=""):
 
 _VALID_SPLIT_GET = {None, "arrays", "tensors", "values"}
 _SPLIT_FNS = {
-    "svd": decomp.svd_truncated,
-    "eig": decomp.svd_via_eig_truncated,
-    "lu": decomp.lu_truncated,
-    "qr": decomp.qr_stabilized,
-    "lq": decomp.lq_stabilized,
-    "polar_right": decomp.polar_right,
-    "polar_left": decomp.polar_left,
-    "eigh": decomp.eigh_truncated,
     "cholesky": decomp.cholesky,
-    "isvd": decomp.isvd,
-    "svds": decomp.svds,
-    "rsvd": decomp.rsvd,
+    "eigh": decomp.eigh_truncated,
     "eigsh": decomp.eigsh,
+    "isvd": decomp.isvd,
+    "lfactor:eig": decomp.lfactor_via_eig_truncated,
+    "lq": decomp.lq_stabilized,
+    "lu": decomp.lu_truncated,
+    "polar_left": decomp.polar_left,
+    "polar_right": decomp.polar_right,
+    "qr": decomp.qr_stabilized,
+    "rfactor:eig": decomp.rfactor_via_eig_truncated,
+    "rsvd": decomp.rsvd,
+    "svd:eig": decomp.svd_via_eig_truncated,
+    "svd": decomp.svd_truncated,
+    "svds": decomp.svds,
 }
-_SPLIT_VALUES_FNS = {"svd": decomp.svdvals, "eig": decomp.svdvals_eig}
-_FULL_SPLIT_METHODS = {"svd", "svdamr", "eig", "eigh"}
-_RANK_HIDDEN_METHODS = {"qr", "lq", "cholesky", "polar_right", "polar_left"}
-_DENSE_ONLY_METHODS = {
+_SPLIT_VALUES_FNS = {
+    "svd": decomp.svdvals,
+    "svd:eig": decomp.svdvals_eig,
+}
+_FULL_SPLIT_METHODS = {
     "svd",
-    "eig",
+    "svdamr",
+    "svd:eig",
     "eigh",
-    "cholesky",
+}
+_RANK_HIDDEN_METHODS = {
     "qr",
     "lq",
+    "cholesky",
     "polar_right",
     "polar_left",
+}
+_DENSE_ONLY_METHODS = {
+    "cholesky",
+    "eigh",
+    "lfactor:eig",
+    "lq",
     "lu",
+    "polar_left",
+    "polar_right",
+    "qr",
+    "rfactor:eig",
+    "svd:eig",
+    "svd",
     "svdamr",
 }
 # methods whose left factor is isometric
@@ -414,7 +433,15 @@ _LEFT_ISOM_METHODS = {"qr", "polar_right"}
 _RIGHT_ISOM_METHODS = {"lq", "polar_left"}
 # methods whose left and right factors are isometric, depending
 # on where the 'singular/eigen' values are absorbed
-_BOTH_ISOM_METHODS = {"svd", "eig", "eigh", "isvd", "svds", "rsvd", "eigsh"}
+_BOTH_ISOM_METHODS = {
+    "eigh",
+    "eigsh",
+    "isvd",
+    "rsvd",
+    "svd:eig",
+    "svd",
+    "svds",
+}
 
 _CUTOFF_LOOKUP = {None: -1.0}
 _ABSORB_LOOKUP = {"left": -1, "both": 0, "right": 1, None: None}
@@ -446,9 +473,9 @@ def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
 
     # convert defaults and settings to numeric type for numba funcs
     opts["cutoff"] = _CUTOFF_LOOKUP.get(cutoff, cutoff)
-    opts["absorb"] = _ABSORB_LOOKUP[absorb]
-    opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
     opts["cutoff_mode"] = _CUTOFF_MODES[cutoff_mode]
+    opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
+    opts["absorb"] = _ABSORB_LOOKUP[absorb]
 
     # renorm doubles up as the power used to renormalize
     if (method in _FULL_SPLIT_METHODS) and (renorm is True):
@@ -505,7 +532,10 @@ def tensor_split(
         How to split the tensor, only some methods allow bond truncation:
 
         - `'svd'`: full SVD, allows truncation.
-        - `'eig'`: full SVD via eigendecomp, allows truncation.
+        - `'svd:eig'`: full SVD via eigendecomp, allows truncation. Some loss
+          of precision due to squaring the singular values, but can be faster
+          especially for tall (m >> n) or wide (m << n) matrices with left or
+          right absorb respectively (deprecated alias: ``"eig"``).
         - `'lu'`: full LU decomposition, allows truncation. This method
           favors tensor sparsity but is not rank optimal.
         - `'svds'`: iterative svd, allows truncation.
@@ -516,6 +546,10 @@ def tensor_split(
         - `'eigsh'`: iterative eigen-decomposition, tensor must be hermitian.
         - `'qr'`: full QR decomposition.
         - `'lq'`: full LQ decomposition.
+        - `'rfactor:eig'`: *only* the right-factor (s @ VH) via eigendecomp,
+           allows fixed bond truncation.
+        - `'lfactor:eig'`: *only* the left-factor (U @ s) via eigendecomp,
+           allows fixed bond truncation.
         - `'polar_right'`: full polar decomposition as `A = UP`.
         - `'polar_left'`: full polar decomposition as `A = PU`.
         - `'cholesky'`: full cholesky decomposition, tensor must be positive.
@@ -582,7 +616,7 @@ def tensor_split(
     info : dict or None, optional
         If a dict is passed, store truncation info in the dict. Currently only
         supports the key 'error' for the truncation error, which is only
-        computed if `method in {"svd", "eig"}`.
+        computed if `method in {"svd", "svd:eig"}`.
 
     Returns
     -------
@@ -594,6 +628,14 @@ def tensor_split(
         `(left, singular_values, right)`.
     """
     check_opt("get", get, _VALID_SPLIT_GET)
+
+    if method == "eig":
+        warnings.warn(
+            "`method='eig'` has been renamed to "
+            "`method='svd:eig'` for consistency.",
+            FutureWarning,
+        )
+        method = "svd:eig"
 
     if left_inds is None:
         left_inds = oset(T.inds) - oset(right_inds)
@@ -652,10 +694,11 @@ def tensor_split(
     left, s, right = _SPLIT_FNS[method](array, **kwargs)
     # note `s` itself will be None unless `absorb=None` is specified
 
-    if nleft != 1:
+    if nleft != 1 and left is not None:
         # unfuse dangling left indices
         left = do("reshape", left, (*left_dims, shape(left)[-1]))
-    if nright != 1:
+
+    if nright != 1 and right is not None:
         # unfuse dangling right indices
         right = do("reshape", right, (shape(right)[0], *right_dims))
 
@@ -667,21 +710,40 @@ def tensor_split(
         return left, right
 
     if matrix_svals:
+        # need two bonds on either side of the singular value matrix
         if bond_ind is None:
             bond_ind_l = rand_uuid()
             bond_ind_r = rand_uuid()
         else:
             bond_ind_l, bond_ind_r = bond_ind
     else:
+        # only need one bond
         if bond_ind is None:
             bond_ind = rand_uuid()
         bond_ind_l = bond_ind_r = bond_ind
 
-    ltags = T.tags | tags_to_oset(ltags)
-    rtags = T.tags | tags_to_oset(rtags)
+    # check if we have created left and/or right isometric tensors
+    left_isom, right_isom = _check_left_right_isom(method, absorb)
 
-    Tl = Tensor(data=left, inds=(*left_inds, bond_ind_l), tags=ltags)
-    Tr = Tensor(data=right, inds=(bond_ind_r, *right_inds), tags=rtags)
+    if left is not None:
+        Tl = Tensor(
+            data=left,
+            inds=(*left_inds, bond_ind_l),
+            tags=T.tags | tags_to_oset(ltags),
+            left_inds=left_inds if left_isom else None,
+        )
+    else:
+        Tl = None
+
+    if right is not None:
+        Tr = Tensor(
+            data=right,
+            inds=(bond_ind_r, *right_inds),
+            tags=T.tags | tags_to_oset(rtags),
+            left_inds=right_inds if right_isom else None,
+        )
+    else:
+        Tr = None
 
     if absorb is None:
         # need to also wrap the singular values as a tensor
@@ -695,13 +757,6 @@ def tensor_split(
         tensors = (Tl, Ts, Tr)
     else:
         tensors = (Tl, Tr)
-
-    # work out if we have created left and/or right isometric tensors
-    left_isom, right_isom = _check_left_right_isom(method, absorb)
-    if left_isom:
-        Tl.modify(left_inds=left_inds)
-    if right_isom:
-        Tr.modify(left_inds=right_inds)
 
     if get == "tensors":
         return tensors
@@ -2647,6 +2702,7 @@ class Tensor:
         split_opts["left_inds"] = left_inds
         split_opts["right_inds"] = right_inds
         split_opts["get"] = "arrays"
+        # TODO: use 'lfactor:eig' or 'rfactor:eig' here?
         if side == "right":
             which = 1
             split_opts["method"] = "qr"
@@ -6113,8 +6169,6 @@ class TensorNetwork:
         **fit_opts,
     ):
         if cutoff != 0.0:
-            import warnings
-
             warnings.warn("Non-zero cutoff ignored by local fit compress.")
 
         select_local_opts = ensure_dict(select_local_opts)
@@ -8247,8 +8301,6 @@ class TensorNetwork:
             tree = self.contraction_tree(optimize, output_inds=output_inds)
 
             if not isinstance(tree, ctg.ContractionTreeCompressed):
-                import warnings
-
                 warnings.warn(
                     "The contraction tree is not a compressed one, "
                     "this may be very inefficient."

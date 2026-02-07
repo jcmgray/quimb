@@ -17,6 +17,7 @@ from autoray import (
     do,
     get_dtype_name,
     get_lib_fn,
+    get_namespace,
     infer_backend,
     lazy,
     reshape,
@@ -608,22 +609,58 @@ def _svd_via_eig_truncated_numba(
     calc_error=False,
 ):
     """SVD-split via eigen-decomposition."""
-    if x.shape[0] > x.shape[1]:
-        # Get sU, V
+    need_full_spectrum = (cutoff > 0.0) or (renorm > 0)
+
+    da, db = x.shape
+    if da > db:
+        tall = True
+    elif da < db:
+        tall = False
+    elif da == db:
+        # base choice to compute Us or sVH on absorb
+        if absorb == -1:
+            tall = True
+        else:
+            tall = False
+
+    if tall:
+        # tall: get U @ s, VH
         s2, V = np.linalg.eigh(dag_numba(x) @ x)
-        U = x @ V
+
+        if not need_full_spectrum and (0 < max_bond < db):
+            # more efficient to truncate here than when trimming
+            s2 = s2[-max_bond:]
+            V = V[:, -max_bond:]
+
+        Us = x @ V
         VH = dag_numba(V)
+
+        if not need_full_spectrum and (absorb == -1):
+            # shortcut - don't need svals and already correctly absorbed
+            return Us, None, VH, None
+
         # small negative eigenvalues turn into nan when sqrtd
         s2[s2 < 0.0] = 0.0
         s = np.sqrt(s2)
-        U = rddiv_numba(U, s)
+        U = rddiv_numba(Us, s + (s == 0.0))
     else:
-        # Get U, sV
+        # wide: get U, s @ VH
         s2, U = np.linalg.eigh(x @ dag_numba(x))
-        VH = dag_numba(U) @ x
+
+        if not need_full_spectrum and (0 < max_bond < da):
+            # more efficient to truncate here than when trimming
+            s2 = s2[-max_bond:]
+            U = U[:, -max_bond:]
+
+        sVH = dag_numba(U) @ x
+
+        if not need_full_spectrum and (absorb == 1):
+            # shortcut - don't need svals and already correctly absorbed
+            return U, None, sVH, None
+
         s2[s2 < 0.0] = 0.0
         s = np.sqrt(s2)
-        VH = lddiv_numba(s, VH)
+        VH = lddiv_numba(s + (s == 0.0), sVH)
 
     # we need singular values and vectors in descending order
     U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
@@ -669,25 +706,65 @@ def svd_via_eig_truncated(
 
         return U, s, VH
 
-    elif x.shape[0] > x.shape[1]:
-        # Get sU, V
-        s2, V = do("linalg.eigh", dag(x) @ x)
-        U = x @ V
+    xp = get_namespace(x)
+
+    need_full_spectrum = (cutoff > 0.0) or (renorm > 0)
+
+    da, db = xp.shape(x)
+    if da > db:
+        tall = True
+    elif da < db:
+        tall = False
+    elif da == db:
+        # base choice to compute Us or sVH on absorb
+        if absorb == -1:
+            tall = True
+        else:
+            tall = False
+
+    if tall:
+        # tall: get U @ s, VH
+        s2, V = xp.linalg.eigh(dag(x) @ x)
+
+        if not need_full_spectrum and (0 < max_bond < db):
+            # more efficient to truncate here than when trimming
+            s2 = s2[-max_bond:]
+            V = V[:, -max_bond:]
+
+        Us = x @ V
         VH = dag(V)
+
+        if not need_full_spectrum and (absorb == -1):
+            # shortcut - don't need svals and already correctly absorbed
+            return Us, None, VH
+
         # small negative eigenvalues turn into nan when sqrtd
-        s2 = do("clip", s2, 0.0, None)
-        s = do("sqrt", s2)
-        U = rddiv(U, s)
+        s2 = xp.clip(s2, 0.0, None)
+        s = xp.sqrt(s2)
+        U = rddiv(Us, s + (s == 0.0))
     else:
-        # Get U, sV
-        s2, U = do("linalg.eigh", x @ dag(x))
-        VH = dag(U) @ x
-        s2 = do("clip", s2, 0.0, None)
-        s = do("sqrt", s2)
-        VH = lddiv(s, VH)
+        # wide: get U, s @ VH
+        s2, U = xp.linalg.eigh(x @ dag(x))
+
+        if not need_full_spectrum and (0 < max_bond < da):
+            # more efficient to truncate here than when trimming
+            s2 = s2[-max_bond:]
+            U = U[:, -max_bond:]
+
+        sVH = dag(U) @ x
+
+        if not need_full_spectrum and (absorb == 1):
+            # shortcut - don't need svals and already correctly absorbed
+            return U, None, sVH
+
+        s2 = xp.clip(s2, 0.0, None)
+        s = xp.sqrt(s2)
+        VH = lddiv(s + (s == 0.0), sVH)
 
     # we need singular values and vectors in descending order
-    U, s, VH = do("flip", U, (1,)), do("flip", s, (0,)), do("flip", VH, (0,))
+    U = xp.flip(U, (1,))
+    s = xp.flip(s, (0,))
+    VH = xp.flip(VH, (0,))
 
     return _trim_and_renorm_svd_result(
         U,
@@ -805,6 +882,149 @@ def _choose_k(x, cutoff, max_bond):
 
     # if computing more than half of spectrum then just use dense method
     return "full" if k > d // 2 else k
+
+
+@compose
+def rfactor_via_eig_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=1,
+    renorm=0,
+):
+    """Get the truncated reduced right factor (s @ VH in SVD) via
+    eigen-decomposition of x @ x^dagger or x^dagger @ x, depending on which is
+    smaller. Dynamic cutoff is not yet implemented.
+    """
+    if cutoff > 0.0:
+        raise NotImplementedError(
+            "Can't handle cutoff in rfactor_via_eig_truncated yet."
+        )
+    if absorb != 1:
+        raise NotImplementedError(
+            "Can't handle absorb != 1 in rfactor_via_eig_truncated yet."
+        )
+
+    xp = get_namespace(x)
+
+    da, db = xp.shape(x)
+
+    if da > db:
+        s2, V = xp.linalg.eigh(dag(x) @ x)
+        if max_bond > 0 and max_bond < db:
+            s2 = s2[-max_bond:]
+            V = V[:, -max_bond:]
+        # small negative eigenvalues turn into nan when sqrtd
+        s2 = xp.clip(s2, 0.0, None)
+        sVH = ldmul(xp.sqrt(s2), dag(V))
+    else:
+        _, U = xp.linalg.eigh(x @ dag(x))
+        if max_bond > 0 and max_bond < da:
+            U = U[:, -max_bond:]
+        sVH = dag(U) @ x
+
+    return None, None, sVH
+
+
+@rfactor_via_eig_truncated.register("numpy")
+@njit  # pragma: no cover
+def rfactor_via_eig_truncated_numba(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=1,
+    renorm=0,
+):
+    da, db = x.shape
+
+    if da > db:
+        s2, V = np.linalg.eigh(dag_numba(x) @ x)
+        if max_bond > 0 and max_bond < db:
+            s2 = s2[-max_bond:]
+            V = V[:, -max_bond:]
+        # small negative eigenvalues turn into nan when sqrtd
+        s2[s2 < 0.0] = 0.0
+        sVH = ldmul_numba(np.sqrt(s2), dag_numba(V))
+    else:
+        _, U = np.linalg.eigh(x @ dag_numba(x))
+        if max_bond > 0 and max_bond < da:
+            U = U[:, -max_bond:]
+        sVH = dag_numba(U) @ x
+
+    return None, None, sVH
+
+
+@compose
+def lfactor_via_eig_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=-1,
+    renorm=0,
+):
+    """Get the truncated reduced left factor (U @ s in SVD) via
+    eigen-decomposition of x @ x^dagger or x^dagger @ x, depending on which is
+    smaller. Dynamic cutoff is not yet implemented.
+    """
+    if cutoff > 0.0:
+        raise NotImplementedError(
+            "Can't handle cutoff in lfactor_via_eig_truncated yet."
+        )
+    if absorb != -1:
+        raise NotImplementedError(
+            "Can't handle absorb != -1 in lfactor_via_eig_truncated yet."
+        )
+
+    xp = get_namespace(x)
+    da, db = xp.shape(x)
+
+    if db > da:
+        s2, U = xp.linalg.eigh(x @ dag(x))
+        if max_bond > 0 and max_bond < da:
+            s2 = s2[-max_bond:]
+            U = U[:, -max_bond:]
+        # small negative eigenvalues turn into nan when sqrtd
+        s2 = xp.clip(s2, 0.0, None)
+        Us = rdmul(U, xp.sqrt(s2))
+    else:
+        _, V = xp.linalg.eigh(dag(x) @ x)
+        if max_bond > 0 and max_bond < db:
+            V = V[:, -max_bond:]
+        Us = x @ V
+
+    return Us, None, None
+
+
+@lfactor_via_eig_truncated.register("numpy")
+@njit  # pragma: no cover
+def lfactor_via_eig_truncated_numba(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=-1,
+    renorm=0,
+):
+    da, db = x.shape
+
+    if db > da:
+        s2, U = np.linalg.eigh(x @ dag_numba(x))
+        if max_bond > 0 and max_bond < da:
+            s2 = s2[-max_bond:]
+            U = U[:, -max_bond:]
+        # small negative eigenvalues turn into nan when sqrtd
+        s2[s2 < 0.0] = 0.0
+        Us = rdmul_numba(U, np.sqrt(s2))
+    else:
+        _, V = np.linalg.eigh(dag_numba(x) @ x)
+        if max_bond > 0 and max_bond < db:
+            V = V[:, -max_bond:]
+        Us = x @ V
+
+    return Us, None, None
 
 
 def svds(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):

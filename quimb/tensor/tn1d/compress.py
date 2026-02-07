@@ -1299,7 +1299,7 @@ def tensor_network_1d_compress_src_oversample(
     max_bond_oversample=None,
     cutoff=1e-10,
     cutoff_oversample=0.0,
-    noise_mode="separable",
+    noise_mode="joint",
     site_tags=None,
     canonize=True,
     normalize=False,
