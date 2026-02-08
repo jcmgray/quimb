@@ -907,7 +907,6 @@ def rfactor_via_eig_truncated(
         )
 
     xp = get_namespace(x)
-
     da, db = xp.shape(x)
 
     if da > db:

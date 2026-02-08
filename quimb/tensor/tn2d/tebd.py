@@ -1056,7 +1056,7 @@ class FullUpdate(TEBD2D):
     @compute_envs_every.setter
     def compute_envs_every(self, x):
         if x == "sweep":
-            self._need_to_recompute_envs = lambda: (self._n != self._env_n)
+            self._need_to_recompute_envs = lambda: self._n != self._env_n
         elif x == "group":
             self._need_to_recompute_envs = lambda: (
                 (self._n != self._env_n)
@@ -1070,7 +1070,7 @@ class FullUpdate(TEBD2D):
             )
         else:
             x = max(1, int(x))
-            self._need_to_recompute_envs = lambda: (self._n >= self._env_n + x)
+            self._need_to_recompute_envs = lambda: self._n >= self._env_n + x
 
         self._compute_envs_every = x
 

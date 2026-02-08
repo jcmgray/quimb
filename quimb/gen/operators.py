@@ -91,10 +91,12 @@ def pauli(xyz, dim=2, **kwargs):
         ("y", 2): lambda: qu([[0, -1j], [1j, 0]], **kwargs),
         ("z", 2): lambda: qu([[1, 0], [0, -1]], **kwargs),
         ("i", 3): lambda: eye(3, **kwargs),
-        ("x", 3): lambda: qu([[0, 1, 0], [1, 0, 1], [0, 1, 0]], **kwargs)
-        / 2**0.5,
-        ("y", 3): lambda: qu([[0, -1j, 0], [1j, 0, -1j], [0, 1j, 0]], **kwargs)
-        / 2**0.5,
+        ("x", 3): lambda: (
+            qu([[0, 1, 0], [1, 0, 1], [0, 1, 0]], **kwargs) / 2**0.5
+        ),
+        ("y", 3): lambda: (
+            qu([[0, -1j, 0], [1j, 0, -1j], [0, 1j, 0]], **kwargs) / 2**0.5
+        ),
         ("z", 3): lambda: qu([[1, 0, 0], [0, 0, 0], [0, 0, -1]], **kwargs),
     }
     op = opmap[(xyzmap[xyz], dim)]()
