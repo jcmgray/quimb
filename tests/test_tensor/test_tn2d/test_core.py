@@ -60,12 +60,15 @@ class TestPEPSConstruct:
         assert_allclose(peps.to_dense(), np.zeros([512, 1]))
 
     def test_flatten(self):
+        from quimb.tensor.tn2d.core import TensorNetwork2DFlat
+
         psi = qtn.PEPS.rand(3, 5, 3, seed=42)
         norm = psi.H & psi
         assert len(norm.tensors) == 30
         norm.flatten_()
         assert len(norm.tensors) == 15
         assert norm.max_bond() == 9
+        assert norm.__class__ == TensorNetwork2DFlat
 
     def test_add_peps(self):
         pa = qtn.PEPS.rand(3, 4, 2)

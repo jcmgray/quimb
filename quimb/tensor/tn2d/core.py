@@ -793,17 +793,35 @@ class TensorNetwork2D(TensorNetworkGen):
         info["max_bond"] = self.max_bond()
         return info
 
-    def flatten(self, fuse_multibonds=True, inplace=False):
-        """Contract all tensors corresponding to each site into one."""
-        tn = self if inplace else self.copy()
+    def flatten(
+        self,
+        fuse_multibonds=True,
+        inplace=False,
+    ) -> "TensorNetwork2DFlat":
+        """Contract all tensors at each site together, yielding a single tensor
+        per site. By default, any multibonds between flattened sites will also
+        be fused together. If not already, the resulting tensor network will be
+        promoted to a :class:`TensorNetwork2DFlat`.
 
-        for i, j in self.gen_site_coos():
-            tn ^= (i, j)
+        Parameters
+        ----------
+        fuse_multibonds : bool, optional
+            Whether to fuse any multibonds that are created by this process.
+            Defaults to ``True``.
+        inplace : bool, optional
+            Whether to modify this tensor network inplace, or return a new
+            one. Defaults to ``False``.
 
-        if fuse_multibonds:
-            tn.fuse_multibonds_()
+        Returns
+        -------
+        TensorNetwork2DFlat
+        """
+        tn = super().flatten(fuse_multibonds=fuse_multibonds, inplace=inplace)
 
-        return tn.view_as_(TensorNetwork2DFlat, like=self)
+        if not isinstance(tn, TensorNetwork2DFlat):
+            tn.view_as_(TensorNetwork2DFlat, like=self)
+
+        return tn
 
     flatten_ = functools.partialmethod(flatten, inplace=True)
 

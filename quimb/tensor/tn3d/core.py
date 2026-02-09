@@ -774,17 +774,36 @@ class TensorNetwork3D(TensorNetworkGen):
         info["max_bond"] = self.max_bond()
         return info
 
-    def flatten(self, fuse_multibonds=True, inplace=False):
-        """Contract all tensors corresponding to each site into one."""
-        tn = self if inplace else self.copy()
+    def flatten(
+        self,
+        fuse_multibonds=True,
+        inplace=False,
+    ) -> "TensorNetwork3DFlat":
+        """Contract all tensors at each site together, yielding a single tensor
+        per site. By default, any multibonds between flattened sites will also
+        be fused together. If not already, the resulting tensor network will be
+        promoted to a :class:`TensorNetwork3DFlat`.
 
-        for i, j, k in self.gen_site_coos():
-            tn ^= (i, j, k)
+        Parameters
+        ----------
+        fuse_multibonds : bool, optional
+            Whether to fuse any multibonds that are created by this process.
+            Defaults to ``True``.
+        inplace : bool, optional
+            Whether to modify this tensor network inplace, or return a new
+            one. Defaults to ``False``.
 
-        if fuse_multibonds:
-            tn.fuse_multibonds_()
+        Returns
+        -------
+        TensorNetwork3DFlat
+        """
 
-        return tn.view_as_(TensorNetwork3DFlat, like=self)
+        tn = super().flatten(fuse_multibonds=fuse_multibonds, inplace=inplace)
+
+        if not isinstance(tn, TensorNetwork3DFlat):
+            tn.view_as_(TensorNetwork3DFlat, like=self)
+
+        return tn
 
     flatten_ = functools.partialmethod(flatten, inplace=True)
 

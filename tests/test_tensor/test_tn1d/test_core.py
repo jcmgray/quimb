@@ -1182,3 +1182,22 @@ class TestDense1D:
         assert t_psi.shape == (2,) * 7
         assert t_psi.dtype == "complex64"
         assert (t_psi.H @ t_psi) == pytest.approx(1.0)
+
+
+def test_flatten():
+    from quimb.tensor.tn1d.core import TensorNetwork1D, TensorNetwork1DFlat
+
+    mps = qtn.MPS_rand_state(4, 3, 2)
+    norm = mps.H & mps
+    assert norm.__class__ == TensorNetwork1D
+    norm_no_fuse = norm.flatten(fuse_multibonds=False)
+    assert norm_no_fuse.__class__ == TensorNetwork1DFlat
+    assert norm_no_fuse.max_bond() == 3
+    norm.flatten_()
+    assert norm.__class__ == TensorNetwork1DFlat
+    assert norm.max_bond() == 9
+    mpo = qtn.MPO_rand(4, 3, 2)
+    new = mps.gate_with_op_lazy_(mpo).flatten_()
+    assert new.__class__ == qtn.MatrixProductState
+    double = mpo.gate_lower_with_op_lazy(mpo).flatten_()
+    assert double.__class__ == qtn.MatrixProductOperator

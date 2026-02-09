@@ -1052,6 +1052,36 @@ class TensorNetworkGen(TensorNetwork):
     def __isub__(self, other):
         return tensor_network_ag_sum(self, other, negate=True, inplace=True)
 
+    def flatten(self, fuse_multibonds=True, inplace=False, **contract_opts):
+        """Contract all tensors at each site together, yielding a single tensor
+        per site. By default, any multibonds between flattened sites will also
+        be fused together.
+
+        Parameters
+        ----------
+        fuse_multibonds : bool, optional
+            Whether to fuse any multibonds that are created by this process.
+            Defaults to ``True``.
+        inplace : bool, optional
+            Whether to modify this tensor network inplace, or return a new
+            one. Defaults to ``False``.
+
+        Returns
+        -------
+        TensorNetworkGen
+        """
+        tn = self if inplace else self.copy()
+
+        for site in tn.gen_sites_present():
+            tn.contract_tags_(tn.site_tag(site), **contract_opts)
+
+        if fuse_multibonds:
+            tn.fuse_multibonds_()
+
+        return tn
+
+    flatten_ = functools.partialmethod(flatten, inplace=True)
+
     def normalize_simple(self, gauges, **contract_opts):
         """Normalize this network using simple local gauges. After calling
         this, any tree-like sub network gauged with ``gauges`` will have

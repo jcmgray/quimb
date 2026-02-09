@@ -604,6 +604,36 @@ class TensorNetwork1D(TensorNetworkGen):
 
         return right_envs
 
+    def flatten(
+        self,
+        fuse_multibonds=True,
+        inplace=False,
+    ) -> "TensorNetwork1DFlat":
+        """Contract all tensors at each site together, yielding a single tensor
+        per site. By default, any multibonds between flattened sites will also
+        be fused together. If not already, the resulting tensor network will be
+        promoted to a :class:`TensorNetwork1DFlat`.
+
+        Parameters
+        ----------
+        fuse_multibonds : bool, optional
+            Whether to fuse any multibonds that are created by this process.
+            Defaults to ``True``.
+        inplace : bool, optional
+            Whether to modify this tensor network inplace, or return a new
+            one. Defaults to ``False``.
+
+        Returns
+        -------
+        TensorNetwork1DFlat
+        """
+        tn = super().flatten(fuse_multibonds=fuse_multibonds, inplace=inplace)
+        if not isinstance(tn, TensorNetwork1DFlat):
+            tn.view_as_(TensorNetwork1DFlat, like=self)
+        return tn
+
+    flatten_ = functools.partialmethod(flatten, inplace=True)
+
     def _repr_info(self):
         info = super()._repr_info()
         info["L"] = self.L
