@@ -287,10 +287,9 @@ def _form_final_tn_from_tensor_sequence(
     sweep_reverse: bool,
     permute_arrays: bool | str,
     equalize_norms: bool | float,
-    inplace: bool,
-    tags_per_site=None,
     exponent=0.0,
-):
+    inplace=False,
+) -> TensorNetwork:
     """Form the final, compressed tensor network given the the original target
     (uncompressed) tensor network and the new sequence of tensors, e.g.
     sequence of unitaries from the dm method.
@@ -320,18 +319,12 @@ def _form_final_tn_from_tensor_sequence(
         the overall scaling factor will be accumulated into `.exponent`. If
         ``True``, whatever current `.exponent` will be distributed equally
         among the tensors.
-    inplace : bool
-        Whether to perform the compression inplace or not.
-    tags_per_site : sequence of sequence of str, optional
-        The tags to assign to each tensor in ``ts``, in order.
     exponent : float
         An exponent value to add to the final tensor network's existing
         exponent, e.g. generated during the compression procedure.
+    inplace : bool
+        Whether to perform the compression inplace or not.
     """
-    if tags_per_site is not None:
-        for t, tags in zip(ts, tags_per_site):
-            t.modify(tags=tags)
-
     if normalize:
         # in right canonical form already
         ts[0].normalize_()
@@ -648,14 +641,14 @@ def tensor_network_1d_compress_dm(
     )
 
     new = _form_final_tn_from_tensor_sequence(
-        tn,
-        Us,
-        normalize,
-        sweep_reverse,
-        permute_arrays,
-        equalize_norms,
-        inplace,
+        tn=tn,
+        ts=Us,
+        normalize=normalize,
+        sweep_reverse=sweep_reverse,
+        permute_arrays=permute_arrays,
+        equalize_norms=equalize_norms,
         exponent=exponent,
+        inplace=inplace,
     )
 
     return new
@@ -829,14 +822,14 @@ def tensor_network_1d_compress_zipup(
     )
 
     new = _form_final_tn_from_tensor_sequence(
-        tn,
-        ts,
-        normalize,
-        sweep_reverse,
-        permute_arrays,
-        equalize_norms,
-        inplace,
+        tn=tn,
+        ts=ts,
+        normalize=normalize,
+        sweep_reverse=sweep_reverse,
+        permute_arrays=permute_arrays,
+        equalize_norms=equalize_norms,
         exponent=exponent,
+        inplace=inplace,
     )
 
     return new
@@ -1022,16 +1015,156 @@ def tensor_network_1d_compress_zipup_oversample(
     )
     # direct sweep in other direction
     return _do_direct_sweep(
-        tn,
-        site_tags,
-        max_bond,
-        cutoff,
-        cutoff_mode,
-        equalize_norms,
-        normalize,
-        permute_arrays,
+        tn=tn,
+        site_tags=site_tags,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
+        permute_arrays=permute_arrays,
         **compress_opts,
     )
+
+
+def _do_sweep_compress_from_low_rank_left_envs(
+    tn,
+    local_tns,
+    left_envs,
+    left_env_inds,
+    contract_opts,
+    equalize_norms,
+    normalize,
+    sweep_reverse,
+    permute_arrays,
+    inplace,
+) -> TensorNetwork:
+    """Form a compressed MPS for any method that produces a sequence of low-rank
+    'left environments' such as SRC.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The original target tensor network.
+    local_tns : list[TensorNetwork, ...]
+        The tensor network partitioned into each local site.
+    left_envs : dict[int, Tensor]
+        The left environment tensors, keyed by the site they are the environment
+        for.
+    left_env_inds : dict[int, sequence[str]]
+        The 'left' indices of each left environment, typically only one.
+    contract_opts : dict
+        Options, such as `optimize`, to use contracting.
+    equalize_norms : bool or float
+        Whether to equalize the norms of the tensors after compression. If an
+        explicit value is given, then the norms will be set to that value, and
+        the overall scaling factor will be accumulated into `.exponent`.
+    normalize : bool
+        Whether to normalize the final tensor network, making use of the fact
+        that the output tensor network is in right canonical form.
+    sweep_reverse : bool
+        Whether to reverse the order the tensors are inserted, e.g. if
+        `site_tags` have been reversed, purely for cosmetic ordering of the
+        resulting `tensor_map`.
+    permute_arrays : bool or str
+        Whether to permute the array indices of the final tensor network into
+        canonical order. If ``True`` will use the default order, if any (e.g.
+        MatrixProductState), otherwise if a string this specifies a custom
+        order.
+    inplace : bool
+        Whether to perform the compression inplace or not.
+
+    Returns
+    -------
+    TensorNetwork
+    """
+    # we sweep in from the right
+    L = len(local_tns)
+    Us = [None] * L
+    right_env = None
+    exponent = 0.0
+    for i in range(L - 1, 0, -1):
+        # contract the environments with the current site
+        #
+        #     left_env_inds[i]
+        #         ┃
+        #         ┃   │   ┃
+        #         ▓▓━━█━━▓▓       (MPO-MPS example)
+        #      LE ▓▓  │  ▓▓ RE
+        #         ▓▓━━█━━▓▓
+        #        i-1  i  i+1
+        #
+        ts = [left_envs[i], *local_tns[i]]
+        if i < L - 1:
+            ts.append(right_env)
+        t = tensor_contract(*ts, **contract_opts)
+
+        # perform QR to get the projector!
+        #
+        #  left_env_inds[i]
+        #       ┃
+        #       ┃  │  ┃
+        #     R ░━━▒▒▒▒ Q
+        #          i  i+1
+        #
+        tq, _ = t.split(
+            left_inds=None,  # auto calc
+            right_inds=left_env_inds[i],
+            method="qr",
+            get="tensors",
+        )
+        Us[i] = tq
+
+        # now we contract the projector with one more site
+        # to form the right environment tensor
+        #
+        #         ┃
+        #       ▒▒▒▒ Qdag
+        #       │  ┃         (MPO-MPS example)
+        #     ━━█━━▓▓
+        #       │  ▓▓ RE
+        #     ━━█━━▓▓
+        #       i  i+1
+        #
+        ts = [*local_tns[i], tq.conj()]
+        if i < L - 1:
+            # include the right environment
+            ts.append(right_env)
+
+        right_env = tensor_contract(
+            *ts, strip_exponent=equalize_norms, **contract_opts
+        )
+        if equalize_norms:
+            # exponent also returned
+            right_env, result_exponent = right_env
+            exponent += result_exponent
+
+    # handle the final site
+    #
+    #       │  ┃
+    #       █━━▓▓
+    #       │  ▓▓ RE
+    #       █━━▓▓
+    #     i=0  1
+    #
+    Us[0] = (local_tns[0] | right_env).contract(all, **contract_opts)
+
+    # inherit all tags on each site from original tensor network
+    for i in range(L):
+        Us[i].modify(tags=local_tns[i].tags)
+
+    new = _form_final_tn_from_tensor_sequence(
+        tn=tn,
+        ts=Us,
+        normalize=normalize,
+        sweep_reverse=sweep_reverse,
+        permute_arrays=permute_arrays,
+        equalize_norms=equalize_norms,
+        exponent=exponent,
+        inplace=inplace,
+    )
+
+    return new
 
 
 def _src_get_local_noise_tensors(
@@ -1172,20 +1305,23 @@ def tensor_network_1d_compress_src(
     L = len(site_tags)
 
     # first we segment the tensor network into local sites
-    local_tns = [None] * L
-    local_inds = [None] * L
-    local_bonds = [None] * (L - 1)
+    local_tns = []
+    local_inds = []
+    local_bonds = []
     output_inds = tn._outer_inds
     for i in range(L):
         # local network
-        local_tns[i] = tni = tn.select(site_tags[i])
+        tni = tn.select(site_tags[i])
+        local_tns.append(tni)
         # outer indices found on this site
-        local_inds[i] = oset.from_dict(tni.ind_map).intersection(output_inds)
+        oix = oset.from_dict(tni.ind_map).intersection(output_inds)
+        local_inds.append(oix)
         if i > 0:
-            local_bonds[i - 1] = bonds(local_tns[i - 1], tni)
+            local_bonds.append(bonds(local_tns[i - 1], tni))
 
     # first we form the left environment tensors with sampling noise
     left_envs = {}
+    left_env_inds = [(Bix,)] * L
     for i in range(1, L):
         tws = _src_get_local_noise_tensors(
             noise_mode=noise_mode,
@@ -1222,75 +1358,18 @@ def tensor_network_1d_compress_src(
         if equalize_norms:
             left_envs[i].normalize_()
 
-    # then we sweep in from the right
-    Us = [None] * L
-    right_envs = {}
-    exponent = 0.0
-    for i in range(L - 1, 0, -1):
-        # contract the environments with the current site
-        #
-        #   bix
-        #     |  |  |
-        #    LE--i--RE     (MPO-MPS example)
-        #    LE  |  RE
-        #    LE--i--RE
-        #
-        ts = [left_envs[i], *local_tns[i]]
-        if i < L - 1:
-            ts.append(right_envs[i])
-        t = tensor_contract(*ts, **contract_opts)
-
-        # perform QR to get the projector!
-        #
-        #   bix
-        #     |  |  |
-        #     R--QQQQ
-        #
-        tq, _ = t.split(
-            left_inds=None,  # auto calc
-            right_inds=(Bix,),
-            method="qr",
-            get="tensors",
-        )
-        Us[i] = tq
-
-        # now we contract the projector with one more site
-        # to form the right environment tensor
-        #
-        #       QQQQ--
-        #       |  |      (MPO-MPS example)
-        #     --i--RE
-        #       |  RE
-        #     --i--RE
-        #
-        ts = [*local_tns[i], tq.conj()]
-        if i < L - 1:
-            # include the right environment
-            ts.append(right_envs[i])
-        if equalize_norms:
-            right_envs[i - 1], result_exponent = tensor_contract(
-                *ts, strip_exponent=True, **contract_opts
-            )
-            exponent += result_exponent
-        else:
-            right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
-
-    # handle the final tensor
-    Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
-
-    new = _form_final_tn_from_tensor_sequence(
-        tn,
-        Us,
-        normalize,
-        sweep_reverse,
-        permute_arrays,
-        equalize_norms,
-        inplace,
-        tags_per_site=[ltn.tags for ltn in local_tns],
-        exponent=exponent,
+    return _do_sweep_compress_from_low_rank_left_envs(
+        tn=tn,
+        local_tns=local_tns,
+        left_envs=left_envs,
+        left_env_inds=left_env_inds,
+        contract_opts=contract_opts,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
+        sweep_reverse=sweep_reverse,
+        permute_arrays=permute_arrays,
+        inplace=inplace,
     )
-
-    return new
 
 
 def tensor_network_1d_compress_src_oversample(
@@ -1413,14 +1492,14 @@ def tensor_network_1d_compress_src_oversample(
     )
     # direct sweep in other direction
     return _do_direct_sweep(
-        tn,
-        site_tags,
-        max_bond,
-        cutoff,
-        cutoff_mode,
-        equalize_norms,
-        normalize,
-        permute_arrays,
+        tn=tn,
+        site_tags=site_tags,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
+        permute_arrays=permute_arrays,
         **compress_opts,
     )
 
@@ -1440,8 +1519,8 @@ def tensor_network_1d_compress_srcmps(
     **contract_opts,
 ):
     """Compress any 1D-like tensor network using 'Successive Randomized
-    Compression' (SRC) https://arxiv.org/abs/2504.06475 but using an random or
-    supplied MPS as the 'sampling noise'.
+    Compression' (SRC) https://arxiv.org/abs/2504.06475 but using a random or
+    a supplied MPS as the 'sampling noise'.
 
     Parameters
     ----------
@@ -1494,7 +1573,8 @@ def tensor_network_1d_compress_srcmps(
         warnings.warn("`canonize=False` is ignored for the `src` method.")
     if cutoff != 0.0:
         warnings.warn(
-            "`cutoff` is ignored for the `src` method, use `max_bond` instead."
+            "`cutoff` is ignored for the `srcmps` "
+            "method, use `max_bond` instead."
         )
 
     contract_opts["optimize"] = "auto"
@@ -1506,7 +1586,10 @@ def tensor_network_1d_compress_srcmps(
         site_tags = tuple(reversed(site_tags))
     L = len(site_tags)
 
-    local_tns = [tn.select(site_tags[i]) for i in range(L)]
+    local_tns = []
+    for i in range(L):
+        tni = tn.select(site_tags[i])
+        local_tns.append(tni)
 
     # parse the sampling MPS
     if not isinstance(tn_fit, TensorNetwork):
@@ -1524,102 +1607,44 @@ def tensor_network_1d_compress_srcmps(
             tn_fit.setdefault("site_tags", site_tags)
             tn_fit = tensor_network_1d_compress(tn, **tn_fit)
 
-    # get the bonds along the sampling MPS
-    bonds = [
-        next(iter(tn_fit[site_tags[i]].bonds(tn_fit[site_tags[i + 1]])))
-        for i in range(L - 1)
-    ]
-
     # compute the left environments
     left_envs = {}
+    left_env_inds = {}
     for i in range(1, L):
         # contract it with the previous site and environment
         #
-        #    LE--w--    (MPO-MPS example)
-        #    LE  |
-        #    LE--i--
-        #    LE  |
-        #    LE--i--
+        #         tn_fit
+        #       ▓▓━━░━━ . left_env_inds[i]
+        #       ▓▓  │
+        #    LE ▓▓──█── .    (MPO-MPS example)
+        #       ▓▓  │
+        #       ▓▓━━█━━ .
+        #          i-1  i
         #
         ts = [*local_tns[i - 1], tn_fit[site_tags[i - 1]]]
         if i >= 2:
             ts.append(left_envs[i - 1])
+
         left_envs[i] = tensor_contract(*ts, **contract_opts)
         if equalize_norms:
+            # we don't need to track scaling since we are just projecting
             left_envs[i].normalize_()
 
-    # then we sweep in from the right
-    Us = [None] * L
-    right_envs = {}
-    exponent = 0.0
-    for i in range(L - 1, 0, -1):
-        # contract the environments with the current site
-        #
-        #       bonds[i-1]
-        #    LE--
-        #    LE   |  |
-        #    LE---i--RE     (MPO-MPS example)
-        #    LE   |  RE
-        #    LE---i--RE
-        #
-        ts = [left_envs[i], *local_tns[i]]
-        if i < L - 1:
-            ts.append(right_envs[i])
+        # get the bonds along the sampling MPS
+        left_env_inds[i] = tn_fit[site_tags[i - 1]].bonds(tn_fit[site_tags[i]])
 
-        t = tensor_contract(*ts, **contract_opts)
-
-        # perform QR to get the projector!
-        #
-        #   bonds[i-1]
-        #     |
-        #     |  |  |
-        #     R--QQQQ
-        #
-        tq, _ = t.split(
-            left_inds=None,  # auto calc
-            right_inds=(bonds[i - 1],),
-            method="qr",
-            get="tensors",
-        )
-        Us[i] = tq
-
-        # now we contract the projector with one more site
-        # to form the right environment tensor
-        #
-        #       QQQQ--
-        #       |  |      (MPO-MPS example)
-        #     --i--RE
-        #       |  RE
-        #     --i--RE
-        #
-        ts = [*local_tns[i], tq.conj()]
-        if i < L - 1:
-            # include the right environment
-            ts.append(right_envs[i])
-        if equalize_norms:
-            right_envs[i - 1], result_exponent = tensor_contract(
-                *ts, strip_exponent=True, **contract_opts
-            )
-            exponent += result_exponent
-        else:
-            right_envs[i - 1] = tensor_contract(*ts, **contract_opts)
-
-    # handle the final tensor
-    Us[0] = (local_tns[0] | right_envs[0]).contract(all, **contract_opts)
-
-    new = _form_final_tn_from_tensor_sequence(
-        tn,
-        Us,
-        normalize,
-        sweep_reverse,
-        permute_arrays,
-        equalize_norms,
-        inplace,
-        tags_per_site=[ltn.tags for ltn in local_tns],
-        exponent=exponent,
+    return _do_sweep_compress_from_low_rank_left_envs(
+        tn=tn,
+        local_tns=local_tns,
+        left_envs=left_envs,
+        left_env_inds=left_env_inds,
+        contract_opts=contract_opts,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
+        sweep_reverse=sweep_reverse,
+        permute_arrays=permute_arrays,
+        inplace=inplace,
     )
-
-    return new
 
 
 def tensor_network_1d_compress_srcmps_oversample(
@@ -1744,14 +1769,14 @@ def tensor_network_1d_compress_srcmps_oversample(
     )
     # direct sweep in other direction
     return _do_direct_sweep(
-        tn,
-        site_tags,
-        max_bond,
-        cutoff,
-        cutoff_mode,
-        equalize_norms,
-        normalize,
-        permute_arrays,
+        tn=tn,
+        site_tags=site_tags,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
+        permute_arrays=permute_arrays,
         **compress_opts,
     )
 
@@ -2600,14 +2625,14 @@ def tensor_network_1d_compress_fit_oversample(
 
     # direct sweep in other direction
     return _do_direct_sweep(
-        tn,
-        site_tags,
-        max_bond,
-        cutoff,
-        cutoff_mode,
-        equalize_norms,
-        normalize,
-        permute_arrays,
+        tn=tn,
+        site_tags=site_tags,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
+        permute_arrays=permute_arrays,
         **compress_opts,
     )
 

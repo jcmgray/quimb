@@ -59,6 +59,7 @@ def test_basic_compress_double_mpo(
         phys_dim=phys_dim,
         dtype=dtype,
         seed=seed,
+        tags="A",
     )
     b = qtn.MPO_rand(
         L,
@@ -66,6 +67,7 @@ def test_basic_compress_double_mpo(
         phys_dim=phys_dim,
         dtype=dtype,
         seed=seed + 1,
+        tags="B",
     )
     if use_input_exponent:
         a.exponent = 2.0
@@ -85,6 +87,8 @@ def test_basic_compress_double_mpo(
     )
     assert c.istree()
     assert c.max_bond() == max_bond
+    for t in c:
+        assert "A" in t.tags and "B" in t.tags
 
     if (equalize_norms is True) or normalize:
         assert c.exponent == 0.0
