@@ -1735,7 +1735,14 @@ def squared_op_to_reduced_factor_numba(x2, dl, dr, right=True):
 
 
 def compute_oblique_projectors(
-    Rl, Rr, max_bond, cutoff, absorb="both", cutoff_mode=4, **compress_opts
+    Rl,
+    Rr,
+    max_bond,
+    cutoff,
+    absorb="both",
+    cutoff_mode=4,
+    method="svd",
+    **compress_opts,
 ):
     """Compute the oblique projectors for two reduced factor matrices that
     describe a gauge on a bond. Concretely, assuming that ``Rl`` and ``Rr`` are
@@ -1772,14 +1779,26 @@ def compute_oblique_projectors(
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
-    Ut, st, VHt = svd_truncated(
-        Rl @ Rr,
-        max_bond=max_bond,
-        cutoff=cutoff,
-        absorb=None,
-        cutoff_mode=cutoff_mode,
-        **compress_opts,
-    )
+    if method == "svd":
+        Ut, st, VHt = svd_truncated(
+            Rl @ Rr,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            absorb=None,
+            cutoff_mode=cutoff_mode,
+            **compress_opts,
+        )
+    elif method == "svd:eig":
+        Ut, st, VHt = svd_via_eig_truncated(
+            Rl @ Rr,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            absorb=None,
+            cutoff_mode=cutoff_mode,
+            **compress_opts,
+        )
+    else:
+        raise ValueError(f"Unrecognized method={method}.")
 
     if absorb is None:
         Pl = Rr @ rddiv(dag(VHt), st)

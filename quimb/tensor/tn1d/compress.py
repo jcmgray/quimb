@@ -1028,19 +1028,19 @@ def tensor_network_1d_compress_zipup_oversample(
 
 
 def _do_sweep_compress_from_low_rank_left_envs(
-    tn,
-    local_tns,
-    left_envs,
-    left_env_inds,
-    contract_opts,
-    equalize_norms,
-    normalize,
-    sweep_reverse,
-    permute_arrays,
-    inplace,
+    tn: TensorNetwork,
+    local_tns: list[TensorNetwork],
+    left_envs: dict[int, Tensor],
+    left_env_inds: dict[int, list[str]],
+    contract_opts: dict,
+    equalize_norms: bool | float,
+    normalize: bool,
+    sweep_reverse: bool,
+    permute_arrays: bool | str,
+    inplace: bool,
 ) -> TensorNetwork:
-    """Form a compressed MPS for any method that produces a sequence of low-rank
-    'left environments' such as SRC.
+    """Form a compressed MPS for any method that produces a sequence of
+    low-rank 'left environments' such as SRC.
 
     Parameters
     ----------
@@ -1048,9 +1048,9 @@ def _do_sweep_compress_from_low_rank_left_envs(
         The original target tensor network.
     local_tns : list[TensorNetwork, ...]
         The tensor network partitioned into each local site.
-    left_envs : dict[int, Tensor]
-        The left environment tensors, keyed by the site they are the environment
-        for.
+    left_envs : sequence[int, Tensor]
+        The left environment tensors, keyed by the site they are the
+        environment for.
     left_env_inds : dict[int, sequence[str]]
         The 'left' indices of each left environment, typically only one.
     contract_opts : dict
