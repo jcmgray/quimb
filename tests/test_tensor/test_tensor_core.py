@@ -60,6 +60,21 @@ class TestBasicTensorOperations:
             "dtype='float64')"
         )
 
+    @pytest.mark.parametrize(
+        "dtype",
+        [float, complex, np.complex128, np.float64, np.float32, "raise"],
+    )
+    def test_rand_tensor_dtype(self, dtype):
+        if dtype == "raise":
+            with pytest.raises(TypeError):
+                rand_tensor((2, 3, 4), "abc", dtype=dtype)
+        else:
+            t = rand_tensor((2, 3, 4), "abc", dtype=dtype)
+            assert t.dtype == np.dtype(dtype)
+
+            tn = t & t
+            assert tn.dtype == np.dtype(dtype)
+
     def test_tensor_copy(self):
         a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags="blue")
         b = a.copy()
@@ -110,113 +125,11 @@ class TestBasicTensorOperations:
         assert_allclose((5 / a).data, 5 / x)
         assert_allclose((5**a).data, 5**x)
 
-    @pytest.mark.parametrize(
-        "op",
-        [
-            operator.__add__,
-            operator.__sub__,
-            operator.__mul__,
-            operator.__pow__,
-            operator.__truediv__,
-        ],
-    )
-    @pytest.mark.parametrize("mismatch", (True, False))
-    def test_tensor_tensor_arithmetic(self, op, mismatch):
-        a = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags="blue")
-        b = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags="red")
-        if mismatch:
-            b.modify(inds=(0, 1, 3))
-            c = op(a, b)
-            assert_allclose(
-                c.data,
-                op(a.data.reshape(2, 3, 4, 1), b.data.reshape(2, 3, 1, 4)),
-            )
-        else:
-            c = op(a, b)
-            assert_allclose(c.data, op(a.data, b.data))
-
     def test_tensor_conj_inplace(self):
         data = np.random.rand(2, 3, 4) + 1.0j * np.random.rand(2, 3, 4)
         a = Tensor(data, inds=[0, 1, 2], tags="blue")
         a.conj_()
         assert_allclose(data.conj(), a.data)
-
-    def test_contract_some(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
-        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3])
-
-        assert a.shared_bond_size(b) == 12
-
-        c = a @ b
-        c.check()
-
-        assert isinstance(c, Tensor)
-        assert c.shape == (2, 5)
-        assert c.inds == (0, 3)
-
-    def test_contract_all(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
-        b = Tensor(np.random.randn(3, 4, 2), inds=[1, 2, 0])
-        c = a @ b
-        assert isinstance(c, float)
-        assert not isinstance(c, Tensor)
-
-    def test_contract_None(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
-        b = Tensor(np.random.randn(3, 4, 5), inds=[3, 4, 5])
-        c = a @ b
-        c.check()
-        assert c.shape == (2, 3, 4, 3, 4, 5)
-        assert c.inds == (0, 1, 2, 3, 4, 5)
-
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
-        b = Tensor(np.random.randn(3, 4, 5), inds=[5, 4, 3])
-        c = a @ b
-
-        assert c.shape == (2, 3, 4, 3, 4, 5)
-        assert c.inds == (0, 1, 2, 5, 4, 3)
-
-    def test_raise_on_triple_inds(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
-        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 1, 2])
-        with pytest.raises(ValueError):
-            a @ b
-
-    def test_multi_contract(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags="red")
-        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3], tags="blue")
-        c = Tensor(np.random.randn(5, 2, 6), inds=[3, 0, 4], tags="blue")
-        d = tensor_contract(a, b, c)
-        d.check()
-        assert isinstance(d, Tensor)
-        assert d.shape == (6,)
-        assert d.inds == (4,)
-        assert d.tags == oset(("red", "blue"))
-
-    def test_contract_with_legal_characters(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds="abc", tags="red")
-        b = Tensor(np.random.randn(3, 4, 5), inds="bcd", tags="blue")
-        c = a @ b
-        assert c.shape == (2, 5)
-        assert c.inds == ("a", "d")
-
-    def test_contract_with_out_of_range_inds(self):
-        a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 100, 2200], tags="red")
-        b = Tensor(np.random.randn(3, 4, 5), inds=[100, 2200, -3], tags="blue")
-        c = a @ b
-        assert c.shape == (2, 5)
-        assert c.inds == (-1, -3)
-
-    def test_contract_with_wild_mix(self):
-        a = Tensor(
-            np.random.randn(2, 3, 4), inds=["-1", "a", "foo"], tags="red"
-        )
-        b = Tensor(
-            np.random.randn(3, 4, 5), inds=["a", "foo", "42.42"], tags="blue"
-        )
-        c = a @ b
-        assert c.shape == (2, 5)
-        assert c.inds == ("-1", "42.42")
 
     def test_fuse(self):
         a = Tensor(np.random.rand(2, 3, 4, 5), "abcd", tags={"blue"})
@@ -376,42 +289,184 @@ class TestBasicTensorOperations:
         assert t.H @ t == pytest.approx(3.0)
         assert t.inds == ("b", "a", "c")
 
-    def test_connect(self):
-        x = rand_tensor((2, 3), "ab")
-        y = rand_tensor((3, 2), "cd")
+    def test_squeeze(self):
+        a = rand_tensor((1, 2, 3, 1, 4), inds="abcde", tags=["hello"])
+        b = a.squeeze()
+        assert b.shape == (2, 3, 4)
+        assert b.inds == ("b", "c", "e")
+        assert "hello" in b.tags
+        assert a.shape == (1, 2, 3, 1, 4)
+        c = a.squeeze(include=["d"])
+        assert c.shape == (1, 2, 3, 4)
+        assert c.inds == ("a", "b", "c", "e")
+        d = a.squeeze(exclude=["d"])
+        assert d.shape == (2, 3, 1, 4)
+        assert d.inds == ("b", "c", "d", "e")
 
+    @pytest.mark.parametrize("dtype", [None, "complex128", "float32"])
+    def test_randomize(self, dtype):
+        a = rand_tensor((2, 3, 4), ["a", "b", "c"], dtype="float64")
+        if dtype is not None:
+            assert a.dtype != dtype
+        x1 = a.norm()
+        a.randomize_(dtype=dtype)
+        x2 = a.norm()
+        assert x1 != pytest.approx(x2)
+        assert a.shape == (2, 3, 4)
+        if dtype is not None:
+            assert a.dtype == dtype
+        else:
+            assert a.dtype == "float64"
+
+    def test_new_ind_with_identity(self):
+        t = rand_tensor((2, 2, 3, 3), "abcd")
+        t.new_ind_with_identity("switch", ["a", "c"], ["b", "d"], axis=2)
+        assert t.inds == ("a", "b", "switch", "c", "d")
+        assert t.isel({"switch": 1}).data.sum() == pytest.approx(6)
+
+    def test_new_ind_pair_diag(self):
+        data = np.array([1, 2, 3])
+        inds = ["a"]
+        t = Tensor(data=data, inds=inds)
+        new_left_ind = "b"
+        new_right_ind = "c"
+        expanded_tensor = t.new_ind_pair_diag(
+            "a", new_left_ind, new_right_ind, inplace=False
+        )
+        assert t.inds == ("a",)
+        assert_allclose(t.data, data)
+        assert expanded_tensor.inds == ("b", "c")
+        assert expanded_tensor.shape == (3, 3)
+        expected_data = np.zeros((3, 3))
+        np.fill_diagonal(expected_data, data)
+        assert_allclose(expanded_tensor.data, expected_data)
+        t.new_ind_pair_diag_("a", new_left_ind, new_right_ind)
+        assert t.inds == ("b", "c")
+        assert t.shape == (3, 3)
+        assert_allclose(t.data, expected_data)
+
+    def test_idxmin(self):
+        data = np.arange(24).reshape(2, 3, 4)
+        t = Tensor(data, inds=["a", "b", "c"])
+        assert t.idxmax() == {"a": 1, "b": 2, "c": 3}
+        assert t.idxmin() == {"a": 0, "b": 0, "c": 0}
+        data = np.arange(24).reshape(2, 3, 4) - 11.5
+        t = Tensor(data, inds=["a", "b", "c"])
+        assert t.idxmin("abs") == {"a": 0, "b": 2, "c": 3}
+        assert t.idxmax(lambda x: 1 / x) == {"a": 1, "b": 0, "c": 0}
+
+    def test_expand_ind(self):
+        t = Tensor(np.ones((2, 3, 4)), inds=["a", "b", "c"])
+        assert t.data.sum() == pytest.approx(24)
+
+        # test zeros mode
+        t0 = t.copy()
+        t0.expand_ind("a", size=6, mode="zeros")
+        assert t0.data.sum() == pytest.approx(24)
+
+        # test tiling mode
+        tt = t.copy()
+        tt.expand_ind("a", size=6, mode="repeat")
+        assert tt.data.sum() == pytest.approx(72)
+
+        # test random mode
+        tr = t.copy()
+        tr.expand_ind("a", size=6, mode="random", rand_dist="uniform")
+        assert 24 <= tr.data.sum() <= 72
+
+        tr = t.copy()
+        tr.expand_ind("a", size=6, rand_strength=1.0, rand_dist="uniform")
+        assert 24 <= tr.data.sum() <= 72
+
+        tr = t.copy()
+        tr.expand_ind("a", size=6, rand_strength=-1.0, rand_dist="uniform")
+        assert -48 <= tr.data.sum() <= 24
+
+
+class TestTensorContract:
+    """Test functionality realted to directly contracting tensors."""
+
+    def test_contract_some_inds(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
+        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3])
+
+        assert a.shared_bond_size(b) == 12
+
+        c = a @ b
+        c.check()
+
+        assert isinstance(c, Tensor)
+        assert c.shape == (2, 5)
+        assert c.inds == (0, 3)
+
+    def test_contract_all_inds(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
+        b = Tensor(np.random.randn(3, 4, 2), inds=[1, 2, 0])
+        c = a @ b
+        assert isinstance(c, float)
+        assert not isinstance(c, Tensor)
+
+    def test_contract_no_inds(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
+        b = Tensor(np.random.randn(3, 4, 5), inds=[3, 4, 5])
+        c = a @ b
+        c.check()
+        assert c.shape == (2, 3, 4, 3, 4, 5)
+        assert c.inds == (0, 1, 2, 3, 4, 5)
+
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
+        b = Tensor(np.random.randn(3, 4, 5), inds=[5, 4, 3])
+        c = a @ b
+
+        assert c.shape == (2, 3, 4, 3, 4, 5)
+        assert c.inds == (0, 1, 2, 5, 4, 3)
+
+    def test_raise_on_triple_inds(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2])
+        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 1, 2])
         with pytest.raises(ValueError):
-            qtn.connect(x, y, 0, 0)
+            a @ b
 
-        tn = x | y
-        assert len(tn.outer_inds()) == 4
-        qtn.connect(x, y, 0, 1)
-        assert len(tn.outer_inds()) == 2
-        qtn.connect(x, y, 1, 0)
-        assert len(tn.outer_inds()) == 0
-        assert tn.contract(all, preserve_tensor=True).shape == ()
-        # make sure bond is newly labelled
-        assert set("abcd") & set(tn.all_inds()) == set()
+    def test_multi_contract(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[0, 1, 2], tags="red")
+        b = Tensor(np.random.randn(3, 4, 5), inds=[1, 2, 3], tags="blue")
+        c = Tensor(np.random.randn(5, 2, 6), inds=[3, 0, 4], tags="blue")
+        d = tensor_contract(a, b, c)
+        d.check()
+        assert isinstance(d, Tensor)
+        assert d.shape == (6,)
+        assert d.inds == (4,)
+        assert d.tags == oset(("red", "blue"))
 
-    def test_group_inds(self):
-        x = rand_tensor((2, 2, 2, 2), "abcd")
-        y = rand_tensor((2, 2, 2), "bdf")
-        lix, six, rix = qtn.group_inds(x, y)
-        assert lix == ["a", "c"]
-        assert six == ["b", "d"]
-        assert rix == ["f"]
+    def test_contract_with_legal_characters(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds="abc", tags="red")
+        b = Tensor(np.random.randn(3, 4, 5), inds="bcd", tags="blue")
+        c = a @ b
+        assert c.shape == (2, 5)
+        assert c.inds == ("a", "d")
 
-    def test_group_inds_tensor_network(self):
-        tn = qtn.TN2D_with_value(1.0, 4, 4, 2)
-        ltn = tn.select(["I1,1", "I1,2"], "any")
-        rtn = tn.select(["I2,1", "I2,2"], "any")
-        lix, six, rix = qtn.group_inds(ltn, rtn)
-        assert len(lix) == len(rix) == 4
-        assert len(six) == 2
-        assert ltn.inds_size(six) == 4
+    def test_contract_with_out_of_range_inds(self):
+        a = Tensor(np.random.randn(2, 3, 4), inds=[-1, 100, 2200], tags="red")
+        b = Tensor(np.random.randn(3, 4, 5), inds=[100, 2200, -3], tags="blue")
+        c = a @ b
+        assert c.shape == (2, 5)
+        assert c.inds == (-1, -3)
+
+    def test_contract_with_wild_mix(self):
+        a = Tensor(
+            np.random.randn(2, 3, 4), inds=["-1", "a", "foo"], tags="red"
+        )
+        b = Tensor(
+            np.random.randn(3, 4, 5), inds=["a", "foo", "42.42"], tags="blue"
+        )
+        c = a @ b
+        assert c.shape == (2, 5)
+        assert c.inds == ("-1", "42.42")
 
 
-class TestTensorFunctions:
+class TestTensorSplit:
+    """Test `tensor_split` and related functionality."""
+
     @pytest.mark.parametrize("method", ["svd", "svd:eig", "isvd", "svds"])
     @pytest.mark.parametrize("linds", [("a", "b", "d"), ("c", "e")])
     @pytest.mark.parametrize("cutoff", [-1.0, 1e-13, 1e-10])
@@ -606,6 +661,69 @@ class TestTensorFunctions:
         svn = (t2).entropy(left_inds, method=method)
         assert_allclose(real_svn, svn)
 
+
+class TestTensorFunctions:
+    """Test functions involving multiple tensors."""
+
+    @pytest.mark.parametrize(
+        "op",
+        [
+            operator.__add__,
+            operator.__sub__,
+            operator.__mul__,
+            operator.__pow__,
+            operator.__truediv__,
+        ],
+    )
+    @pytest.mark.parametrize("mismatch", (True, False))
+    def test_tensor_tensor_arithmetic(self, op, mismatch):
+        a = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags="blue")
+        b = Tensor(np.random.rand(2, 3, 4), inds=[0, 1, 2], tags="red")
+        if mismatch:
+            b.modify(inds=(0, 1, 3))
+            c = op(a, b)
+            assert_allclose(
+                c.data,
+                op(a.data.reshape(2, 3, 4, 1), b.data.reshape(2, 3, 1, 4)),
+            )
+        else:
+            c = op(a, b)
+            assert_allclose(c.data, op(a.data, b.data))
+
+    def test_connect(self):
+        x = rand_tensor((2, 3), "ab")
+        y = rand_tensor((3, 2), "cd")
+
+        with pytest.raises(ValueError):
+            qtn.connect(x, y, 0, 0)
+
+        tn = x | y
+        assert len(tn.outer_inds()) == 4
+        qtn.connect(x, y, 0, 1)
+        assert len(tn.outer_inds()) == 2
+        qtn.connect(x, y, 1, 0)
+        assert len(tn.outer_inds()) == 0
+        assert tn.contract(all, preserve_tensor=True).shape == ()
+        # make sure bond is newly labelled
+        assert set("abcd") & set(tn.all_inds()) == set()
+
+    def test_group_inds(self):
+        x = rand_tensor((2, 2, 2, 2), "abcd")
+        y = rand_tensor((2, 2, 2), "bdf")
+        lix, six, rix = qtn.group_inds(x, y)
+        assert lix == ["a", "c"]
+        assert six == ["b", "d"]
+        assert rix == ["f"]
+
+    def test_group_inds_tensor_network(self):
+        tn = qtn.TN2D_with_value(1.0, 4, 4, 2)
+        ltn = tn.select(["I1,1", "I1,2"], "any")
+        rtn = tn.select(["I2,1", "I2,2"], "any")
+        lix, six, rix = qtn.group_inds(ltn, rtn)
+        assert len(lix) == len(rix) == 4
+        assert len(six) == 2
+        assert ltn.inds_size(six) == 4
+
     def test_direct_product(self):
         a1 = rand_tensor((2, 3, 4), inds="abc")
         b1 = rand_tensor((3, 4, 5), inds="bcd")
@@ -635,35 +753,6 @@ class TestTensorFunctions:
         )
         assert d1.almost_equals(d2)
 
-    @pytest.mark.parametrize(
-        "dtype",
-        [float, complex, np.complex128, np.float64, np.float32, "raise"],
-    )
-    def test_rand_tensor(self, dtype):
-        if dtype == "raise":
-            with pytest.raises(TypeError):
-                rand_tensor((2, 3, 4), "abc", dtype=dtype)
-        else:
-            t = rand_tensor((2, 3, 4), "abc", dtype=dtype)
-            assert t.dtype == np.dtype(dtype)
-
-            tn = t & t
-            assert tn.dtype == np.dtype(dtype)
-
-    def test_squeeze(self):
-        a = rand_tensor((1, 2, 3, 1, 4), inds="abcde", tags=["hello"])
-        b = a.squeeze()
-        assert b.shape == (2, 3, 4)
-        assert b.inds == ("b", "c", "e")
-        assert "hello" in b.tags
-        assert a.shape == (1, 2, 3, 1, 4)
-        c = a.squeeze(include=["d"])
-        assert c.shape == (1, 2, 3, 4)
-        assert c.inds == ("a", "b", "c", "e")
-        d = a.squeeze(exclude=["d"])
-        assert d.shape == (2, 3, 1, 4)
-        assert d.inds == ("b", "c", "d", "e")
-
     def test_tensor_fuse_squeeze(self):
         a = rand_tensor((1, 2, 3), inds="abc")
         b = rand_tensor((2, 3, 4), inds="bcd")
@@ -680,21 +769,6 @@ class TestTensorFunctions:
         assert a.shape == (1,)
         assert b.inds == ("d",)
         assert b.shape == (1,)
-
-    @pytest.mark.parametrize("dtype", [None, "complex128", "float32"])
-    def test_randomize(self, dtype):
-        a = rand_tensor((2, 3, 4), ["a", "b", "c"], dtype="float64")
-        if dtype is not None:
-            assert a.dtype != dtype
-        x1 = a.norm()
-        a.randomize_(dtype=dtype)
-        x2 = a.norm()
-        assert x1 != pytest.approx(x2)
-        assert a.shape == (2, 3, 4)
-        if dtype is not None:
-            assert a.dtype == dtype
-        else:
-            assert a.dtype == "float64"
 
     def test_multiply_index_diagonal(self):
         x = rand_tensor((3, 4), "ab")
@@ -721,70 +795,6 @@ class TestTensorFunctions:
         assert_allclose(col_nrm_x2, col_nrm_y2, rtol=10 * smudge)
         z2 = (t1 @ t2).data
         assert_allclose(z1, z2)
-
-    def test_new_ind_with_identity(self):
-        t = rand_tensor((2, 2, 3, 3), "abcd")
-        t.new_ind_with_identity("switch", ["a", "c"], ["b", "d"], axis=2)
-        assert t.inds == ("a", "b", "switch", "c", "d")
-        assert t.isel({"switch": 1}).data.sum() == pytest.approx(6)
-
-    def test_new_ind_pair_diag(self):
-        data = np.array([1, 2, 3])
-        inds = ["a"]
-        t = Tensor(data=data, inds=inds)
-        new_left_ind = "b"
-        new_right_ind = "c"
-        expanded_tensor = t.new_ind_pair_diag(
-            "a", new_left_ind, new_right_ind, inplace=False
-        )
-        assert t.inds == ("a",)
-        assert_allclose(t.data, data)
-        assert expanded_tensor.inds == ("b", "c")
-        assert expanded_tensor.shape == (3, 3)
-        expected_data = np.zeros((3, 3))
-        np.fill_diagonal(expected_data, data)
-        assert_allclose(expanded_tensor.data, expected_data)
-        t.new_ind_pair_diag_("a", new_left_ind, new_right_ind)
-        assert t.inds == ("b", "c")
-        assert t.shape == (3, 3)
-        assert_allclose(t.data, expected_data)
-
-    def test_idxmin(self):
-        data = np.arange(24).reshape(2, 3, 4)
-        t = Tensor(data, inds=["a", "b", "c"])
-        assert t.idxmax() == {"a": 1, "b": 2, "c": 3}
-        assert t.idxmin() == {"a": 0, "b": 0, "c": 0}
-        data = np.arange(24).reshape(2, 3, 4) - 11.5
-        t = Tensor(data, inds=["a", "b", "c"])
-        assert t.idxmin("abs") == {"a": 0, "b": 2, "c": 3}
-        assert t.idxmax(lambda x: 1 / x) == {"a": 1, "b": 0, "c": 0}
-
-    def test_expand_ind(self):
-        t = Tensor(np.ones((2, 3, 4)), inds=["a", "b", "c"])
-        assert t.data.sum() == pytest.approx(24)
-
-        # test zeros mode
-        t0 = t.copy()
-        t0.expand_ind("a", size=6, mode="zeros")
-        assert t0.data.sum() == pytest.approx(24)
-
-        # test tiling mode
-        tt = t.copy()
-        tt.expand_ind("a", size=6, mode="repeat")
-        assert tt.data.sum() == pytest.approx(72)
-
-        # test random mode
-        tr = t.copy()
-        tr.expand_ind("a", size=6, mode="random", rand_dist="uniform")
-        assert 24 <= tr.data.sum() <= 72
-
-        tr = t.copy()
-        tr.expand_ind("a", size=6, rand_strength=1.0, rand_dist="uniform")
-        assert 24 <= tr.data.sum() <= 72
-
-        tr = t.copy()
-        tr.expand_ind("a", size=6, rand_strength=-1.0, rand_dist="uniform")
-        assert -48 <= tr.data.sum() <= 24
 
 
 class TestTensorNetwork:
