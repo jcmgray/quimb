@@ -32,7 +32,8 @@ class RegionGraph:
         Generating regions.
     autocomplete : bool, optional
         Whether to automatically add all intersecting sub-regions, to guarantee
-        a complete region graph.
+        a balanced region graph, i.e. one where each variable has an overall
+        count of 1, with over- or under-counting.
     autoprune : bool, optional
         Whether to automatically remove all regions with a count of zero.
     """
@@ -44,7 +45,11 @@ class RegionGraph:
         autoprune=True,
     ):
         regions = tuple(map(frozenset, regions))
-        self.base_nodes = frozenset.intersection(*regions)
+
+        if not regions:
+            self.base_nodes = frozenset()
+        else:
+            self.base_nodes = frozenset.intersection(*regions)
 
         self.lookup = {}
         self.parents = {}
@@ -266,7 +271,9 @@ class RegionGraph:
         return 1 - sum(self.get_count(a) for a in self.get_ancestors(region))
 
     def get_total_count(self):
-        """Get the total count of all regions."""
+        """Get the total count of all regions. For a region graph to be
+        'totally balanced', this should equal 1.
+        """
         return sum(map(self.get_count, self.regions))
 
     @cached_region_property("level")
@@ -322,6 +329,23 @@ class RegionGraph:
         pairs_div = target_pairs - source_pairs
 
         return factors, pairs_mul, pairs_div
+
+    def isbalanced(self) -> bool:
+        """Check if the region graph is balanced, i.e. each variable has an
+        overall count of 1.
+        """
+        counts = {}
+        for r in self.regions:
+            c = self.get_count(r)
+            for node in r:
+                counts[node] = counts.get(node, 0) + c
+        return set(counts.values()) <= {1}
+
+    def istotallybalanced(self) -> bool:
+        """Check if the region graph is totally balanced, i.e. the total count
+        of all regions is 1.
+        """
+        return self.get_total_count() == 1
 
     def check(self):
         """Run some basic consistency checks on the region graph."""
