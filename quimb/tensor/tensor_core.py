@@ -386,10 +386,12 @@ _SPLIT_FNS = {
     "isvd": decomp.isvd,
     "lfactor:eig": decomp.lfactor_via_eig_truncated,
     "lq": decomp.lq_stabilized,
+    "lq:rand": decomp.lq_via_randqb,
     "lu": decomp.lu_truncated,
     "polar_left": decomp.polar_left,
     "polar_right": decomp.polar_right,
     "qr": decomp.qr_stabilized,
+    "qr:rand": decomp.qr_via_randqb,
     "rfactor:eig": decomp.rfactor_via_eig_truncated,
     "rsvd": decomp.rsvd,
     "svd:eig": decomp.svd_via_eig_truncated,
@@ -418,10 +420,12 @@ _DENSE_ONLY_METHODS = {
     "eigh",
     "lfactor:eig",
     "lq",
+    "lq:rand",
     "lu",
     "polar_left",
     "polar_right",
     "qr",
+    "qr:rand",
     "rfactor:eig",
     "svd:eig",
     "svd",
@@ -545,7 +549,11 @@ def tensor_split(
         - `'eigh'`: full eigen-decomposition, tensor must he hermitian.
         - `'eigsh'`: iterative eigen-decomposition, tensor must be hermitian.
         - `'qr'`: full QR decomposition.
+        - `'qr:rand'`: low-rank QR decomposition via randomized methods, faster
+          if truncation is needed.
         - `'lq'`: full LQ decomposition.
+        - `'lq:rand'`: low-rank LQ decomposition via randomized methods, faster
+          if truncation is needed.
         - `'rfactor:eig'`: *only* the right-factor (s @ VH) via eigendecomp,
            allows fixed bond truncation.
         - `'lfactor:eig'`: *only* the left-factor (U @ s) via eigendecomp,

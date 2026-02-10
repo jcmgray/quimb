@@ -630,7 +630,7 @@ def _svd_via_eig_truncated_numba(
         if not need_full_spectrum and (0 < max_bond < db):
             # more efficient to truncate here than when trimming
             s2 = s2[-max_bond:]
-            V = V[:, -max_bond:]
+            V = np.ascontiguousarray(V[:, -max_bond:])
 
         Us = x @ V
         VH = dag_numba(V)
@@ -650,7 +650,7 @@ def _svd_via_eig_truncated_numba(
         if not need_full_spectrum and (0 < max_bond < da):
             # more efficient to truncate here than when trimming
             s2 = s2[-max_bond:]
-            U = U[:, -max_bond:]
+            U = np.ascontiguousarray(U[:, -max_bond:])
 
         sVH = dag_numba(U) @ x
 
@@ -1024,6 +1024,66 @@ def lfactor_via_eig_truncated_numba(
         Us = x @ V
 
     return Us, None, None
+
+
+@compose
+def qr_via_randqb(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=1,
+    renorm=0,
+    seed=None,
+):
+    """Decompose `x` into a low rank product of orthogonal matrix `Q` and right
+    factor `R`, via randomized projection. Cutoff options are ignored.
+    """
+    if cutoff > 0.0:
+        raise NotImplementedError("Can't handle cutoff in qr_via_randqb yet.")
+    if absorb != 1:
+        raise ValueError("`absorb` must be 1 (right) in qr_via_randqb.")
+
+    xp = get_namespace(x)
+    da, db = xp.shape(x)
+
+    if max_bond > 0:
+        k = min((da, db, max_bond))
+    else:
+        k = min(da, db)
+
+    rng = xp.random.default_rng(seed)
+    W = rng.standard_normal((db, k))
+    Y = x @ W
+    Q, _ = xp.linalg.qr(Y)
+    B = dag(Q) @ x
+
+    return Q, None, B
+
+
+@compose
+def lq_via_randqb(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=-1,
+    renorm=0,
+    seed=None,
+):
+    """Decompose `x` into a low rank product of left factor `L` and orthogonal
+    matrix `Q`, via randomized projection. Cutoff options are ignored.
+    """
+    if cutoff > 0.0:
+        raise NotImplementedError("Can't handle cutoff in lq_via_randqb yet.")
+    if absorb != -1:
+        raise ValueError("`absorb` must be -1 (left) in lq_via_randqb.")
+
+    xp = get_namespace(x)
+    QT, _, LT = qr_via_randqb(xp.transpose(x), max_bond=max_bond, seed=seed)
+    Q = xp.transpose(QT)
+    L = xp.transpose(LT)
+    return L, None, Q
 
 
 def svds(x, cutoff=0.0, cutoff_mode=4, max_bond=-1, absorb=0, renorm=0):

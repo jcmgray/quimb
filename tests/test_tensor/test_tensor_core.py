@@ -510,6 +510,40 @@ class TestTensorSplit:
             )
         assert (a_split ^ ...).almost_equals(a)
 
+    def test_tensor_split_lowrank_qrrand(self):
+        t = rand_tensor((10, 10, 10, 10), inds="abcd", seed=0, dist="uniform")
+        chi = 50
+        t.normalize_()
+        tq, tr = t.split(
+            ["a", "c"],
+            method="qr:rand",
+            max_bond=chi,
+            cutoff=0.0,
+            absorb="right",
+            seed=0,
+        )
+        assert (tq.H @ tq) == pytest.approx(chi)
+        assert tq.shape == (10, 10, chi)
+        assert tr.shape == (chi, 10, 10)
+        assert ((tq @ tr) - t).norm() < 0.3
+
+    def test_tensor_split_lowrank_lqrand(self):
+        t = rand_tensor((10, 10, 10, 10), inds="abcd", seed=0, dist="uniform")
+        chi = 50
+        t.normalize_()
+        tl, tq = t.split(
+            ["a", "c"],
+            method="lq:rand",
+            max_bond=chi,
+            cutoff=0.0,
+            absorb="left",
+            seed=0,
+        )
+        assert (tq.H @ tq) == pytest.approx(chi)
+        assert tl.shape == (10, 10, chi)
+        assert tq.shape == (chi, 10, 10)
+        assert ((tl @ tq) - t).norm() < 0.3
+
     @pytest.mark.parametrize("matrix_svals", [False, True])
     def test_split_tensor_return_svals(self, matrix_svals):
         t = rand_tensor((2, 3, 4, 5), inds=("a", "b", "c", "d"))
