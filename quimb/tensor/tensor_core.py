@@ -212,7 +212,6 @@ def maybe_realify_scalar(data):
     return data
 
 
-@functools.singledispatch
 def tensor_contract(
     *tensors: "Tensor",
     output_inds=None,
@@ -501,7 +500,6 @@ def _check_left_right_isom(method, absorb):
     return left_isom, right_isom
 
 
-@functools.singledispatch
 def tensor_split(
     T: "Tensor",
     left_inds,
@@ -772,7 +770,6 @@ def tensor_split(
     return TensorNetwork(tensors, virtual=True)
 
 
-@functools.singledispatch
 def tensor_canonize_bond(
     T1: "Tensor",
     T2: "Tensor",
@@ -899,7 +896,6 @@ def choose_local_compress_gauge_settings(
     return canonize_distance, canonize_after_distance, mode
 
 
-@functools.singledispatch
 def tensor_compress_bond(
     T1: "Tensor",
     T2: "Tensor",
@@ -1073,7 +1069,6 @@ def tensor_compress_bond(
         T2 *= fact_1_2
 
 
-@functools.singledispatch
 def tensor_balance_bond(t1: "Tensor", t2: "Tensor", smudge=1e-6):
     """Gauge the bond between two tensors such that the norm of the 'columns'
     of the tensors on each side is the same for each index of the bond.
