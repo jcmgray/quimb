@@ -598,86 +598,7 @@ def svdvals(x):
     return np.linalg.svd(x, full_matrices=False, compute_uv=False)
 
 
-@njit  # pragma: no cover
-def _svd_via_eig_truncated_numba(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=4,
-    max_bond=-1,
-    absorb=0,
-    renorm=0,
-    calc_error=False,
-):
-    """SVD-split via eigen-decomposition."""
-    need_full_spectrum = (cutoff > 0.0) or (renorm > 0)
-
-    da, db = x.shape
-    if da > db:
-        tall = True
-    elif da < db:
-        tall = False
-    elif da == db:
-        # base choice to compute Us or sVH on absorb
-        if absorb == -1:
-            tall = True
-        else:
-            tall = False
-
-    if tall:
-        # tall: get U @ s, VH
-        s2, V = np.linalg.eigh(dag_numba(x) @ x)
-
-        if not need_full_spectrum and (0 < max_bond < db):
-            # more efficient to truncate here than when trimming
-            s2 = s2[-max_bond:]
-            V = np.ascontiguousarray(V[:, -max_bond:])
-
-        Us = x @ V
-        VH = dag_numba(V)
-
-        if not need_full_spectrum and (absorb == -1):
-            # shortcut - don't need svals and already correctly absorbed
-            return Us, None, VH, None
-
-        # small negative eigenvalues turn into nan when sqrtd
-        s2[s2 < 0.0] = 0.0
-        s = np.sqrt(s2)
-        U = rddiv_numba(Us, s + (s == 0.0))
-    else:
-        # wide: get U, s @ VH
-        s2, U = np.linalg.eigh(x @ dag_numba(x))
-
-        if not need_full_spectrum and (0 < max_bond < da):
-            # more efficient to truncate here than when trimming
-            s2 = s2[-max_bond:]
-            U = np.ascontiguousarray(U[:, -max_bond:])
-
-        sVH = dag_numba(U) @ x
-
-        if not need_full_spectrum and (absorb == 1):
-            # shortcut - don't need svals and already correctly absorbed
-            return U, None, sVH, None
-
-        s2[s2 < 0.0] = 0.0
-        s = np.sqrt(s2)
-        VH = lddiv_numba(s + (s == 0.0), sVH)
-
-    # we need singular values and vectors in descending order
-    U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
-
-    return _trim_and_renorm_svd_result_numba(
-        U,
-        s,
-        VH,
-        cutoff,
-        cutoff_mode,
-        max_bond,
-        absorb,
-        renorm,
-        calc_error=calc_error,
-    )
-
-
+@compose
 def svd_via_eig_truncated(
     x,
     cutoff=-1.0,
@@ -777,6 +698,113 @@ def svd_via_eig_truncated(
         renorm,
         info=info,
     )
+
+
+@njit  # pragma: no cover
+def _svd_via_eig_truncated_numba(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    calc_error=False,
+):
+    """SVD-split via eigen-decomposition."""
+    need_full_spectrum = (cutoff > 0.0) or (renorm > 0)
+
+    da, db = x.shape
+    if da > db:
+        tall = True
+    elif da < db:
+        tall = False
+    elif da == db:
+        # base choice to compute Us or sVH on absorb
+        if absorb == -1:
+            tall = True
+        else:
+            tall = False
+
+    if tall:
+        # tall: get U @ s, VH
+        s2, V = np.linalg.eigh(dag_numba(x) @ x)
+
+        if not need_full_spectrum and (0 < max_bond < db):
+            # more efficient to truncate here than when trimming
+            s2 = s2[-max_bond:]
+            V = np.ascontiguousarray(V[:, -max_bond:])
+
+        Us = x @ V
+        VH = dag_numba(V)
+
+        if not need_full_spectrum and (absorb == -1):
+            # shortcut - don't need svals and already correctly absorbed
+            return Us, None, VH, None
+
+        # small negative eigenvalues turn into nan when sqrtd
+        s2[s2 < 0.0] = 0.0
+        s = np.sqrt(s2)
+        U = rddiv_numba(Us, s + (s == 0.0))
+    else:
+        # wide: get U, s @ VH
+        s2, U = np.linalg.eigh(x @ dag_numba(x))
+
+        if not need_full_spectrum and (0 < max_bond < da):
+            # more efficient to truncate here than when trimming
+            s2 = s2[-max_bond:]
+            U = np.ascontiguousarray(U[:, -max_bond:])
+
+        sVH = dag_numba(U) @ x
+
+        if not need_full_spectrum and (absorb == 1):
+            # shortcut - don't need svals and already correctly absorbed
+            return U, None, sVH, None
+
+        s2[s2 < 0.0] = 0.0
+        s = np.sqrt(s2)
+        VH = lddiv_numba(s + (s == 0.0), sVH)
+
+    # we need singular values and vectors in descending order
+    U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
+
+    return _trim_and_renorm_svd_result_numba(
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        calc_error=calc_error,
+    )
+
+
+@svd_via_eig_truncated.register("numpy")
+def svd_via_eig_truncated_numpy(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=4,
+    max_bond=-1,
+    absorb=0,
+    renorm=0,
+    info=None,
+):
+    calc_error = "error" in info
+    U, s, VH, error = _svd_via_eig_truncated_numba(
+        x,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        calc_error=calc_error,
+    )
+
+    if calc_error:
+        info["error"] = error
+
+    return U, s, VH
 
 
 @njit  # pragma: no cover
