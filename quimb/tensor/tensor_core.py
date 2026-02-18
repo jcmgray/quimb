@@ -421,29 +421,32 @@ def tensor_split(
     method : str, optional
         The decomposition method to use:
 
-        - ``'svd'``: full SVD, allows truncation.
-        - ``'svd:eig'``: full SVD via eigendecomp, allows truncation. Some loss
-          of precision due to squaring the singular values, but can be faster
-          especially for tall (m >> n) or wide (m << n) matrices with left or
-          right absorb respectively (deprecated alias: ``'eig'``).
-        - ``'qr'``: full QR decomposition.
-        - ``'qr:rand'``: low-rank QR decomposition via randomized methods,
-          faster if truncation is needed.
-        - ``'lq'``: full LQ decomposition.
-        - ``'lq:rand'``: low-rank LQ decomposition via randomized methods,
-          faster if truncation is needed.
-        - ``'rfactor:eig'``: *only* the right-factor (s @ VH) via eigendecomp,
-          allows fixed bond truncation.
-        - ``'lfactor:eig'``: *only* the left-factor (U @ s) via eigendecomp,
-          allows fixed bond truncation.
-        - ``'svds'``: iterative svd, allows truncation.
-        - ``'isvd'``: iterative svd using interpolative methods, allows
-          truncation.
-        - ``'rsvd'``: randomized iterative svd with truncation.
+        - ``'svd'``: full SVD, allowing all truncation options. Submethods:
+          ``'svd:eig'`` (via eigendecomp, some loss of precision but often
+          faster).
+        - ``'qr'``: QR decomposition, left factor is isometric.
+          Submethods: ``'qr:svd'`` (via SVD, allows dynamic truncation),
+          ``'qr:eig'`` (via eigendecomp, allows dynamic truncation),
+          ``'qr:rand'`` (randomized, static truncation only).
+        - ``'lq'``: LQ decomposition, right factor is isometric.
+          Submethods: ``'lq:svd'`` (via SVD, allows dynamic truncation),
+          ``'lq:eig'`` (via eigendecomp, allows dynamic truncation),
+          ``'lq:rand'`` (randomized, static truncation only).
+        - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
+          Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
+          ``'rfactor:eig'`` (via eigendecomp, static truncation).
+        - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
+          Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
+          ``'lfactor:eig'`` (via eigendecomp, static truncation).
         - ``'eigh'``: full eigen-decomposition, tensor must be hermitian.
-        - ``'eigsh'``: iterative eigen-decomposition, tensor must be hermitian.
-        - ``'lu'``: full LU decomposition, allows truncation. This method
-          favors tensor sparsity but is not rank optimal.
+        - ``'eigsh'``: iterative eigen-decomposition, tensor must be
+          hermitian.
+        - ``'svds'``: iterative SVD, allows truncation.
+        - ``'isvd'``: iterative SVD using interpolative methods, allows
+          truncation.
+        - ``'rsvd'``: randomized iterative SVD with truncation.
+        - ``'lu'``: full LU decomposition, allows truncation. Favors
+          sparsity but is not rank optimal.
         - ``'polar_right'``: polar decomposition as ``A = U @ P``.
         - ``'polar_left'``: polar decomposition as ``A = P @ U``.
         - ``'cholesky'``: cholesky decomposition, tensor must be positive

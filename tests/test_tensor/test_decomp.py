@@ -56,7 +56,7 @@ def test_decomp_svd_via_eig(
     absorb,
     descending,
 ):
-    from quimb.tensor.decomp import svd_via_eig_with_max_bond
+    from quimb.tensor.decomp import svd_via_eig
 
     # turn test-case into reproducible seed
     seed = qu.utils.hash_kwargs_to_int(
@@ -69,9 +69,7 @@ def test_decomp_svd_via_eig(
 
     Ux, sx, VHx = np.linalg.svd(x, full_matrices=False)
 
-    U, s, VH = svd_via_eig_with_max_bond(
-        x, max_bond=k, absorb=absorb, descending=descending
-    )
+    U, s, VH = svd_via_eig(x, max_bond=k, absorb=absorb, descending=descending)
     if 0 < k < min(da, db):
         sx = sx[:k]
         Ux = Ux[:, :k]

@@ -19,18 +19,19 @@ Release notes for `quimb`.
 - add `phase_dual` option to [`TensorNetwork.conj`](quimb.tensor.tensor_core.TensorNetwork.conj).
 - rename `tensor_network_1d_compress_zipup_first` to [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup_oversample) and standardise `oversample` arguments.
 - add [`tensor_network_1d_compress_srcmps_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_srcmps_oversample) and [`tensor_network_1d_compress_fit_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_fit_oversample) methods.
-- add [`connected_bipartitions`](quimb.tensor.geometry.connected_bipartitions) for finding all connected bipartitions of a tensor network
+- add [`connected_bipartitions`](quimb.tensor.networking.connected_bipartitions) for finding all connected bipartitions of a tensor network
 - [`tn.distribute_exponent`](quimb.tensor.tensor_core.TensorNetwork.distribute_exponent): add `new_exponent` option for specifying the new exponent value (default 0.0).
 - [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress): correctly handle input networks with non-zero exponents and `equalize_norms`.
 - add [`tensor_network_gate_sandwich_inds`](quimb.tensor.gating.tensor_network_gate_sandwich_inds) for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network.
 - [`tensor_network_ag_gate`](quimb.tensor.tnag.core.tensor_network_ag_gate): add `which="sandwich"` option for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network, default to this if the supplied tensor network is a [`TensorNetworkGenOperator`](quimb.tensor.tnag.core.TensorNetworkGenOperator).
 - add function [`tensor_network_ag_gate_simple`](quimb.tensor.tnag.core.tensor_network_ag_gate_simple) for applying a gate to a arbitrary geometry tensor network vector or operator, using simple update style `gauges` to perform any compression.
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. Add several accelerations for this method. `"eig"` remains as a deprecated alias for `"svd:eig"`.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add `method="qr:svd"`, `"qr:eig"`, `"lq:svd"`, `"lq:eig"`, `"rfactor:svd"`, `"lfactor:svd"`, `"rfactor"`, and `"lfactor"` for QR-like, LQ-like, and single-factor decompositions with optional dynamic SVD-based truncation.
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add `method="rfactor:eig"` and `method="lfactor:eig"` for computing *only* the right (s @ VH) or left (U @ s) factor of the SVD via eigen-decomposition, which can be much faster if only one of these is needed, especially for large rectangular tensors.
 - add [`array_split`](quimb.tensor.decomp.array_split) and [`array_svals`](quimb.tensor.decomp.array_svals) as the primary array-level entry points for matrix decomposition, consolidating dispatch logic that was previously internal to `tensor_core`.
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): expand `absorb` options significantly beyond `"left"`, `"both"`, `"right"`, `None` to include `"lorthog"`, `"rorthog"`, `"lfactor"`, `"rfactor"`, and `"s"` for returning partial results (single factors or singular values only). Default changed from `"both"` to `"auto"`, which uses each method's natural default.
 - add [`register_split_driver`](quimb.tensor.decomp.register_split_driver) and [`register_svals_driver`](quimb.tensor.decomp.register_svals_driver) decorators for registering custom matrix decomposition methods with `array_split` and `array_svals`.
-- add [`svd_via_eig_with_max_bond`](quimb.tensor.decomp.svd_via_eig_with_max_bond) for efficient partial SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes.
+- add [`svd_via_eig`](quimb.tensor.decomp.svd_via_eig) for efficient partial SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes.
 - add [`hash_kwargs_to_int`](quimb.utils.hash_kwargs_to_int) utility for hashing keyword arguments to a deterministic integer.
 
 **Bug fixes:**
@@ -68,11 +69,11 @@ Release notes for `quimb`.
 - [`schematic.Drawing`](quimb.schematic.Drawing): add `relative` option to [`arrowhead`](quimb.schematic.Drawing.arrowhead), `shorten` option to [`text_between`](quimb.schematic.Drawing.text_between) and `text_left` and `text_right` options to [`line`](quimb.schematic.Drawing.line).
 - add [`Drawing.scale_figsize`](quimb.schematic.Drawing.scale_figsize) for automatically setting the absolute figsize based on placed elements.
 - refactor [`TEBDGen`](quimb.tensor.tnag.tebd.TEBDGen) and [`SimpleUpdateGen`](quimb.tensor.tnag.tebd.SimpleUpdateGen)
-- update the 2d specific [`SimpleUpdate`](quimb.tensor.tn1d.tebd.SimpleUpdate) to use the new infrastructure.
+- update the 2d specific [`SimpleUpdate`](quimb.tensor.tn2d.tebd.SimpleUpdate) to use the new infrastructure.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): show abelian signature if using `symmray` arrays.
 - [`tn.draw()`](quimb.tensor.drawing.draw_tn): add `adjust_lims` option
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): allow `autodiff_backend="torch"` with `jit_fn=True` to work with array backends with general pytree parameters, e.g. `symmray` arrays.
-- [`tn.gen_gloops`](quimb.tensor.tensor_core.TensorNetwork.gen_gloops) and [`tn.gen_gloops_sites`](quimb.tensor.tnag.core.TensorNetworkArbgeom.gen_gloops_sites): add `join_overlap` option. When building cluster by joining smaller generalized loops, this option controls how many nodes they need to overlap by to be joined together.
+- [`tn.gen_gloops`](quimb.tensor.tensor_core.TensorNetwork.gen_gloops) and [`tn.gen_gloops_sites`](quimb.tensor.tnag.core.TensorNetworkGen.gen_gloops_sites): add `join_overlap` option. When building cluster by joining smaller generalized loops, this option controls how many nodes they need to overlap by to be joined together.
 - all message passing routines: add `callback` option
 - GBP: allow a message initilization function.
 - [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP): allow `messages` to be a callable initialization function.
@@ -192,7 +193,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add [`Circuit.sample_gate_by_gate`](quimb.tensor.circuit.Circuit.sample_gate_by_gate) and related methods [`CircuitMPS.reordered_gates_dfs_clustered`](quimb.tensor.circuit.Circuit.reordered_gates_dfs_clustered) and [`CircuitMPS.get_qubit_distances`](quimb.tensor.circuit.CircuitMPS.get_qubit_distances) for sampling a circuit using the 'gate by gate' method introduced in https://arxiv.org/abs/2112.08499.
+- add [`Circuit.sample_gate_by_gate`](quimb.tensor.circuit.Circuit.sample_gate_by_gate) and related methods [`Circuit.reordered_gates_dfs_clustered`](quimb.tensor.circuit.Circuit.reordered_gates_dfs_clustered) and [`Circuit.get_qubit_distances`](quimb.tensor.circuit.Circuit.get_qubit_distances) for sampling a circuit using the 'gate by gate' method introduced in https://arxiv.org/abs/2112.08499.
 - add [`Circuit.draw`](quimb.tensor.circuit.Circuit.draw) for drawing a very simple circuit schematic.
 - [`Circuit`](quimb.tensor.circuit.Circuit): by default turn on `simplify_equalize_norms` and use a `group_size=10` for sampling. This should result in faster and more stable sampling.
 - [`Circuit`](quimb.tensor.circuit.Circuit): use `numpy.random.default_rng` for random number generation.
@@ -232,7 +233,7 @@ Release notes for `quimb`.
 
 - support for numpy v2.0 and scipy v1.14
 - add MPS sampling: [`MatrixProductState.sample_configuration`](quimb.tensor.tn1d.core.MatrixProductState.sample_configuration) and [`MatrixProductState.sample`](quimb.tensor.tn1d.core.MatrixProductState.sample) (generating multiple samples) and use these for [`CircuitMPS.sample`](quimb.tensor.circuit.CircuitMPS.sample) and [`CircuitPermMPS.sample`](quimb.tensor.circuit.CircuitPermMPS.sample).
-- add basic [`.plot()`](quimb.tensor.tnag.tebd.TEBDGen.plot) method for SimpleUpdate classes
+- add basic [`.plot()`](quimb.tensor.tnag.tebd.TEBDSweepMixin.plot) method for SimpleUpdate classes
 - add [`edges_1d_chain`](quimb.tensor.geometry.edges_1d_chain) for generating 1D chain edges
 - [operatorbuilder](quimb.operator): better coefficient placement for long range MPO building
 
@@ -248,7 +249,7 @@ Release notes for `quimb`.
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer) can now directly optimize [`Circuit`](quimb.tensor.circuit.Circuit) objects, returning a new optimized circuit with updated parameters.
 - [`Circuit`](quimb.tensor.circuit.Circuit): add `.copy()`, `.get_params()` and `.set_params()` interface methods.
 - Update generic TN optimizer docs.
-- add [`tn.gen_inds_loops`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_loops) for generating all loops of indices in a TN.
+- add [`tn.gen_paths_loops`](quimb.tensor.tensor_core.TensorNetwork.gen_paths_loops) for generating all loops of indices in a TN.
 - add [`tn.gen_inds_connected`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_connected) for generating all connected sets of indices in a TN.
 - make SVD fallback error catching more generic ({pull}`#238`)
 - fix some windows + numba CI issues.
@@ -276,9 +277,9 @@ Release notes for `quimb`.
 - TN2D, TN3D and arbitrary geom classical partition function builders ([`TN_classical_partition_function_from_edges`](quimb.tensor.tensor_builder.TN_classical_partition_function_from_edges)) now all support `outputs=` kwarg specifying non-marginalized variables
 - add simple dense 1-norm belief propagation algorithm [`D1BP`](quimb.tensor.belief_propagation.d1bp.D1BP)
 - add [`qtn.enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like) for checking whether a tensor network is 1D-like, including automatically adding strings of identities between non-local bonds, expanding applicability of [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress)
-- add [`MatrixProductState.canonicalize`](quimb.tensor.tn1d.core.MatrixProductState.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].
-- add [`MatrixProductState.left_canonicalize`](quimb.tensor.tn1d.core.MatrixProductState.left_canonicalize) as (by default *non-inplace*) version of `left_canonize`, to follow the pattern of other tensor network methods. `left_canonize` is now an alias for `left_canonicalize_` [note trailing underscore].
-- add [`MatrixProductState.right_canonicalize`](quimb.tensor.tn1d.core.MatrixProductState.right_canonicalize) as (by default *non-inplace*) version of `right_canonize`, to follow the pattern of other tensor network methods. `right_canonize` is now an alias for `right_canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.canonicalize`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.canonicalize) as (by default *non-inplace*) version of `canonize`, to follow the pattern of other tensor network methods. `canonize` is now an alias for `canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.left_canonicalize`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.left_canonicalize) as (by default *non-inplace*) version of `left_canonize`, to follow the pattern of other tensor network methods. `left_canonize` is now an alias for `left_canonicalize_` [note trailing underscore].
+- add [`MatrixProductState.right_canonicalize`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.right_canonicalize) as (by default *non-inplace*) version of `right_canonize`, to follow the pattern of other tensor network methods. `right_canonize` is now an alias for `right_canonicalize_` [note trailing underscore].
 
 **Bug fixes:**
 
@@ -308,7 +309,7 @@ Release notes for `quimb`.
   - The **'direct'** method: [`tensor_network_1d_compress_direct`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_direct)
   - The **'dm'** (density matrix) method: [`tensor_network_1d_compress_dm`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_dm)
   - The **'zipup'** method: [`tensor_network_1d_compress_zipup`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup)
-  - The **'zipup-first'** method: [`tensor_network_1d_compress_zipup_first`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup_first)
+  - The **'zipup-oversample'** method: [`tensor_network_1d_compress_zipup_oversample`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup_oversample)
   - The 1 and 2 site **'fit'** or sweeping method: [`tensor_network_1d_compress_fit`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_fit)
   - ... and some more niche methods for debugging and testing.
 
@@ -397,7 +398,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- add `normalized=True` option to [`tensor_network_distance`](quimb.tensor.tensor_core.tensor_network_distance) for computing the normalized distance between tensor networks: $2 |A - B| / (|A| + |B|)$, which is useful for convergence checks. [`Tensor.distance_normalized`](quimb.tensor.tensor_core.Tensor.distance_normalized) and [`TensorNetwork.distance_normalized`](quimb.tensor.tensor_core.TensorNetwork.distance_normalized) added as aliases.
+- add `normalized=True` option to [`tensor_network_distance`](quimb.tensor.fitting.tensor_network_distance) for computing the normalized distance between tensor networks: $2 |A - B| / (|A| + |B|)$, which is useful for convergence checks. [`Tensor.distance_normalized`](quimb.tensor.tensor_core.Tensor.distance_normalized) and [`TensorNetwork.distance_normalized`](quimb.tensor.tensor_core.TensorNetwork.distance_normalized) added as aliases.
 - add [`TensorNetwork.cut_bond`](quimb.tensor.tensor_core.TensorNetwork.cut_bond) for cutting a bond index
 
 **Bug fixes:**
@@ -485,7 +486,7 @@ Release notes for `quimb`.
   [Tensor.idxmax](quimb.tensor.Tensor.idxmax) for finding the index of the
   minimum/maximum element.
 - 2D and 3D classical partition function TN builders: allow output indices.
-- [`quimb.tensor.belief_propagation`]([`quimb.tensor.belief_propagation`]):
+- [`quimb.tensor.belief_propagation`](quimb.tensor.belief_propagation):
   add various 1-norm/2-norm dense/lazy BP algorithms.
 
 **Bug fixes:**
