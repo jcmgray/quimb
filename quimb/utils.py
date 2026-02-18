@@ -55,7 +55,13 @@ def check_opt(name, value, valid):
         raise ValueError(_CHECK_OPT_MSG.format(name, valid, value))
 
 
-def parse_info_extras(info=None, default=()):
+def parse_info_extras(info=None, default=()) -> dict:
+    """For functions that take an optional ``info`` dict, this function
+    populates which quantities to compute based on the keys of ``info``.
+    If ``info is None``, nothing is inserted, if ``info == {}``, all default
+    keys are inserted, but if ``info`` is a dict with some keys, only those
+    keys will remain, assuming they specify a manual subset.
+    """
     if info is None:
         # compute nothing
         return {}
@@ -904,3 +910,15 @@ def autocorrect_kwargs(func=None, valid_kwargs=None):
         return func(*args, **kwargs)
 
     return wrapped
+
+
+def hash_kwargs_to_int(**kwargs) -> int:
+    """Hash a set of keyword arguments to a deterministic integer, which can be
+    used for seeding random number generators in tests, for example, allowing a
+    varying but reproducible seed.
+    """
+    import hashlib
+
+    kwargs_str = str(sorted(kwargs.items()))
+    kwargs_hash = hashlib.md5(kwargs_str.encode()).hexdigest()
+    return int(kwargs_hash, 16) % (2**32 - 1)

@@ -47,7 +47,6 @@ from ..utils import (
     unique,
     valmap,
 )
-from . import decomp
 from .array_ops import (
     PArray,
     asarray,
@@ -70,6 +69,15 @@ from .contraction import (
     get_tensor_linop_backend,
     inds_to_eq,
     inds_to_symbols,
+)
+from .decomp import (
+    array_split,
+    array_svals,
+    compute_oblique_projectors,
+    isometrize,
+    parse_split_left_right_isom,
+    similarity_compress,
+    squared_op_to_reduced_factor,
 )
 from .drawing import (
     auto_color_html,
@@ -378,126 +386,6 @@ def rand_uuid(base=""):
 
 
 _VALID_SPLIT_GET = {None, "arrays", "tensors", "values"}
-_SPLIT_FNS = {
-    "cholesky": decomp.cholesky,
-    "eigh": decomp.eigh_truncated,
-    "eigsh": decomp.eigsh,
-    "isvd": decomp.isvd,
-    "lfactor:eig": decomp.lfactor_via_eig_truncated,
-    "lq": decomp.lq_stabilized,
-    "lq:rand": decomp.lq_via_randqb,
-    "lu": decomp.lu_truncated,
-    "polar_left": decomp.polar_left,
-    "polar_right": decomp.polar_right,
-    "qr": decomp.qr_stabilized,
-    "qr:rand": decomp.qr_via_randqb,
-    "rfactor:eig": decomp.rfactor_via_eig_truncated,
-    "rsvd": decomp.rsvd,
-    "svd:eig": decomp.svd_via_eig_truncated,
-    "svd": decomp.svd_truncated,
-    "svds": decomp.svds,
-}
-_SPLIT_VALUES_FNS = {
-    "svd": decomp.svdvals,
-    "svd:eig": decomp.svdvals_eig,
-}
-_FULL_SPLIT_METHODS = {
-    "svd",
-    "svdamr",
-    "svd:eig",
-    "eigh",
-}
-_RANK_HIDDEN_METHODS = {
-    "qr",
-    "lq",
-    "cholesky",
-    "polar_right",
-    "polar_left",
-}
-_DENSE_ONLY_METHODS = {
-    "cholesky",
-    "eigh",
-    "lfactor:eig",
-    "lq",
-    "lq:rand",
-    "lu",
-    "polar_left",
-    "polar_right",
-    "qr",
-    "qr:rand",
-    "rfactor:eig",
-    "svd:eig",
-    "svd",
-    "svdamr",
-}
-# methods whose left factor is isometric
-_LEFT_ISOM_METHODS = {"qr", "polar_right"}
-# methods whose right factor is isometric
-_RIGHT_ISOM_METHODS = {"lq", "polar_left"}
-# methods whose left and right factors are isometric, depending
-# on where the 'singular/eigen' values are absorbed
-_BOTH_ISOM_METHODS = {
-    "eigh",
-    "eigsh",
-    "isvd",
-    "rsvd",
-    "svd:eig",
-    "svd",
-    "svds",
-}
-
-_CUTOFF_LOOKUP = {None: -1.0}
-_ABSORB_LOOKUP = {"left": -1, "both": 0, "right": 1, None: None}
-_MAX_BOND_LOOKUP = {None: -1}
-_CUTOFF_MODES = {
-    "abs": 1,
-    "rel": 2,
-    "sum2": 3,
-    "rsum2": 4,
-    "sum1": 5,
-    "rsum1": 6,
-}
-_RENORM_LOOKUP = {"sum2": 2, "rsum2": 2, "sum1": 1, "rsum1": 1}
-
-
-@functools.lru_cache(None)
-def _parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
-    opts = dict()
-
-    if method in _RANK_HIDDEN_METHODS:
-        if absorb is None:
-            raise ValueError(
-                "You can't return the singular values separately when "
-                "`method='{}'`.".format(method)
-            )
-
-        # options are only relevant for handling singular values
-        return opts
-
-    # convert defaults and settings to numeric type for numba funcs
-    opts["cutoff"] = _CUTOFF_LOOKUP.get(cutoff, cutoff)
-    opts["cutoff_mode"] = _CUTOFF_MODES[cutoff_mode]
-    opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
-    opts["absorb"] = _ABSORB_LOOKUP[absorb]
-
-    # renorm doubles up as the power used to renormalize
-    if (method in _FULL_SPLIT_METHODS) and (renorm is True):
-        opts["renorm"] = _RENORM_LOOKUP.get(cutoff_mode, 0)
-    else:
-        opts["renorm"] = 0 if renorm is None else renorm
-
-    return opts
-
-
-@functools.lru_cache(None)
-def _check_left_right_isom(method, absorb):
-    left_isom = (method in _LEFT_ISOM_METHODS) or (
-        method in _BOTH_ISOM_METHODS and absorb in (None, "right")
-    )
-    right_isom = (method in _RIGHT_ISOM_METHODS) or (
-        method in _BOTH_ISOM_METHODS and absorb in (None, "left")
-    )
-    return left_isom, right_isom
 
 
 def tensor_split(
@@ -505,7 +393,7 @@ def tensor_split(
     left_inds,
     method="svd",
     get=None,
-    absorb="both",
+    absorb="auto",
     max_bond=None,
     cutoff=1e-10,
     cutoff_mode="rel",
@@ -527,81 +415,99 @@ def tensor_split(
     T : Tensor or TNLinearOperator
         The tensor (network) to split.
     left_inds : str or sequence of str
-        The index or sequence of inds, which `T` should already have, to
-        split to the 'left'. You can supply `None` here if you supply
-        `right_inds` instead.
+        The index or sequence of inds, which ``T`` should already have, to
+        split to the 'left'. You can supply ``None`` here if you supply
+        ``right_inds`` instead.
     method : str, optional
-        How to split the tensor, only some methods allow bond truncation:
+        The decomposition method to use:
 
-        - `'svd'`: full SVD, allows truncation.
-        - `'svd:eig'`: full SVD via eigendecomp, allows truncation. Some loss
+        - ``'svd'``: full SVD, allows truncation.
+        - ``'svd:eig'``: full SVD via eigendecomp, allows truncation. Some loss
           of precision due to squaring the singular values, but can be faster
           especially for tall (m >> n) or wide (m << n) matrices with left or
-          right absorb respectively (deprecated alias: ``"eig"``).
-        - `'lu'`: full LU decomposition, allows truncation. This method
-          favors tensor sparsity but is not rank optimal.
-        - `'svds'`: iterative svd, allows truncation.
-        - `'isvd'`: iterative svd using interpolative methods, allows
+          right absorb respectively (deprecated alias: ``'eig'``).
+        - ``'qr'``: full QR decomposition.
+        - ``'qr:rand'``: low-rank QR decomposition via randomized methods,
+          faster if truncation is needed.
+        - ``'lq'``: full LQ decomposition.
+        - ``'lq:rand'``: low-rank LQ decomposition via randomized methods,
+          faster if truncation is needed.
+        - ``'rfactor:eig'``: *only* the right-factor (s @ VH) via eigendecomp,
+          allows fixed bond truncation.
+        - ``'lfactor:eig'``: *only* the left-factor (U @ s) via eigendecomp,
+          allows fixed bond truncation.
+        - ``'svds'``: iterative svd, allows truncation.
+        - ``'isvd'``: iterative svd using interpolative methods, allows
           truncation.
-        - `'rsvd'` : randomized iterative svd with truncation.
-        - `'eigh'`: full eigen-decomposition, tensor must he hermitian.
-        - `'eigsh'`: iterative eigen-decomposition, tensor must be hermitian.
-        - `'qr'`: full QR decomposition.
-        - `'qr:rand'`: low-rank QR decomposition via randomized methods, faster
-          if truncation is needed.
-        - `'lq'`: full LQ decomposition.
-        - `'lq:rand'`: low-rank LQ decomposition via randomized methods, faster
-          if truncation is needed.
-        - `'rfactor:eig'`: *only* the right-factor (s @ VH) via eigendecomp,
-           allows fixed bond truncation.
-        - `'lfactor:eig'`: *only* the left-factor (U @ s) via eigendecomp,
-           allows fixed bond truncation.
-        - `'polar_right'`: full polar decomposition as `A = UP`.
-        - `'polar_left'`: full polar decomposition as `A = PU`.
-        - `'cholesky'`: full cholesky decomposition, tensor must be positive.
+        - ``'rsvd'``: randomized iterative svd with truncation.
+        - ``'eigh'``: full eigen-decomposition, tensor must be hermitian.
+        - ``'eigsh'``: iterative eigen-decomposition, tensor must be hermitian.
+        - ``'lu'``: full LU decomposition, allows truncation. This method
+          favors tensor sparsity but is not rank optimal.
+        - ``'polar_right'``: polar decomposition as ``A = U @ P``.
+        - ``'polar_left'``: polar decomposition as ``A = P @ U``.
+        - ``'cholesky'``: cholesky decomposition, tensor must be positive
+          definite.
 
+        Note truncation and absorb options are only valid for certain methods.
     get : {None, 'arrays', 'tensors', 'values'}
         If given, what to return instead of a TN describing the split:
 
-        - `None`: a tensor network of the two (or three) tensors.
-        - `'arrays'`: the raw data arrays as a tuple `(l, r)` or
-          `(l, s, r)` depending on `absorb`.
-        - `'tensors '`: the new tensors as a tuple `(Tl, Tr)` or
-          `(Tl, Ts, Tr)` depending on `absorb`.
-        - `'values'`: only compute and return the singular values `s`.
+        - ``None``: a tensor network of the two (or three) tensors.
+        - ``'arrays'``: the raw data arrays as a tuple ``(l, r)`` or
+          ``(l, s, r)`` depending on ``absorb``.
+        - ``'tensors'``: the new tensors as a tuple ``(Tl, Tr)`` or
+          ``(Tl, Ts, Tr)`` depending on ``absorb``.
+        - ``'values'``: only compute and return the singular values ``s``.
 
-    absorb : {'both', 'left', 'right', None}, optional
-        Whether to absorb the singular values into both, the left, or the right
-        unitary matrix respectively, or neither. If neither (`absorb=None`)
-        then the singular values will be returned separately in their own
-        1D tensor or array. In that case if `get=None` the tensor network
-        returned will have a hyperedge corresponding to the new bond index
-        connecting three tensors. If `get='tensors'` or `get='arrays'` then
-        a tuple like `(left, s, right)` is returned.
+    absorb : str or None, optional
+        What to compute / where to absorb the singular- or eigen- values.
+        Common options are:
+
+        - ``'auto'``: use the method's default absorb mode.
+        - ``'both'`` / ``'Usq,sqVH'``: absorb ``sqrt(s)`` into both factors.
+        - ``'left'`` / ``'Us,VH'``: absorb ``s`` into the left factor,
+          leaving the right factor isometric (LQ-like).
+        - ``'right'`` / ``'U,sVH'``: absorb ``s`` into the right factor,
+          leaving the left factor isometric (QR-like).
+        - ``None`` / ``'U,s,VH'``: do not absorb ``s`` — it is returned as its
+          own tensor. If ``get=None`` the tensor network will have a hyperedge
+          connecting three tensors on the new bond index. If ``get='tensors'``
+          or ``get='arrays'`` a tuple ``(left, s, right)`` is returned.
+
+        Additional options for returning partial results (e.g. only one
+        factor, in which case the unrequested factor is returned as ``None``):
+
+        - ``'lorthog'`` / ``'U'``: return only the left isometric factor.
+        - ``'rorthog'`` / ``'VH'``: return only the right isometric factor.
+        - ``'lfactor'`` / ``'Us'``: return only the left factor with ``s``
+          absorbed (the L in an LQ decomposition).
+        - ``'rfactor'`` / ``'sVH'``: return only the right factor with ``s``
+          absorbed (the R in a QR decomposition).
+
+        Only some ``absorb`` options are valid for some ``method`` options.
     max_bond : None or int
         If integer, the maximum number of singular values to keep, regardless
-        of `cutoff`.
+        of ``cutoff``.
     cutoff : float, optional
         The threshold below which to discard singular values, only applies to
-        rank revealing methods (not QR, LQ, or cholesky).
-    cutoff_mode : {'sum2', 'rel', 'abs', 'rsum2'}
-        Method with which to apply the cutoff threshold:
+        rank revealing methods (not QR, LQ, or cholesky etc.).
+    cutoff_mode : {'rsum2', 'rel', 'abs', 'sum2', 'rsum1', 'sum1'}, optional
+        How to interpret ``cutoff`` when discarding singular values:
 
-        - `'rel'`: values less than `cutoff * s[0]` discarded.
-        - `'abs'`: values less than `cutoff` discarded.
-        - `'sum2'`: sum squared of values discarded must be `< cutoff`.
-        - `'rsum2'`: sum squared of values discarded must be less than
-          `cutoff` times the total sum of squared values.
-        - `'sum1'`: sum values discarded must be `< cutoff`.
-        - `'rsum1'`: sum of values discarded must be less than `cutoff`
+        - ``'rel'``: values less than ``cutoff * s[0]`` discarded.
+        - ``'abs'``: values less than ``cutoff`` discarded.
+        - ``'sum2'``: sum squared of values discarded must be ``< cutoff``.
+        - ``'rsum2'``: sum squared of values discarded must be less than
+          ``cutoff`` times the total sum of squared values.
+        - ``'sum1'``: sum values discarded must be ``< cutoff``.
+        - ``'rsum1'``: sum of values discarded must be less than ``cutoff``
           times the total sum of values.
 
-    renorm : {None, bool, or int}, optional
-        Whether to renormalize the kept singular values, assuming the bond has
-        a canonical environment, corresponding to maintaining the frobenius
-        or nuclear norm. If `None` (the default) then this is automatically
-        turned on only for `cutoff_method in {'sum2', 'rsum2', 'sum1',
-        'rsum1'}` with `method in {'svd', 'eig', 'eigh'}`.
+    renorm : int or bool, optional
+        Whether to renormalize the kept singular values to maintain the
+        Frobenius or nuclear norm. ``0`` or ``False`` means no renormalization.
+        ``True`` automatically picks the power based on ``cutoff_mode``.
     ltags : sequence of str, optional
         Add these new tags to the left tensor.
     rtags : sequence of str, optional
@@ -610,38 +516,34 @@ def tensor_split(
         Add these new tags to the singular value tensor.
     bond_ind : str, optional
         Explicitly name the new bond, else a random one will be generated.
-        If `matrix_svals=True` then this should be a tuple of two indices,
+        If ``matrix_svals=True`` then this should be a tuple of two indices,
         one for the left and right bond respectively.
     right_inds : sequence of str, optional
         Explicitly give the right indices, otherwise they will be worked out.
         This is a minor performance feature.
     matrix_svals : bool, optional
-        If `True`, return the singular values as a diagonal 2D array or
+        If ``True``, return the singular values as a diagonal 2D array or
         Tensor, otherwise return them as a 1D array. This is only relevant if
         returning the singular value in some form.
     info : dict or None, optional
         If a dict is passed, store truncation info in the dict. Currently only
         supports the key 'error' for the truncation error, which is only
-        computed if `method in {"svd", "svd:eig"}`.
+        computed if ``method in {"svd", "svd:eig"}``.
 
     Returns
     -------
     TensorNetwork or tuple[Tensor] or tuple[array] or 1D-array
-        Depending on if `get` is `None`, `'tensors'`, `'arrays'`, or
-        `'values'`. In the first three cases, if `absorb` is set, then the
-        returned objects correspond to `(left, right)` whereas if
-        `absorb=None` the returned objects correspond to
-        `(left, singular_values, right)`.
+        Depending on if ``get`` is ``None``, ``'tensors'``, ``'arrays'``, or
+        ``'values'``. In the first three cases, if ``absorb`` is set, then the
+        returned objects correspond to ``(left, right)`` whereas if
+        ``absorb=None`` the returned objects correspond to
+        ``(left, singular_values, right)``.
+
+    See Also
+    --------
+    array_split
     """
     check_opt("get", get, _VALID_SPLIT_GET)
-
-    if method == "eig":
-        warnings.warn(
-            "`method='eig'` has been renamed to "
-            "`method='svd:eig'` for consistency.",
-            FutureWarning,
-        )
-        method = "svd:eig"
 
     if left_inds is None:
         left_inds = oset(T.inds) - oset(right_inds)
@@ -659,10 +561,7 @@ def tensor_split(
     if isinstance(T, spla.LinearOperator):
         left_dims = T.ldims
         right_dims = T.rdims
-        if method in _DENSE_ONLY_METHODS:
-            array = T.to_dense()
-        else:
-            array = T
+        array = T
     else:
         TT = T.transpose(*left_inds, *right_inds)
         left_dims = TT.shape[:nleft]
@@ -677,27 +576,23 @@ def tensor_split(
             array = TT.data
 
     if get == "values":
-        s = _SPLIT_VALUES_FNS[method](array)
+        s = array_svals(array, method=method, **kwargs)
         if matrix_svals:
             s = do("diag", s)
         return s
 
-    kwargs.update(
-        # cached lookup of various defaults
-        _parse_split_opts(
-            method,
-            cutoff,
-            absorb,
-            max_bond,
-            cutoff_mode,
-            renorm,
-        )
-    )
-    if info is not None:
-        kwargs["info"] = info
-
     # do the matrix decomposition!
-    left, s, right = _SPLIT_FNS[method](array, **kwargs)
+    left, s, right = array_split(
+        array,
+        method=method,
+        absorb=absorb,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        renorm=renorm,
+        info=info,
+        **kwargs,
+    )
     # note `s` itself will be None unless `absorb=None` is specified
 
     if nleft != 1 and left is not None:
@@ -729,7 +624,7 @@ def tensor_split(
         bond_ind_l = bond_ind_r = bond_ind
 
     # check if we have created left and/or right isometric tensors
-    left_isom, right_isom = _check_left_right_isom(method, absorb)
+    left_isom, right_isom = parse_split_left_right_isom(method, absorb)
 
     if left is not None:
         Tl = Tensor(
@@ -3277,7 +3172,7 @@ class Tensor:
 
         # fuse this tensor into a matrix and 'isometrize' it
         x = self.to_dense(L_inds, R_inds)
-        x = decomp.isometrize(x, method=method)
+        x = isometrize(x, method=method)
 
         # turn the array back into a tensor
         x = do("reshape", x, [self.ind_size(ix) for ix in LR_inds])
@@ -6023,7 +5918,7 @@ class TensorNetwork:
         Rl, Rr = self._compute_tree_gauges(tree, [(tidl, bix), (tidr, bix)])
 
         # compute the oblique projectors from the reduced factors
-        Pl, Pr = decomp.compute_oblique_projectors(Rl, Rr.T, **compress_opts)
+        Pl, Pr = compute_oblique_projectors(Rl, Rr.T, **compress_opts)
 
         # absorb the projectors into the tensors to perform the compression
         tl.gate_(Pl.T, bix)
@@ -6146,9 +6041,7 @@ class TensorNetwork:
             exclude=exclude,
         )
 
-        Cl, Cr = decomp.similarity_compress(
-            E, max_bond, method=method, renorm=renorm
-        )
+        Cl, Cr = similarity_compress(E, max_bond, method=method, renorm=renorm)
 
         # absorb them into the tensors to compress this bond
         ta.gate_(Cr, bond)
@@ -9398,11 +9291,8 @@ class TensorNetwork:
         tnd = self.reindex(ixmap).conj_() & self
         XX = tnd.to_dense(lix, rix, optimize=optimize, **contract_opts)
 
-        return decomp.squared_op_to_reduced_factor(
-            XX,
-            d0,
-            d1,
-            right=(side == "right"),
+        return squared_op_to_reduced_factor(
+            XX, d0, d1, right=(side == "right")
         )
 
     def insert_compressor_between_regions(
@@ -9514,7 +9404,7 @@ class TensorNetwork:
             )
 
             # then form the 'oblique' projectors
-            Pl, Pr = decomp.compute_oblique_projectors(
+            Pl, Pr = compute_oblique_projectors(
                 Rl,
                 Rr,
                 max_bond=max_bond,

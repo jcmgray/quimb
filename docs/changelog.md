@@ -27,6 +27,11 @@ Release notes for `quimb`.
 - add function [`tensor_network_ag_gate_simple`](quimb.tensor.tnag.core.tensor_network_ag_gate_simple) for applying a gate to a arbitrary geometry tensor network vector or operator, using simple update style `gauges` to perform any compression.
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. Add several accelerations for this method. `"eig"` remains as a deprecated alias for `"svd:eig"`.
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add `method="rfactor:eig"` and `method="lfactor:eig"` for computing *only* the right (s @ VH) or left (U @ s) factor of the SVD via eigen-decomposition, which can be much faster if only one of these is needed, especially for large rectangular tensors.
+- add [`array_split`](quimb.tensor.decomp.array_split) and [`array_svals`](quimb.tensor.decomp.array_svals) as the primary array-level entry points for matrix decomposition, consolidating dispatch logic that was previously internal to `tensor_core`.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): expand `absorb` options significantly beyond `"left"`, `"both"`, `"right"`, `None` to include `"lorthog"`, `"rorthog"`, `"lfactor"`, `"rfactor"`, and `"s"` for returning partial results (single factors or singular values only). Default changed from `"both"` to `"auto"`, which uses each method's natural default.
+- add [`register_split_driver`](quimb.tensor.decomp.register_split_driver) and [`register_svals_driver`](quimb.tensor.decomp.register_svals_driver) decorators for registering custom matrix decomposition methods with `array_split` and `array_svals`.
+- add [`svd_via_eig_with_max_bond`](quimb.tensor.decomp.svd_via_eig_with_max_bond) for efficient partial SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes.
+- add [`hash_kwargs_to_int`](quimb.utils.hash_kwargs_to_int) utility for hashing keyword arguments to a deterministic integer.
 
 **Bug fixes:**
 

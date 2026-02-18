@@ -37,8 +37,6 @@ def test_basic_compress_double_mpo(
     equalize_norms,
     normalize,
 ):
-    import hashlib
-
     L = 8
     phys_dim = 2
     Da = 3
@@ -46,12 +44,13 @@ def test_basic_compress_double_mpo(
     max_bond = 6
 
     # turn case into a deterministic int [0, 2**32-1] for seeding
-    case_str = (
-        f"{method}-{dtype}-useexp{use_input_exponent}"
-        f"-eqn{equalize_norms}-norm{normalize}"
+    seed = qu.utils.hash_kwargs_to_int(
+        method=method,
+        dtype=dtype,
+        use_input_exponent=use_input_exponent,
+        equalize_norms=equalize_norms,
+        normalize=normalize,
     )
-    case_hash = hashlib.md5(case_str.encode()).hexdigest()
-    seed = int(case_hash, 16) % (2**32 - 1)
 
     a = qtn.MPO_rand(
         L,
