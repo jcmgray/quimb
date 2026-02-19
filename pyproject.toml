@@ -198,6 +198,12 @@ testtensorflow = { features = ["pymid", "full", "tensorflow", "testing"] }
 testslepc = { features = ["pynew", "slepc", "testing"] }
 docs = { features = ["pynew", "docs"] }
 
+[tool.pixi.tasks.pytest]
+default-environment = "testpymid"
+cmd = "pytest"
+cwd = "."
+description = "Run pytest."
+
 [tool.pixi.tasks.testmatrix]
 default-environment = "testpymid"
 cmd = """
