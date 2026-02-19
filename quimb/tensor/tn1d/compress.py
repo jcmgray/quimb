@@ -150,8 +150,11 @@ def tensor_network_1d_compress_direct(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    contract_opts=None,
+    canonize_opts=None,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress a 1D-like tensor network using the 'direct' or 'naive' method,
     that is, explicitly contracting site-wise to form a MPS-like TN,
@@ -201,8 +204,20 @@ def tensor_network_1d_compress_direct(
         returned tensor network.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    canonize_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.TensorNetwork.canonize_between` when
+        canonizing between sites. Values set here take precedence over any
+        defaults.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.TensorNetwork.compress_between` when
+        compressing between sites. Values set here take precedence over any
+        defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -211,6 +226,20 @@ def tensor_network_1d_compress_direct(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
+
+    canonize_opts = ensure_dict(canonize_opts)
+    canonize_opts.setdefault("equalize_norms", equalize_norms)
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("cutoff_mode", cutoff_mode)
+    compress_opts.setdefault("absorb", "left")
+    compress_opts.setdefault("reduced", "right")
+    compress_opts.setdefault("equalize_norms", False)
+
     if site_tags is None:
         site_tags = tn.site_tags
     if sweep_reverse:
@@ -219,12 +248,12 @@ def tensor_network_1d_compress_direct(
     new = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
 
     # contract the first site group
-    new.contract_tags_(site_tags[0], optimize=optimize)
+    new.contract_tags_(site_tags[0], **contract_opts)
 
     # sweep right
     for i in range(1, len(site_tags)):
         # contract the next site group
-        new.contract_tags_(site_tags[i], optimize=optimize)
+        new.contract_tags_(site_tags[i], **contract_opts)
         #     │ │ │ │ │ │ │ │ │ │
         #     ▶━▶━▶━▶═○─○─○─○─○─○
         #              ╲│ │ │ │ │
@@ -234,7 +263,7 @@ def tensor_network_1d_compress_direct(
         if canonize:
             # shift canonical center rightwards
             new.canonize_between(
-                site_tags[i - 1], site_tags[i], equalize_norms=equalize_norms
+                site_tags[i - 1], site_tags[i], **canonize_opts
             )
             #     │ │ │ │ │ │ │ │ │ │
             #     ▶━▶━▶━▶━▶─○─○─○─○─○
@@ -245,17 +274,7 @@ def tensor_network_1d_compress_direct(
     # sweep left
     for i in range(len(site_tags) - 1, 0, -1):
         # compress and shift canonical center leftwards
-        new.compress_between(
-            site_tags[i - 1],
-            site_tags[i],
-            absorb="left",
-            reduced="right",
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            equalize_norms=False,
-            **compress_opts,
-        )
+        new.compress_between(site_tags[i - 1], site_tags[i], **compress_opts)
         #     │ │ │ │ │ │ │ │ │ │
         #     ▶━▶━▶━▶━▶━▶━○─◀─◀─◀
         #                      :
@@ -375,8 +394,10 @@ def tensor_network_1d_compress_dm(
     sweep_reverse=False,
     canonize=True,
     equalize_norms=False,
+    contract_opts=None,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress any 1D-like tensor network using the 'density matrix' method
     (https://tensornetwork.org/mps/algorithms/denmat_mpo_mps/).
@@ -425,8 +446,15 @@ def tensor_network_1d_compress_dm(
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here take
+        precedence over any defaults.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`. Values set
+        here take precedence over any defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -435,6 +463,18 @@ def tensor_network_1d_compress_dm(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
+    contract_opts.setdefault("preserve_tensor", True)
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("method", "eigh")
+    compress_opts.setdefault("positive", 1)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("cutoff_mode", cutoff_mode)
+    compress_opts.setdefault("absorb", None)
+
     if not canonize:
         warnings.warn("`canonize=False` is ignored for the `dm` method.")
 
@@ -479,9 +519,7 @@ def tensor_network_1d_compress_dm(
     #
     left_envs = {}
     left_envs[1] = norm.select(site_tags[0]).contract(
-        preserve_tensor=True,
-        drop_tags=True,
-        optimize=optimize,
+        drop_tags=True, **contract_opts
     )
     if equalize_norms:
         left_envs[1].normalize_()
@@ -489,9 +527,8 @@ def tensor_network_1d_compress_dm(
         left_envs[i] = tensor_contract(
             left_envs[i - 1],
             *norm.select_tensors(site_tags[i - 1]),
-            preserve_tensor=True,
             drop_tags=True,
-            optimize=optimize,
+            **contract_opts,
         )
         if equalize_norms:
             left_envs[i].normalize_()
@@ -537,24 +574,14 @@ def tensor_network_1d_compress_dm(
         #     │  ┃           UHUH
         #                    │  ┃
         #
-        rhoi = tensor_contract(
-            *rho_tensors,
-            preserve_tensor=True,
-            optimize=optimize,
-        )
+        rhoi = tensor_contract(*rho_tensors, **contract_opts)
 
         # XXX: fermionic, see fix in squared_op_to_reduced_factor
 
         U, s, UH = rhoi.split(
             left_inds=left_inds,
             right_inds=right_inds,
-            method="eigh",
-            positive=1,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
             get="tensors",
-            absorb=None,
             **compress_opts,
         )
 
@@ -594,38 +621,27 @@ def tensor_network_1d_compress_dm(
             right_ket_tensors.append(right_env_ket)
             right_bra_tensors.append(right_env_bra)
 
+        right_env_ket = tensor_contract(
+            *right_ket_tensors,
+            drop_tags=True,
+            strip_exponent=equalize_norms,
+            **contract_opts,
+        )
         if equalize_norms:
-            right_env_ket, result_exponent = tensor_contract(
-                *right_ket_tensors,
-                preserve_tensor=True,
-                drop_tags=True,
-                optimize=optimize,
-                strip_exponent=True,
-            )
+            # accumulate stripped exponent
+            right_env_ket, result_exponent = right_env_ket
             exponent += result_exponent
-        else:
-            right_env_ket = tensor_contract(
-                *right_ket_tensors,
-                preserve_tensor=True,
-                drop_tags=True,
-                optimize=optimize,
-            )
+
         # TODO: could compute this just as conjugated and relabelled ket env
+        right_env_bra = tensor_contract(
+            *right_bra_tensors,
+            drop_tags=True,
+            strip_exponent=equalize_norms,
+            **contract_opts,
+        )
         if equalize_norms:
-            right_env_bra, _ = tensor_contract(
-                *right_bra_tensors,
-                preserve_tensor=True,
-                drop_tags=True,
-                optimize=optimize,
-                strip_exponent=True,
-            )
-        else:
-            right_env_bra = tensor_contract(
-                *right_bra_tensors,
-                preserve_tensor=True,
-                drop_tags=True,
-                optimize=optimize,
-            )
+            # don't need stripped exponent
+            right_env_bra, _ = right_env_bra
 
     # form the final site
     #
@@ -634,10 +650,7 @@ def tensor_network_1d_compress_dm(
     #     0   1           0
     #
     Us[0] = tensor_contract(
-        *ket.select_tensors(site_tags[0]),
-        right_env_ket,
-        optimize=optimize,
-        preserve_tensor=True,
+        *ket.select_tensors(site_tags[0]), right_env_ket, **contract_opts
     )
 
     new = _form_final_tn_from_tensor_sequence(
@@ -666,8 +679,11 @@ def tensor_network_1d_compress_zipup(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    contract_opts=None,
+    canonize_opts=None,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress a 1D-like tensor network using the 'zip-up' algorithm due to
     'Minimally Entangled Typical Thermal State Algorithms', E.M. Stoudenmire &
@@ -716,10 +732,20 @@ def tensor_network_1d_compress_zipup(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    canonize_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.TensorNetwork.canonize_around_` when
+        pseudo-canonicalizing. Values set here take precedence over defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split`. Values set here take
+        precedence over defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -728,6 +754,18 @@ def tensor_network_1d_compress_zipup(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
+
+    canonize_opts = ensure_dict(canonize_opts)
+    canonize_opts.setdefault("equalize_norms", equalize_norms)
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("cutoff_mode", cutoff_mode)
+    compress_opts.setdefault("absorb", "left")
+
     if site_tags is None:
         site_tags = tn.site_tags
     if sweep_reverse:
@@ -750,7 +788,7 @@ def tensor_network_1d_compress_zipup(
         #     │ │ │ │ │ │ │ │ │ │
         #     ▶─▶─▶─▶─▶─▶─▶─▶─▶─○  MPS
         #
-        tn = tn.canonize_around_(site_tags[-1], equalize_norms=equalize_norms)
+        tn = tn.canonize_around_(site_tags[-1], **canonize_opts)
 
     # zip along the bonds
     ts = [None] * N
@@ -768,21 +806,17 @@ def tensor_network_1d_compress_zipup(
         if Us is None:
             # first site
             C = tensor_contract(
-                *tn.select_tensors(site_tags[i]), optimize=optimize
+                *tn.select_tensors(site_tags[i]), **contract_opts
             )
         else:
+            C = tensor_contract(
+                Us,
+                *tn.select_tensors(site_tags[i]),
+                strip_exponent=equalize_norms,
+                **contract_opts,
+            )
             if equalize_norms:
-                C, result_exponent = tensor_contract(
-                    Us,
-                    *tn.select_tensors(site_tags[i]),
-                    optimize=optimize,
-                    strip_exponent=True,
-                )
-                exponent += result_exponent
-            else:
-                C = tensor_contract(
-                    Us, *tn.select_tensors(site_tags[i]), optimize=optimize
-                )
+                C, result_exponent = C
         #         i
         #      │  │    │ │
         #     ─▶──□━━━━◀━◀━
@@ -799,10 +833,6 @@ def tensor_network_1d_compress_zipup(
         Us, VH = C.split(
             left_inds=None,
             right_inds=right_inds,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            absorb="left",
             bond_ind=bix,
             get="tensors",
             **compress_opts,
@@ -818,7 +848,7 @@ def tensor_network_1d_compress_zipup(
 
     # compute final site
     ts[0] = tensor_contract(
-        Us, *tn.select_tensors(site_tags[0]), optimize=optimize
+        Us, *tn.select_tensors(site_tags[0]), **contract_opts
     )
 
     new = _form_final_tn_from_tensor_sequence(
@@ -844,21 +874,20 @@ def _do_direct_sweep(
     equalize_norms,
     normalize,
     permute_arrays,
-    **compress_opts,
+    compress_opts=None,
+    **kwargs,
 ):
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("cutoff_mode", cutoff_mode)
+    compress_opts.setdefault("absorb", "left")
+    compress_opts.setdefault("reduced", "right")
+    compress_opts.setdefault("equalize_norms", False)
+
     for i in range(len(site_tags) - 1, 0, -1):
         # compress and shift canonical center
-        tn.compress_between(
-            site_tags[i - 1],
-            site_tags[i],
-            absorb="left",
-            reduced="right",
-            max_bond=max_bond,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            equalize_norms=False,
-            **compress_opts,
-        )
+        tn.compress_between(site_tags[i - 1], site_tags[i], **compress_opts)
         if equalize_norms:
             # only rescale the non-isometric tensor
             tn.strip_exponent(tn[site_tags[i - 1]], value=equalize_norms)
@@ -894,8 +923,11 @@ def tensor_network_1d_compress_zipup_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    contract_opts=None,
+    canonize_opts=None,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress this 1D-like tensor network using the 'zip-up first' algorithm,
     that is, first compressing the tensor network to a larger bond dimension
@@ -952,10 +984,21 @@ def tensor_network_1d_compress_zipup_oversample(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    canonize_opts : dict, optional
+        Supplied to :func:`tensor_network_1d_compress_zipup` when
+        pseudo-canonicalizing in the oversampling step.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` in the oversampling step
+        and to :func:`~quimb.tensor.TensorNetwork.compress_between` in the
+        final direct sweep. Values set here take precedence over defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -964,6 +1007,8 @@ def tensor_network_1d_compress_zipup_oversample(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
+    compress_opts = kwargs | ensure_dict(compress_opts)
+
     if max_bond_oversample is None:
         if max_bond is not None:
             max_bond_oversample = 2 * max_bond
@@ -1010,8 +1055,10 @@ def tensor_network_1d_compress_zipup_oversample(
         optimize=optimize,
         sweep_reverse=True,
         equalize_norms=equalize_norms,
+        contract_opts=contract_opts,
+        canonize_opts=canonize_opts,
+        compress_opts=compress_opts,
         inplace=inplace,
-        **compress_opts,
     )
     # direct sweep in other direction
     return _do_direct_sweep(
@@ -1023,7 +1070,7 @@ def tensor_network_1d_compress_zipup_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        **compress_opts,
+        compress_opts=compress_opts,
     )
 
 
@@ -1033,6 +1080,7 @@ def _do_sweep_compress_from_low_rank_left_envs(
     left_envs: dict[int, Tensor],
     left_env_inds: dict[int, list[str]],
     contract_opts: dict,
+    project_opts: dict,
     equalize_norms: bool | float,
     normalize: bool,
     sweep_reverse: bool,
@@ -1054,7 +1102,13 @@ def _do_sweep_compress_from_low_rank_left_envs(
     left_env_inds : dict[int, sequence[str]]
         The 'left' indices of each left environment, typically only one.
     contract_opts : dict
-        Options, such as `optimize`, to use contracting.
+        Supplied to :func:`~quimb.tensor.tensor_contract` when contracting
+        tensors during the sweep. Values set here take precedence over
+        defaults.
+    project_opts : dict
+        Supplied to :func:`~quimb.tensor.tensor_split` when forming the
+        orthogonal projectors. The method should product a left isometry, for
+        example ``method="qr"``. Values set here take precedence over defaults.
     equalize_norms : bool or float
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
@@ -1078,6 +1132,8 @@ def _do_sweep_compress_from_low_rank_left_envs(
     -------
     TensorNetwork
     """
+    project_opts.setdefault("method", "lorthog")
+
     # we sweep in from the right
     L = len(local_tns)
     Us = [None] * L
@@ -1110,8 +1166,8 @@ def _do_sweep_compress_from_low_rank_left_envs(
         tq, _ = t.split(
             left_inds=None,  # auto calc
             right_inds=left_env_inds[i],
-            method="qr",
             get="tensors",
+            **project_opts,
         )
         Us[i] = tq
 
@@ -1226,8 +1282,10 @@ def tensor_network_1d_compress_src(
     sweep_reverse=False,
     canonize=True,
     equalize_norms=False,
+    contract_opts=None,
+    project_opts=None,
     inplace=False,
-    **contract_opts,
+    **kwargs,
 ):
     """Compress any 1D-like tensor network using 'Successive Randomized
     Compression' (SRC) https://arxiv.org/abs/2504.06475.
@@ -1269,10 +1327,18 @@ def tensor_network_1d_compress_src(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    project_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` when forming the
+        orthogonal projectors. The method should product a left isometry, for
+        example ``method="qr"``. Values set here take precedence over defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    contract_opts
-        Supplied to :func:`~quimb.tensor.tensor_contract`.
+    kwargs
+        Extra keyword arguments are combined into `contract_opts`, though
+        existing items in `contract_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -1294,7 +1360,11 @@ def tensor_network_1d_compress_src(
             "`cutoff` is ignored for the `src` method, use `max_bond` instead."
         )
 
-    contract_opts["drop_tags"] = True
+    contract_opts = kwargs | ensure_dict(contract_opts)
+    contract_opts.setdefault("drop_tags", True)
+
+    project_opts = ensure_dict(project_opts)
+    project_opts.setdefault("method", "lorthog")
 
     # batch index for the noise samples
     Bix = rand_uuid()
@@ -1364,6 +1434,7 @@ def tensor_network_1d_compress_src(
         left_envs=left_envs,
         left_env_inds=left_env_inds,
         contract_opts=contract_opts,
+        project_opts=project_opts,
         equalize_norms=equalize_norms,
         normalize=normalize,
         sweep_reverse=sweep_reverse,
@@ -1387,8 +1458,11 @@ def tensor_network_1d_compress_src_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    contract_opts=None,
+    project_opts=None,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress this 1D-like tensor network using the 'src first' algorithm,
     i.e. src with oversampling, that is, first compressing the tensor network
@@ -1440,17 +1514,33 @@ def tensor_network_1d_compress_src_oversample(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    project_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` when forming the
+        orthogonal projectors in the SRC step. The method should product a left
+        isometry, for example ``method="qr"``. Values set here take precedence
+        over defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
+    compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
-        sweep.
+        sweep. Values set here take precedence over defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
     TensorNetwork
         The compressed tensor network.
     """
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+
     if max_bond is None:
         raise ValueError(
             "`max_bond` must be given for the `src-oversample` method."
@@ -1487,7 +1577,8 @@ def tensor_network_1d_compress_src_oversample(
         permute_arrays=False,  # handle after direct sweep
         sweep_reverse=True,  # handled above, opposite to direct sweep
         equalize_norms=equalize_norms,
-        optimize=optimize,
+        contract_opts=contract_opts,
+        project_opts=project_opts,
         inplace=inplace,
     )
     # direct sweep in other direction
@@ -1500,7 +1591,7 @@ def tensor_network_1d_compress_src_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        **compress_opts,
+        compress_opts=compress_opts,
     )
 
 
@@ -1515,8 +1606,10 @@ def tensor_network_1d_compress_srcmps(
     sweep_reverse=False,
     canonize=True,
     equalize_norms=False,
+    contract_opts=None,
+    project_opts=None,
     inplace=False,
-    **contract_opts,
+    **kwargs,
 ):
     """Compress any 1D-like tensor network using 'Successive Randomized
     Compression' (SRC) https://arxiv.org/abs/2504.06475 but using a random or
@@ -1556,10 +1649,18 @@ def tensor_network_1d_compress_srcmps(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    project_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` when forming the
+        orthogonal projectors. The method should product a left isometry, for
+        example ``method="qr"``. Values set here take precedence over defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    contract_opts
-        Supplied to :func:`~quimb.tensor.tensor_contract`.
+    kwargs
+        Extra keyword arguments are combined into `contract_opts`, though
+        existing items in `contract_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -1577,8 +1678,12 @@ def tensor_network_1d_compress_srcmps(
             "method, use `max_bond` instead."
         )
 
-    contract_opts["optimize"] = "auto"
-    contract_opts["drop_tags"] = True
+    contract_opts = kwargs | ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", "auto")
+    contract_opts.setdefault("drop_tags", True)
+
+    project_opts = ensure_dict(project_opts)
+    project_opts.setdefault("method", "lorthog")
 
     if site_tags is None:
         site_tags = tn.site_tags
@@ -1639,6 +1744,7 @@ def tensor_network_1d_compress_srcmps(
         left_envs=left_envs,
         left_env_inds=left_env_inds,
         contract_opts=contract_opts,
+        project_opts=project_opts,
         equalize_norms=equalize_norms,
         normalize=normalize,
         sweep_reverse=sweep_reverse,
@@ -1662,8 +1768,11 @@ def tensor_network_1d_compress_srcmps_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    contract_opts=None,
+    project_opts=None,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress this 1D-like tensor network using the 'srcmps-oversample'
     algorithm, i.e. src with oversampling and matrix product state noise, that
@@ -1717,17 +1826,33 @@ def tensor_network_1d_compress_srcmps_oversample(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_contract`. Values set here
+        take precedence over any defaults.
+    project_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` when forming the
+        orthogonal projectors in the SRC step. The method should product a left
+        isometry, for example ``method="qr"``. Values set here take precedence
+        over defaults.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
+        sweep. Values set here take precedence over defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
-        sweep.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
     TensorNetwork
         The compressed tensor network.
     """
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+
     if max_bond is None:
         raise ValueError(
             "`max_bond` must be given for the `srcmps-oversample` method."
@@ -1764,7 +1889,7 @@ def tensor_network_1d_compress_srcmps_oversample(
         permute_arrays=False,  # handle after direct sweep
         sweep_reverse=True,  # handled above, opposite to direct sweep
         equalize_norms=equalize_norms,
-        optimize=optimize,
+        contract_opts=contract_opts,
         inplace=inplace,
     )
     # direct sweep in other direction
@@ -1777,7 +1902,7 @@ def tensor_network_1d_compress_srcmps_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        **compress_opts,
+        compress_opts=compress_opts,
     )
 
 
@@ -2118,7 +2243,8 @@ def tensor_network_1d_compress_fit(
     inplace_fit=False,
     inplace=False,
     progbar=False,
-    **compress_opts,
+    compress_opts=None,
+    **kwargs,
 ):
     """Compress any 1D-like (can have multiple tensors per site) tensor network
     or sum of tensor networks to an exactly 1D (one tensor per site) tensor
@@ -2212,9 +2338,12 @@ def tensor_network_1d_compress_fit(
         Whether to show a progress bar. Note the progress bar shows the maximum
         change of any single tensor norm, *not* the global change in norm or
         truncation error.
-    compress_opts
+    compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split`, if using the 2-site
-        sweeping algorithm.
+        sweeping algorithm. Values set here take precedence over defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -2269,8 +2398,10 @@ def tensor_network_1d_compress_fit(
         # set default cutoff
         cutoff = 1e-10 if bsz == 2 else 0.0
 
+    compress_opts = kwargs | ensure_dict(compress_opts)
+
     if bsz == 2:
-        compress_opts["cutoff_mode"] = cutoff_mode
+        compress_opts.setdefault("cutoff_mode", cutoff_mode)
 
     # choose our initial guess
     if not isinstance(tn_fit, TensorNetwork):
@@ -2515,8 +2646,9 @@ def tensor_network_1d_compress_fit_oversample(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress this 1D-like tensor network using the 'fit-oversample'
     algorithm, that is, first compressing the tensor network to a larger bond
@@ -2571,8 +2703,12 @@ def tensor_network_1d_compress_fit_oversample(
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
+        sweep. Values set here take precedence over defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -2581,6 +2717,8 @@ def tensor_network_1d_compress_fit_oversample(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
+    compress_opts = kwargs | ensure_dict(compress_opts)
+
     if max_bond is None:
         raise ValueError(
             "`max_bond` must be given for the `fit-oversample` method."
@@ -2633,7 +2771,7 @@ def tensor_network_1d_compress_fit_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        **compress_opts,
+        compress_opts=compress_opts,
     )
 
 
@@ -2670,7 +2808,6 @@ def tensor_network_1d_compress(
     optimize="auto-hq",
     sweep_reverse=False,
     equalize_norms=False,
-    compress_opts=None,
     inplace=False,
     **kwargs,
 ) -> TensorNetwork:
@@ -2752,8 +2889,6 @@ def tensor_network_1d_compress(
     -------
     TensorNetwork
     """
-    compress_opts = compress_opts or {}
-
     f_tn1d = _TN1D_COMPRESS_METHODS.get(method, None)
     if f_tn1d is not None:
         # 1D specific compression methods
@@ -2768,7 +2903,6 @@ def tensor_network_1d_compress(
             sweep_reverse=sweep_reverse,
             equalize_norms=equalize_norms,
             inplace=inplace,
-            **compress_opts,
             **kwargs,
         )
 
@@ -2788,7 +2922,6 @@ def tensor_network_1d_compress(
         optimize=optimize,
         equalize_norms=equalize_norms,
         inplace=inplace,
-        **compress_opts,
         **kwargs,
     )
 

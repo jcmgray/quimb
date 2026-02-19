@@ -24,8 +24,9 @@ def tensor_network_ag_compress_projector(
     lazy=False,
     optimize="auto-hq",
     equalize_norms=False,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress an arbtrary geometry tensor network, with potentially multiple
     tensors per site, using locally computed projectors.
@@ -57,15 +58,25 @@ def tensor_network_ag_compress_projector(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    compress_opts : dict, optional
+        Supplied to
+        :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions_`
+        when inserting projectors. Values set here take precedence over any
+        defaults.
     inplace : bool, optional
         Whether to perform the compression inplace.
-    compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split`.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
     TensorNetwork
     """
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+
     tn = tn if inplace else tn.copy()
 
     if site_tags is None:
@@ -115,11 +126,9 @@ def tensor_network_ag_compress_projector(
         tn_calc.insert_compressor_between_regions_(
             [taga],
             [tagb],
-            max_bond=max_bond,
-            cutoff=cutoff,
-            insert_into=tn,
             new_ltags=[taga],
             new_rtags=[tagb],
+            insert_into=tn,
             gauges=gauges,
             optimize=optimize,
             **compress_opts,
