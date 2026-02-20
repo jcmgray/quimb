@@ -160,8 +160,9 @@ def tensor_network_ag_compress_local_early(
     mode="auto",
     optimize="auto-hq",
     equalize_norms=False,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress an arbtrary geometry tensor network, with potentially multiple
     tensors per site, using explicit contraction followed by immediate
@@ -205,11 +206,15 @@ def tensor_network_ag_compress_local_early(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.TensorNetwork.compress_between` when
+        compressing between sites. Values set here take precedence over any
+        defaults.
     inplace : bool, optional
         Whether to perform the compression inplace.
-    compress_opts
-        Supplied to
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -232,6 +237,15 @@ def tensor_network_ag_compress_local_early(
         )
     )
 
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("canonize_distance", canonize_distance)
+    compress_opts.setdefault(
+        "canonize_after_distance", canonize_after_distance
+    )
+    compress_opts.setdefault("mode", mode)
+
     st0 = next(iter(site_tags))
     seen = {st0}
     queue = [st0]
@@ -251,16 +265,7 @@ def tensor_network_ag_compress_local_early(
         # then immediately compress around it
         (tida,) = tnc._get_tids_from_tags(taga)
         for tidb in tnc._get_neighbor_tids(tida):
-            tnc._compress_between_tids(
-                tida,
-                tidb,
-                max_bond=max_bond,
-                cutoff=cutoff,
-                canonize_distance=canonize_distance,
-                canonize_after_distance=canonize_after_distance,
-                mode=mode,
-                **compress_opts,
-            )
+            tnc._compress_between_tids(tida, tidb, **compress_opts)
 
     if equalize_norms is True:
         tnc.equalize_norms_()
@@ -282,8 +287,9 @@ def tensor_network_ag_compress_local_late(
     mode="auto",
     optimize="auto-hq",
     equalize_norms=False,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress an arbtrary geometry tensor network, with potentially multiple
     tensors per site, by explicitly contracting all sites first and then
@@ -326,11 +332,15 @@ def tensor_network_ag_compress_local_late(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.TensorNetwork.compress_all` when
+        compressing between sites. Values set here take precedence over any
+        defaults.
     inplace : bool, optional
         Whether to perform the compression inplace.
-    compress_opts
-        Supplied to
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -338,22 +348,24 @@ def tensor_network_ag_compress_local_late(
     """
     tnc = tn if inplace else tn.copy()
 
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("canonize", canonize)
+    compress_opts.setdefault("tree_gauge_distance", tree_gauge_distance)
+    compress_opts.setdefault("canonize_distance", canonize_distance)
+    compress_opts.setdefault(
+        "canonize_after_distance", canonize_after_distance
+    )
+    compress_opts.setdefault("mode", mode)
+
     if site_tags is None:
         site_tags = tnc.site_tags
 
     for st in site_tags:
         tnc.contract_(st, optimize=optimize)
 
-    tnc.compress_all_(
-        max_bond=max_bond,
-        cutoff=cutoff,
-        canonize=canonize,
-        tree_gauge_distance=tree_gauge_distance,
-        canonize_distance=canonize_distance,
-        canonize_after_distance=canonize_after_distance,
-        mode=mode,
-        **compress_opts,
-    )
+    tnc.compress_all_(**compress_opts)
 
     if equalize_norms is True:
         tnc.equalize_norms_()
@@ -371,8 +383,9 @@ def tensor_network_ag_compress_superorthogonal(
     canonize=True,
     optimize="auto-hq",
     equalize_norms=False,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress an arbtrary geometry tensor network, with potentially multiple
     tensors per site, using the 'superorthogonal' / 'Vidal' / quasi-canonical
@@ -400,17 +413,25 @@ def tensor_network_ag_compress_superorthogonal(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.TensorNetwork.compress_all_simple`
+        when compressing between sites. Values set here take precedence over
+        any defaults.
     inplace : bool, optional
         Whether to perform the compression inplace.
-    compress_opts
-        Supplied to
-        :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_all_simple`.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
     TensorNetwork
     """
     tnc = tn if inplace else tn.copy()
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
 
     if site_tags is None:
         site_tags = tnc.site_tags
@@ -428,11 +449,7 @@ def tensor_network_ag_compress_superorthogonal(
         compress_opts.setdefault("max_iterations", 1000)
         compress_opts.setdefault("tol", 5e-6)
 
-    tnc.compress_all_simple_(
-        max_bond=max_bond,
-        cutoff=cutoff,
-        **compress_opts,
-    )
+    tnc.compress_all_simple_(**compress_opts)
 
     if equalize_norms is True:
         tnc.equalize_norms_()
@@ -453,8 +470,9 @@ def tensor_network_ag_compress_l2bp(
     update="sequential",
     optimize="auto-hq",
     equalize_norms=False,
+    compress_opts=None,
     inplace=False,
-    **compress_opts,
+    **kwargs,
 ):
     """Compress an arbitrary geometry tensor network, with potentially multiple
     tensors per site, using lazy 2-norm belief propagation.
@@ -487,11 +505,15 @@ def tensor_network_ag_compress_l2bp(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    compress_opts : dict, optional
+        Supplied to
+        :func:`~quimb.tensor.belief_propagation.l2bp.compress_l2bp`. Values set
+        here take precedence over any defaults.
     inplace : bool, optional
         Whether to perform the compression inplace.
-    compress_opts
-        Supplied to
-        :func:`~quimb.tensor.belief_propagation.l2bp.compress_l2bp`.
+    **kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
 
     Returns
     -------
@@ -499,20 +521,19 @@ def tensor_network_ag_compress_l2bp(
     """
     from quimb.tensor.belief_propagation.l2bp import compress_l2bp
 
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+    compress_opts.setdefault("damping", damping)
+    compress_opts.setdefault("local_convergence", local_convergence)
+    compress_opts.setdefault("update", update)
+    compress_opts.setdefault("optimize", optimize)
+
     if not canonize:
         compress_opts.setdefault("max_iterations", 1)
 
     tnc = compress_l2bp(
-        tn,
-        max_bond=max_bond,
-        cutoff=cutoff,
-        site_tags=site_tags,
-        damping=damping,
-        local_convergence=local_convergence,
-        update=update,
-        optimize=optimize,
-        inplace=inplace,
-        **compress_opts,
+        tn, site_tags=site_tags, inplace=inplace, **compress_opts
     )
 
     if equalize_norms is True:

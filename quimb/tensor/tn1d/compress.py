@@ -1285,6 +1285,7 @@ def tensor_network_1d_compress_src(
     equalize_norms=False,
     contract_opts=None,
     project_opts=None,
+    compress_opts=None,
     inplace=False,
     **kwargs,
 ):
@@ -1366,6 +1367,12 @@ def tensor_network_1d_compress_src(
 
     project_opts = ensure_dict(project_opts)
     project_opts.setdefault("method", "lorthog")
+
+    if compress_opts:
+        warnings.warn(
+            "`compress_opts` is ignored for the `src` method, since there is "
+            "no final compression step, see `project_opts` instead."
+        )
 
     # batch index for the noise samples
     Bix = rand_uuid()
@@ -1609,6 +1616,7 @@ def tensor_network_1d_compress_srcmps(
     equalize_norms=False,
     contract_opts=None,
     project_opts=None,
+    compress_opts=None,
     inplace=False,
     **kwargs,
 ):
@@ -1685,6 +1693,12 @@ def tensor_network_1d_compress_srcmps(
 
     project_opts = ensure_dict(project_opts)
     project_opts.setdefault("method", "lorthog")
+
+    if compress_opts:
+        warnings.warn(
+            "`compress_opts` is ignored for the `srcmps` method, since there "
+            "is no final compression step, see `project_opts` instead."
+        )
 
     if site_tags is None:
         site_tags = tn.site_tags
@@ -1891,6 +1905,7 @@ def tensor_network_1d_compress_srcmps_oversample(
         sweep_reverse=True,  # handled above, opposite to direct sweep
         equalize_norms=equalize_norms,
         contract_opts=contract_opts,
+        project_opts=project_opts,
         inplace=inplace,
     )
     # direct sweep in other direction
@@ -2241,10 +2256,10 @@ def tensor_network_1d_compress_fit(
     canonize=True,
     sweep_reverse=False,
     equalize_norms=False,
+    compress_opts=None,
     inplace_fit=False,
     inplace=False,
     progbar=False,
-    compress_opts=None,
     **kwargs,
 ):
     """Compress any 1D-like (can have multiple tensors per site) tensor network
@@ -2329,6 +2344,9 @@ def tensor_network_1d_compress_fit(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split`, if using the 2-site
+        sweeping algorithm. Values set here take precedence over defaults.
     inplace_fit : bool, optional
         Whether to perform the compression inplace on the initial guess tensor
         network, ``tn_fit``, if supplied.
@@ -2339,9 +2357,6 @@ def tensor_network_1d_compress_fit(
         Whether to show a progress bar. Note the progress bar shows the maximum
         change of any single tensor norm, *not* the global change in norm or
         truncation error.
-    compress_opts : dict, optional
-        Supplied to :func:`~quimb.tensor.tensor_split`, if using the 2-site
-        sweeping algorithm. Values set here take precedence over defaults.
     kwargs
         Extra keyword arguments are combined into `compress_opts`, though
         existing items in `compress_opts` take precedence over `kwargs`.
