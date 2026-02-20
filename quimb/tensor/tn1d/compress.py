@@ -817,6 +817,7 @@ def tensor_network_1d_compress_zipup(
             )
             if equalize_norms:
                 C, result_exponent = C
+                exponent += result_exponent
         #         i
         #      │  │    │ │
         #     ─▶──□━━━━◀━◀━
