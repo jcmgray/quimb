@@ -434,10 +434,18 @@ def tensor_split(
           ``'lq:rand'`` (randomized, static truncation only).
         - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
           Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
-          ``'rfactor:eig'`` (via eigendecomp, static truncation).
+          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation).
         - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
           Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
-          ``'lfactor:eig'`` (via eigendecomp, static truncation).
+          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation).
+        - ``'rorthog'``: *only* the right isometric factor (Q in LQ), no
+          truncation. Submethods: ``'rorthog:svd'`` (via SVD, dynamic
+          truncation), ``'rorthog:eig'`` (via eigendecomp, dynamic
+          truncation).
+        - ``'lorthog'``: *only* the left isometric factor (Q in QR), no
+          truncation. Submethods: ``'lorthog:svd'`` (via SVD, dynamic
+          truncation), ``'lorthog:eig'`` (via eigendecomp, dynamic
+          truncation).
         - ``'eigh'``: full eigen-decomposition, tensor must be hermitian.
         - ``'eigsh'``: iterative eigen-decomposition, tensor must be
           hermitian.

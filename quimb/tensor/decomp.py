@@ -64,10 +64,18 @@ def array_split(
           static truncation only).
         - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
           Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
-          ``'rfactor:eig'`` (via eigendecomp, static truncation).
+          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation).
         - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
           Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
-          ``'lfactor:eig'`` (via eigendecomp, static truncation).
+          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation).
+        - ``'rorthog'``: *only* the right isometric factor (Q in LQ), no
+          truncation. Submethods: ``'rorthog:svd'`` (via SVD, dynamic
+          truncation), ``'rorthog:eig'`` (via eigendecomp, dynamic
+          truncation).
+        - ``'lorthog'``: *only* the left isometric factor (Q in QR), no
+          truncation. Submethods: ``'lorthog:svd'`` (via SVD, dynamic
+          truncation), ``'lorthog:eig'`` (via eigendecomp, dynamic
+          truncation).
         - ``'eigh'``: full eigen-decomposition, array must be hermitian.
         - ``'eigsh'``: iterative eigen-decomposition, array must be
           hermitian.
@@ -414,6 +422,19 @@ def dag_numba(x):
     return np.conjugate(x.T)
 
 
+def safe_inverse(s, cutoff):
+    return s / (s**2 + cutoff**2)
+    # NOTE: other options, possibly less gradient friendly
+    # return 1 / s
+    # return 1 / (s + (s == 0.0))
+    # return np.where(s > cutoff, 1 / np.maximum(s, cutoff), 0.0)
+
+
+@njit  # pragma: no cover
+def safe_inverse_numba(s, cutoff):
+    return s / (s**2 + cutoff**2)
+
+
 # some convenience functions for multiplying diagonals
 
 
@@ -674,14 +695,21 @@ def svd_truncated(
         ``get_U_sVH=1``: right, ``None``: return separately). Use
         ``array_split`` with string aliases (e.g. ``'left'``, ``'both'``,
         ``'right'``, ``None``) for a friendlier interface.
-    renorm : {0, 1}, optional
-        Whether to renormalize the singular values (depends on
-        ``cutoff_mode``).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     backend : str or None, optional
         The backend to use.
     info : dict or None, optional
         If a dict is passed, store truncation info in the dict. Currently only
         supports the key 'error' for the truncation error.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
     """
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
@@ -957,8 +985,7 @@ def svd_via_eig(
     absorb=None,
     max_bond=-1,
     descending=True,
-    right="auto",
-    eps=1e-12,
+    right=None,
 ):
     """Singular value decomposition of raw 2d array ``x``, via hermitian
     eigen-decomposition of the Gram matrix (xdag @ x or x @ xdag), with
@@ -991,13 +1018,10 @@ def svd_via_eig(
         An explicit maximum bond dimension, use -1 for no truncation.
     descending : bool, optional
         Whether to return singular values in descending order, default False.
-    right : bool or 'auto', optional
+    right : bool, optional
         Whether to use decompose (xdag @ x: True) or (x @ xdag: False).
-        If 'auto', then will choose based on shape of x, and if square, then
-        based on what is requested in ``absorb``.
-    eps : float, optional
-        To avoid numerical issues, eigenvalues of the Gram matrix below
-        ``eps * max_eigenvalue`` are clipped to that value.
+        If None (default), then will choose based on shape of x, and if square,
+        then based on what is requested in ``absorb``.
 
     Returns
     -------
@@ -1014,7 +1038,7 @@ def svd_via_eig(
     m, n = xp.shape(x)
     absorb = _ABSORB_MAP[absorb]
 
-    if right == "auto":
+    if right is None:
         if m > n:
             right = True
         elif m < n:
@@ -1033,7 +1057,7 @@ def svd_via_eig(
             # maybe match svd convention, by default eigh is *ascending*
             s2 = xp.flip(s2, axis=0)
             V = xp.flip(V, axis=1)
-        s2 = xp.clip(s2, xp.max(s2) * eps, None)
+        s2 = xp.maximum(s2, 0.0)
         if absorb == get_s:
             return None, xp.sqrt(s2), None
         if absorb == get_VH:
@@ -1046,7 +1070,12 @@ def svd_via_eig(
         if absorb == get_Us_VH:
             return Us, None, xp.conj(xp.transpose(V))
         s = xp.sqrt(s2)
-        U = Us / s[None, :]
+
+        eps = xp.finfo(s.dtype).eps
+        cutoff = xp.max(s) * eps * max(m, n)
+        sinv = safe_inverse(s, cutoff)
+        U = Us * sinv[None, :]
+
         if absorb == get_U:
             return U, None, None
         VH = xp.conj(xp.transpose(V))
@@ -1067,7 +1096,7 @@ def svd_via_eig(
             # maybe match svd convention, by default eigh is *ascending*
             s2 = xp.flip(s2)
             U = xp.flip(U, axis=1)
-        s2 = xp.clip(s2, xp.max(s2) * eps, None)
+        s2 = xp.maximum(s2, 0.0)
         if absorb == get_s:
             return None, xp.sqrt(s2), None
         if absorb == get_U:
@@ -1080,7 +1109,12 @@ def svd_via_eig(
         if absorb == get_U_sVH:
             return U, None, sVH
         s = xp.sqrt(s2)
-        VH = sVH / s[:, None]
+
+        eps = xp.finfo(s.dtype).eps
+        cutoff = xp.max(s) * eps * max(m, n)
+        sinv = safe_inverse(s, cutoff)
+        VH = sinv[:, None] * sVH
+
         if absorb == get_VH:
             return None, None, VH
         if absorb == get_U_s_VH:
@@ -1115,12 +1149,12 @@ def svd_via_eig_truncated(
     cutoff_mode : {1, 2, 3, 4, 5, 6}, optional
         How to perform the truncation based on ``cutoff``:
 
-        - 1: ['abs'], trim values below ``cutoff``
-        - 2: ['rel'], trim values below ``s[0] * cutoff``
-        - 3: ['sum2'], trim s.t. ``sum(s_trim**2) < cutoff``.
-        - 4: ['rsum2'], trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
-        - 5: ['sum1'], trim s.t. ``sum(s_trim**1) < cutoff``.
-        - 6: ['rsum1'], trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
+        - 1 / 'abs': trim values below ``cutoff``
+        - 2 / 'rel': trim values below ``s[0] * cutoff``
+        - 3 / 'sum2': trim s.t. ``sum(s_trim**2) < cutoff``.
+        - 4 / 'rsum2': trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
+        - 5 / 'sum1': trim s.t. ``sum(s_trim**1) < cutoff``.
+        - 6 / 'rsum1': trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
 
     max_bond : int, optional
         An explicit maximum bond dimension, use -1 for none.
@@ -1130,14 +1164,21 @@ def svd_via_eig_truncated(
         ``get_U_sVH=1``: right, ``None``: return separately). Use
         ``array_split`` with string aliases (e.g. ``'left'``, ``'both'``,
         ``'right'``, ``None``) for a friendlier interface.
-    renorm : {0, 1}, optional
-        Whether to renormalize the singular values (depends on
-        ``cutoff_mode``).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     backend : str or None, optional
         The backend to use.
     info : dict or None, optional
         If a dict is passed, store truncation info in the dict. Currently only
         supports the key 'error' for the truncation error.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
     """
     absorb = _ABSORB_MAP[absorb]
     info = parse_info_extras(info, ("error",))
@@ -1171,6 +1212,136 @@ def svd_via_eig_truncated(
 
 
 @njit  # pragma: no cover
+def _svd_via_eig_numba(
+    x,
+    absorb=get_U_s_VH,
+    max_bond=-1,
+    descending=True,
+    right=None,
+):
+    """Numba-accelerated SVD via eigendecomposition of the Gram matrix,
+    with static truncation (``max_bond`` only) and all ``absorb`` return
+    options, each with their own shortcuts. Mirrors the structure of
+    ``svd_via_eig``.
+
+    Parameters
+    ----------
+    x : array-like
+        The 2d array to decompose.
+    absorb : int or None, optional
+        Numeric absorb code controlling what to compute / return.
+    max_bond : int, optional
+        An explicit maximum bond dimension, use -1 for no truncation.
+    descending : bool, optional
+        Whether to return singular values in descending order.
+
+    Returns
+    -------
+    U : array or None
+    s : array or None
+    VH : array or None
+    """
+    m, n = x.shape
+
+    if right is None:
+        if m > n:
+            right = True
+        elif m < n:
+            right = False
+        else:
+            # square: avoid division if possible
+            right = (absorb is not None) and (
+                absorb == get_Us or absorb == get_Us_VH or absorb == get_VH
+            )
+    else:
+        right = bool(right)
+
+    if right:
+        # tall: eigendecompose xdag @ x
+        xx = dag_numba(x) @ x
+        s2, V = np.linalg.eigh(xx)
+        if 0 < max_bond < min(m, n):
+            s2 = s2[-max_bond:]
+            V = np.ascontiguousarray(V[:, -max_bond:])
+        if descending:
+            s2 = s2[::-1]
+            V = np.ascontiguousarray(V[:, ::-1])
+        s2 = np.maximum(s2, 0.0)
+        if absorb == get_s:
+            return None, np.sqrt(s2), None
+        if absorb == get_VH:
+            return None, None, dag_numba(V)
+        if absorb == get_sVH:
+            return None, None, ldmul_numba(np.sqrt(s2), dag_numba(V))
+        V = np.ascontiguousarray(V)
+        Us = x @ V
+        if absorb == get_Us:
+            return Us, None, None
+        if absorb == get_Us_VH:
+            return Us, None, dag_numba(V)
+        s = np.sqrt(s2)
+
+        eps = np.finfo(s.dtype).eps
+        cutoff = np.max(s) * eps * max(m, n)
+        sinv = safe_inverse_numba(s, cutoff)
+        U = Us * sinv[None, :]
+
+        if absorb == get_U:
+            return U, None, None
+        VH = dag_numba(V)
+        if absorb is None:
+            return U, s, VH
+        if absorb == get_U_sVH:
+            return U, None, ldmul_numba(s, VH)
+        if absorb == get_Usq_sqVH:
+            sq = np.sqrt(s)
+            return rdmul_numba(U, sq), None, ldmul_numba(sq, VH)
+    else:
+        # wide: eigendecompose x @ xdag
+        xx = x @ dag_numba(x)
+        s2, U = np.linalg.eigh(xx)
+        if 0 < max_bond < min(m, n):
+            s2 = s2[-max_bond:]
+            U = np.ascontiguousarray(U[:, -max_bond:])
+        if descending:
+            s2 = s2[::-1]
+            U = np.ascontiguousarray(U[:, ::-1])
+        # clip small/negative eigenvalues
+        s2 = np.maximum(s2, 0.0)
+        if absorb == get_s:
+            return None, np.sqrt(s2), None
+        if absorb == get_U:
+            return U, None, None
+        if absorb == get_Us:
+            return rdmul_numba(U, np.sqrt(s2)), None, None
+        U = np.ascontiguousarray(U)
+        sVH = dag_numba(U) @ x
+        if absorb == get_sVH:
+            return None, None, sVH
+        if absorb == get_U_sVH:
+            return U, None, sVH
+        s = np.sqrt(s2)
+
+        eps = np.finfo(s.dtype).eps
+        cutoff = np.max(s) * eps * max(m, n)
+        sinv = safe_inverse_numba(s, cutoff)
+        VH = sinv[:, None] * sVH
+
+        if absorb == get_VH:
+            return None, None, VH
+        if absorb is None:
+            return U, s, VH
+        if absorb == get_Us_VH:
+            return rdmul_numba(U, s), None, VH
+        if absorb == get_Usq_sqVH:
+            sq = np.sqrt(s)
+            return rdmul_numba(U, sq), None, ldmul_numba(sq, VH)
+
+    # fallback (should not be reached)
+    return None, None, None
+
+
+@njit  # pragma: no cover
 def _svd_via_eig_truncated_numba(
     x,
     cutoff=-1.0,
@@ -1180,74 +1351,41 @@ def _svd_via_eig_truncated_numba(
     renorm=0,
     calc_error=False,
 ):
-    """SVD-split via eigen-decomposition."""
+    """SVD-split via eigen-decomposition, with optional dynamic truncation.
+    Uses ``_svd_via_eig_numba`` shortcuts when the full spectrum is not
+    needed.
+    """
     need_full_spectrum = (cutoff > 0.0) or (renorm > 0) or calc_error
 
-    da, db = x.shape
-    if da > db:
-        tall = True
-    elif da < db:
-        tall = False
-    elif da == db:
-        # base choice to compute Us or sVH on absorb
-        if absorb == get_Us_VH:
-            tall = True
-        else:
-            tall = False
-
-    if tall:
-        # tall: get U @ s, VH
-        s2, V = np.linalg.eigh(dag_numba(x) @ x)
-
-        if not need_full_spectrum and (0 < max_bond < db):
-            # more efficient to truncate here than when trimming
-            s2 = s2[-max_bond:]
-            V = np.ascontiguousarray(V[:, -max_bond:])
-
-        Us = x @ V
-        VH = dag_numba(V)
-
-        if not need_full_spectrum and (absorb == get_Us_VH):
-            # shortcut - don't need s itself and already absorbed left
-            return Us, None, VH, None
-
-        # small negative eigenvalues turn into nan when sqrtd
-        s2[s2 < 0.0] = 0.0
-        s = np.sqrt(s2)
-        U = rddiv_numba(Us, s + (s == 0.0))
+    if need_full_spectrum:
+        # 1. compute full svd ...
+        U, s, VH = _svd_via_eig_numba(
+            x,
+            absorb=None,
+            max_bond=-1,
+            descending=True,
+        )
+        # 2. ... then truncate separately
+        return _trim_and_renorm_svd_result_numba(
+            U,
+            s,
+            VH,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            max_bond=max_bond,
+            absorb=absorb,
+            renorm=renorm,
+            calc_error=calc_error,
+        )
     else:
-        # wide: get U, s @ VH
-        s2, U = np.linalg.eigh(x @ dag_numba(x))
-
-        if not need_full_spectrum and (0 < max_bond < da):
-            # more efficient to truncate here than when trimming
-            s2 = s2[-max_bond:]
-            U = np.ascontiguousarray(U[:, -max_bond:])
-
-        sVH = dag_numba(U) @ x
-
-        if not need_full_spectrum and (absorb == get_U_sVH):
-            # shortcut - don't need s itself and already absorbed right
-            return U, None, sVH, None
-
-        s2[s2 < 0.0] = 0.0
-        s = np.sqrt(s2)
-        VH = lddiv_numba(s + (s == 0.0), sVH)
-
-    # we need singular values and vectors in descending order
-    U, s, VH = U[:, ::-1], s[::-1], VH[::-1, :]
-
-    return _trim_and_renorm_svd_result_numba(
-        U,
-        s,
-        VH,
-        cutoff,
-        cutoff_mode,
-        max_bond,
-        absorb,
-        renorm,
-        calc_error=calc_error,
-    )
+        # perform in one step, possibly taking advantage of shortcuts
+        U, s, VH = _svd_via_eig_numba(
+            x,
+            absorb=absorb,
+            max_bond=max_bond,
+            descending=False,
+        )
+        return U, s, VH, None
 
 
 @svd_via_eig_truncated.register("numpy")
@@ -1307,6 +1445,15 @@ def eigh_truncated(
     positive=0,
     backend=None,
 ):
+    """SVD-like decomposition using hermitian eigen-decomposition, only works
+    if ``x`` is hermitian.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
+    """
     with backend_like(backend):
         s, U = do("linalg.eigh", x)
 
@@ -1380,7 +1527,16 @@ def eigh_truncated_numba(
 @register_split_driver("qr", isom="left", default_absorb=get_U_sVH)
 @compose
 def qr_stabilized(x, backend=None):
-    """QR-decomposition, with stabilized R factor."""
+    """QR-decomposition, with stabilized R factor.
+
+    Returns
+    -------
+    left : array_like
+        The left isometric factor (Q).
+    s : None
+    right : array_like
+        The right upper triangular factor (R).
+    """
     with backend_like(backend):
         Q, R = do("linalg.qr", x)
         # stabilize the diagonal of R
@@ -1431,26 +1587,37 @@ def qr_via_svd(
     renorm=0,
     info=None,
 ):
-    """QR-like decomposition via SVD, allowing dynamic truncation.
-    Returns ``(Q, None, R)`` where ``Q`` is the left isometric factor
-    and ``R = s @ VH``.
+    """QR-like decomposition via SVD, with optional truncation.
 
     Parameters
     ----------
     x : array_like
         The 2D array to decompose.
     cutoff : float, optional
-        Singular value cutoff threshold.
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
     cutoff_mode : int, optional
-        How to interpret the cutoff.
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for none.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
         Ignored, always uses ``get_U_sVH`` (right).
     renorm : int, optional
-        Whether to renormalize.
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     info : dict or None, optional
-        If a dict is passed, store truncation info.
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+        The left isometric factor (Q).
+    s : None
+    right : array_like
+        The right factor (R = s @ VH).
     """
     if absorb != get_U_sVH:
         warnings.warn(
@@ -1480,7 +1647,7 @@ def qr_via_eig(
     renorm=0,
     info=None,
 ):
-    """QR-like decomposition via SVD (via eigendecomp), allowing dynamic
+    """QR-like decomposition via SVD (via eigendecomp), with optional
     truncation. Returns ``(Q, None, R)`` where ``Q`` is the left
     isometric factor and ``R = s @ VH``.
 
@@ -1489,17 +1656,30 @@ def qr_via_eig(
     x : array_like
         The 2D array to decompose.
     cutoff : float, optional
-        Singular value cutoff threshold.
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
     cutoff_mode : int, optional
-        How to interpret the cutoff.
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for none.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
         Ignored, always uses ``get_U_sVH`` (right).
     renorm : int, optional
-        Whether to renormalize.
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     info : dict or None, optional
-        If a dict is passed, store truncation info.
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+        The left isometric factor (Q).
+    s : None
+    right : array_like
+        The right factor (R = s @ VH).
     """
     if absorb != get_U_sVH:
         warnings.warn(
@@ -1537,6 +1717,14 @@ def qr_via_randqb(x, max_bond=-1, absorb=get_U_sVH, seed=None):
         different value is passed.
     seed : int or None, optional
         Random seed for the randomized projection.
+
+    Returns
+    -------
+    left : array_like
+        The left isometric factor (Q).
+    s : None
+    right : array_like
+        The right factor (R).
     """
     if absorb != get_U_sVH:
         warnings.warn(
@@ -1564,6 +1752,16 @@ def qr_via_randqb(x, max_bond=-1, absorb=get_U_sVH, seed=None):
 @register_split_driver("lq", isom="right", default_absorb=get_Us_VH)
 @compose
 def lq_stabilized(x, backend=None):
+    """LQ-decomposition, with stabilized L factor.
+
+    Returns
+    -------
+    left : array_like
+        The left lower triangular factor (L).
+    s : None
+    right : array_like
+        The right isometric factor (Q).
+    """
     QT, _, LT = qr_stabilized(do("transpose", x, like=backend))
     Q = do("transpose", QT, like=backend)
     L = do("transpose", LT, like=backend)
@@ -1589,26 +1787,37 @@ def lq_via_svd(
     renorm=0,
     info=None,
 ):
-    """LQ-like decomposition via SVD, allowing dynamic truncation.
-    Returns ``(L, None, Q)`` where ``L = U @ diag(s)`` and ``Q`` is the
-    right isometric factor.
+    """LQ-like decomposition via SVD, with optional truncation.
 
     Parameters
     ----------
     x : array_like
         The 2D array to decompose.
     cutoff : float, optional
-        Singular value cutoff threshold.
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
     cutoff_mode : int, optional
-        How to interpret the cutoff.
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for none.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
         Ignored, always uses ``get_Us_VH`` (left).
     renorm : int, optional
-        Whether to renormalize.
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     info : dict or None, optional
-        If a dict is passed, store truncation info.
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+        The left factor (L = U @ diag(s)).
+    s : None
+    right : array_like
+        The right isometric factor (Q).
     """
     if absorb != get_Us_VH:
         warnings.warn(
@@ -1638,7 +1847,7 @@ def lq_via_eig(
     renorm=0,
     info=None,
 ):
-    """LQ-like decomposition via SVD (via eigendecomp), allowing dynamic
+    """LQ-like decomposition via SVD (via eigendecomp), with optional
     truncation. Returns ``(L, None, Q)`` where ``L = U @ s`` and ``Q``
     is the right isometric factor.
 
@@ -1647,17 +1856,30 @@ def lq_via_eig(
     x : array_like
         The 2D array to decompose.
     cutoff : float, optional
-        Singular value cutoff threshold.
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
     cutoff_mode : int, optional
-        How to interpret the cutoff.
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for none.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
         Ignored, always uses ``get_Us_VH`` (left).
     renorm : int, optional
-        Whether to renormalize.
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     info : dict or None, optional
-        If a dict is passed, store truncation info.
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+        The left factor (L = U @ s).
+    s : None
+    right : array_like
+        The right isometric factor (Q).
     """
     if absorb != get_Us_VH:
         warnings.warn(
@@ -1695,6 +1917,14 @@ def lq_via_randqb(x, max_bond=-1, absorb=get_Us_VH, seed=None):
         different value is passed.
     seed : int or None, optional
         Random seed for the randomized projection.
+
+    Returns
+    -------
+    left : array_like
+        The left factor (L).
+    s : None
+    right : array_like
+        The right isometric factor (Q).
     """
     if absorb != get_Us_VH:
         warnings.warn(
@@ -1719,6 +1949,12 @@ def rfactor(x, absorb=get_sVH, **kwargs):
         The 2D array to decompose.
     absorb : int, optional
         Ignored, always returns ``(None, None, R)``.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
     """
     if absorb not in (get_sVH, get_U_sVH):
         warnings.warn(
@@ -1741,7 +1977,7 @@ def rfactor_via_svd(
     renorm=0,
     info=None,
 ):
-    """Get the truncated right factor (s @ VH) via SVD, allowing dynamic
+    """Get the right factor (``s @ VH``) via SVD, with optional
     truncation.
 
     Parameters
@@ -1749,17 +1985,28 @@ def rfactor_via_svd(
     x : array_like
         The 2D array to decompose.
     cutoff : float, optional
-        Singular value cutoff threshold.
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
     cutoff_mode : int, optional
-        How to interpret the cutoff.
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for none.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
         Ignored, always uses ``get_sVH`` (rfactor).
     renorm : int, optional
-        Whether to renormalize.
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     info : dict or None, optional
-        If a dict is passed, store truncation info.
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
     """
     if absorb not in (get_sVH, get_U_sVH):
         warnings.warn(
@@ -1778,53 +2025,62 @@ def rfactor_via_svd(
 
 
 @register_split_driver(
-    "rfactor:eig", truncation="static", default_absorb=get_sVH
+    "rfactor:eig", truncation="dynamic", default_absorb=get_sVH
 )
-@compose
-def rfactor_via_eig(x, max_bond=-1, absorb=get_sVH):
-    """Get the truncated reduced right factor (s @ VH in SVD) via
-    eigen-decomposition of x @ x^dagger or x^dagger @ x, depending on which is
-    smaller. Dynamic cutoff is not yet implemented.
+def rfactor_via_eig(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_sVH,
+    renorm=0,
+    info=None,
+):
+    """Get the right factor (``s @ VH``) via eigendecomposition, with
+    optional truncation.
 
     Parameters
     ----------
     x : array_like
         The 2D array to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : int, optional
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for no truncation.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
-        Ignored — this driver always returns the right factor with ``s``
-        absorbed (``'rfactor'`` / ``'sVH'``). A warning is issued if a
-        different value is passed.
+        Ignored, always uses ``get_sVH`` (rfactor).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
     """
     if absorb not in (get_sVH, get_U_sVH):
         warnings.warn(
             "By definition, absorb must be 1 (right) in "
             f"rfactor_via_eig, ignoring absorb={absorb}."
         )
-    return svd_via_eig(x, get=get_sVH, max_bond=max_bond, descending=False)
-
-
-@rfactor_via_eig.register("numpy")
-@njit  # pragma: no cover
-def rfactor_via_eig_numba(x, max_bond=-1, absorb=get_sVH):
-    da, db = x.shape
-
-    if da > db:
-        s2, V = np.linalg.eigh(dag_numba(x) @ x)
-        if max_bond > 0 and max_bond < db:
-            s2 = s2[-max_bond:]
-            V = V[:, -max_bond:]
-        # small negative eigenvalues turn into nan when sqrtd
-        s2[s2 < 0.0] = 0.0
-        sVH = ldmul_numba(np.sqrt(s2), dag_numba(V))
-    else:
-        _, U = np.linalg.eigh(x @ dag_numba(x))
-        if max_bond > 0 and max_bond < da:
-            U = U[:, -max_bond:]
-        sVH = dag_numba(U) @ x
-
-    return None, None, sVH
+    return svd_via_eig_truncated(
+        x,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=get_sVH,
+        renorm=renorm,
+        info=info,
+    )
 
 
 @register_split_driver("lfactor", default_absorb=get_Us)
@@ -1837,6 +2093,12 @@ def lfactor(x, absorb=get_Us, **kwargs):
         The 2D array to decompose.
     absorb : int, optional
         Ignored, always returns ``(L, None, None)``.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
     """
     if absorb not in (get_Us, get_Us_VH):
         warnings.warn(
@@ -1859,25 +2121,35 @@ def lfactor_via_svd(
     renorm=0,
     info=None,
 ):
-    """Get the truncated left factor (U @ s) via SVD, allowing dynamic
-    truncation.
+    """Get the left factor (``U @ s``) via SVD, with optional truncation.
 
     Parameters
     ----------
     x : array_like
         The 2D array to decompose.
     cutoff : float, optional
-        Singular value cutoff threshold.
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
     cutoff_mode : int, optional
-        How to interpret the cutoff.
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for none.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
         Ignored, always uses ``get_Us`` (lfactor).
     renorm : int, optional
-        Whether to renormalize.
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
     info : dict or None, optional
-        If a dict is passed, store truncation info.
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
     """
     if absorb not in (get_Us, get_Us_VH):
         warnings.warn(
@@ -1896,53 +2168,331 @@ def lfactor_via_svd(
 
 
 @register_split_driver(
-    "lfactor:eig", truncation="static", default_absorb=get_Us
+    "lfactor:eig", truncation="dynamic", default_absorb=get_Us
 )
-@compose
-def lfactor_via_eig_truncated(x, max_bond=-1, absorb=get_Us):
-    """Get the truncated reduced left factor (U @ s in SVD) via
-    eigen-decomposition of x @ x^dagger or x^dagger @ x, depending on which is
-    smaller. Dynamic cutoff is not yet implemented.
+def lfactor_via_eig_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Us,
+    renorm=0,
+    info=None,
+):
+    """Get the left factor (``U @ s``) via eigendecomposition, with
+    optional truncation.
 
     Parameters
     ----------
     x : array_like
         The 2D array to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : int, optional
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
     max_bond : int, optional
-        Maximum bond dimension, use -1 for no truncation.
+        An explicit maximum bond dimension, use -1 for none.
     absorb : int, optional
-        Ignored — this driver always returns the left factor with ``s``
-        absorbed (``'lfactor'`` / ``'Us'``). A warning is issued if a
-        different value is passed.
+        Ignored, always uses ``get_Us`` (lfactor).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
     """
     if absorb not in (get_Us, get_Us_VH):
         warnings.warn(
             "By definition, absorb must be -1 (left) in "
             f"lfactor_via_eig_truncated, ignoring absorb={absorb}."
         )
-    return svd_via_eig(x, get=get_Us, max_bond=max_bond, descending=False)
+    return svd_via_eig_truncated(
+        x,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=get_Us,
+        renorm=renorm,
+        info=info,
+    )
 
 
-@lfactor_via_eig_truncated.register("numpy")
-@njit  # pragma: no cover
-def lfactor_via_eig_truncated_numba(x, max_bond=-1, absorb=get_Us_VH):
-    da, db = x.shape
+@register_split_driver("rorthog", isom="right", default_absorb=get_VH)
+def rorthog(x):
+    """Get the right orthogonal factor (Q in LQ) via LQ decomposition. No
+    truncation.
 
-    if db > da:
-        s2, U = np.linalg.eigh(x @ dag_numba(x))
-        if max_bond > 0 and max_bond < da:
-            s2 = s2[-max_bond:]
-            U = U[:, -max_bond:]
-        # small negative eigenvalues turn into nan when sqrtd
-        s2[s2 < 0.0] = 0.0
-        Us = rdmul_numba(U, np.sqrt(s2))
-    else:
-        _, V = np.linalg.eigh(dag_numba(x) @ x)
-        if max_bond > 0 and max_bond < db:
-            V = V[:, -max_bond:]
-        Us = x @ V
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    _, _, Q = lq_stabilized(x)
+    return None, None, Q
 
-    return Us, None, None
+
+@register_split_driver(
+    "rorthog:svd", truncation="dynamic", isom="right", default_absorb=get_VH
+)
+def rorthog_via_svd(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_VH,
+    renorm=0,
+    info=None,
+):
+    """Get the right isometric factor (``VH``) via SVD, with optional
+    truncation.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : int, optional
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
+    max_bond : int, optional
+        An explicit maximum bond dimension, use -1 for none.
+    absorb : int, optional
+        Ignored, always uses ``get_VH`` (rorthog).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    if absorb not in (get_VH, get_Us_VH):
+        warnings.warn(
+            "By definition, absorb must be -1 (left) in rorthog_via_svd, "
+            f"ignoring absorb={absorb}."
+        )
+    return svd_truncated(
+        x,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=get_VH,
+        renorm=renorm,
+        info=info,
+    )
+
+
+@register_split_driver(
+    "rorthog:eig", truncation="dynamic", isom="right", default_absorb=get_VH
+)
+def rorthog_via_eig(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_VH,
+    renorm=0,
+    info=None,
+):
+    """Get the right isometric factor (``VH``) via eigen-decomposition,
+    with optional truncation.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : int, optional
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
+    max_bond : int, optional
+        An explicit maximum bond dimension, use -1 for none.
+    absorb : int, optional
+        Ignored, always uses ``get_VH`` (rorthog).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    if absorb not in (get_VH, get_Us_VH):
+        warnings.warn(
+            "By definition, absorb must be -1 (left) in rorthog_via_eig, "
+            f"ignoring absorb={absorb}."
+        )
+    return svd_via_eig_truncated(
+        x,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=get_VH,
+        renorm=renorm,
+        info=info,
+    )
+
+
+# --------------------------------- lorthog --------------------------------- #
+
+
+@register_split_driver("lorthog", isom="left", default_absorb=get_U)
+def lorthog(x):
+    """Get the left orthogonal factor (Q in QR) via QR decomposition. No
+    truncation.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    Q, _, _ = qr_stabilized(x)
+    return Q, None, None
+
+
+@register_split_driver(
+    "lorthog:svd", truncation="dynamic", isom="left", default_absorb=get_U
+)
+def lorthog_via_svd(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_U,
+    renorm=0,
+    info=None,
+):
+    """Get the left isometric factor (``U``) via SVD, with optional
+    truncation.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : int, optional
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
+    max_bond : int, optional
+        An explicit maximum bond dimension, use -1 for none.
+    absorb : int, optional
+        Ignored, always uses ``get_U`` (lorthog).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    if absorb not in (get_U, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 1 (right) in lorthog_via_svd, "
+            f"ignoring absorb={absorb}."
+        )
+    return svd_truncated(
+        x,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=get_U,
+        renorm=renorm,
+        info=info,
+    )
+
+
+@register_split_driver(
+    "lorthog:eig", truncation="dynamic", isom="left", default_absorb=get_U
+)
+def lorthog_via_eig(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_U,
+    renorm=0,
+    info=None,
+):
+    """Get the left isometric factor (``U``) via eigen-decomposition, with
+    optional truncation.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : int, optional
+        How to interpret the cutoff, see
+        :func:`~quimb.tensor.decomp.svd_truncated`.
+    max_bond : int, optional
+        An explicit maximum bond dimension, use -1 for none.
+    absorb : int, optional
+        Ignored, always uses ``get_U`` (lorthog).
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    info : dict or None, optional
+        If a dict is passed, store truncation info in the dict. Currently
+        only supports the key ``'error'`` for the truncation error.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    if absorb not in (get_U, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 1 (right) in lorthog_via_eig, "
+            f"ignoring absorb={absorb}."
+        )
+    return svd_via_eig_truncated(
+        x,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=get_U,
+        renorm=renorm,
+        info=info,
+    )
 
 
 # ------------------------ iterative decompositions ------------------------- #
@@ -1976,6 +2526,12 @@ def svds(
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
     ``scipy.sparse.linalg.LinearOperator``.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
     """
     k = _choose_k(x, cutoff, max_bond)
 
@@ -2004,6 +2560,12 @@ def isvd(
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
     ``scipy.sparse.linalg.LinearOperator``.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
     """
     k = _choose_k(x, cutoff, max_bond)
 
@@ -2056,6 +2618,12 @@ def rsvd(
     computation of only a certain number of singular values, e.g. max_bond,
     from the get-go, and is thus more efficient. Can also supply
     ``scipy.sparse.linalg.LinearOperator``.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
     """
     if isinstance(x, (np.ndarray, spla.LinearOperator)):
         return _rsvd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
@@ -2079,6 +2647,12 @@ def eigsh(
     that ``x`` is hermitian. Allows the computation of only a certain number of
     singular values, e.g. max_bond, from the get-go, and is thus more
     efficient. Can also supply ``scipy.sparse.linalg.LinearOperator``.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
     """
     k = _choose_k(x, cutoff, max_bond)
 
@@ -2111,6 +2685,16 @@ def lu_truncated(
     renorm=0,
     backend=None,
 ):
+    """LU-decomposition with optional truncation.
+
+    Returns
+    -------
+    left : array_like
+        The permuted lower triangular factor (PL).
+    s : None
+    right : array_like
+        The upper triangular factor (U).
+    """
     if absorb != get_Usq_sqVH:
         raise NotImplementedError(
             f"Can't handle absorb{absorb} in lu_truncated."
@@ -2172,6 +2756,16 @@ def cholesky(
     max_bond=-1,
     absorb=get_Usq_sqVH,
 ):
+    """Cholesky decomposition, only works if ``x`` is positive definite.
+
+    Returns
+    -------
+    left : array_like
+        The lower triangular Cholesky factor (L).
+    s : None
+    right : array_like
+        The conjugate transpose of L (L^H).
+    """
     try:
         return _cholesky_numba(x, cutoff, cutoff_mode, max_bond, absorb)
     except np.linalg.LinAlgError as e:
@@ -2186,7 +2780,16 @@ def cholesky(
 @compose
 def polar_right(x):
     """Polar decomposition of ``x`` as x = U @ P, where U is unitary and P is
-    positive semidefinite."""
+    positive semidefinite.
+
+    Returns
+    -------
+    left : array_like
+        The unitary factor (U).
+    s : None
+    right : array_like
+        The positive semidefinite factor (P).
+    """
     W, s, VH = do("linalg.svd", x)
     U = W @ VH
     P = dag(VH) @ ldmul(s, VH)
@@ -2206,7 +2809,16 @@ def polar_right_numba(x):
 @compose
 def polar_left(x):
     """Polar decomposition of ``x`` as x = P @ U, where U is unitary and P is
-    positive semidefinite."""
+    positive semidefinite.
+
+    Returns
+    -------
+    left : array_like
+        The positive semidefinite factor (P).
+    s : None
+    right : array_like
+        The unitary factor (U).
+    """
     W, s, VH = do("linalg.svd", x)
     U = W @ VH
     P = rdmul(W, s) @ dag(W)
