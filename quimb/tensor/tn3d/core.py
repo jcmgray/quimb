@@ -2049,6 +2049,8 @@ class TensorNetwork3D(TensorNetworkGen):
         direction,
         max_bond=None,
         cutoff=1e-10,
+        canonize=False,
+        canonize_opts=None,
         lazy=False,
         equalize_norms=False,
         optimize="auto-hq",
@@ -2067,6 +2069,11 @@ class TensorNetwork3D(TensorNetworkGen):
             The maximum bond dimension of the projector pairs inserted.
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
+        canonize : bool, optional
+            Whether to canonize all tensors before computing projectors,
+            via :meth:`gauge_all_simple_`.
+        canonize_opts : None or dict, optional
+            Additional options to pass to :meth:`gauge_all_simple_`.
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
@@ -2084,7 +2091,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
         Returns
         -------
-        TensorNetwork2D
+        TensorNetwork3D
             The coarse grained tensor network, with size halved in
             ``direction``.
 
@@ -2096,7 +2103,19 @@ class TensorNetwork3D(TensorNetworkGen):
         check_opt("direction", direction, ("x", "y", "z"))
 
         tn = self if inplace else self.copy()
-        tn_calc = tn.copy()
+
+        if canonize:
+            canonize_opts = ensure_dict(canonize_opts)
+            # extract simple gauges
+            gauges = {}
+            tn.gauge_all_simple_(gauges=gauges, **canonize_opts)
+            # compute projectors from gauged network
+            tn_calc = tn.copy()
+            # insert gauges back into target before inserting projectors
+            tn.gauge_simple_insert(gauges)
+        else:
+            gauges = None
+            tn_calc = tn.copy()
 
         r = Rotator3D(tn, None, None, None, f"{direction}min")
 
@@ -2147,6 +2166,7 @@ class TensorNetwork3D(TensorNetworkGen):
                             insert_into=tn,
                             max_bond=max_bond,
                             cutoff=cutoff,
+                            gauges=gauges,
                             **compress_opts,
                         )
 
@@ -2183,6 +2203,7 @@ class TensorNetwork3D(TensorNetworkGen):
     def contract_hotrg(
         self,
         max_bond=None,
+        *,
         cutoff=1e-10,
         canonize=False,
         canonize_opts=None,
@@ -2212,6 +2233,12 @@ class TensorNetwork3D(TensorNetworkGen):
             The maximum bond dimension of the projector pairs inserted.
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
+        canonize : bool, optional
+            Whether to canonize all tensors before each contraction,
+            via :meth:`gauge_all_simple_`.
+        canonize_opts : None or dict, optional
+            Additional options to pass to
+            :meth:`gauge_all_simple_`.
         sequence : tuple of str, optional
             The directions to contract in.  Default is to contract in all
             directions.
@@ -2234,6 +2261,8 @@ class TensorNetwork3D(TensorNetworkGen):
         final_contract_opts : None or dict, optional
             Options to pass to :meth:`contract`, ``optimize`` defaults to
             ``'auto-hq'``.
+        progbar : bool, optional
+            Whether to show a progress bar.
         inplace : bool, optional
             Whether to perform the coarse graining in place.
         coarse_grain_opts
@@ -2243,7 +2272,7 @@ class TensorNetwork3D(TensorNetworkGen):
         -------
         TensorNetwork3D
             The contracted tensor network, which will have no more than one
-            directino of length > 2.
+            direction of length > 2.
 
         See Also
         --------
@@ -2284,13 +2313,11 @@ class TensorNetwork3D(TensorNetworkGen):
                     f"Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
                 )
 
-            if canonize:
-                tn.gauge_all_(**canonize_opts)
-
-            # do the contractions!
             tn.coarse_grain_hotrg_(
                 direction=direction,
                 max_bond=max_bond,
+                canonize=canonize,
+                canonize_opts=canonize_opts,
                 cutoff=cutoff,
                 lazy=lazy,
                 equalize_norms=equalize_norms,
