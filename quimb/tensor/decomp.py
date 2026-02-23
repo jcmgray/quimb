@@ -200,19 +200,22 @@ def array_svals(x, method="svd", **kwargs):
 
 
 # mode aliases, and conversion to enum for numba functions
-get_U_s_VH = None  # "full"
+get_U_s_VH = None  # 'full'
 get_s = 2  # 'svals'
+get_Usq = -12  # 'lsqrt'
 get_VH = -11  # 'rorthog'
 get_Us = -10  # 'lfactor'
-get_Us_VH = -1  # absorb left
-get_Usq_sqVH = 0  # absorb both
-get_U_sVH = 1  # absorb right
+get_Us_VH = -1  # absorb 'left'
+get_Usq_sqVH = 0  # absorb 'both'
+get_U_sVH = 1  # absorb 'right'
 get_U = 10  # 'lorthog'
 get_sVH = 11  # 'rfactor'
+get_sqVH = 12  # 'rsqrt'
 _ABSORB_MAP = {}
 for mode, aliases in [
     (None, ["U,s,VH"]),
     (get_s, ["s"]),  # 2
+    (get_Usq, ["lsqrt"]),  # -12
     (get_VH, ["VH", "rorthog"]),  # -11
     (get_Us, ["Us", "lfactor"]),  # -10
     (get_Us_VH, ["Us,VH", "left"]),  # -1
@@ -220,6 +223,7 @@ for mode, aliases in [
     (get_U_sVH, ["U,sVH", "right"]),  # 1
     (get_U, ["U", "lorthog"]),  # 10
     (get_sVH, ["sVH", "rfactor"]),  # 11
+    (get_sqVH, ["sqVH", "rsqrt"]),  # 12
 ]:
     _ABSORB_MAP[mode] = mode
     for alias in aliases:
@@ -271,7 +275,9 @@ def parse_absorb(absorb, method):
 
 @functools.lru_cache(None)
 def parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
-    # convert defaults and settings to numeric type for numba funcs
+    """Convert defaults and settings to numeric type for numba funcs, and only
+    supply valid options for the given method.
+    """
     opts = dict()
     absorb = _ABSORB_MAP[absorb]
     if method in _DYNAMIC_SPLIT_METHODS:
@@ -288,11 +294,11 @@ def parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
             # turn off, or use explicitly supplied power
             opts["renorm"] = 0 if renorm is None else renorm
     elif method in _STATIC_SPLIT_METHODS:
-        # dynamic cutoff options not supplied
+        # dynamic cutoff options can't be supplied
         opts["absorb"] = absorb
         opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
     else:
-        # no singular value options supplied
+        # no singular value options should be supplied
         if absorb is None:
             raise ValueError(
                 "You can't return the singular values separately when "
@@ -514,7 +520,7 @@ def sgn_tf(x):
 
 
 def _do_absorb(U, s, VH, absorb=None, xp=None):
-    if absorb is None:
+    if absorb is None:  # 'full'
         return U, s, VH
     if xp is None:
         xp = get_namespace(U)
@@ -533,7 +539,13 @@ def _do_absorb(U, s, VH, absorb=None, xp=None):
         return U, None, None
     if absorb == get_VH:  # 'rorthog'
         return None, None, VH
-    if absorb == get_s:
+    if absorb == get_Usq:  # 'lsqrt'
+        sq = xp.sqrt(s)
+        return rdmul(U, sq), None, None
+    if absorb == get_sqVH:  # 'rsqrt'
+        sq = xp.sqrt(s)
+        return None, None, ldmul(sq, VH)
+    if absorb == get_s:  # 'svals'
         return None, s, None
     raise ValueError(f"Invalid absorb mode: {absorb}")
 
@@ -558,6 +570,12 @@ def _do_absorb_numba(U, s, VH, absorb):
         return U, None, None
     if absorb == get_VH:  # 'rorthog'
         return None, None, VH
+    if absorb == get_Usq:  # 'lsqrt'
+        sq = np.sqrt(s)
+        return rdmul_numba(U, sq), None, None
+    if absorb == get_sqVH:  # 'rsqrt'
+        sq = np.sqrt(s)
+        return None, None, ldmul_numba(sq, VH)
     if absorb == get_s:  # 'svals'
         return None, s, None
     return None, None, None
@@ -567,11 +585,11 @@ def _trim_and_renorm_svd_result(
     U,
     s,
     VH,
-    cutoff,
-    cutoff_mode,
-    max_bond,
-    absorb,
-    renorm,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
     use_abs=False,
     info=None,
 ):
@@ -1058,16 +1076,16 @@ def svd_via_eig(
             s2 = xp.flip(s2, axis=0)
             V = xp.flip(V, axis=1)
         s2 = xp.maximum(s2, 0.0)
-        if absorb == get_s:
+        if absorb == get_s:  # 'svals'
             return None, xp.sqrt(s2), None
-        if absorb == get_VH:
+        if absorb == get_VH:  # 'rorthog'
             return None, None, xp.conj(xp.transpose(V))
-        if absorb == get_sVH:
+        if absorb == get_sVH:  # 'rfactor'
             return None, None, xp.sqrt(s2)[:, None] * xp.conj(xp.transpose(V))
         Us = x @ V
-        if absorb == get_Us:
+        if absorb == get_Us:  # 'lfactor'
             return Us, None, None
-        if absorb == get_Us_VH:
+        if absorb == get_Us_VH:  # 'left'
             return Us, None, xp.conj(xp.transpose(V))
         s = xp.sqrt(s2)
 
@@ -1076,16 +1094,20 @@ def svd_via_eig(
         sinv = safe_inverse(s, cutoff)
         U = Us * sinv[None, :]
 
-        if absorb == get_U:
+        if absorb == get_U:  # 'lorthog'
             return U, None, None
         VH = xp.conj(xp.transpose(V))
-        if absorb == get_U_s_VH:
+        if absorb == get_U_s_VH:  # 'full'
             return U, s, VH
-        if absorb == get_U_sVH:
+        if absorb == get_U_sVH:  # 'right'
             return U, None, s[:, None] * VH
-        if absorb == get_Usq_sqVH:
-            sq = xp.sqrt(s)
+        sq = xp.sqrt(s)
+        if absorb == get_Usq_sqVH:  # 'both'
             return U * sq[None, :], None, sq[:, None] * VH
+        if absorb == get_Usq:  # 'lsqrt'
+            return U * sq[None, :], None, None
+        if absorb == get_sqVH:  # 'rsqrt'
+            return None, None, sq[:, None] * VH
     else:
         xx = x @ xp.conj(xp.transpose(x))
         s2, U = xp.linalg.eigh(xx)
@@ -1097,16 +1119,16 @@ def svd_via_eig(
             s2 = xp.flip(s2)
             U = xp.flip(U, axis=1)
         s2 = xp.maximum(s2, 0.0)
-        if absorb == get_s:
+        if absorb == get_s:  # 'svals'
             return None, xp.sqrt(s2), None
-        if absorb == get_U:
+        if absorb == get_U:  # 'lorthog'
             return U, None, None
-        if absorb == get_Us:
+        if absorb == get_Us:  # 'lfactor'
             return U * xp.sqrt(s2)[None, :], None, None
         sVH = xp.conj(xp.transpose(U)) @ x
-        if absorb == get_sVH:
+        if absorb == get_sVH:  # 'rfactor'
             return None, None, sVH
-        if absorb == get_U_sVH:
+        if absorb == get_U_sVH:  # 'right'
             return U, None, sVH
         s = xp.sqrt(s2)
 
@@ -1115,15 +1137,21 @@ def svd_via_eig(
         sinv = safe_inverse(s, cutoff)
         VH = sinv[:, None] * sVH
 
-        if absorb == get_VH:
+        if absorb == get_VH:  # 'rorthog'
             return None, None, VH
-        if absorb == get_U_s_VH:
+        if absorb == get_U_s_VH:  # 'full'
             return U, s, VH
-        if absorb == get_Us_VH:
+        if absorb == get_Us_VH:  # 'left'
             return U * s[None, :], None, VH
-        if absorb == get_Usq_sqVH:
-            sq = xp.sqrt(s)
+        sq = xp.sqrt(s)
+        if absorb == get_Usq_sqVH:  # 'both'
             return U * sq[None, :], None, (sq[:, None] * VH)
+        if absorb == get_Usq:  # 'lsqrt'
+            return U * sq[None, :], None, None
+        if absorb == get_sqVH:  # 'rsqrt'
+            return None, None, sq[:, None] * VH
+
+    raise ValueError(f"Invalid absorb mode: {absorb}")
 
 
 @register_split_driver("svd:eig", truncation="dynamic", isom="both")
@@ -1267,17 +1295,17 @@ def _svd_via_eig_numba(
             s2 = s2[::-1]
             V = np.ascontiguousarray(V[:, ::-1])
         s2 = np.maximum(s2, 0.0)
-        if absorb == get_s:
+        if absorb == get_s:  # 'svals'
             return None, np.sqrt(s2), None
-        if absorb == get_VH:
+        if absorb == get_VH:  # 'rorthog'
             return None, None, dag_numba(V)
-        if absorb == get_sVH:
+        if absorb == get_sVH:  # 'rfactor'
             return None, None, ldmul_numba(np.sqrt(s2), dag_numba(V))
         V = np.ascontiguousarray(V)
         Us = x @ V
-        if absorb == get_Us:
+        if absorb == get_Us:  # 'lfactor'
             return Us, None, None
-        if absorb == get_Us_VH:
+        if absorb == get_Us_VH:  # 'left'
             return Us, None, dag_numba(V)
         s = np.sqrt(s2)
 
@@ -1286,16 +1314,20 @@ def _svd_via_eig_numba(
         sinv = safe_inverse_numba(s, cutoff)
         U = Us * sinv[None, :]
 
-        if absorb == get_U:
+        if absorb == get_U:  # 'lorthog'
             return U, None, None
         VH = dag_numba(V)
-        if absorb is None:
+        if absorb is None:  # 'full'
             return U, s, VH
-        if absorb == get_U_sVH:
+        if absorb == get_U_sVH:  # 'right'
             return U, None, ldmul_numba(s, VH)
-        if absorb == get_Usq_sqVH:
-            sq = np.sqrt(s)
+        sq = np.sqrt(s)
+        if absorb == get_Usq_sqVH:  # 'both'
             return rdmul_numba(U, sq), None, ldmul_numba(sq, VH)
+        if absorb == get_Usq:  # 'lsqrt'
+            return rdmul_numba(U, sq), None, None
+        if absorb == get_sqVH:  # 'rsqrt'
+            return None, None, ldmul_numba(sq, VH)
     else:
         # wide: eigendecompose x @ xdag
         xx = x @ dag_numba(x)
@@ -1308,17 +1340,17 @@ def _svd_via_eig_numba(
             U = np.ascontiguousarray(U[:, ::-1])
         # clip small/negative eigenvalues
         s2 = np.maximum(s2, 0.0)
-        if absorb == get_s:
+        if absorb == get_s:  # 'svals'
             return None, np.sqrt(s2), None
-        if absorb == get_U:
+        if absorb == get_U:  # 'lorthog'
             return U, None, None
-        if absorb == get_Us:
+        if absorb == get_Us:  # 'lfactor'
             return rdmul_numba(U, np.sqrt(s2)), None, None
         U = np.ascontiguousarray(U)
         sVH = dag_numba(U) @ x
-        if absorb == get_sVH:
+        if absorb == get_sVH:  # 'rfactor'
             return None, None, sVH
-        if absorb == get_U_sVH:
+        if absorb == get_U_sVH:  # 'right'
             return U, None, sVH
         s = np.sqrt(s2)
 
@@ -1327,15 +1359,19 @@ def _svd_via_eig_numba(
         sinv = safe_inverse_numba(s, cutoff)
         VH = sinv[:, None] * sVH
 
-        if absorb == get_VH:
+        if absorb == get_VH:  # 'rorthog'
             return None, None, VH
-        if absorb is None:
+        if absorb is None:  # 'full'
             return U, s, VH
-        if absorb == get_Us_VH:
+        if absorb == get_Us_VH:  # 'left'
             return rdmul_numba(U, s), None, VH
-        if absorb == get_Usq_sqVH:
-            sq = np.sqrt(s)
+        sq = np.sqrt(s)
+        if absorb == get_Usq_sqVH:  # 'both'
             return rdmul_numba(U, sq), None, ldmul_numba(sq, VH)
+        if absorb == get_Usq:  # 'lsqrt'
+            return rdmul_numba(U, sq), None, None
+        if absorb == get_sqVH:  # 'rsqrt'
+            return None, None, ldmul_numba(sq, VH)
 
     # fallback (should not be reached)
     return None, None, None
@@ -2733,47 +2769,94 @@ def lu_truncated(
         return PL, None, U
 
 
-@njit  # pragma: no cover
-def _cholesky_numba(
-    x,
-    cutoff=-1,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-):
-    """SVD-decomposition, using cholesky decomposition, only works if
-    ``x`` is positive definite.
-    """
-    L = np.linalg.cholesky(x)
-    return L, None, dag_numba(L)
+def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
+    xp = get_namespace(x)
+
+    if shift < 0.0:
+        # auto compute
+        eps = xp.finfo(x.dtype).eps
+        shift = xp.linalg.norm(x) * eps
+        x = x + shift * xp.eye(x.shape[0])
+    elif shift > 0.0:
+        x = x + shift * xp.eye(x.shape[0])
+
+    L = xp.linalg.cholesky(x)
+
+    if absorb == get_Usq:
+        return L, None, None
+    if absorb == get_sqVH:
+        return None, None, dag(L)
+    # absorb == get_Usq_sqVH
+    return L, None, dag(L)
 
 
 @register_split_driver("cholesky")
-def cholesky(
-    x,
-    cutoff=-1,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-):
+@compose
+def cholesky(x, absorb=get_Usq_sqVH):
     """Cholesky decomposition, only works if ``x`` is positive definite.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    absorb : int, optional
+        How to absorb the factors. The valid options are:
+
+        - ``"both"`` or ``get_Usq_sqVH``: return (L, None, L^H)
+        - ``"lsqrt"`` or ``get_Usq``: return (L, None, None)
+        - ``"rsqrt"`` or ``get_sqVH``: return (None, None, L^H)
 
     Returns
     -------
-    left : array_like
+    left : array_like or None
         The lower triangular Cholesky factor (L).
     s : None
-    right : array_like
+    right : array_like or None
         The conjugate transpose of L (L^H).
     """
+    absorb = _ABSORB_MAP[absorb]
     try:
-        return _cholesky_numba(x, cutoff, cutoff_mode, max_bond, absorb)
+        # try without shift
+        return _cholesky_maybe_with_diag_shift(x, absorb)
+    except Exception as e:
+        warnings.warn(
+            f"Cholesky decomposition failed with error: {e}. "
+            "retrying with small regularization added to the diagonal."
+        )
+        return _cholesky_maybe_with_diag_shift(x, absorb, shift=-1.0)
+
+
+@njit  # pragma: no cover
+def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=0.0):
+    if shift < 0.0:
+        # auto compute
+        eps = np.finfo(x.dtype).eps
+        shift = np.linalg.norm(x) * eps
+        x = x + shift * np.eye(x.shape[0])
+    elif shift > 0.0:
+        x = x + shift * np.eye(x.shape[0])
+
+    L = np.linalg.cholesky(x)
+
+    if absorb == get_Usq:
+        return L, None, None
+    if absorb == get_sqVH:
+        return None, None, dag_numba(L)
+    # absorb == get_Usq_sqVH
+    return L, None, dag_numba(L)
+
+
+@cholesky.register("numpy")
+def cholesky_numpy(x, absorb=get_Usq_sqVH):
+    try:
+        # try without shift
+        return _cholesky_numba(x, absorb)
     except np.linalg.LinAlgError as e:
-        if cutoff < 0:
-            raise e
-        # try adding cutoff identity - assuming it is approx allowable error
-        xi = x + 2 * cutoff * np.eye(x.shape[0])
-        return _cholesky_numba(xi, cutoff, cutoff_mode, max_bond, absorb)
+        warnings.warn(
+            f"Cholesky decomposition failed with error: {e}. "
+            "retrying with small regularization added to the diagonal."
+        )
+        return _cholesky_numba(x, absorb, shift=-1.0)
 
 
 @register_split_driver("polar_right", isom="left", default_absorb=get_U_sVH)
@@ -3183,10 +3266,41 @@ def isometrize(x, method="qr"):
 
 
 @compose
-def squared_op_to_reduced_factor(x2, dl, dr, right=True):
+def squared_op_to_reduced_factor(
+    x2,
+    dl,
+    dr,
+    right=True,
+    method="eigh",
+    **kwargs,
+):
     """Given the square, ``x2``, of an operator ``x``, compute either the left
     or right reduced factor matrix of the unsquared operator ``x`` with
     original shape ``(dl, dr)``.
+
+    If ``right=True``, compute the right factor, ``s @ Vdag``, assuming ``x2``
+    is given as ``x2 = dag(x) @ x = V @ s^2 @ Vdag``, otherwise
+    compute the left factor, ``U @ s``, assuming
+    ``x2 = x @ dag(x) = U @ s^2 @ Udag``.
+
+    Parameters
+    ----------
+    x2 : array
+        The squared operator, either ``dag(x) @ x`` or ``x @ dag(x)``.
+    dl : int
+        The original left dimension of the unsquared operator ``x``.
+    dr : int
+        The original right dimension of the unsquared operator ``x``.
+    right : bool, optional
+        Whether to compute the right factor (``s @ Vdag``) or left factor
+        (``U @ s``).
+    method : str, optional
+        The method to use for the decomposition.
+
+    Returns
+    -------
+    factor : array
+        The reduced factor matrix of the unsquared operator ``x``.
     """
     if right:
         if dl < dr:
@@ -3204,40 +3318,31 @@ def squared_op_to_reduced_factor(x2, dl, dr, right=True):
     if isfermionic(x2) and x2.indices[1].dual:
         x2 = x2.phase_flip(1)
 
-    try:
-        # attempt faster hermitian eigendecomposition
-        U, s2, VH = eigh_truncated(
-            x2,
-            max_bond=keep,
-            cutoff=0.0,
-            absorb=None,
-            positive=1,  # know positive
-        )
-        # might have negative eigenvalues due to numerical error from squaring
-        s2 = do("clip", s2, 0.0, None)
-
-    except Exception as e:
-        warnings.warn(
-            "squared_op_to_reduced_factor: eigh_truncated failed"
-            f" with error: {e}, falling back to svd_truncated.",
-            RuntimeWarning,
-        )
-
-        # fallback to SVD if maybe badly conditioned etc.
-        U, s2, VH = svd_truncated(
-            x2,
-            max_bond=keep,
-            cutoff=0.0,
-            absorb=None,
-        )
-
-    s = do("sqrt", s2)
+    # only compute factor we need
     if right:
-        factor = ldmul(s, VH)
-    else:  # 'left'
-        factor = rdmul(U, s)
+        absorb = get_sqVH
+    else:
+        absorb = get_Usq
 
-    return factor
+    if method == "cholesky":
+        lsqrt, _, rsqrt = cholesky(x2, absorb=absorb)
+
+    if method == "eigh":
+        kwargs.setdefault("positive", 1)
+
+    lsqrt, _, rsqrt = array_split(
+        x2,
+        max_bond=keep,
+        cutoff=0.0,
+        absorb=absorb,
+        method=method,
+        **kwargs,
+    )
+
+    if rsqrt:
+        return rsqrt
+    else:
+        return lsqrt
 
 
 @squared_op_to_reduced_factor.register("numpy")
