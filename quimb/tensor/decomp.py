@@ -11,16 +11,13 @@ import scipy.linalg.interpolative as sli
 import scipy.sparse.linalg as spla
 from autoray import (
     astype,
-    backend_like,
     compose,
     dag,
-    do,
     get_dtype_name,
     get_lib_fn,
     get_namespace,
     infer_backend,
     lazy,
-    reshape,
 )
 
 from ..core import njit
@@ -497,8 +494,9 @@ def sgn(x):
     """Get the 'sign' of ``x``, such that ``x / sgn(x)`` is real and
     non-negative.
     """
-    x0 = do("equal", x, 0.0)
-    return (x + x0) / (do("abs", x) + x0)
+    xp = get_namespace(x)
+    x0 = xp.equal(x, 0.0)
+    return (x + x0) / (xp.abs(x) + x0)
 
 
 @sgn.register("numpy")
@@ -510,10 +508,10 @@ def sgn_numba(x):
 
 @sgn.register("tensorflow")
 def sgn_tf(x):
-    with backend_like(x):
-        x0 = do("cast", do("equal", x, 0.0), x.dtype)
-        xa = do("cast", do("abs", x), x.dtype)
-        return (x + x0) / (xa + x0)
+    xp = get_namespace(x)
+    x0 = xp.cast(xp.equal(x, 0.0), x.dtype)
+    xa = xp.cast(xp.abs(x), x.dtype)
+    return (x + x0) / (xa + x0)
 
 
 # ----------------------------------- svd ----------------------------------- #
@@ -592,12 +590,15 @@ def _trim_and_renorm_svd_result(
     renorm=0,
     use_abs=False,
     info=None,
+    xp=None,
 ):
     """Give full SVD decomposion result ``U``, ``s``, ``VH``, optionally trim,
     renormalize, and absorb the singular values. See ``svd_truncated`` for
     details.
     """
-    xp = get_namespace(U)
+    if xp is None:
+        xp = get_namespace(U)
+
     info = parse_info_extras(info, ("error",))
 
     if use_abs:
@@ -684,7 +685,6 @@ def svd_truncated(
     max_bond=-1,
     absorb=get_Usq_sqVH,
     renorm=0,
-    backend=None,
     info=None,
 ):
     """Singular value decomposition of raw 2d array ``x``, with optional
@@ -717,8 +717,6 @@ def svd_truncated(
         Whether to renormalize the kept singular values. ``0`` means
         no renormalization, ``1`` maintains the trace norm, ``2``
         maintains the Frobenius norm.
-    backend : str or None, optional
-        The backend to use.
     info : dict or None, optional
         If a dict is passed, store truncation info in the dict. Currently only
         supports the key 'error' for the truncation error.
@@ -732,19 +730,20 @@ def svd_truncated(
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
-    with backend_like(backend):
-        U, s, VH = do("linalg.svd", x)
-        return _trim_and_renorm_svd_result(
-            U,
-            s,
-            VH,
-            cutoff=cutoff,
-            cutoff_mode=cutoff_mode,
-            max_bond=max_bond,
-            absorb=absorb,
-            renorm=renorm,
-            info=info,
-        )
+    xp = get_namespace(x)
+    U, s, VH = xp.linalg.svd(x)
+    return _trim_and_renorm_svd_result(
+        U,
+        s,
+        VH,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        max_bond=max_bond,
+        absorb=absorb,
+        renorm=renorm,
+        info=info,
+        xp=xp,
+    )
 
 
 @njit(["i4(f4[:], f4, i4)", "i4(f8[:], f8, i4)"])  # pragma: no cover
@@ -1196,8 +1195,6 @@ def svd_via_eig_truncated(
         Whether to renormalize the kept singular values. ``0`` means
         no renormalization, ``1`` maintains the trace norm, ``2``
         maintains the Frobenius norm.
-    backend : str or None, optional
-        The backend to use.
     info : dict or None, optional
         If a dict is passed, store truncation info in the dict. Currently only
         supports the key 'error' for the truncation error.
@@ -1479,7 +1476,6 @@ def eigh_truncated(
     absorb=get_Usq_sqVH,
     renorm=0,
     positive=0,
-    backend=None,
 ):
     """SVD-like decomposition using hermitian eigen-decomposition, only works
     if ``x`` is hermitian.
@@ -1490,35 +1486,36 @@ def eigh_truncated(
     s : array_like or None
     right : array_like or None
     """
-    with backend_like(backend):
-        s, U = do("linalg.eigh", x)
+    xp = get_namespace(x)
+    s, U = xp.linalg.eigh(x)
 
-        # make sure largest singular value first
-        if not positive:
-            idx = do("argsort", -do("abs", s))
-            s, U = s[idx], U[:, idx]
-        else:
-            # assume all positive, simply reverse
-            s = do("flip", s)
-            U = do("flip", U, axis=1)
+    # make sure largest singular value first
+    if not positive:
+        idx = xp.argsort(-xp.abs(s))
+        s, U = s[idx], U[:, idx]
+    else:
+        # assume all positive, simply reverse
+        s = xp.flip(s)
+        U = xp.flip(U, axis=1)
 
-        VH = dag(U)
+    VH = dag(U)
 
-        # XXX: better to absorb phase in V and return positive 'values'?
-        # V = ldmul(sgn(s), dag(U))
-        # s = do("abs", s)
+    # XXX: better to absorb phase in V and return positive 'values'?
+    # V = ldmul(sgn(s), dag(U))
+    # s = do("abs", s)
 
-        return _trim_and_renorm_svd_result(
-            U,
-            s,
-            VH,
-            cutoff,
-            cutoff_mode,
-            max_bond,
-            absorb,
-            renorm,
-            use_abs=True,
-        )
+    return _trim_and_renorm_svd_result(
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        use_abs=True,
+        xp=xp,
+    )
 
 
 @eigh_truncated.register("numpy")
@@ -1562,7 +1559,7 @@ def eigh_truncated_numba(
 
 @register_split_driver("qr", isom="left", default_absorb=get_U_sVH)
 @compose
-def qr_stabilized(x, backend=None):
+def qr_stabilized(x):
     """QR-decomposition, with stabilized R factor.
 
     Returns
@@ -1573,14 +1570,14 @@ def qr_stabilized(x, backend=None):
     right : array_like
         The right upper triangular factor (R).
     """
-    with backend_like(backend):
-        Q, R = do("linalg.qr", x)
-        # stabilize the diagonal of R
-        rd = do("diag", R)
-        s = sgn(rd)
-        Q = rdmul(Q, do("conj", s))
-        R = ldmul(s, R)
-        return Q, None, R
+    xp = get_namespace(x)
+    Q, R = xp.linalg.qr(x)
+    # stabilize the diagonal of R
+    rd = xp.diag(R)
+    s = sgn(rd)
+    Q = rdmul(Q, xp.conj(s))
+    R = ldmul(s, R)
+    return Q, None, R
 
 
 @qr_stabilized.register("numpy")
@@ -1787,7 +1784,7 @@ def qr_via_randqb(x, max_bond=-1, absorb=get_U_sVH, seed=None):
 
 @register_split_driver("lq", isom="right", default_absorb=get_Us_VH)
 @compose
-def lq_stabilized(x, backend=None):
+def lq_stabilized(x):
     """LQ-decomposition, with stabilized L factor.
 
     Returns
@@ -1798,9 +1795,10 @@ def lq_stabilized(x, backend=None):
     right : array_like
         The right isometric factor (Q).
     """
-    QT, _, LT = qr_stabilized(do("transpose", x, like=backend))
-    Q = do("transpose", QT, like=backend)
-    L = do("transpose", LT, like=backend)
+    xp = get_namespace(x)
+    QT, _, LT = qr_stabilized(xp.transpose(x))
+    Q = xp.transpose(QT)
+    L = xp.transpose(LT)
     return L, None, Q
 
 
@@ -2664,9 +2662,10 @@ def rsvd(
     if isinstance(x, (np.ndarray, spla.LinearOperator)):
         return _rsvd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
 
-    U, s, VH = do("linalg.rsvd", x, max_bond)
+    xp = get_namespace(x)
+    U, s, VH = xp.linalg.rsvd(x, max_bond)
     return _trim_and_renorm_svd_result(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm, xp=xp,
     )
 
 
@@ -2719,7 +2718,6 @@ def lu_truncated(
     max_bond=-1,
     absorb=get_Usq_sqVH,
     renorm=0,
-    backend=None,
 ):
     """LU-decomposition with optional truncation.
 
@@ -2745,28 +2743,28 @@ def lu_truncated(
             f"Can't handle max_bond={max_bond} in lu_truncated."
         )
 
-    with backend_like(backend):
-        PL, U = do("scipy.linalg.lu", x, permute_l=True)
+    xp = get_namespace(x)
+    PL, U = xp.scipy.linalg.lu(x, permute_l=True)
 
-        sl = do("sum", do("abs", PL), axis=0)
-        su = do("sum", do("abs", U), axis=1)
+    sl = xp.sum(xp.abs(PL), axis=0)
+    su = xp.sum(xp.abs(U), axis=1)
 
-        if cutoff_mode == 2:
-            abs_cutoff_l = cutoff * do("max", sl)
-            abs_cutoff_u = cutoff * do("max", su)
-        elif cutoff_mode == 1:
-            abs_cutoff_l = abs_cutoff_u = cutoff
-        else:
-            raise NotImplementedError(
-                f"Can't handle cutoff_mode={cutoff_mode} in lu_truncated."
-            )
+    if cutoff_mode == 2:
+        abs_cutoff_l = cutoff * xp.max(sl)
+        abs_cutoff_u = cutoff * xp.max(su)
+    elif cutoff_mode == 1:
+        abs_cutoff_l = abs_cutoff_u = cutoff
+    else:
+        raise NotImplementedError(
+            f"Can't handle cutoff_mode={cutoff_mode} in lu_truncated."
+        )
 
-        idx = (sl > abs_cutoff_l) & (su > abs_cutoff_u)
+    idx = (sl > abs_cutoff_l) & (su > abs_cutoff_u)
 
-        PL = PL[:, idx]
-        U = U[idx, :]
+    PL = PL[:, idx]
+    U = U[idx, :]
 
-        return PL, None, U
+    return PL, None, U
 
 
 def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
@@ -2873,7 +2871,8 @@ def polar_right(x):
     right : array_like
         The positive semidefinite factor (P).
     """
-    W, s, VH = do("linalg.svd", x)
+    xp = get_namespace(x)
+    W, s, VH = xp.linalg.svd(x)
     U = W @ VH
     P = dag(VH) @ ldmul(s, VH)
     return U, None, P
@@ -2902,7 +2901,8 @@ def polar_left(x):
     right : array_like
         The unitary factor (U).
     """
-    W, s, VH = do("linalg.svd", x)
+    xp = get_namespace(x)
+    W, s, VH = xp.linalg.svd(x)
     U = W @ VH
     P = rdmul(W, s) @ dag(W)
     return P, None, U
@@ -2921,18 +2921,19 @@ def polar_left_numba(x):
 
 
 def _similarity_compress_eig(X, max_bond, renorm):
+    xp = get_namespace(X)
     # eigen decompose X -> V w V^-1
-    el, ev = do("linalg.eig", X)
-    evi = do("linalg.inv", ev)
+    el, ev = xp.linalg.eig(X)
+    evi = xp.linalg.inv(ev)
 
     # choose largest abs value eigenpairs
-    sel = do("argsort", do("abs", el))[-max_bond:]
+    sel = xp.argsort(xp.abs(el))[-max_bond:]
     Cl = ev[:, sel]
     Cr = evi[sel, :]
 
     if renorm:
-        trace_old = do("sum", el)
-        trace_new = do("sum", el[sel])
+        trace_old = xp.sum(el)
+        trace_new = xp.sum(el[sel])
         Cl = Cl * trace_old / trace_new
 
     return Cl, Cr
@@ -2958,14 +2959,15 @@ def _similarity_compress_eig_numba(X, max_bond, renorm):
 
 
 def _similarity_compress_eigh(X, max_bond, renorm):
+    xp = get_namespace(X)
     XX = (X + dag(X)) / 2
-    el, ev = do("linalg.eigh", XX)
-    sel = do("argsort", do("abs", el))[-max_bond:]
+    el, ev = xp.linalg.eigh(XX)
+    sel = xp.argsort(xp.abs(el))[-max_bond:]
     Cl = ev[:, sel]
     Cr = dag(Cl)
     if renorm:
-        trace_old = do("trace", X)
-        trace_new = do("trace", Cr @ (X @ Cl))
+        trace_old = xp.trace(X)
+        trace_new = xp.trace(Cr @ (X @ Cl))
         Cl = Cl * trace_old / trace_new
     return Cl, Cr
 
@@ -2985,7 +2987,8 @@ def _similarity_compress_eigh_numba(X, max_bond, renorm):
 
 
 def _similarity_compress_svd(X, max_bond, renorm, asymm):
-    U, _, VH = do("linalg.svd", X)
+    xp = get_namespace(X)
+    U, _, VH = xp.linalg.svd(X)
     U = U[:, :max_bond]
 
     Cl = U
@@ -2998,8 +3001,8 @@ def _similarity_compress_svd(X, max_bond, renorm, asymm):
 
     if renorm:
         # explicitly maintain trace value
-        trace_old = do("trace", X)
-        trace_new = do("trace", Cr @ (X @ Cl))
+        trace_old = xp.trace(X)
+        trace_new = xp.trace(Cr @ (X @ Cl))
         Cl = Cl * (trace_old / trace_new)
 
     return Cl, Cr
@@ -3026,14 +3029,15 @@ def _similarity_compress_svd_numba(X, max_bond, renorm, asymm):
 
 
 def _similarity_compress_biorthog(X, max_bond, renorm):
-    U, s, VH = do("linalg.svd", X)
+    xp = get_namespace(X)
+    U, s, VH = xp.linalg.svd(X)
 
     B = U[:, :max_bond]
     AH = VH[:max_bond, :]
 
-    Uab, sab, VHab = do("linalg.svd", AH @ B)
-    sab = (sab + 1e-12 * do("max", sab)) ** -0.5
-    sab_inv = do("reshape", sab, (1, -1))
+    Uab, sab, VHab = xp.linalg.svd(AH @ B)
+    sab = (sab + 1e-12 * xp.max(sab)) ** -0.5
+    sab_inv = xp.reshape(sab, (1, -1))
     P = Uab * sab_inv
     Q = dag(VHab) * sab_inv
 
@@ -3041,8 +3045,8 @@ def _similarity_compress_biorthog(X, max_bond, renorm):
     Cr = dag(P) @ AH
 
     if renorm:
-        trace_old = do("trace", X)
-        trace_new = do("trace", Cr @ (X @ Cl))
+        trace_old = xp.trace(X)
+        trace_new = xp.trace(Cr @ (X @ Cl))
         Cl = Cl * trace_old / trace_new
 
     return Cl, Cr
@@ -3103,27 +3107,28 @@ def similarity_compress(X, max_bond, renorm=False, method="eigh"):
 
 
 @compose
-def isometrize_qr(x, backend=None):
+def isometrize_qr(x):
     """Perform isometrization using the QR decomposition."""
-    with backend_like(backend):
-        Q, R = do("linalg.qr", x)
-        # stabilize qr by fixing diagonal of R in canonical, positive form (we
-        # don't actaully do anything to R, just absorb the necessary sign -> Q)
-        rd = do("diag", R)
-        s = sgn(rd)
-        Q = Q * reshape(s, (1, -1))
-        return Q
+    xp = get_namespace(x)
+    Q, R = xp.linalg.qr(x)
+    # stabilize qr by fixing diagonal of R in canonical, positive form (we
+    # don't actaully do anything to R, just absorb the necessary sign -> Q)
+    rd = xp.diag(R)
+    s = sgn(rd)
+    Q = Q * xp.reshape(s, (1, -1))
+    return Q
 
 
 @compose
-def isometrize_svd(x, backend=None):
+def isometrize_svd(x):
     """Perform isometrization using the SVD decomposition."""
-    U, _, VH = do("linalg.svd", x, like=backend)
+    xp = get_namespace(x)
+    U, _, VH = xp.linalg.svd(x)
     return U @ VH
 
 
 @compose
-def isometrize_exp(x, backend):
+def isometrize_exp(x):
     r"""Perform isometrization using anti-symmetric matrix exponentiation.
 
     .. math::
@@ -3132,19 +3137,17 @@ def isometrize_exp(x, backend):
 
     If ``x`` is rectangular it is completed with zeros first.
     """
-    with backend_like(backend):
-        m, n = x.shape
-        d = max(m, n)
-        x = do(
-            "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
-        )
-        x = x - dag(x)
-        Q = do("scipy.linalg.expm", x)
-        return Q[:m, :n]
+    xp = get_namespace(x)
+    m, n = x.shape
+    d = max(m, n)
+    x = xp.pad(x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0)
+    x = x - dag(x)
+    Q = xp.scipy.linalg.expm(x)
+    return Q[:m, :n]
 
 
 @compose
-def isometrize_cayley(x, backend):
+def isometrize_cayley(x):
     r"""Perform isometrization using an anti-symmetric Cayley transform.
 
     .. math::
@@ -3154,43 +3157,41 @@ def isometrize_cayley(x, backend):
     where :math:`A = X - X^\dagger`. If ``x`` is rectangular it is completed
     with zeros first.
     """
-    with backend_like(backend):
-        m, n = x.shape
-        d = max(m, n)
-        x = do(
-            "pad", x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0
-        )
-        x = x - dag(x)
-        x = x / 2.0
-        Id = do("eye", d, like=x)
-        Q = do("linalg.solve", Id - x, Id + x)
-        return Q[:m, :n]
+    xp = get_namespace(x)
+    m, n = x.shape
+    d = max(m, n)
+    x = xp.pad(x, [[0, d - m], [0, d - n]], "constant", constant_values=0.0)
+    x = x - dag(x)
+    x = x / 2.0
+    Id = xp.eye(d)
+    Q = xp.linalg.solve(Id - x, Id + x)
+    return Q[:m, :n]
 
 
 @compose
-def isometrize_modified_gram_schmidt(A, backend=None):
+def isometrize_modified_gram_schmidt(A):
     """Perform isometrization explicitly using the modified Gram Schmidt
     procedure (this is slow but a useful reference).
     """
-    with backend_like(backend):
-        Q = []
-        for j in range(A.shape[1]):
-            q = A[:, j]
-            for i in range(0, j):
-                rij = do("tensordot", do("conj", Q[i]), q, 1)
-                q = q - rij * Q[i]
-            Q.append(q / do("linalg.norm", q))
-        Q = do("stack", tuple(Q), axis=1)
-        return Q
+    xp = get_namespace(A)
+    Q = []
+    for j in range(A.shape[1]):
+        q = A[:, j]
+        for i in range(0, j):
+            rij = xp.tensordot(xp.conj(Q[i]), q, 1)
+            q = q - rij * Q[i]
+        Q.append(q / xp.linalg.norm(q))
+    Q = xp.stack(tuple(Q), axis=1)
+    return Q
 
 
 @compose
-def isometrize_householder(X, backend=None):
-    with backend_like(backend):
-        X = do("tril", X, -1)
-        tau = 2.0 / (1.0 + do("sum", do("conj", X) * X, 0))
-        Q = do("linalg.householder_product", X, tau)
-        return Q
+def isometrize_householder(X):
+    xp = get_namespace(X)
+    X = xp.tril(X, -1)
+    tau = 2.0 / (1.0 + xp.sum(xp.conj(X) * X, 0))
+    Q = xp.linalg.householder_product(X, tau)
+    return Q
 
 
 def isometrize_torch_householder(x):
@@ -3255,13 +3256,14 @@ def isometrize(x, method="qr"):
     Q : array
         The isometrization / orthogonalization of ``x``.
     """
+    xp = get_namespace(x)
     m, n = x.shape
     fat = m < n
     if fat:
-        x = do("transpose", x)
+        x = xp.transpose(x)
     Q = _ISOMETRIZE_METHODS[method](x)
     if fat:
-        Q = do("transpose", Q)
+        Q = xp.transpose(Q)
     return Q
 
 
@@ -3441,7 +3443,7 @@ def compute_oblique_projectors(
         return Pl, st, Pr
 
     elif absorb == get_Usq_sqVH:
-        st_sqrt = do("sqrt", st)
+        st_sqrt = get_namespace(st).sqrt(st)
 
         # then form the 'oblique' projectors
         Pl = Rr @ rddiv(dag(VHt), st_sqrt)
@@ -3581,21 +3583,22 @@ def compute_bondenv_projectors(
         E = E / ctg.array_contract((E,), (("K", "K", "B", "B"),), ())
 
     if enforce_pos:
-        with backend_like(backend):
-            Ea = do("fuse", E, (0, 1), (2, 3))
-            Ea = (Ea + dag(Ea)) / 2
-            el, ev = do("linalg.eigh", Ea)
-            lmax = do("max", el)
-            el = do("clip", el + lmax * pos_smudge, lmax * pos_smudge, None)
-            Ea = do("multiply_diagonal", ev, el, axis=1) @ dag(ev)
-            E = do("reshape", Ea, E.shape)
+        xp = get_namespace(E)
+        Ea = xp.fuse(E, (0, 1), (2, 3))
+        Ea = (Ea + dag(Ea)) / 2
+        el, ev = xp.linalg.eigh(Ea)
+        lmax = xp.max(el)
+        el = xp.clip(el + lmax * pos_smudge, lmax * pos_smudge, None)
+        Ea = xp.multiply_diagonal(ev, el, axis=1) @ dag(ev)
+        E = xp.reshape(Ea, E.shape)
 
     # current bond dim
     d = E.shape[0]
     # environment with bra indices traced out (i.e. half uncompressed)
     Ek = ctg.array_contract((E,), (("kl", "kr", "X", "X"),), ("kl", "kr"))
     # for distance calculation, compute <A|A>, which is constant
-    yAA = do("abs", ctg.array_contract((Ek,), (("X", "X"),), ()))
+    xp = get_namespace(E)
+    yAA = xp.abs(ctg.array_contract((Ek,), (("X", "X"),), ()))
 
     # initial guess for projectors
 
@@ -3620,8 +3623,8 @@ def compute_bondenv_projectors(
             Pl = torch.randn(d, max_bond, dtype=E.dtype, device=E.device)
             Pr = torch.linalg.pinv(Pl)
         else:
-            Pl = do("random.normal", size=(d, max_bond), like=E)
-            Pr = do("linalg.pinv", Pl)
+            Pl = xp.random.normal(size=(d, max_bond))
+            Pr = xp.linalg.pinv(Pl)
 
     elif init == "reduced":
         from .tensor_core import Tensor
@@ -3680,8 +3683,8 @@ def compute_bondenv_projectors(
 
         elif condition:
             # match projector norms
-            nrml = do("linalg.norm", Pl)
-            nrmr = do("linalg.norm", Pr)
+            nrml = xp.linalg.norm(Pl)
+            nrmr = xp.linalg.norm(Pr)
             Pl = Pl * (nrmr**0.5 / nrml**0.5)
             Pr = Pr * (nrml**0.5 / nrmr**0.5)
 
@@ -3709,8 +3712,8 @@ def compute_bondenv_projectors(
         )
 
         if blocksparse:
-            A, b = do("align_axes", A, b, axes=((0, 1), (0, 1)))
-            A, b = do("align_axes", A, b, axes=((2, 3), (0, 1)))
+            A, b = xp.align_axes(A, b, axes=((0, 1), (0, 1)))
+            A, b = xp.align_axes(A, b, axes=((2, 3), (0, 1)))
 
         # get pre-fuse shape as `d` might have changed
         Pl_shape = b.shape
@@ -3754,8 +3757,8 @@ def compute_bondenv_projectors(
         )
 
         if blocksparse:
-            A, b = do("align_axes", A, b, axes=((0, 1), (0, 1)))
-            A, b = do("align_axes", A, b, axes=((2, 3), (0, 1)))
+            A, b = xp.align_axes(A, b, axes=((0, 1), (0, 1)))
+            A, b = xp.align_axes(A, b, axes=((2, 3), (0, 1)))
 
         # get pre-fuse shape as `d` might have changed
         Pr_shape = b.shape
