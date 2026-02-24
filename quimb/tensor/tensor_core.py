@@ -9388,7 +9388,7 @@ class TensorNetwork:
         contract_opts : dict, optional
             Explicit options for contracting the projectors to pass to
             :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
-            set here take precedence over any defaults.
+            set here take precedence over any defaults such as ``optimize``.
         reduce_opts : dict, optional
             Explicit options to pass to :func:`squared_op_to_reduced_factor`,
             for example ``method="cholesky"``. Values set here take precedence

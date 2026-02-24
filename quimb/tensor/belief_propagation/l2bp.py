@@ -3,7 +3,7 @@ import math
 import autoray as ar
 
 import quimb.tensor as qtn
-from quimb.utils import oset
+from quimb.utils import ensure_dict, oset
 
 from .bp_common import (
     BeliefPropagationCommon,
@@ -393,10 +393,20 @@ class L2BP(BeliefPropagationCommon):
         cutoff_mode="rsum2",
         renorm=0,
         lazy=False,
+        reduce_opts=None,
+        compress_opts=None,
+        **kwargs,
     ):
         """Compress the state ``tn``, assumed to matched this L2BP instance,
         using the messages stored.
         """
+        reduce_opts = ensure_dict(reduce_opts)
+        compress_opts = kwargs | ensure_dict(compress_opts)
+        compress_opts.setdefault("max_bond", max_bond)
+        compress_opts.setdefault("cutoff", cutoff)
+        compress_opts.setdefault("cutoff_mode", cutoff_mode)
+        compress_opts.setdefault("renorm", renorm)
+
         for (i, j), bix in self.edges.items():
             tml = self.messages[i, j]
             tmr = self.messages[j, i]
@@ -407,22 +417,17 @@ class L2BP(BeliefPropagationCommon):
             ml = ar.reshape(tml.data, (dm, dm))
             dl = self.local_tns[i].outer_size() // dm
             Rl = qtn.decomp.squared_op_to_reduced_factor(
-                ml, dl, dm, right=True
+                ml, dl, dm, right=True, **reduce_opts
             )
 
             mr = ar.reshape(tmr.data, (dm, dm)).T
             dr = self.local_tns[j].outer_size() // dm
             Rr = qtn.decomp.squared_op_to_reduced_factor(
-                mr, dm, dr, right=False
+                mr, dm, dr, right=False, **reduce_opts
             )
 
             Pl, Pr = qtn.decomp.compute_oblique_projectors(
-                Rl,
-                Rr,
-                cutoff_mode=cutoff_mode,
-                renorm=renorm,
-                max_bond=max_bond,
-                cutoff=cutoff,
+                Rl, Rr, **compress_opts
             )
 
             Pl = ar.do("reshape", Pl, (*bix_sizes, -1))

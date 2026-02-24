@@ -2791,11 +2791,10 @@ def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
 
     if shift < 0.0:
         # auto compute
-        eps = xp.finfo(x.dtype).eps
-        shift = xp.linalg.norm(x) * eps
-        x = x + shift * xp.eye(x.shape[0])
-    elif shift > 0.0:
-        x = x + shift * xp.eye(x.shape[0])
+        shift = xp.finfo(x.dtype).eps
+
+    if shift > 0.0:
+        x = x + shift * xp.trace(x) * xp.eye(x.shape[0])
 
     L = xp.linalg.cholesky(x)
 
@@ -2809,8 +2808,10 @@ def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
 
 @register_split_driver("cholesky")
 @compose
-def cholesky(x, absorb=get_Usq_sqVH):
-    """Cholesky decomposition, only works if ``x`` is positive definite.
+def cholesky_regularized(x, absorb=get_Usq_sqVH, shift="auto"):
+    """Cholesky decomposition, only works if ``x`` is positive definite. The
+    ``shift`` parameter controls optional regularization for close to
+    singular matrices.
 
     Parameters
     ----------
@@ -2823,6 +2824,19 @@ def cholesky(x, absorb=get_Usq_sqVH):
         - ``"lsqrt"`` or ``get_Usq``: return (L, None, None)
         - ``"rsqrt"`` or ``get_sqVH``: return (None, None, L^H)
 
+    shift : "auto", bool or float, optional
+        Whether to add a small shift to the diagonal of ``x`` for
+        regularization. The valid options are:
+
+        - ``"auto"``: try without shift, if it fails, then add a small shift
+          computed as ``trace(x) * eps``, ``eps`` is the machine epsilon for
+          the dtype of ``x``.
+        - ``True``: always add a small shift computed as above.
+        - ``False``: never add a shift, just try the Cholesky decomposition
+          directly.
+        - float: use the provided value as a relative shift, i.e. add
+          ``shift * trace(x)`` to the diagonal of ``x``.
+
     Returns
     -------
     left : array_like or None
@@ -2832,26 +2846,30 @@ def cholesky(x, absorb=get_Usq_sqVH):
         The conjugate transpose of L (L^H).
     """
     absorb = _ABSORB_MAP[absorb]
-    try:
-        # try without shift
-        return _cholesky_maybe_with_diag_shift(x, absorb)
-    except Exception as e:
-        warnings.warn(
-            f"Cholesky decomposition failed with error: {e}. "
-            "retrying with small regularization added to the diagonal."
-        )
-        return _cholesky_maybe_with_diag_shift(x, absorb, shift=-1.0)
+
+    if shift == "auto":
+        try:
+            # try without shift
+            return _cholesky_maybe_with_diag_shift(x, absorb, shift=0.0)
+        except Exception as e:
+            warnings.warn(
+                f"Cholesky decomposition failed with error: {e}. "
+                "retrying with small regularization added to the diagonal."
+            )
+            return _cholesky_maybe_with_diag_shift(x, absorb, shift=-1.0)
+
+    shift = {False: 0.0, True: -1.0}.get(shift, shift)
+    return _cholesky_maybe_with_diag_shift(x, absorb, shift=0.0)
 
 
 @njit  # pragma: no cover
 def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=0.0):
     if shift < 0.0:
         # auto compute
-        eps = np.finfo(x.dtype).eps
-        shift = np.linalg.norm(x) * eps
-        x = x + shift * np.eye(x.shape[0])
-    elif shift > 0.0:
-        x = x + shift * np.eye(x.shape[0])
+        shift = np.finfo(x.dtype).eps
+
+    if shift > 0.0:
+        x = x + shift * np.trace(x) * np.eye(x.shape[0])
 
     L = np.linalg.cholesky(x)
 
@@ -2863,17 +2881,21 @@ def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=0.0):
     return L, None, dag_numba(L)
 
 
-@cholesky.register("numpy")
-def cholesky_numpy(x, absorb=get_Usq_sqVH):
-    try:
-        # try without shift
-        return _cholesky_numba(x, absorb)
-    except np.linalg.LinAlgError as e:
-        warnings.warn(
-            f"Cholesky decomposition failed with error: {e}. "
-            "retrying with small regularization added to the diagonal."
-        )
-        return _cholesky_numba(x, absorb, shift=-1.0)
+@cholesky_regularized.register("numpy")
+def cholesky_numpy(x, absorb=get_Usq_sqVH, shift="auto"):
+    absorb = _ABSORB_MAP[absorb]
+    if shift == "auto":
+        try:
+            # try without shift
+            return _cholesky_numba(x, absorb, shift=0.0)
+        except Exception as e:
+            warnings.warn(
+                f"Cholesky decomposition failed with error: {e}. "
+                "retrying with small regularization added to the diagonal."
+            )
+            return _cholesky_numba(x, absorb, shift=-1.0)
+    shift = {False: 0.0, True: -1.0}.get(shift, shift)
+    return _cholesky_numba(x, absorb, shift=0.0)
 
 
 @register_split_driver("polar_right", isom="left", default_absorb=get_U_sVH)
@@ -3293,6 +3315,7 @@ def squared_op_to_reduced_factor(
     dr,
     right=True,
     method="eigh",
+    shift="auto",
     **kwargs,
 ):
     """Given the square, ``x2``, of an operator ``x``, compute either the left
@@ -3317,6 +3340,9 @@ def squared_op_to_reduced_factor(
         (``U @ s``).
     method : str, optional
         The method to use for the decomposition.
+    kwargs
+        Additional keyword arguments to pass to the decomposition method.
+        For example ``shift`` for the ``cholesky`` method.
 
     Returns
     -------
@@ -3346,7 +3372,11 @@ def squared_op_to_reduced_factor(
         absorb = get_Usq
 
     if method == "cholesky":
-        lsqrt, _, rsqrt = cholesky(x2, absorb=absorb)
+        lsqrt, _, rsqrt = cholesky_regularized(
+            x2,
+            absorb=absorb,
+            **kwargs,
+        )
 
     else:
         if method == "eigh":
@@ -3370,10 +3400,10 @@ def squared_op_to_reduced_factor(
 def compute_oblique_projectors(
     Rl,
     Rr,
-    max_bond,
-    cutoff,
+    max_bond=None,
+    cutoff=0.0,
     absorb="both",
-    cutoff_mode=cutoff_mode_rsum2,
+    cutoff_mode="rsum2",
     method="svd",
     **compress_opts,
 ):
@@ -3398,6 +3428,29 @@ def compute_oblique_projectors(
         The left reduced factor matrix.
     Rr : array
         The right reduced factor matrix.
+    max_bond : int, optional
+        The maximum bond dimension to compress to.
+    cutoff : float, optional
+        The singular value cutoff to use.
+    absorb : str or None, optional
+        Where to absorb the effective singular values into the projectors.
+        The options are:
+
+        - ``'both'`` / ``'Usq,sqVH'``: absorb ``sqrt(s)`` into both
+          projectors.
+        - ``'left'`` / ``'Us,VH'``: absorb ``s`` into the left projector,
+          leaving the right projector isometric (LQ-like).
+        - ``'right'`` / ``'U,sVH'``: absorb ``s`` into the right projector,
+          leaving the left projector isometric (QR-like).
+        - ``None`` / ``'U,s,VH'``: return ``s`` as a separate middle element.
+
+    cutoff_mode : str, optional
+        The cutoff mode to use when applying the cutoff.
+    method : str, optional
+        The method to use for the SVD decomposition when computing the
+        projectors.
+    compress_opts
+        Additional keyword arguments to pass to the SVD decomposition method.
 
     Returns
     -------
@@ -3408,7 +3461,6 @@ def compute_oblique_projectors(
     """
     if max_bond is None:
         max_bond = -1
-
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 

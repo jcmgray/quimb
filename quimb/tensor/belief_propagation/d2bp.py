@@ -6,7 +6,7 @@ import operator
 import autoray as ar
 
 import quimb.tensor as qtn
-from quimb.utils import oset
+from quimb.utils import ensure_dict, oset
 
 from .bp_common import (
     BeliefPropagationCommon,
@@ -767,12 +767,22 @@ class D2BP(BeliefPropagationCommon):
         self,
         max_bond,
         cutoff=0.0,
-        cutoff_mode=4,
+        cutoff_mode="rsum2",
         renorm=0,
+        reduce_opts=None,
+        compress_opts=None,
         inplace=False,
+        **kwargs,
     ):
         """Compress the initial tensor network using the current messages."""
         tn = self.tn if inplace else self.tn.copy()
+
+        reduce_opts = ensure_dict(reduce_opts)
+        compress_opts = kwargs | ensure_dict(compress_opts)
+        compress_opts.setdefault("max_bond", max_bond)
+        compress_opts.setdefault("cutoff", cutoff)
+        compress_opts.setdefault("cutoff_mode", cutoff_mode)
+        compress_opts.setdefault("renorm", renorm)
 
         for ix, tids in tn.ind_map.items():
             if len(tids) != 2:
@@ -785,24 +795,19 @@ class D2BP(BeliefPropagationCommon):
             dl = ta.size // dm
             ml = self.messages[ix, tidb]
             Rl = qtn.decomp.squared_op_to_reduced_factor(
-                ml, dl, dm, right=True
+                ml, dl, dm, right=True, **reduce_opts
             )
 
             tb = tn.tensor_map[tidb]
             dr = tb.size // dm
             mr = self.messages[ix, tida].T
             Rr = qtn.decomp.squared_op_to_reduced_factor(
-                mr, dm, dr, right=False
+                mr, dm, dr, right=False, **reduce_opts
             )
 
             # compute the compressors
             Pl, Pr = qtn.decomp.compute_oblique_projectors(
-                Rl,
-                Rr,
-                max_bond=max_bond,
-                cutoff=cutoff,
-                cutoff_mode=cutoff_mode,
-                renorm=renorm,
+                Rl, Rr, **compress_opts
             )
 
             # contract the compressors into the tensors
