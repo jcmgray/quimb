@@ -3382,6 +3382,8 @@ class TensorNetwork2D(TensorNetworkGen):
         lazy=False,
         equalize_norms=False,
         optimize="auto-hq",
+        contract_opts=None,
+        reduce_opts=None,
         compress_opts=None,
         inplace=False,
     ):
@@ -3406,9 +3408,14 @@ class TensorNetwork2D(TensorNetworkGen):
         optimize : str, optional
             The optimization method to use when contracting the coarse grained
             lattice, if ``lazy=False``.
+        contract_opts : None or dict, optional
+            Explicit contraction options supplied to
+            :meth:`~quimb.tensor.TensorNetwork.insert_compressor_between_regions`
+            when forming the projectors. Values here take precedence over
+            other defaults.
         compress_opts : None or dict, optional
             Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions`.
+            :meth:`~quimb.tensor.TensorNetwork.insert_compressor_between_regions`
         inplace : bool, optional
             Whether to perform the coarse graining in place.
 
@@ -3422,8 +3429,16 @@ class TensorNetwork2D(TensorNetworkGen):
         --------
         contract_hotrg, TensorNetwork.insert_compressor_between_regions
         """
-        compress_opts = ensure_dict(compress_opts)
         check_opt("direction", direction, ("x", "y"))
+
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
+
+        reduce_opts = ensure_dict(reduce_opts)
+
+        compress_opts = ensure_dict(compress_opts)
+        compress_opts.setdefault("max_bond", max_bond)
+        compress_opts.setdefault("cutoff", cutoff)
 
         tn = self if inplace else self.copy()
 
@@ -3473,13 +3488,13 @@ class TensorNetwork2D(TensorNetworkGen):
                     tn_calc.insert_compressor_between_regions(
                         ltags,
                         rtags,
-                        max_bond=max_bond,
-                        cutoff=cutoff,
                         insert_into=tn,
                         new_ltags=ltags,
                         new_rtags=rtags,
                         gauges=gauges,
-                        **compress_opts,
+                        contract_opts=contract_opts,
+                        reduce_opts=reduce_opts,
+                        compress_opts=compress_opts,
                     )
 
             retag_map[r.x_tag(i)] = r.x_tag(i // 2)
@@ -3499,7 +3514,7 @@ class TensorNetwork2D(TensorNetworkGen):
         if not lazy:
             # contract each pair of tensors with their projectors
             for st in tn.site_tags:
-                tn.contract_tags_(st, optimize=optimize)
+                tn.contract_tags_(st, **contract_opts)
 
         if equalize_norms:
             tn.equalize_norms_(value=equalize_norms)

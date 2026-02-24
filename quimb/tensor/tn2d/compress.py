@@ -71,7 +71,7 @@ def tensor_network_2d_compress(
             optimize=optimize,
             equalize_norms=equalize_norms,
             inplace=inplace,
-            **compress_opts,
+            compress_opts=compress_opts,
             **kwargs,
         )
     except KeyError:
@@ -86,7 +86,7 @@ def tensor_network_2d_compress(
             optimize=optimize,
             equalize_norms=equalize_norms,
             inplace=inplace,
-            **compress_opts,
+            compress_opts=compress_opts,
             **kwargs,
         )
 

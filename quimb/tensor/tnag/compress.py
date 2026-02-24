@@ -22,8 +22,10 @@ def tensor_network_ag_compress_projector(
     canonize=True,
     canonize_opts=None,
     lazy=False,
-    optimize="auto-hq",
     equalize_norms=False,
+    optimize="auto-hq",
+    contract_opts=None,
+    reduce_opts=None,
     compress_opts=None,
     inplace=False,
     **kwargs,
@@ -58,6 +60,13 @@ def tensor_network_ag_compress_projector(
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is give, then the norms will be set to that value, and
         the overall scaling factor will be accumulated into `.exponent`.
+    contract_opts : dict, optional
+        Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.to_dense`
+        when contracting the projectors. Values set here take precedence over
+        any defaults.
+    reduce_opts : dict, optional
+        Supplied to :func:`squared_op_to_reduced_factor` when computing the
+        projectors. Values set here take precedence over any defaults.
     compress_opts : dict, optional
         Supplied to
         :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions_`
@@ -73,6 +82,11 @@ def tensor_network_ag_compress_projector(
     -------
     TensorNetwork
     """
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
+
+    reduce_opts = ensure_dict(reduce_opts)
+
     compress_opts = kwargs | ensure_dict(compress_opts)
     compress_opts.setdefault("max_bond", max_bond)
     compress_opts.setdefault("cutoff", cutoff)
@@ -130,14 +144,15 @@ def tensor_network_ag_compress_projector(
             new_rtags=[tagb],
             insert_into=tn,
             gauges=gauges,
-            optimize=optimize,
-            **compress_opts,
+            contract_opts=contract_opts,
+            reduce_opts=reduce_opts,
+            compress_opts=compress_opts,
         )
 
     if not lazy:
         # then contract each site with all surrounding projectors
         for st in site_tags:
-            tn.contract_(st, optimize=optimize)
+            tn.contract_(st, **contract_opts)
 
     # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:

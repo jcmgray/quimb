@@ -438,6 +438,11 @@ _DEPRECATED_SUBMODULES = {
     "tensor_mera": ".tensor_mera",
 }
 
+# vscode debugging and test runner has issues with the custom __getattr__ and
+# __dir__ unless we set these attributes
+__bases__ = ()
+__test__ = False
+
 
 def __getattr__(name):
     if name in _DEPRECATED_SUBMODULES:

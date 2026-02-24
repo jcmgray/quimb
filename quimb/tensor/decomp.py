@@ -1498,6 +1498,11 @@ def eigh_truncated(
         s = xp.flip(s)
         U = xp.flip(U, axis=1)
 
+        if absorb in (get_Usq_sqVH, get_Usq, get_sqVH):
+            # operator assumed positive, but small negative eignvalues
+            # will cause problems when taking sqrt, so clip to zero
+            s = xp.clip(s, 0.0, None)
+
     VH = dag(U)
 
     # XXX: better to absorb phase in V and return positive 'values'?
@@ -1541,6 +1546,12 @@ def eigh_truncated_numba(
     else:
         s = s[::-1]
         U = U[:, ::-1]
+
+        if absorb == get_Usq_sqVH or absorb == get_Usq or absorb == get_sqVH:
+            # operator assumed positive, but small negative eignvalues
+            # will cause problems when taking sqrt, so clip to zero
+            s[s < 0.0] = 0.0
+
     VH = dag_numba(U)
 
     # XXX: better to absorb phase in V and return positive 'values'?
@@ -2665,7 +2676,15 @@ def rsvd(
     xp = get_namespace(x)
     U, s, VH = xp.linalg.rsvd(x, max_bond)
     return _trim_and_renorm_svd_result(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm, xp=xp,
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        xp=xp,
     )
 
 
@@ -3329,57 +3348,23 @@ def squared_op_to_reduced_factor(
     if method == "cholesky":
         lsqrt, _, rsqrt = cholesky(x2, absorb=absorb)
 
-    if method == "eigh":
-        kwargs.setdefault("positive", 1)
+    else:
+        if method == "eigh":
+            kwargs.setdefault("positive", 1)
 
-    lsqrt, _, rsqrt = array_split(
-        x2,
-        max_bond=keep,
-        cutoff=0.0,
-        absorb=absorb,
-        method=method,
-        **kwargs,
-    )
+        lsqrt, _, rsqrt = array_split(
+            x2,
+            max_bond=keep,
+            cutoff=0.0,
+            absorb=absorb,
+            method=method,
+            **kwargs,
+        )
 
-    if rsqrt:
+    if right:
         return rsqrt
     else:
         return lsqrt
-
-
-@squared_op_to_reduced_factor.register("numpy")
-@njit  # pragma: no cover
-def squared_op_to_reduced_factor_numba(x2, dl, dr, right=True):
-    s2, W = np.linalg.eigh(x2)
-
-    if right:
-        if dl < dr:
-            # know exactly low-rank, so truncate
-            keep = dl
-        else:
-            keep = None
-    else:
-        if dl > dr:
-            # know exactly low-rank, so truncate
-            keep = dr
-        else:
-            keep = None
-
-    if keep is not None:
-        # outer dimension smaller -> exactly low-rank
-        s2 = s2[-keep:]
-        W = W[:, -keep:]
-
-    # might have negative eigenvalues due to numerical error from squaring
-    s2 = np.clip(s2, 0.0, None)
-    s = np.sqrt(s2)
-
-    if right:
-        factor = ldmul_numba(s, dag_numba(W))
-    else:  # 'left'
-        factor = rdmul_numba(W, s)
-
-    return factor
 
 
 def compute_oblique_projectors(

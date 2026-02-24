@@ -1861,6 +1861,86 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **contract_boundary_opts,
     ):
+        """Contract this 3D tensor network using the 3D finite analog of the
+        CTMRG algorithm - https://arxiv.org/abs/cond-mat/9507087. The TN is
+        contracted sequentially in ``sequence`` directions by inserting oblique
+        projectors between boundary pairs, and then optionally contracting
+        these new effective sites. The algorithm stops when enough directions
+        have a length no larger than ``max_separation + 1``, and thus exact
+        contraction can be used.
+
+        Parameters
+        ----------
+        max_bond : int, optional
+            The maximum bond dimension of the projector pairs inserted.
+        cutoff : float, optional
+            The cutoff for the singular values of the projector pairs.
+        canonize : bool, optional
+            Whether to canonize the boundary tensors before each contraction.
+        canonize_opts : None or dict, optional
+            Additional options for canonization.
+        lazy : bool, optional
+            Whether to contract the coarse graining projectors or leave them
+            in the tensor network lazily. Default is to contract them.
+        mode : str, optional
+            The method to perform the boundary contraction. Defaults to
+            ``'projector'``.
+        compress_opts : None or dict, optional
+            Other low level options to pass to
+            :meth:`insert_compressor_between_regions`.
+        sequence : sequence of str, optional
+            Which directions to cycle through when performing the inwards
+            contractions, i.e. *from* that direction. Default is to contract
+            in all directions.
+        xmin : int, optional
+            The initial bottom boundary row, defaults to 0.
+        xmax : int, optional
+            The initial top boundary row, defaults to ``Lx - 1``.
+        ymin : int, optional
+            The initial left boundary column, defaults to 0.
+        ymax : int, optional
+            The initial right boundary column, defaults to ``Ly - 1``.
+        zmin : int, optional
+            The initial front boundary layer, defaults to 0.
+        zmax : int, optional
+            The initial back boundary layer, defaults to ``Lz - 1``.
+        max_separation : int, optional
+            If ``around is None``, when any two sides become this far apart
+            simply contract the remaining tensor network.
+        max_unfinished : int, optional
+            The maximum number of directions that can be unfinished before the
+            contraction terminates.
+        around : None or sequence of (int, int, int), optional
+            If given, don't contract the cube of sites bounding these
+            coordinates.
+        equalize_norms : bool or float, optional
+            Whether to equalize the norms of the boundary tensors after each
+            contraction, gathering the overall scaling coefficient, log10, in
+            ``tn.exponent``.
+        final_contract : bool, optional
+            Whether to exactly contract the remaining tensor network after the
+            boundary contraction.
+        final_contract_opts : None or dict, optional
+            Options to pass to :meth:`contract`, ``optimize`` defaults to
+            ``'auto-hq'``.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        inplace : bool, optional
+            Whether to perform the boundary contraction in place.
+        contract_boundary_opts
+            Additional options to pass to :meth:`contract_boundary_from`.
+
+        Returns
+        -------
+        scalar or TensorNetwork3D
+            Either the fully contracted scalar (if ``final_contract=True`` and
+            ``around=None``) or the partially contracted tensor network.
+
+        See Also
+        --------
+        contract_boundary_from, contract_hotrg,
+        TensorNetwork.insert_compressor_between_regions
+        """
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["mode"] = mode
@@ -2396,8 +2476,8 @@ def cell_to_sites(p):
     Examples
     --------
 
-        >>> cell_to_sites([(3, 4), (2, 2)])
-        ((3, 4), (3, 5), (4, 4), (4, 5))
+        >>> cell_to_sites([(3, 4, 5), (2, 2, 1)])
+        ((3, 4, 5), (3, 5, 5), (4, 4, 5), (4, 5, 5))
     """
     (i0, j0, k0), (di, dj, dk) = p
     return tuple(

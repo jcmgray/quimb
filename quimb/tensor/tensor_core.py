@@ -9239,7 +9239,9 @@ class TensorNetwork:
         left_inds,
         right_inds,
         optimize="auto-hq",
-        **contract_opts,
+        contract_opts=None,
+        reduce_opts=None,
+        **kwargs,
     ):
         """Compute either the left or right 'reduced factor' of this tensor
         network. I.e., view as an operator, ``X``, mapping ``left_inds`` to
@@ -9259,15 +9261,30 @@ class TensorNetwork:
             The indices forming the left side of the operator.
         right_inds : sequence of str
             The indices forming the right side of the operator.
+        optimize : str or PathOptimizer, optional
+            How to optimize the contraction of the squared operator. Note any
+            value in ``contract_opts`` will take precedence over this.
         contract_opts : dict, optional
             Options to pass to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.to_dense`.
+        reduce_opts : dict, optional
+            Options to pass to :func:`squared_op_to_reduced_factor`, for
+            example ``method="cholesky"``.
+        kwargs
+            Extra keyword arguments are combined into `contract_opts`, though
+            existing items in `contract_opts` take precedence over `kwargs`.
+
 
         Returns
         -------
         array_like
         """
         check_opt("side", side, ("left", "right"))
+
+        contract_opts = kwargs | ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
+
+        reduce_opts = ensure_dict(reduce_opts)
 
         if left_inds is None:
             right_inds = tags_to_oset(right_inds)
@@ -9300,10 +9317,14 @@ class TensorNetwork:
 
         # contract to dense array
         tnd = self.reindex(ixmap).conj_() & self
-        XX = tnd.to_dense(lix, rix, optimize=optimize, **contract_opts)
+        XX = tnd.to_dense(lix, rix, **contract_opts)
 
         return squared_op_to_reduced_factor(
-            XX, d0, d1, right=(side == "right")
+            XX,
+            d0,
+            d1,
+            right=(side == "right"),
+            **reduce_opts,
         )
 
     def insert_compressor_between_regions(
@@ -9324,8 +9345,11 @@ class TensorNetwork:
         gauge_smudge=0.0,
         gauge_power=1.0,
         optimize="auto-hq",
+        contract_opts=None,
+        reduce_opts=None,
+        compress_opts=None,
         inplace=False,
-        **compress_opts,
+        **kwargs,
     ):
         """Compute and insert a pair of 'oblique' projection tensors (see for
         example https://arxiv.org/abs/1905.02351) that effectively compresses
@@ -9359,11 +9383,26 @@ class TensorNetwork:
         new_rtags : str or sequence of str, optional
             The tag(s) to add to the new right projection tensor.
         optimize : str or PathOptimizer, optional
-            How to optimize the contraction of the projection tensors.
+            How to optimize the contraction of the projection tensors. Note any
+            value in ``contract_opts`` will take precedence over this.
+        contract_opts : dict, optional
+            Explicit options for contracting the projectors to pass to
+            :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
+            set here take precedence over any defaults.
+        reduce_opts : dict, optional
+            Explicit options to pass to :func:`squared_op_to_reduced_factor`,
+            for example ``method="cholesky"``. Values set here take precedence
+            over any defaults.
+        compress_opts : dict, optional
+            Explicit options to pass to :func:`compute_oblique_projectors`.
+            Values set here take precedence over any defaults.
         inplace : bool, optional
             Whether perform the insertion in-place. If ``insert_into`` is
             supplied then this doesn't matter, and that tensor network will
             be modified and returned.
+        kwargs
+            Extra keyword arguments are combined into `compress_opts`, though
+            existing items in `compress_opts` take precedence over `kwargs`.
 
         Returns
         -------
@@ -9373,8 +9412,16 @@ class TensorNetwork:
         --------
         compute_reduced_factor, select
         """
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
+
+        compress_opts = kwargs | ensure_dict(compress_opts)
         if compress_opts.pop("absorb", "both") != "both":
             raise NotImplementedError("Only `absorb=both` supported.")
+        compress_opts.setdefault("max_bond", max_bond)
+        compress_opts.setdefault("cutoff", cutoff)
+
+        reduce_opts = ensure_dict(reduce_opts)
 
         if bond_ind is None:
             bond_ind = rand_uuid()
@@ -9408,20 +9455,22 @@ class TensorNetwork:
         if mode == "oblique":
             # contract the reduced factors
             Rl = ltn.compute_reduced_factor(
-                "right", None, bix, optimize=optimize
+                "right",
+                None,
+                bix,
+                contract_opts=contract_opts,
+                reduce_opts=reduce_opts,
             )
             Rr = rtn.compute_reduced_factor(
-                "left", bix, None, optimize=optimize
+                "left",
+                bix,
+                None,
+                contract_opts=contract_opts,
+                reduce_opts=reduce_opts,
             )
 
             # then form the 'oblique' projectors
-            Pl, Pr = compute_oblique_projectors(
-                Rl,
-                Rr,
-                max_bond=max_bond,
-                cutoff=cutoff,
-                **compress_opts,
-            )
+            Pl, Pr = compute_oblique_projectors(Rl, Rr, **compress_opts)
         elif mode == "nystrom":
             from .decomp import ldmul, rdmul, svd_truncated
             from .tensor_builder import rand_tensor
@@ -9456,22 +9505,17 @@ class TensorNetwork:
                 all, optimize="auto-hq", output_inds=(*bix, ixbr)
             )
 
-            Ml = tml.to_dense((ixbl,), bix)
-            Mr = tmr.to_dense(bix, (ixbr,))
+            Ml = tml.to_dense((ixbl,), bix, **contract_opts)
+            Mr = tmr.to_dense(bix, (ixbr,), **contract_opts)
 
-            U, s, VH = svd_truncated(
-                Ml @ Mr,
-                cutoff=cutoff,
-                max_bond=max_bond,
-                absorb=None,
-                **compress_opts,
-            )
+            U, s, VH = svd_truncated(Ml @ Mr, absorb=None, **compress_opts)
             sqi = s**-0.5
             Pl = Mr @ rdmul(dag(VH), sqi)
             Pr = ldmul(sqi, dag(U)) @ Ml
         else:
             raise ValueError(f"mode `{mode}` is invalid.")
 
+        # now we rewire the prjectors back into the network
         Pl = do("reshape", Pl, (*bix_sizes, -1))
         Pr = do("reshape", Pr, (-1, *bix_sizes))
 
