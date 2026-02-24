@@ -3315,7 +3315,6 @@ def squared_op_to_reduced_factor(
     dr,
     right=True,
     method="eigh",
-    shift="auto",
     **kwargs,
 ):
     """Given the square, ``x2``, of an operator ``x``, compute either the left
@@ -3372,6 +3371,13 @@ def squared_op_to_reduced_factor(
         absorb = get_Usq
 
     if method == "cholesky":
+        if keep != -1:
+            # XXX: fallback to eigh here?
+            warnings.warn(
+                "Operator is exactly low rank, but cholesky method "
+                "doesn't support truncation, so ignoring `max_bond`."
+            )
+
         lsqrt, _, rsqrt = cholesky_regularized(
             x2,
             absorb=absorb,
