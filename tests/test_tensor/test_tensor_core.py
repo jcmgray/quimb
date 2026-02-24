@@ -1816,7 +1816,8 @@ class TestTensorNetwork:
         xs = mps.to_dense().ravel()
         assert not any(np.allclose(rx, x) for x in xs)
 
-    def test_insert_compressor_between_regions(self):
+    @pytest.mark.parametrize("method_reduce", ["eigh", "svd", "cholesky"])
+    def test_insert_compressor_between_regions(self, method_reduce):
         inputs = ["abgl", "gfhim", "bcdfe", "iekj"]
         tags = ["A", "C", "B", "D"]
         size_dict = {ix: 2 for ix in set("".join(inputs))}
@@ -1849,6 +1850,7 @@ class TestTensorNetwork:
             ["A", "B"],
             ["C", "D"],
             max_bond=4,
+            reduce_opts=dict(method=method_reduce),
         )
         assert tn.geometry_hash() == gh
         assert tn_other.num_tensors == 6

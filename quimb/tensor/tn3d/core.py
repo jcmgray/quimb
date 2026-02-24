@@ -1843,7 +1843,6 @@ class TensorNetwork3D(TensorNetworkGen):
         canonize_opts=None,
         lazy=False,
         mode="projector",
-        compress_opts=None,
         sequence=None,
         xmin=None,
         xmax=None,
@@ -1855,6 +1854,10 @@ class TensorNetwork3D(TensorNetworkGen):
         max_unfinished=1,
         around=None,
         equalize_norms=False,
+        optimize="auto-hq",
+        contract_opts=None,
+        reduce_opts=None,
+        compress_opts=None,
         final_contract=True,
         final_contract_opts=None,
         progbar=False,
@@ -1885,9 +1888,6 @@ class TensorNetwork3D(TensorNetworkGen):
         mode : str, optional
             The method to perform the boundary contraction. Defaults to
             ``'projector'``.
-        compress_opts : None or dict, optional
-            Other low level options to pass to
-            :meth:`insert_compressor_between_regions`.
         sequence : sequence of str, optional
             Which directions to cycle through when performing the inwards
             contractions, i.e. *from* that direction. Default is to contract
@@ -1917,12 +1917,26 @@ class TensorNetwork3D(TensorNetworkGen):
             Whether to equalize the norms of the boundary tensors after each
             contraction, gathering the overall scaling coefficient, log10, in
             ``tn.exponent``.
+        optimize : str or PathOptimizer, optional
+            How to optimize the contraction of the projection tensors. Note any
+            value in ``contract_opts`` will take precedence over this.
+        contract_opts : dict, optional
+            Explicit options for contracting the projectors to pass to
+            :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
+            set here take precedence over any defaults such as ``optimize``.
+        reduce_opts : dict, optional
+            Explicit options to pass to :func:`squared_op_to_reduced_factor`,
+            for example ``method="cholesky"``. Values set here take precedence
+            over any defaults.
+        compress_opts : dict, optional
+            Explicit options to pass to :func:`compute_oblique_projectors`.
+            Values set here take precedence over any defaults.
         final_contract : bool, optional
             Whether to exactly contract the remaining tensor network after the
             boundary contraction.
         final_contract_opts : None or dict, optional
-            Options to pass to :meth:`contract`, ``optimize`` defaults to
-            ``'auto-hq'``.
+            Options to pass to :meth:`contract`, if ``final_contract=True``.
+            Defaults to same as ``contract_opts``.
         progbar : bool, optional
             Whether to show a progress bar.
         inplace : bool, optional
@@ -1941,9 +1955,19 @@ class TensorNetwork3D(TensorNetworkGen):
         contract_boundary_from, contract_hotrg,
         TensorNetwork.insert_compressor_between_regions
         """
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
+        if final_contract_opts is None:
+            final_contract_opts = contract_opts
+        else:
+            final_contract_opts = ensure_dict(final_contract_opts)
+            final_contract_opts.setdefault("optimize", optimize)
+
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["contract_opts"] = contract_opts
+        contract_boundary_opts["reduce_opts"] = reduce_opts
         contract_boundary_opts["compress_opts"] = compress_opts
         contract_boundary_opts["lazy"] = lazy
         contract_boundary_opts["canonize"] = canonize
@@ -2134,6 +2158,8 @@ class TensorNetwork3D(TensorNetworkGen):
         lazy=False,
         equalize_norms=False,
         optimize="auto-hq",
+        contract_opts=None,
+        reduce_opts=None,
         compress_opts=None,
         inplace=False,
     ):
@@ -2160,12 +2186,20 @@ class TensorNetwork3D(TensorNetworkGen):
         equalize_norms : bool, optional
             Whether to equalize the norms of the tensors in the coarse grained
             lattice.
-        optimize : str, optional
-            The optimization method to use when contracting the coarse grained
-            lattice, if ``lazy=False``.
-        compress_opts : None or dict, optional
-            Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions`.
+        optimize : str or PathOptimizer, optional
+            How to optimize the contraction of the projection tensors. Note any
+            value in ``contract_opts`` will take precedence over this.
+        contract_opts : dict, optional
+            Explicit options for contracting the projectors to pass to
+            :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
+            set here take precedence over any defaults such as ``optimize``.
+        reduce_opts : dict, optional
+            Explicit options to pass to :func:`squared_op_to_reduced_factor`,
+            for example ``method="cholesky"``. Values set here take precedence
+            over any defaults.
+        compress_opts : dict, optional
+            Explicit options to pass to :func:`compute_oblique_projectors`.
+            Values set here take precedence over any defaults.
         inplace : bool, optional
             Whether to perform the coarse graining in place.
 
@@ -2179,8 +2213,10 @@ class TensorNetwork3D(TensorNetworkGen):
         --------
         contract_hotrg, insert_compressor_between_regions
         """
-        compress_opts = ensure_dict(compress_opts)
         check_opt("direction", direction, ("x", "y", "z"))
+
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
 
         tn = self if inplace else self.copy()
 
@@ -2247,7 +2283,9 @@ class TensorNetwork3D(TensorNetworkGen):
                             max_bond=max_bond,
                             cutoff=cutoff,
                             gauges=gauges,
-                            **compress_opts,
+                            contract_opts=contract_opts,
+                            reduce_opts=reduce_opts,
+                            compress_opts=compress_opts,
                         )
 
             retag_map[r.x_tag(i)] = r.x_tag(i // 2)
@@ -2269,7 +2307,7 @@ class TensorNetwork3D(TensorNetworkGen):
         if not lazy:
             # contract each pair of tensors with their projectors
             for st in tn.site_tags:
-                tn.contract_tags_(st, optimize=optimize)
+                tn.contract_tags_(st, **contract_opts)
 
         if equalize_norms:
             tn.equalize_norms_(value=equalize_norms)
@@ -2292,6 +2330,10 @@ class TensorNetwork3D(TensorNetworkGen):
         max_unfinished=1,
         lazy=False,
         equalize_norms=False,
+        optimize="auto-hq",
+        contract_opts=None,
+        reduce_opts=None,
+        compress_opts=None,
         final_contract=True,
         final_contract_opts=None,
         progbar=False,
@@ -2335,12 +2377,26 @@ class TensorNetwork3D(TensorNetworkGen):
         equalize_norms : bool or float, optional
             Whether to equalize the norms of the tensors in the tensor network
             after each coarse graining step.
+        optimize : str or PathOptimizer, optional
+            How to optimize the contraction of the projection tensors. Note any
+            value in ``contract_opts`` will take precedence over this.
+        contract_opts : dict, optional
+            Explicit options for contracting the projectors to pass to
+            :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
+            set here take precedence over any defaults such as ``optimize``.
+        reduce_opts : dict, optional
+            Explicit options to pass to :func:`squared_op_to_reduced_factor`,
+            for example ``method="cholesky"``. Values set here take precedence
+            over any defaults.
+        compress_opts : dict, optional
+            Explicit options to pass to :func:`compute_oblique_projectors`.
+            Values set here take precedence over any defaults.
         final_contract : bool, optional
             Whether to exactly contract the remaining tensor network after the
             coarse graining contractions.
         final_contract_opts : None or dict, optional
-            Options to pass to :meth:`contract`, ``optimize`` defaults to
-            ``'auto-hq'``.
+            Options to pass to :meth:`contract`, if ``final_contract=True``.
+            Defaults to same as ``contract_opts``.
         progbar : bool, optional
             Whether to show a progress bar.
         inplace : bool, optional
@@ -2359,6 +2415,9 @@ class TensorNetwork3D(TensorNetworkGen):
         coarse_grain_hotrg, insert_compressor_between_regions
         """
         tn = self if inplace else self.copy()
+
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
 
         if lazy:
             # we are implicitly asking for the tensor network
@@ -2401,6 +2460,9 @@ class TensorNetwork3D(TensorNetworkGen):
                 cutoff=cutoff,
                 lazy=lazy,
                 equalize_norms=equalize_norms,
+                contract_opts=contract_opts,
+                reduce_opts=reduce_opts,
+                compress_opts=compress_opts,
                 **coarse_grain_opts,
             )
 
@@ -2422,9 +2484,12 @@ class TensorNetwork3D(TensorNetworkGen):
             pbar.close()
 
         if final_contract:
-            final_contract_opts = ensure_dict(final_contract_opts)
-            final_contract_opts.setdefault("optimize", "auto-hq")
-            final_contract_opts.setdefault("inplace", inplace)
+            if final_contract_opts is None:
+                final_contract_opts = contract_opts
+            else:
+                final_contract_opts = ensure_dict(final_contract_opts)
+                final_contract_opts.setdefault("optimize", "auto-hq")
+                final_contract_opts.setdefault("inplace", inplace)
             return tn.contract(**final_contract_opts)
 
         return tn
