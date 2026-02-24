@@ -2317,6 +2317,7 @@ class TensorNetwork2D(TensorNetworkGen):
         equalize_norms=False,
         final_contract=True,
         final_contract_opts=None,
+        optimize="auto-hq",
         progbar=False,
         inplace=False,
     ):
@@ -2464,9 +2465,8 @@ class TensorNetwork2D(TensorNetworkGen):
 
         if final_contract and (around is None):
             final_contract_opts = ensure_dict(final_contract_opts)
-            final_contract_opts.setdefault("optimize", "auto-hq")
-            final_contract_opts.setdefault("inplace", inplace)
-            return tn.contract(**final_contract_opts)
+            final_contract_opts.setdefault("optimize", optimize)
+            return tn.contract(inplace=inplace, **final_contract_opts)
 
         return tn
 
@@ -3705,8 +3705,7 @@ class TensorNetwork2D(TensorNetworkGen):
             else:
                 final_contract_opts = ensure_dict(final_contract_opts)
                 final_contract_opts.setdefault("optimize", optimize)
-            final_contract_opts.setdefault("inplace", inplace)
-            return tn.contract(**final_contract_opts)
+            return tn.contract(inplace=inplace, **final_contract_opts)
 
         return tn
 

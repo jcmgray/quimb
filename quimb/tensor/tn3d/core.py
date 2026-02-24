@@ -1541,8 +1541,7 @@ class TensorNetwork3D(TensorNetworkGen):
         if final_contract and (around is None):
             final_contract_opts = ensure_dict(final_contract_opts)
             final_contract_opts.setdefault("optimize", optimize)
-            final_contract_opts.setdefault("inplace", inplace)
-            return tn.contract(**final_contract_opts)
+            return tn.contract(inplace=inplace, **final_contract_opts)
 
         return tn
 
@@ -2488,9 +2487,8 @@ class TensorNetwork3D(TensorNetworkGen):
                 final_contract_opts = contract_opts
             else:
                 final_contract_opts = ensure_dict(final_contract_opts)
-                final_contract_opts.setdefault("optimize", "auto-hq")
-                final_contract_opts.setdefault("inplace", inplace)
-            return tn.contract(**final_contract_opts)
+                final_contract_opts.setdefault("optimize", optimize)
+            return tn.contract(inplace=inplace, **final_contract_opts)
 
         return tn
 
