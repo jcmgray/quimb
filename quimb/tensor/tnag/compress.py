@@ -282,6 +282,7 @@ def tensor_network_ag_compress_local_early(
         for tidb in tnc._get_neighbor_tids(tida):
             tnc._compress_between_tids(tida, tidb, **compress_opts)
 
+    # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:
         tnc.equalize_norms_()
     elif equalize_norms:
@@ -382,6 +383,7 @@ def tensor_network_ag_compress_local_late(
 
     tnc.compress_all_(**compress_opts)
 
+    # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:
         tnc.equalize_norms_()
     elif equalize_norms:
@@ -466,6 +468,7 @@ def tensor_network_ag_compress_superorthogonal(
 
     tnc.compress_all_simple_(**compress_opts)
 
+    # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:
         tnc.equalize_norms_()
     elif equalize_norms:
@@ -551,6 +554,7 @@ def tensor_network_ag_compress_l2bp(
         tn, site_tags=site_tags, inplace=inplace, **compress_opts
     )
 
+    # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:
         tnc.equalize_norms_()
     elif equalize_norms:

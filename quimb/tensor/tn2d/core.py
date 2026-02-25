@@ -2314,7 +2314,8 @@ class TensorNetwork2D(TensorNetworkGen):
         max_separation=1,
         max_unfinished=1,
         around=None,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         final_contract=True,
         final_contract_opts=None,
         optimize="auto-hq",
@@ -2327,6 +2328,15 @@ class TensorNetwork2D(TensorNetworkGen):
         tn = self if inplace else self.copy()
 
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
+
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            if strip_exponent:
+                # but we won't redistribute norms (`True`) during contraction
+                equalize_norms = 1.0
+            else:
+                equalize_norms = False
 
         if progbar:
             pbar = Progbar()
@@ -2466,7 +2476,11 @@ class TensorNetwork2D(TensorNetworkGen):
         if final_contract and (around is None):
             final_contract_opts = ensure_dict(final_contract_opts)
             final_contract_opts.setdefault("optimize", optimize)
-            return tn.contract(inplace=inplace, **final_contract_opts)
+            return tn.contract(
+                strip_exponent=strip_exponent,
+                inplace=inplace,
+                **final_contract_opts,
+            )
 
         return tn
 
@@ -2487,7 +2501,8 @@ class TensorNetwork2D(TensorNetworkGen):
         max_separation=1,
         max_unfinished=1,
         around=None,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         final_contract=True,
         final_contract_opts=None,
         progbar=None,
@@ -2557,10 +2572,15 @@ class TensorNetwork2D(TensorNetworkGen):
         around : None or sequence of (int, int), optional
             If given, don't contract the square of sites bounding these
             coordinates.
-        equalize_norms : bool or float, optional
+        strip_exponent : bool, optional
+            Whether to strip an overall exponent, log10, from the *final*
+            contraction result. If ``True``, a tuple of ``(scalar, exponent)``
+            is returned instead of a single scalar.
+        equalize_norms : bool, float, or "auto", optional
             Whether to equalize the norms of the boundary tensors after each
             contraction, gathering the overall scaling coefficient, log10, in
-            ``tn.exponent``.
+            ``tn.exponent``. By default (``"auto"``) this follows
+            ``strip_exponent``.
         final_contract : bool, optional
             Whether to exactly contract the remaining tensor network after the
             boundary contraction.
@@ -2598,6 +2618,7 @@ class TensorNetwork2D(TensorNetworkGen):
             max_separation=max_separation,
             max_unfinished=max_unfinished,
             around=around,
+            strip_exponent=strip_exponent,
             equalize_norms=equalize_norms,
             final_contract=final_contract,
             final_contract_opts=final_contract_opts,
@@ -3393,7 +3414,8 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize=False,
         canonize_opts=None,
         lazy=False,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         optimize="auto-hq",
         contract_opts=None,
         reduce_opts=None,
@@ -3415,9 +3437,11 @@ class TensorNetwork2D(TensorNetworkGen):
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
-        equalize_norms : bool, optional
+        strip_exponent : bool, optional
+            If ``True``, enable norm equalization during the coarse graining.
+        equalize_norms : bool or "auto", optional
             Whether to equalize the norms of the tensors in the coarse grained
-            lattice.
+            lattice. By default (``"auto"``) this follows ``strip_exponent``.
         optimize : str, optional
             The optimization method to use when contracting the coarse grained
             lattice, if ``lazy=False``.
@@ -3446,6 +3470,15 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_hotrg, TensorNetwork.insert_compressor_between_regions
         """
         check_opt("direction", direction, ("x", "y"))
+
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            if strip_exponent:
+                # but we won't redistribute norms (`True`) during contraction
+                equalize_norms = 1.0
+            else:
+                equalize_norms = False
 
         contract_opts = ensure_dict(contract_opts)
         contract_opts.setdefault("optimize", optimize)
@@ -3552,7 +3585,8 @@ class TensorNetwork2D(TensorNetworkGen):
         max_separation=1,
         max_unfinished=1,
         lazy=False,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         optimize="auto-hq",
         contract_opts=None,
         reduce_opts=None,
@@ -3597,10 +3631,15 @@ class TensorNetwork2D(TensorNetworkGen):
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
-        equalize_norms : bool or float, optional
+        strip_exponent : bool, optional
+            Whether to strip an overall exponent, log10, from the *final*
+            contraction result. If ``True``, a tuple of ``(scalar, exponent)``
+            is returned instead of a single scalar.
+        equalize_norms : bool, float, or "auto", optional
             Whether to equalize the norms of all tensors after each
             contraction, gathering the overall scaling coefficient, log10, in
-            ``tn.exponent``.
+            ``tn.exponent``. By default (``"auto"``) this follows
+            ``strip_exponent``.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the projection tensors. Note any
             value in ``contract_opts`` will take precedence over this.
@@ -3640,6 +3679,15 @@ class TensorNetwork2D(TensorNetworkGen):
         TensorNetwork.insert_compressor_between_regions
         """
         tn = self if inplace else self.copy()
+
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            if strip_exponent:
+                # but we won't redistribute norms (`True`) during contraction
+                equalize_norms = 1.0
+            else:
+                equalize_norms = False
 
         contract_opts = ensure_dict(contract_opts)
         contract_opts.setdefault("optimize", optimize)
@@ -3701,11 +3749,15 @@ class TensorNetwork2D(TensorNetworkGen):
 
         if final_contract:
             if final_contract_opts is None:
-                final_contract_opts = contract_opts
+                final_contract_opts = dict(contract_opts)
             else:
                 final_contract_opts = ensure_dict(final_contract_opts)
                 final_contract_opts.setdefault("optimize", optimize)
-            return tn.contract(inplace=inplace, **final_contract_opts)
+            return tn.contract(
+                strip_exponent=strip_exponent,
+                inplace=inplace,
+                **final_contract_opts,
+            )
 
         return tn
 
@@ -3727,7 +3779,8 @@ class TensorNetwork2D(TensorNetworkGen):
         ymax=None,
         max_separation=1,
         around=None,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
         optimize="auto-hq",
         contract_opts=None,
         reduce_opts=None,
@@ -3782,10 +3835,15 @@ class TensorNetwork2D(TensorNetworkGen):
         around : None or sequence of (int, int), optional
             If given, don't contract the square of sites bounding these
             coordinates.
-        equalize_norms : bool or float, optional
+        strip_exponent : bool, optional
+            Whether to strip an overall exponent, log10, from the *final*
+            contraction result. If ``True``, a tuple of ``(scalar, exponent)``
+            is returned instead of a single scalar.
+        equalize_norms : bool, float, or "auto", optional
             Whether to equalize the norms of the boundary tensors after each
             contraction, gathering the overall scaling coefficient, log10, in
-            ``tn.exponent``.
+            ``tn.exponent``. By default (``"auto"``) this follows
+            ``strip_exponent``.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the projection tensors. Note any
             value in ``contract_opts`` will take precedence over this.
@@ -3866,6 +3924,7 @@ class TensorNetwork2D(TensorNetworkGen):
             ymax=ymax,
             max_separation=max_separation,
             around=around,
+            strip_exponent=strip_exponent,
             equalize_norms=equalize_norms,
             final_contract=final_contract,
             final_contract_opts=final_contract_opts,

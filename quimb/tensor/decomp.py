@@ -2895,7 +2895,7 @@ def cholesky_numpy(x, absorb=get_Usq_sqVH, shift="auto"):
             )
             return _cholesky_numba(x, absorb, shift=-1.0)
     shift = {False: 0.0, True: -1.0}.get(shift, shift)
-    return _cholesky_numba(x, absorb, shift=0.0)
+    return _cholesky_numba(x, absorb, shift=shift)
 
 
 @register_split_driver("polar_right", isom="left", default_absorb=get_U_sVH)

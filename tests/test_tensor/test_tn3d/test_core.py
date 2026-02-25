@@ -97,6 +97,102 @@ class Test3DManualContract:
         f = -qu.log(Z) / (L**3 * beta)
         assert f == pytest.approx(fex, rel=1e-2)
 
+    @pytest.mark.parametrize("strip_exponent", [False, True])
+    @pytest.mark.parametrize("equalize_norms", [False, 1.0, True])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_contract_boundary_strip_exponent(
+        self, strip_exponent, equalize_norms, inplace
+    ):
+        L = 5
+        beta = 0.3
+        fex = -2.7654417752878
+        tn = qtn.TN3D_classical_ising_partition_function(L, L, L, beta=beta)
+
+        if inplace:
+            tnc = tn.copy()
+            tnc.contract_boundary_(
+                max_bond=8,
+                strip_exponent=strip_exponent,
+                equalize_norms=equalize_norms,
+                final_contract=False,
+            )
+            Z = tnc.contract(...)
+        else:
+            Z = tn.contract_boundary(
+                max_bond=8,
+                strip_exponent=strip_exponent,
+                equalize_norms=equalize_norms,
+            )
+            if strip_exponent:
+                Z = Z[0] * 10 ** Z[1]
+
+        f = -qu.log(Z) / (L**3 * beta)
+        assert f == pytest.approx(fex, rel=1e-3)
+
+    @pytest.mark.parametrize("strip_exponent", [False, True])
+    @pytest.mark.parametrize("equalize_norms", [False, 1.0, True])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_contract_hotrg_strip_exponent(
+        self, strip_exponent, equalize_norms, inplace
+    ):
+        L = 5
+        beta = 0.3
+        fex = -2.7654417752878
+        tn = qtn.TN3D_classical_ising_partition_function(L, L, L, beta=beta)
+
+        if inplace:
+            tnc = tn.copy()
+            tnc.contract_hotrg_(
+                max_bond=4,
+                strip_exponent=strip_exponent,
+                equalize_norms=equalize_norms,
+                final_contract=False,
+            )
+            Z = tnc.contract(...)
+        else:
+            Z = tn.contract_hotrg(
+                max_bond=4,
+                strip_exponent=strip_exponent,
+                equalize_norms=equalize_norms,
+            )
+            if strip_exponent:
+                Z = Z[0] * 10 ** Z[1]
+
+        f = -qu.log(Z) / (L**3 * beta)
+        assert f == pytest.approx(fex, rel=1e-2)
+
+    @pytest.mark.parametrize("strip_exponent", [False, True])
+    @pytest.mark.parametrize("equalize_norms", [False, 1.0, True])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_contract_ctmrg_strip_exponent(
+        self, strip_exponent, equalize_norms, inplace
+    ):
+        L = 5
+        beta = 0.3
+        fex = -2.7654417752878
+        tn = qtn.TN3D_classical_ising_partition_function(L, L, L, beta=beta)
+
+        if inplace:
+            tnc = tn.copy()
+            tnc.contract_ctmrg_(
+                max_bond=4,
+                strip_exponent=strip_exponent,
+                equalize_norms=equalize_norms,
+                final_contract=False,
+            )
+            Z = tnc.contract(...)
+        else:
+            Z = tn.contract_ctmrg(
+                max_bond=4,
+                strip_exponent=strip_exponent,
+                equalize_norms=equalize_norms,
+            )
+            if strip_exponent:
+                Z = Z[0] * 10 ** Z[1]
+
+        f = -qu.log(Z) / (L**3 * beta)
+        assert f == pytest.approx(fex, rel=1e-2)
+
     @pytest.mark.parametrize("cyclicx", [False, True])
     @pytest.mark.parametrize("cyclicy", [False, True])
     @pytest.mark.parametrize("cyclicz", [False, True])
