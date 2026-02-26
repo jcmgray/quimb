@@ -3523,6 +3523,14 @@ def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
             f"ignoring absorb={absorb}."
         )
 
+    xp = get_namespace(x)
+    m, n = xp.shape(x)
+    if m < n:
+        warnings.warn(
+            f"qr_via_cholesky is not well-defined for wide "
+            f"matrices ({m} < {n}), consider using 'lq:cholesky'."
+        )
+
     # map QR absorb to LQ absorb (transpose)
     absorb_t = {
         get_U_sVH: get_Us_VH,
@@ -3530,7 +3538,6 @@ def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
         get_U: get_VH,
     }.get(absorb, get_Us_VH)
 
-    xp = get_namespace(x)
     R, _, Q = lq_via_cholesky(
         xp.transpose(x),
         absorb=absorb_t,
@@ -3558,6 +3565,13 @@ def lq_via_cholesky(x, absorb=get_Us_VH, shift=True, solve_triangular=True):
         )
 
     xp = get_namespace(x)
+    m, n = xp.shape(x)
+    if m > n:
+        warnings.warn(
+            f"lq_via_cholesky is not well-defined for tall "
+            f"matrices ({m} > {n}), consider using 'qr:cholesky'."
+        )
+
     xx = x @ xp.conj(xp.transpose(x))
     L, _, _ = cholesky_regularized(xx, absorb=get_Usq, shift=shift)
 

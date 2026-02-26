@@ -1133,7 +1133,9 @@ def _do_sweep_compress_from_low_rank_left_envs(
     -------
     TensorNetwork
     """
+    project_opts = ensure_dict(project_opts)
     project_opts.setdefault("method", "lorthog")
+    project_opts.setdefault("absorb", "lorthog")
 
     # we sweep in from the right
     L = len(local_tns)
@@ -1364,9 +1366,6 @@ def tensor_network_1d_compress_src(
 
     contract_opts = kwargs | ensure_dict(contract_opts)
     contract_opts.setdefault("drop_tags", True)
-
-    project_opts = ensure_dict(project_opts)
-    project_opts.setdefault("method", "lorthog")
 
     if compress_opts:
         warnings.warn(
@@ -1690,9 +1689,6 @@ def tensor_network_1d_compress_srcmps(
     contract_opts = kwargs | ensure_dict(contract_opts)
     contract_opts.setdefault("optimize", "auto")
     contract_opts.setdefault("drop_tags", True)
-
-    project_opts = ensure_dict(project_opts)
-    project_opts.setdefault("method", "lorthog")
 
     if compress_opts:
         warnings.warn(
