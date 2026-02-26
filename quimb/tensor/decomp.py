@@ -22,7 +22,7 @@ from autoray import (
 
 from ..core import njit
 from ..linalg import base_linalg, rand_linalg
-from ..utils import parse_info_extras
+from ..utils import ensure_dict, parse_info_extras
 from .array_ops import isblocksparse, isfermionic
 
 
@@ -61,18 +61,22 @@ def array_split(
           static truncation only).
         - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
           Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
-          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation).
+          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation),
+          ``'rfactor:rand'`` (randomized, static truncation only).
         - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
           Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
-          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation).
+          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation),
+          ``'lfactor:rand'`` (randomized, static truncation only).
         - ``'rorthog'``: *only* the right isometric factor (Q in LQ), no
           truncation. Submethods: ``'rorthog:svd'`` (via SVD, dynamic
           truncation), ``'rorthog:eig'`` (via eigendecomp, dynamic
-          truncation).
+          truncation), ``'rorthog:rand'`` (randomized, static truncation
+          only).
         - ``'lorthog'``: *only* the left isometric factor (Q in QR), no
           truncation. Submethods: ``'lorthog:svd'`` (via SVD, dynamic
           truncation), ``'lorthog:eig'`` (via eigendecomp, dynamic
-          truncation).
+          truncation), ``'lorthog:rand'`` (randomized, static truncation
+          only).
         - ``'eigh'``: full eigen-decomposition, array must be hermitian.
         - ``'eigsh'``: iterative eigen-decomposition, array must be
           hermitian.
@@ -1463,6 +1467,184 @@ def svdvals_eig(x):
     return np.sqrt(s2[::-1])
 
 
+# -------------------------------- rand svd --------------------------------- #
+
+
+@register_split_driver("svd:rand", truncation="static", isom="both")
+@compose
+def svd_rand_truncated(
+    x,
+    max_bond,
+    absorb=get_Usq_sqVH,
+    oversample=10,
+    num_iterations=2,
+    method_lorthog="qr",
+    method_reduced="svd",
+    right=None,
+    lorthog_opts=None,
+    reduced_opts=None,
+    seed=None,
+):
+    """Singular value decomposition of raw 2d array ``x``, via randomized
+    sketching, with static truncation (``max_bond`` only) and various
+    ``absorb`` return options, each with their own shortcuts. The speedup
+    over full SVD is proportional to the truncation.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2d array to decompose.
+    max_bond : int
+        An explicit maximum bond dimension / target rank for the randomized
+        sketch. You can use ``None`` or a negative value to indicate no
+        truncation, though this is not recommended as there is no speedup.
+    absorb : str or None, optional
+        What to compute / where to absorb the singular values:
+
+        - ``None`` / ``'U,s,VH'``: return ``s`` as the middle element of the
+          3-tuple, unabsorbed.
+        - ``'both'`` / ``'Usq,sqVH'``: absorb ``sqrt(s)`` into both factors.
+        - ``'left'`` / ``'Us,VH'``: absorb ``s`` into the left factor,
+          leaving the right factor isometric (LQ-like).
+        - ``'right'`` / ``'U,sVH'``: absorb ``s`` into the right factor,
+          leaving the left factor isometric (QR-like).
+        - ``'lorthog'`` / ``'U'``: return only the left isometric factor.
+        - ``'rorthog'`` / ``'VH'``: return only the right isometric factor.
+        - ``'lfactor'`` / ``'Us'``: return only the left factor with ``s``
+          absorbed (the L in an LQ decomposition).
+        - ``'rfactor'`` / ``'sVH'``: return only the right factor with ``s``
+          absorbed (the R in a QR decomposition).
+        - ``'s'``: return only the singular values.
+
+    oversample : int, optional
+        Extra dimensions for the random sketch to improve accuracy,
+        default 10.
+    num_iterations : int, optional
+        Number of power iterations to improve accuracy, default 2.
+    method_reduced : str, optional
+        The decomposition method to use for the reduced matrix, e.g.
+        ``'svd'``, ``'svd:eig'``, etc. Default is ``'svd'``.
+    method_lorthog : str, optional
+        The decomposition method to use for forming the orthonormal basis
+        of the random sketch, e.g. ``'qr'``, ``'svd:eig'``, ``'svd'``,
+        etc. Default is ``'qr'``.
+    right : bool, optional
+        Whether to sketch from the right or left. If None (default), then will
+        choose based on value of ``absorb``.
+    lorthog_opts : dict or None, optional
+        Extra options to pass to the decomposition method for forming the
+        orthonormal basis of the random sketch.
+    reduced_opts : dict or None, optional
+        Extra options to pass to the decomposition method for the reduced
+        matrix.
+    seed : int, Generator or None, optional
+        Random seed or existing generator for reproducibility.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
+    """
+    absorb = _ABSORB_MAP[absorb]
+    if max_bond is None:
+        max_bond = -1
+
+    lorthog_opts = ensure_dict(lorthog_opts)
+    lorthog_opts.setdefault("method", method_lorthog)
+
+    xp = get_namespace(x)
+    m, n = xp.shape(x)
+
+    # determine target rank and sketch size
+    if max_bond < 0:
+        warnings.warn(
+            "Using 'svd:rand' without `max_bond` is inefficient, "
+            "consider simply using 'svd' or 'svd:eig' instead."
+        )
+        k = min(m, n)
+    else:
+        k = min(m, n, max_bond)
+    k_sketch = min(m, n, k + oversample)
+
+    if right is None:
+        # avoid svd on reduced factor if possible
+        if absorb in (get_U, get_sVH, get_sVH):
+            right = True
+        elif absorb in (get_Us, get_Us_VH, get_VH):
+            right = False
+        else:
+            # note unlike svd via eig, tall vs wide is secondary factor
+            right = m > n
+
+    rng = xp.random.default_rng(seed)
+
+    if right:
+        # tall: sketch from the right
+        omega = rng.normal(size=(n, k_sketch))
+        y = x @ omega
+        if num_iterations:
+            xdag = xp.conj(xp.transpose(x))
+            for _ in range(num_iterations):
+                y = xdag @ y
+                y = x @ y
+
+        # form orthonormal basis of column space / 'U'
+        Q, _, _ = array_split(y, absorb=get_U, **lorthog_opts)
+
+        # X ≈ Q @ B, maybe shortcut for some absorb if no truncation needed
+        if k >= k_sketch:
+            if absorb == get_U:  # 'lorthog'
+                return Q, None, None
+            if absorb == get_sVH:  # 'rfactor'
+                return None, None, xp.conj(xp.transpose(Q)) @ x
+            if absorb == get_U_sVH:  # 'right'
+                return Q, None, xp.conj(xp.transpose(Q)) @ x
+
+        # form reduced factor
+        B = xp.conj(xp.transpose(Q)) @ x
+    else:
+        # wide: sketch from the left
+        omega = rng.normal(size=(k_sketch, m))
+        y = omega @ x
+        if num_iterations:
+            xdag = xp.conj(xp.transpose(x))
+            for _ in range(num_iterations):
+                y = y @ xdag
+                y = y @ x
+        y = xp.conj(xp.transpose(y))
+
+        # form orthonormal basis of row space / 'V'
+        Q, _, _ = array_split(y, absorb=get_U, **lorthog_opts)
+
+        # X ≈ B @ Qdag, maybe shortcut for some absorb if no truncation needed
+        if k >= k_sketch:
+            if absorb == get_VH:  # 'rorthog'
+                return None, None, xp.conj(xp.transpose(Q))
+            if absorb == get_Us:  # 'lfactor'
+                return x @ Q, None, None
+            if absorb == get_Us_VH:  # 'left'
+                return x @ Q, None, xp.conj(xp.transpose(Q))
+
+        # form reduced factor
+        B = x @ Q
+
+    reduced_opts = ensure_dict(reduced_opts)
+    reduced_opts.setdefault("method", method_reduced)
+    reduced_opts.setdefault("cutoff", 0.0)
+
+    # decompose and maybe further truncate reduced matrix
+    U, s, VH = array_split(B, absorb=absorb, max_bond=k, **reduced_opts)
+
+    # expand back out from reduced space
+    if (U is not None) and right:
+        U = Q @ U
+    if (VH is not None) and not right:
+        VH = VH @ xp.conj(xp.transpose(Q))
+
+    return U, s, VH
+
+
 # ---------------------------------- eigh ----------------------------------- #
 
 
@@ -1745,9 +1927,19 @@ def qr_via_eig(
     "qr:rand", truncation="static", isom="left", default_absorb=get_U_sVH
 )
 @compose
-def qr_via_randqb(x, max_bond=-1, absorb=get_U_sVH, seed=None):
+def qr_via_rand(
+    x,
+    max_bond,
+    absorb=get_U_sVH,
+    oversample=0,
+    max_iterations=0,
+    seed=None,
+    **kwargs,
+):
     """Decompose `x` into a low rank product of orthogonal matrix `Q` and right
-    factor `R`, via randomized projection. Cutoff options are ignored.
+    factor `R`, via randomized projection, supporting static (and not
+    recommended without using) truncation. Note by default this uses a single
+    shot projection with no oversampling or power iterations.
 
     Parameters
     ----------
@@ -1761,6 +1953,8 @@ def qr_via_randqb(x, max_bond=-1, absorb=get_U_sVH, seed=None):
         different value is passed.
     seed : int or None, optional
         Random seed for the randomized projection.
+    kwargs
+        Supplied to :func:`svd_rand_truncated`.
 
     Returns
     -------
@@ -1776,21 +1970,15 @@ def qr_via_randqb(x, max_bond=-1, absorb=get_U_sVH, seed=None):
             f"qr_via_randqb, ignoring absorb={absorb}."
         )
 
-    xp = get_namespace(x)
-    da, db = xp.shape(x)
-
-    if max_bond > 0:
-        k = min((da, db, max_bond))
-    else:
-        k = min(da, db)
-
-    rng = xp.random.default_rng(seed)
-    W = rng.standard_normal((db, k))
-    Y = x @ W
-    Q, _ = xp.linalg.qr(Y)
-    B = dag(Q) @ x
-
-    return Q, None, B
+    return svd_rand_truncated(
+        x,
+        max_bond=max_bond,
+        absorb=get_U_sVH,
+        oversample=oversample,
+        num_iterations=max_iterations,
+        seed=seed,
+        **kwargs,
+    )
 
 
 @register_split_driver("lq", isom="right", default_absorb=get_Us_VH)
@@ -1946,9 +2134,19 @@ def lq_via_eig(
     "lq:rand", truncation="static", isom="right", default_absorb=get_Us_VH
 )
 @compose
-def lq_via_randqb(x, max_bond=-1, absorb=get_Us_VH, seed=None):
+def lq_via_rand(
+    x,
+    max_bond,
+    absorb=get_Us_VH,
+    oversample=0,
+    max_iterations=0,
+    seed=None,
+    **kwargs,
+):
     """Decompose `x` into a low rank product of left factor `L` and orthogonal
-    matrix `Q`, via randomized projection. Cutoff options are ignored.
+    matrix `Q`, via randomized projection, supporting static (and not
+    recommended without using) truncation. Note by default this uses a single
+    shot projection with no oversampling or power iterations.
 
     Parameters
     ----------
@@ -1962,6 +2160,8 @@ def lq_via_randqb(x, max_bond=-1, absorb=get_Us_VH, seed=None):
         different value is passed.
     seed : int or None, optional
         Random seed for the randomized projection.
+    kwargs
+        Supplied to :func:`svd_rand_truncated`.
 
     Returns
     -------
@@ -1977,11 +2177,15 @@ def lq_via_randqb(x, max_bond=-1, absorb=get_Us_VH, seed=None):
             f"lq_via_randqb, ignoring absorb={absorb}."
         )
 
-    xp = get_namespace(x)
-    QT, _, LT = qr_via_randqb(xp.transpose(x), max_bond=max_bond, seed=seed)
-    Q = xp.transpose(QT)
-    L = xp.transpose(LT)
-    return L, None, Q
+    return svd_rand_truncated(
+        x,
+        max_bond=max_bond,
+        absorb=get_Us_VH,
+        oversample=oversample,
+        num_iterations=max_iterations,
+        seed=seed,
+        **kwargs,
+    )
 
 
 @register_split_driver("rfactor", default_absorb=get_sVH)
@@ -2128,6 +2332,65 @@ def rfactor_via_eig(
     )
 
 
+@register_split_driver(
+    "rfactor:rand", truncation="static", default_absorb=get_sVH
+)
+@compose
+def rfactor_via_rand(
+    x,
+    max_bond,
+    absorb=get_sVH,
+    oversample=0,
+    max_iterations=0,
+    seed=None,
+    **kwargs,
+):
+    """Get the right factor (``s @ VH``) via randomized projection,
+    supporting static (and not recommended without using) truncation.
+    Note by default this uses a single shot projection with no
+    oversampling or power iterations.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    max_bond : int
+        Maximum bond dimension, use -1 for no truncation.
+    absorb : int, optional
+        Ignored — this driver always returns ``(None, None, sVH)``.
+        A warning is issued if a different value is passed.
+    oversample : int, optional
+        Extra dimensions for the random sketch, default 0.
+    max_iterations : int, optional
+        Number of power iterations, default 0.
+    seed : int or None, optional
+        Random seed for the randomized projection.
+    kwargs
+        Supplied to :func:`svd_rand_truncated`.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    if absorb not in (get_sVH, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 11 == 'rfactor' == 'sVH' in "
+            f"rfactor_via_rand, ignoring absorb={absorb}."
+        )
+
+    return svd_rand_truncated(
+        x,
+        max_bond=max_bond,
+        absorb=get_sVH,
+        oversample=oversample,
+        num_iterations=max_iterations,
+        seed=seed,
+        **kwargs,
+    )
+
+
 @register_split_driver("lfactor", default_absorb=get_Us)
 def lfactor(x, absorb=get_Us, **kwargs):
     """Get the left factor (L in LQ) via LQ decomposition. No truncation.
@@ -2271,6 +2534,65 @@ def lfactor_via_eig_truncated(
     )
 
 
+@register_split_driver(
+    "lfactor:rand", truncation="static", default_absorb=get_Us
+)
+@compose
+def lfactor_via_rand(
+    x,
+    max_bond,
+    absorb=get_Us,
+    oversample=0,
+    max_iterations=0,
+    seed=None,
+    **kwargs,
+):
+    """Get the left factor (``U @ s``) via randomized projection,
+    supporting static (and not recommended without using) truncation.
+    Note by default this uses a single shot projection with no
+    oversampling or power iterations.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    max_bond : int
+        Maximum bond dimension, use -1 for no truncation.
+    absorb : int, optional
+        Ignored — this driver always returns ``(Us, None, None)``.
+        A warning is issued if a different value is passed.
+    oversample : int, optional
+        Extra dimensions for the random sketch, default 0.
+    max_iterations : int, optional
+        Number of power iterations, default 0.
+    seed : int or None, optional
+        Random seed for the randomized projection.
+    kwargs
+        Supplied to :func:`svd_rand_truncated`.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    if absorb not in (get_Us, get_Us_VH):
+        warnings.warn(
+            "By definition, absorb must be -10 == 'lfactor' == 'Us' in "
+            f"lfactor_via_rand, ignoring absorb={absorb}."
+        )
+
+    return svd_rand_truncated(
+        x,
+        max_bond=max_bond,
+        absorb=get_Us,
+        oversample=oversample,
+        num_iterations=max_iterations,
+        seed=seed,
+        **kwargs,
+    )
+
+
 @register_split_driver("rorthog", isom="right", default_absorb=get_VH)
 def rorthog(x):
     """Get the right orthogonal factor (Q in LQ) via LQ decomposition. No
@@ -2401,6 +2723,68 @@ def rorthog_via_eig(
         absorb=get_VH,
         renorm=renorm,
         info=info,
+    )
+
+
+@register_split_driver(
+    "rorthog:rand",
+    truncation="static",
+    isom="right",
+    default_absorb=get_VH,
+)
+@compose
+def rorthog_via_rand(
+    x,
+    max_bond,
+    absorb=get_VH,
+    oversample=0,
+    max_iterations=0,
+    seed=None,
+    **kwargs,
+):
+    """Get the right isometric factor (``VH``) via randomized projection,
+    supporting static (and not recommended without using) truncation.
+    Note by default this uses a single shot projection with no
+    oversampling or power iterations.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    max_bond : int
+        Maximum bond dimension, use -1 for no truncation.
+    absorb : int, optional
+        Ignored — this driver always returns ``(None, None, VH)``.
+        A warning is issued if a different value is passed.
+    oversample : int, optional
+        Extra dimensions for the random sketch, default 0.
+    max_iterations : int, optional
+        Number of power iterations, default 0.
+    seed : int or None, optional
+        Random seed for the randomized projection.
+    kwargs
+        Supplied to :func:`svd_rand_truncated`.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    if absorb not in (get_VH, get_Us_VH):
+        warnings.warn(
+            "By definition, absorb must be -11 == 'rorthog' == 'VH' in "
+            f"rorthog_via_rand, ignoring absorb={absorb}."
+        )
+
+    return svd_rand_truncated(
+        x,
+        max_bond=max_bond,
+        absorb=get_VH,
+        oversample=oversample,
+        num_iterations=max_iterations,
+        seed=seed,
+        **kwargs,
     )
 
 
@@ -2537,6 +2921,68 @@ def lorthog_via_eig(
         absorb=get_U,
         renorm=renorm,
         info=info,
+    )
+
+
+@register_split_driver(
+    "lorthog:rand",
+    truncation="static",
+    isom="left",
+    default_absorb=get_U,
+)
+@compose
+def lorthog_via_rand(
+    x,
+    max_bond,
+    absorb=get_U,
+    oversample=0,
+    max_iterations=0,
+    seed=None,
+    **kwargs,
+):
+    """Get the left isometric factor (``U``) via randomized projection,
+    supporting static (and not recommended without using) truncation.
+    Note by default this uses a single shot projection with no
+    oversampling or power iterations.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    max_bond : int
+        Maximum bond dimension, use -1 for no truncation.
+    absorb : int, optional
+        Ignored — this driver always returns ``(U, None, None)``.
+        A warning is issued if a different value is passed.
+    oversample : int, optional
+        Extra dimensions for the random sketch, default 0.
+    max_iterations : int, optional
+        Number of power iterations, default 0.
+    seed : int or None, optional
+        Random seed for the randomized projection.
+    kwargs
+        Supplied to :func:`svd_rand_truncated`.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    if absorb not in (get_U, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 10 == 'lorthog' == 'U' in "
+            f"lorthog_via_rand, ignoring absorb={absorb}."
+        )
+
+    return svd_rand_truncated(
+        x,
+        max_bond=max_bond,
+        absorb=get_U,
+        oversample=oversample,
+        num_iterations=max_iterations,
+        seed=seed,
+        **kwargs,
     )
 
 
@@ -2808,7 +3254,7 @@ def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
 
 @register_split_driver("cholesky")
 @compose
-def cholesky_regularized(x, absorb=get_Usq_sqVH, shift="auto"):
+def cholesky_regularized(x, absorb=get_Usq_sqVH, shift=True):
     """Cholesky decomposition, only works if ``x`` is positive definite. The
     ``shift`` parameter controls optional regularization for close to
     singular matrices.
@@ -2828,10 +3274,10 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift="auto"):
         Whether to add a small shift to the diagonal of ``x`` for
         regularization. The valid options are:
 
+        - ``True``: always add a small shift computed as above.
         - ``"auto"``: try without shift, if it fails, then add a small shift
           computed as ``trace(x) * eps``, ``eps`` is the machine epsilon for
           the dtype of ``x``.
-        - ``True``: always add a small shift computed as above.
         - ``False``: never add a shift, just try the Cholesky decomposition
           directly.
         - float: use the provided value as a relative shift, i.e. add
@@ -2863,13 +3309,16 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift="auto"):
 
 
 @njit  # pragma: no cover
-def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=0.0):
+def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=-1.0):
     if shift < 0.0:
         # auto compute
         shift = np.finfo(x.dtype).eps
 
     if shift > 0.0:
-        x = x + shift * np.trace(x) * np.eye(x.shape[0])
+        shift = shift * np.trace(x)
+        x = x.copy()  # avoid modifying input in-place
+        for i in range(x.shape[0]):
+            x[i, i] += shift
 
     L = np.linalg.cholesky(x)
 
@@ -2882,7 +3331,7 @@ def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=0.0):
 
 
 @cholesky_regularized.register("numpy")
-def cholesky_numpy(x, absorb=get_Usq_sqVH, shift="auto"):
+def cholesky_numpy(x, absorb=get_Usq_sqVH, shift=True):
     absorb = _ABSORB_MAP[absorb]
     if shift == "auto":
         try:

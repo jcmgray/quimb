@@ -423,7 +423,7 @@ def tensor_split(
 
         - ``'svd'``: full SVD, allowing all truncation options. Submethods:
           ``'svd:eig'`` (via eigendecomp, some loss of precision but often
-          faster).
+          faster), ``'svd:rand'`` (randomized, static truncation only).
         - ``'qr'``: QR decomposition, left factor is isometric.
           Submethods: ``'qr:svd'`` (via SVD, allows dynamic truncation),
           ``'qr:eig'`` (via eigendecomp, allows dynamic truncation),
@@ -434,18 +434,22 @@ def tensor_split(
           ``'lq:rand'`` (randomized, static truncation only).
         - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
           Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
-          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation).
+          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation),
+          ``'rfactor:rand'`` (randomized, static truncation only).
         - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
           Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
-          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation).
+          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation),
+          ``'lfactor:rand'`` (randomized, static truncation only).
         - ``'rorthog'``: *only* the right isometric factor (Q in LQ), no
           truncation. Submethods: ``'rorthog:svd'`` (via SVD, dynamic
           truncation), ``'rorthog:eig'`` (via eigendecomp, dynamic
-          truncation).
+          truncation), ``'rorthog:rand'`` (randomized, static truncation
+          only).
         - ``'lorthog'``: *only* the left isometric factor (Q in QR), no
           truncation. Submethods: ``'lorthog:svd'`` (via SVD, dynamic
           truncation), ``'lorthog:eig'`` (via eigendecomp, dynamic
-          truncation).
+          truncation), ``'lorthog:rand'`` (randomized, static truncation
+          only).
         - ``'eigh'``: full eigen-decomposition, tensor must be hermitian.
         - ``'eigsh'``: iterative eigen-decomposition, tensor must be
           hermitian.

@@ -21,7 +21,6 @@ from quimb.tensor import (
     tensor_contract,
     tensor_direct_product,
 )
-from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
 
 requires_autograd = pytest.mark.skipif(
     importlib.util.find_spec("autograd") is None,
@@ -31,14 +30,6 @@ requires_cotengra = pytest.mark.skipif(
     importlib.util.find_spec("cotengra") is None,
     reason="cotengra not installed",
 )
-
-
-def test_trim_singular_vals():
-    s = np.array([3.0, 2.0, 1.0, 0.1])
-    assert _compute_number_svals_to_keep_numba(s, 0.5, 1) == 3
-    assert _compute_number_svals_to_keep_numba(s, 0.5, 2) == 2
-    assert _compute_number_svals_to_keep_numba(s, 2, 3) == 2
-    assert _compute_number_svals_to_keep_numba(s, 5.02, 3) == 1
 
 
 class TestBasicTensorOperations:
