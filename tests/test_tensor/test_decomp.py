@@ -260,3 +260,225 @@ def test_svd_rand_via_array_split():
     assert VH.shape == (4, 5)
     assert np.all(s >= 0)
     assert np.linalg.norm(x - U @ np.diag(s) @ VH) < 0.5
+
+
+QR_METHODS = ["qr", "qr:svd", "qr:eig", "qr:rand", "qr:cholesky"]
+LQ_METHODS = ["lq", "lq:svd", "lq:eig", "lq:rand", "lq:cholesky"]
+
+
+@pytest.mark.parametrize("method", QR_METHODS)
+@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_qr_methods(method, m, n, dtype):
+    from quimb.tensor.decomp import array_split
+
+    if method == "qr:cholesky" and m < n:
+        pytest.skip("cholesky QR requires m >= n")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((m, n))
+    if dtype == "complex128":
+        x = x + 1j * rng.standard_normal((m, n))
+
+    k = min(m, n)
+    opts = {}
+    if method == "qr:rand":
+        opts["max_bond"] = k
+
+    Q, _, R = array_split(x, method=method, **opts)
+
+    assert Q.shape == (m, k)
+    assert R.shape == (k, n)
+    assert_allclose(Q @ R, x, atol=1e-10)
+    assert_allclose(Q.conj().T @ Q, np.eye(k), atol=1e-10)
+
+
+@pytest.mark.parametrize("method", LQ_METHODS)
+@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_lq_methods(method, m, n, dtype):
+    from quimb.tensor.decomp import array_split
+
+    if method == "lq:cholesky" and m > n:
+        pytest.skip("cholesky LQ requires m <= n")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((m, n))
+    if dtype == "complex128":
+        x = x + 1j * rng.standard_normal((m, n))
+
+    k = min(m, n)
+    opts = {}
+    if method == "lq:rand":
+        opts["max_bond"] = k
+
+    L, _, Q = array_split(x, method=method, **opts)
+
+    assert L.shape == (m, k)
+    assert Q.shape == (k, n)
+    assert_allclose(L @ Q, x, atol=1e-10)
+    assert_allclose(Q @ Q.conj().T, np.eye(k), atol=1e-10)
+
+
+@pytest.mark.parametrize("method", QR_METHODS + LQ_METHODS)
+def test_qr_lq_methods_truncated(method):
+    from quimb.tensor.decomp import array_split
+
+    if method in ("qr", "lq", "qr:cholesky", "lq:cholesky"):
+        pytest.skip("no truncation support")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((8, 6))
+
+    is_qr = method.startswith("qr")
+    max_bond = 4
+    opts = {"max_bond": max_bond}
+
+    if method in ("qr:rand", "lq:rand"):
+        opts["oversample"] = 10
+        opts["max_iterations"] = 2
+
+    left, _, right = array_split(x, method=method, **opts)
+
+    if is_qr:
+        assert left.shape == (8, max_bond)
+        assert right.shape == (max_bond, 6)
+        assert_allclose(left.conj().T @ left, np.eye(max_bond), atol=1e-10)
+    else:
+        assert left.shape == (8, max_bond)
+        assert right.shape == (max_bond, 6)
+        assert_allclose(right @ right.conj().T, np.eye(max_bond), atol=1e-10)
+
+    assert np.linalg.norm(x - left @ right) < 2.0
+
+
+RFACTOR_METHODS = [
+    "rfactor",
+    "rfactor:svd",
+    "rfactor:eig",
+    "rfactor:rand",
+    "rfactor:cholesky",
+]
+LFACTOR_METHODS = [
+    "lfactor",
+    "lfactor:svd",
+    "lfactor:eig",
+    "lfactor:rand",
+    "lfactor:cholesky",
+]
+RORTHOG_METHODS = [
+    "rorthog",
+    "rorthog:svd",
+    "rorthog:eig",
+    "rorthog:rand",
+    "rorthog:cholesky",
+]
+LORTHOG_METHODS = [
+    "lorthog",
+    "lorthog:svd",
+    "lorthog:eig",
+    "lorthog:rand",
+    "lorthog:cholesky",
+]
+
+
+@pytest.mark.parametrize("method", RFACTOR_METHODS)
+@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_rfactor_methods(method, m, n, dtype):
+    from quimb.tensor.decomp import array_split
+
+    if method == "rfactor:cholesky" and m < n:
+        pytest.skip("cholesky rfactor requires m >= n")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((m, n))
+    if dtype == "complex128":
+        x = x + 1j * rng.standard_normal((m, n))
+
+    k = min(m, n)
+    opts = {}
+    if method == "rfactor:rand":
+        opts["max_bond"] = k
+
+    left, _, R = array_split(x, method=method, **opts)
+
+    assert left is None
+    assert R.shape == (k, n)
+
+
+@pytest.mark.parametrize("method", LFACTOR_METHODS)
+@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_lfactor_methods(method, m, n, dtype):
+    from quimb.tensor.decomp import array_split
+
+    if method == "lfactor:cholesky" and m > n:
+        pytest.skip("cholesky lfactor requires m <= n")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((m, n))
+    if dtype == "complex128":
+        x = x + 1j * rng.standard_normal((m, n))
+
+    k = min(m, n)
+    opts = {}
+    if method == "lfactor:rand":
+        opts["max_bond"] = k
+
+    L, _, right = array_split(x, method=method, **opts)
+
+    assert right is None
+    assert L.shape == (m, k)
+
+
+@pytest.mark.parametrize("method", RORTHOG_METHODS)
+@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_rorthog_methods(method, m, n, dtype):
+    from quimb.tensor.decomp import array_split
+
+    if method == "rorthog:cholesky" and m > n:
+        pytest.skip("cholesky rorthog requires m <= n")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((m, n))
+    if dtype == "complex128":
+        x = x + 1j * rng.standard_normal((m, n))
+
+    k = min(m, n)
+    opts = {}
+    if method == "rorthog:rand":
+        opts["max_bond"] = k
+
+    left, _, Q = array_split(x, method=method, **opts)
+
+    assert left is None
+    assert Q.shape == (k, n)
+    assert_allclose(Q @ Q.conj().T, np.eye(k), atol=1e-10)
+
+
+@pytest.mark.parametrize("method", LORTHOG_METHODS)
+@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_lorthog_methods(method, m, n, dtype):
+    from quimb.tensor.decomp import array_split
+
+    if method == "lorthog:cholesky" and m < n:
+        pytest.skip("cholesky lorthog requires m >= n")
+
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((m, n))
+    if dtype == "complex128":
+        x = x + 1j * rng.standard_normal((m, n))
+
+    k = min(m, n)
+    opts = {}
+    if method == "lorthog:rand":
+        opts["max_bond"] = k
+
+    Q, _, right = array_split(x, method=method, **opts)
+
+    assert right is None
+    assert Q.shape == (m, k)
+    assert_allclose(Q.conj().T @ Q, np.eye(k), atol=1e-10)

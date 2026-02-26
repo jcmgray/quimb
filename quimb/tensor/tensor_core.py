@@ -421,50 +421,41 @@ def tensor_split(
     method : str, optional
         The decomposition method to use:
 
-        - ``'svd'``: full SVD, allowing all truncation options. Submethods:
-          ``'svd:eig'`` (via eigendecomp, some loss of precision but often
-          faster), ``'svd:rand'`` (randomized, static truncation only).
+        - ``'svd'``: full SVD, allowing all truncation options.
+          Submethods: ``':eig'``, ``':rand'``.
         - ``'qr'``: QR decomposition, left factor is isometric.
-          Submethods: ``'qr:svd'`` (via SVD, allows dynamic truncation),
-          ``'qr:eig'`` (via eigendecomp, allows dynamic truncation),
-          ``'qr:rand'`` (randomized, static truncation only).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
         - ``'lq'``: LQ decomposition, right factor is isometric.
-          Submethods: ``'lq:svd'`` (via SVD, allows dynamic truncation),
-          ``'lq:eig'`` (via eigendecomp, allows dynamic truncation),
-          ``'lq:rand'`` (randomized, static truncation only).
-        - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
-          Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
-          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation),
-          ``'rfactor:rand'`` (randomized, static truncation only).
-        - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
-          Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
-          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation),
-          ``'lfactor:rand'`` (randomized, static truncation only).
-        - ``'rorthog'``: *only* the right isometric factor (Q in LQ), no
-          truncation. Submethods: ``'rorthog:svd'`` (via SVD, dynamic
-          truncation), ``'rorthog:eig'`` (via eigendecomp, dynamic
-          truncation), ``'rorthog:rand'`` (randomized, static truncation
-          only).
-        - ``'lorthog'``: *only* the left isometric factor (Q in QR), no
-          truncation. Submethods: ``'lorthog:svd'`` (via SVD, dynamic
-          truncation), ``'lorthog:eig'`` (via eigendecomp, dynamic
-          truncation), ``'lorthog:rand'`` (randomized, static truncation
-          only).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'rfactor'``: *only* the right factor (R in QR).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'lfactor'``: *only* the left factor (L in LQ).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'rorthog'``: *only* the right isometric factor (Q in LQ).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'lorthog'``: *only* the left isometric factor (Q in QR).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
         - ``'eigh'``: full eigen-decomposition, tensor must be hermitian.
-        - ``'eigsh'``: iterative eigen-decomposition, tensor must be
-          hermitian.
+        - ``'eigsh'``: iterative eigen-decomposition, tensor must be hermitian.
         - ``'svds'``: iterative SVD, allows truncation.
         - ``'isvd'``: iterative SVD using interpolative methods, allows
           truncation.
         - ``'rsvd'``: randomized iterative SVD with truncation.
-        - ``'lu'``: full LU decomposition, allows truncation. Favors
-          sparsity but is not rank optimal.
+        - ``'lu'``: full LU decomposition, allows truncation. Favors sparsity
+          but is not rank optimal.
         - ``'polar_right'``: polar decomposition as ``A = U @ P``.
         - ``'polar_left'``: polar decomposition as ``A = P @ U``.
         - ``'cholesky'``: cholesky decomposition, tensor must be positive
           definite.
 
-        Note truncation and absorb options are only valid for certain methods.
+        The submethods (e.g. ``'qr:svd'``) select an alternative
+        implementation for the base method. ``':svd'`` performs the
+        decomposition via SVD, supporting dynamic truncation (``cutoff``
+        and ``cutoff_mode``). ``':eig'`` uses eigendecomposition, also
+        supporting dynamic truncation but with some loss of precision.
+        ``':rand'`` uses randomized projection, supporting static
+        truncation only (``max_bond``). ``':cholesky'`` uses Cholesky
+        factorization, with no truncation support.
     get : {None, 'arrays', 'tensors', 'values'}
         If given, what to return instead of a TN describing the split:
 

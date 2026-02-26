@@ -48,50 +48,41 @@ def array_split(
     method : str, optional
         The decomposition method to use:
 
-        - ``'svd'``: full SVD, allowing all truncation options. Submethods:
-          ``'svd:eig'`` (via eigendecomp, some loss of precision but often
-          faster).
-        - ``'qr'``: QR decomposition, left factor is isometric. Submethods:
-          ``'qr:svd'`` (via SVD, allows dynamic truncation), ``'qr:eig'`` (via
-          eigendecomp, allows dynamic truncation), ``'qr:rand'`` (randomized,
-          static truncation only).
-        - ``'lq'``: LQ decomposition, right factor is isometric. Submethods:
-          ``'lq:svd'`` (via SVD, allows dynamic truncation), ``'lq:eig'`` (via
-          eigendecomp, allows dynamic truncation), ``'lq:rand'`` (randomized,
-          static truncation only).
-        - ``'rfactor'``: *only* the right factor (R in QR), no truncation.
-          Submethods: ``'rfactor:svd'`` (via SVD, dynamic truncation),
-          ``'rfactor:eig'`` (via eigendecomp, dynamic truncation),
-          ``'rfactor:rand'`` (randomized, static truncation only).
-        - ``'lfactor'``: *only* the left factor (L in LQ), no truncation.
-          Submethods: ``'lfactor:svd'`` (via SVD, dynamic truncation),
-          ``'lfactor:eig'`` (via eigendecomp, dynamic truncation),
-          ``'lfactor:rand'`` (randomized, static truncation only).
-        - ``'rorthog'``: *only* the right isometric factor (Q in LQ), no
-          truncation. Submethods: ``'rorthog:svd'`` (via SVD, dynamic
-          truncation), ``'rorthog:eig'`` (via eigendecomp, dynamic
-          truncation), ``'rorthog:rand'`` (randomized, static truncation
-          only).
-        - ``'lorthog'``: *only* the left isometric factor (Q in QR), no
-          truncation. Submethods: ``'lorthog:svd'`` (via SVD, dynamic
-          truncation), ``'lorthog:eig'`` (via eigendecomp, dynamic
-          truncation), ``'lorthog:rand'`` (randomized, static truncation
-          only).
+        - ``'svd'``: full SVD, allowing all truncation options.
+          Submethods: ``':eig'``, ``':rand'``.
+        - ``'qr'``: QR decomposition, left factor is isometric.
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'lq'``: LQ decomposition, right factor is isometric.
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'rfactor'``: *only* the right factor (R in QR).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'lfactor'``: *only* the left factor (L in LQ).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'rorthog'``: *only* the right isometric factor (Q in LQ).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'lorthog'``: *only* the left isometric factor (Q in QR).
+          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
         - ``'eigh'``: full eigen-decomposition, array must be hermitian.
-        - ``'eigsh'``: iterative eigen-decomposition, array must be
-          hermitian.
+        - ``'eigsh'``: iterative eigen-decomposition, array must be hermitian.
         - ``'svds'``: iterative SVD, allows truncation.
         - ``'isvd'``: iterative SVD using interpolative methods, allows
           truncation.
         - ``'rsvd'``: randomized iterative SVD with truncation.
-        - ``'lu'``: full LU decomposition, allows truncation. Favors
-          sparsity but is not rank optimal.
+        - ``'lu'``: full LU decomposition, allows truncation. Favors sparsity
+          but is not rank optimal.
         - ``'polar_right'``: polar decomposition as ``A = U @ P``.
         - ``'polar_left'``: polar decomposition as ``A = P @ U``.
         - ``'cholesky'``: cholesky decomposition, array must be positive
           definite.
 
-        Note truncation and absorb options are only valid for certain methods.
+        The submethods (e.g. ``'qr:svd'``) select an alternative
+        implementation for the base method. ``':svd'`` performs the
+        decomposition via SVD, supporting dynamic truncation (``cutoff``
+        and ``cutoff_mode``). ``':eig'`` uses eigendecomposition, also
+        supporting dynamic truncation but with some loss of precision.
+        ``':rand'`` uses randomized projection, supporting static
+        truncation only (``max_bond``). ``':cholesky'`` uses Cholesky
+        factorization, with no truncation support.
     absorb : str or None, optional
         What to compute / where to absorb the singular- or eigen- values.
         Common options are:
@@ -2391,6 +2382,43 @@ def rfactor_via_rand(
     )
 
 
+@register_split_driver("rfactor:cholesky", default_absorb=get_sVH)
+@compose
+def rfactor_via_cholesky(x, absorb=get_sVH, shift=True, solve_triangular=True):
+    """Get the right factor (R) via Cholesky-based QR. Only works if ``x`` has
+    full column rank (m >= n).
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    absorb : int, optional
+        Ignored — this driver always returns ``(None, None, R)``.
+    shift : bool or float, optional
+        Regularization for the Cholesky decomposition, see
+        :func:`cholesky_regularized`.
+    solve_triangular : bool, optional
+        Whether to use triangular solve. Default is True.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    if absorb not in (get_sVH, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 11 == 'rfactor' == 'sVH' in "
+            f"rfactor_via_cholesky, ignoring absorb={absorb}."
+        )
+    return qr_via_cholesky(
+        x,
+        absorb=get_sVH,
+        shift=shift,
+        solve_triangular=solve_triangular,
+    )
+
+
 @register_split_driver("lfactor", default_absorb=get_Us)
 def lfactor(x, absorb=get_Us, **kwargs):
     """Get the left factor (L in LQ) via LQ decomposition. No truncation.
@@ -2593,6 +2621,43 @@ def lfactor_via_rand(
     )
 
 
+@register_split_driver("lfactor:cholesky", default_absorb=get_Us)
+@compose
+def lfactor_via_cholesky(x, absorb=get_Us, shift=True, solve_triangular=True):
+    """Get the left factor (L) via Cholesky-based LQ. Only works if ``x`` has
+    full row rank (m <= n).
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    absorb : int, optional
+        Ignored — this driver always returns ``(L, None, None)``.
+    shift : bool or float, optional
+        Regularization for the Cholesky decomposition, see
+        :func:`cholesky_regularized`.
+    solve_triangular : bool, optional
+        Whether to use triangular solve. Default is True.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    if absorb not in (get_Us, get_Us_VH):
+        warnings.warn(
+            "By definition, absorb must be -10 == 'lfactor' == 'Us' in "
+            f"lfactor_via_cholesky, ignoring absorb={absorb}."
+        )
+    return lq_via_cholesky(
+        x,
+        absorb=get_Us,
+        shift=shift,
+        solve_triangular=solve_triangular,
+    )
+
+
 @register_split_driver("rorthog", isom="right", default_absorb=get_VH)
 def rorthog(x):
     """Get the right orthogonal factor (Q in LQ) via LQ decomposition. No
@@ -2785,6 +2850,43 @@ def rorthog_via_rand(
         num_iterations=max_iterations,
         seed=seed,
         **kwargs,
+    )
+
+
+@register_split_driver("rorthog:cholesky", isom="right", default_absorb=get_VH)
+@compose
+def rorthog_via_cholesky(x, absorb=get_VH, shift=True, solve_triangular=True):
+    """Get the right isometric factor (Q in LQ) via Cholesky-based LQ. Only
+    works if ``x`` has full row rank (m <= n).
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    absorb : int, optional
+        Ignored — this driver always returns ``(None, None, VH)``.
+    shift : bool or float, optional
+        Regularization for the Cholesky decomposition, see
+        :func:`cholesky_regularized`.
+    solve_triangular : bool, optional
+        Whether to use triangular solve. Default is True.
+
+    Returns
+    -------
+    left : None
+    s : None
+    right : array_like
+    """
+    if absorb not in (get_VH, get_Us_VH):
+        warnings.warn(
+            "By definition, absorb must be -11 == 'rorthog' == 'VH' in "
+            f"rorthog_via_cholesky, ignoring absorb={absorb}."
+        )
+    return lq_via_cholesky(
+        x,
+        absorb=get_VH,
+        shift=shift,
+        solve_triangular=solve_triangular,
     )
 
 
@@ -2986,6 +3088,43 @@ def lorthog_via_rand(
     )
 
 
+@register_split_driver("lorthog:cholesky", isom="left", default_absorb=get_U)
+@compose
+def lorthog_via_cholesky(x, absorb=get_U, shift=True, solve_triangular=True):
+    """Get the left isometric factor (Q in QR) via Cholesky-based QR. Only
+    works if ``x`` has full column rank (m >= n).
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    absorb : int, optional
+        Ignored — this driver always returns ``(U, None, None)``.
+    shift : bool or float, optional
+        Regularization for the Cholesky decomposition, see
+        :func:`cholesky_regularized`.
+    solve_triangular : bool, optional
+        Whether to use triangular solve. Default is True.
+
+    Returns
+    -------
+    left : array_like
+    s : None
+    right : None
+    """
+    if absorb not in (get_U, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 10 == 'lorthog' == 'U' in "
+            f"lorthog_via_cholesky, ignoring absorb={absorb}."
+        )
+    return qr_via_cholesky(
+        x,
+        absorb=get_U,
+        shift=shift,
+        solve_triangular=solve_triangular,
+    )
+
+
 # ------------------------ iterative decompositions ------------------------- #
 
 
@@ -3171,7 +3310,7 @@ def eigsh(
     return U, s, V
 
 
-# ------------------------ misc other decompositions ------------------------ #
+# ---------------------- cholesky based decompositions ---------------------- #
 
 
 @register_split_driver("lu", truncation="dynamic")
@@ -3345,6 +3484,101 @@ def cholesky_numpy(x, absorb=get_Usq_sqVH, shift=True):
             return _cholesky_numba(x, absorb, shift=-1.0)
     shift = {False: 0.0, True: -1.0}.get(shift, shift)
     return _cholesky_numba(x, absorb, shift=shift)
+
+
+@register_split_driver("qr:cholesky", isom="left", default_absorb=get_U_sVH)
+@compose
+def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
+    """QR-like decomposition via Cholesky factorization of ``x^H @ x``.
+    Computes ``x = Q @ R`` where ``R`` is upper triangular and ``Q`` is
+    isometric. Implemented via transposed :func:`lq_via_cholesky`.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2D array to decompose.
+    absorb : int, optional
+        Ignored — this driver always returns ``(Q, None, R)``.
+        A warning is issued if a different value is passed.
+    shift : bool or float, optional
+        Regularization for the Cholesky decomposition, see
+        :func:`cholesky_regularized`.
+    solve_triangular : bool, optional
+        Whether to use triangular solve (faster) or general solve
+        to compute Q. Default is True.
+
+    Returns
+    -------
+    left : array_like or None
+        The left isometric factor (Q).
+    s : None
+    right : array_like or None
+        The right upper triangular factor (R).
+    """
+    absorb = _ABSORB_MAP[absorb]
+    if absorb not in (get_U_sVH, get_sVH, get_U):
+        warnings.warn(
+            "qr_via_cholesky only supports absorb in "
+            "('right', 'rfactor', 'lorthog'), "
+            f"ignoring absorb={absorb}."
+        )
+
+    # map QR absorb to LQ absorb (transpose)
+    absorb_t = {
+        get_U_sVH: get_Us_VH,
+        get_sVH: get_Us,
+        get_U: get_VH,
+    }.get(absorb, get_Us_VH)
+
+    xp = get_namespace(x)
+    R, _, Q = lq_via_cholesky(
+        xp.transpose(x),
+        absorb=absorb_t,
+        shift=shift,
+        solve_triangular=solve_triangular,
+    )
+
+    if R is not None:
+        R = xp.transpose(R)
+    if Q is not None:
+        Q = xp.transpose(Q)
+
+    return Q, None, R
+
+
+@register_split_driver("lq:cholesky", isom="right", default_absorb=get_Us_VH)
+@compose
+def lq_via_cholesky(x, absorb=get_Us_VH, shift=True, solve_triangular=True):
+    absorb = _ABSORB_MAP[absorb]
+    if absorb not in (get_Us_VH, get_Us, get_VH):
+        warnings.warn(
+            "lq_via_cholesky only supports absorb in "
+            "('left', 'lfactor', 'rorthog'), "
+            f"ignoring absorb={absorb}."
+        )
+
+    xp = get_namespace(x)
+    xx = x @ xp.conj(xp.transpose(x))
+    L, _, _ = cholesky_regularized(xx, absorb=get_Usq, shift=shift)
+
+    if absorb == get_Us:
+        return L, None, None
+
+    if solve_triangular:
+        Q = xp.scipy.linalg.solve_triangular(L, x, lower=True)
+    else:
+        Q = xp.linalg.solve(L, x)
+
+    if absorb == get_VH:
+        return None, None, Q
+
+    if absorb == get_Us_VH:
+        return L, None, Q
+
+    raise ValueError(f"Invalid absorb={absorb} in lq_via_cholesky.")
+
+
+# ------------------------ misc other decompositions ------------------------ #
 
 
 @register_split_driver("polar_right", isom="left", default_absorb=get_U_sVH)
