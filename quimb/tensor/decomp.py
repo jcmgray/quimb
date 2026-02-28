@@ -1048,6 +1048,7 @@ def svd_via_eig(
     """
     xp = get_namespace(x)
     m, n = xp.shape(x)
+    xdag = xp.conj(xp.transpose(x))
     absorb = _ABSORB_MAP[absorb]
 
     if right is None:
@@ -1057,10 +1058,10 @@ def svd_via_eig(
             right = False
         else:
             # avoid division if possible
-            right = absorb in (get_Us, get_Us_VH, get_VH)
+            right = absorb in (get_VH, get_sVH, get_sqVH, get_Us_VH)
 
     if right:
-        xx = xp.conj(xp.transpose(x)) @ x
+        xx = xdag @ x
         s2, V = xp.linalg.eigh(xx)
         if 0 < max_bond < min(m, n):
             s2 = s2[-max_bond:]
@@ -1070,19 +1071,33 @@ def svd_via_eig(
             s2 = xp.flip(s2, axis=0)
             V = xp.flip(V, axis=1)
         s2 = xp.maximum(s2, 0.0)
+
         if absorb == get_s:  # 'svals'
-            return None, xp.sqrt(s2), None
+            s = xp.sqrt(s2)
+            return None, s, None
         if absorb == get_VH:  # 'rorthog'
-            return None, None, xp.conj(xp.transpose(V))
+            VH = xp.conj(xp.transpose(V))
+            return None, None, VH
         if absorb == get_sVH:  # 'rfactor'
-            return None, None, xp.sqrt(s2)[:, None] * xp.conj(xp.transpose(V))
+            VH = xp.conj(xp.transpose(V))
+            s = xp.sqrt(s2)
+            sVH = s[:, None] * VH
+            return None, None, sVH
+        if absorb == get_sqVH:  # 'rsqrt'
+            sq = xp.sqrt(xp.sqrt(s2))
+            VH = xp.conj(xp.transpose(V))
+            sqVH = sq[:, None] * VH
+            return None, None, sqVH
+
         Us = x @ V
         if absorb == get_Us:  # 'lfactor'
             return Us, None, None
         if absorb == get_Us_VH:  # 'left'
-            return Us, None, xp.conj(xp.transpose(V))
-        s = xp.sqrt(s2)
+            VH = xp.conj(xp.transpose(V))
+            return Us, None, VH
 
+        # for all other options we need U
+        s = xp.sqrt(s2)
         eps = xp.finfo(s.dtype).eps
         cutoff = xp.max(s) * eps * max(m, n)
         sinv = safe_inverse(s, cutoff)
@@ -1090,20 +1105,26 @@ def svd_via_eig(
 
         if absorb == get_U:  # 'lorthog'
             return U, None, None
+        if absorb == get_Usq:  # 'lsqrt'
+            sq = xp.sqrt(s)
+            Usq = U * sq[None, :]
+            return Usq, None, None
+
+        # need U and VH for all remaining options
         VH = xp.conj(xp.transpose(V))
         if absorb == get_U_s_VH:  # 'full'
             return U, s, VH
         if absorb == get_U_sVH:  # 'right'
-            return U, None, s[:, None] * VH
-        sq = xp.sqrt(s)
+            sVH = s[:, None] * VH
+            return U, None, sVH
         if absorb == get_Usq_sqVH:  # 'both'
-            return U * sq[None, :], None, sq[:, None] * VH
-        if absorb == get_Usq:  # 'lsqrt'
-            return U * sq[None, :], None, None
-        if absorb == get_sqVH:  # 'rsqrt'
-            return None, None, sq[:, None] * VH
+            sq = xp.sqrt(s)
+            Usq = U * sq[None, :]
+            sqVH = sq[:, None] * VH
+            return Usq, None, sqVH
+
     else:
-        xx = x @ xp.conj(xp.transpose(x))
+        xx = x @ xdag
         s2, U = xp.linalg.eigh(xx)
         if 0 < max_bond < min(m, n):
             s2 = s2[-max_bond:]
@@ -1113,19 +1134,29 @@ def svd_via_eig(
             s2 = xp.flip(s2)
             U = xp.flip(U, axis=1)
         s2 = xp.maximum(s2, 0.0)
+
         if absorb == get_s:  # 'svals'
-            return None, xp.sqrt(s2), None
+            s = xp.sqrt(s2)
+            return None, s, None
         if absorb == get_U:  # 'lorthog'
             return U, None, None
         if absorb == get_Us:  # 'lfactor'
-            return U * xp.sqrt(s2)[None, :], None, None
+            s = xp.sqrt(s2)
+            Us = U * s[None, :]
+            return Us, None, None
+        if absorb == get_Usq:  # 'lsqrt'
+            sq = xp.sqrt(xp.sqrt(s2))
+            Usq = U * sq[None, :]
+            return Usq, None, None
+
         sVH = xp.conj(xp.transpose(U)) @ x
         if absorb == get_sVH:  # 'rfactor'
             return None, None, sVH
         if absorb == get_U_sVH:  # 'right'
             return U, None, sVH
-        s = xp.sqrt(s2)
 
+        # for all other options we need VH
+        s = xp.sqrt(s2)
         eps = xp.finfo(s.dtype).eps
         cutoff = xp.max(s) * eps * max(m, n)
         sinv = safe_inverse(s, cutoff)
@@ -1136,14 +1167,15 @@ def svd_via_eig(
         if absorb == get_U_s_VH:  # 'full'
             return U, s, VH
         if absorb == get_Us_VH:  # 'left'
-            return U * s[None, :], None, VH
+            Us = U * s[None, :]
+            return Us, None, VH
         sq = xp.sqrt(s)
+        sqVH = sq[:, None] * VH
         if absorb == get_Usq_sqVH:  # 'both'
-            return U * sq[None, :], None, (sq[:, None] * VH)
-        if absorb == get_Usq:  # 'lsqrt'
-            return U * sq[None, :], None, None
+            Usq = U * sq[None, :]
+            return Usq, None, sqVH
         if absorb == get_sqVH:  # 'rsqrt'
-            return None, None, sq[:, None] * VH
+            return None, None, sqVH
 
     raise ValueError(f"Invalid absorb mode: {absorb}")
 
