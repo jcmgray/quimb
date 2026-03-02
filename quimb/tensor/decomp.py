@@ -1061,8 +1061,8 @@ def svd_via_eig(
             right = absorb in (get_VH, get_sVH, get_sqVH, get_Us_VH)
 
     if right:
-        xx = xdag @ x
-        s2, V = xp.linalg.eigh(xx)
+        # tall: eigendecompose xdag @ x
+        s2, V = xp.linalg.eigh(xdag @ x)
         if 0 < max_bond < min(m, n):
             s2 = s2[-max_bond:]
             V = V[:, -max_bond:]
@@ -1124,8 +1124,8 @@ def svd_via_eig(
             return Usq, None, sqVH
 
     else:
-        xx = x @ xdag
-        s2, U = xp.linalg.eigh(xx)
+        # wide: eigendecompose x @ xdag
+        s2, U = xp.linalg.eigh(x @ xdag)
         if 0 < max_bond < min(m, n):
             s2 = s2[-max_bond:]
             U = U[:, -max_bond:]
@@ -1597,7 +1597,7 @@ def svd_rand_truncated(
         elif absorb in (get_Us, get_Us_VH, get_VH):
             right = False
         else:
-            # note unlike svd via eig, tall vs wide is secondary factor
+            # note unlike svd via eig, tall vs wide is secondary consideration
             right = m > n
 
     rng = xp.random.default_rng(seed)
@@ -3476,7 +3476,7 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift=True):
             return _cholesky_maybe_with_diag_shift(x, absorb, shift=-1.0)
 
     shift = {False: 0.0, True: -1.0}.get(shift, shift)
-    return _cholesky_maybe_with_diag_shift(x, absorb, shift=0.0)
+    return _cholesky_maybe_with_diag_shift(x, absorb, shift=shift)
 
 
 @njit  # pragma: no cover
