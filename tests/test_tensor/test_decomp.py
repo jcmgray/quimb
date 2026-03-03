@@ -489,9 +489,15 @@ def test_batch_svd(backend, method, max_bond, absorb):
     rng = xp.random.default_rng(42)
     x = rng.uniform(size=(3, 5, 7))
 
-    left, s, right = array_split(
-        x, method=method, max_bond=max_bond, absorb=absorb
+    kwargs = dict(
+        method=method,
+        max_bond=max_bond,
+        absorb=absorb,
     )
+    if method == "svd:rand":
+        kwargs["seed"] = rng
+
+    left, s, right = array_split(x, **kwargs)
 
     if max_bond is None:
         k = 5

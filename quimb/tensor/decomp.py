@@ -3484,9 +3484,13 @@ def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
         shift = xp.finfo(x.dtype).eps
 
     if shift > 0.0:
-        x = x + (
-            shift * xp.trace(x, axis1=-2, axis2=-1)[..., None, None]
-        ) * xp.eye(x.shape[-1])
+        trace = xp.trace(x, axis1=-2, axis2=-1)[..., None, None]
+        try:
+            # if possible avoid accumulating regulization gradient
+            trace = xp.stop_gradient(trace)
+        except (ImportError, AttributeError):
+            pass
+        x = x + shift * trace * xp.eye(x.shape[-1])
 
     L = xp.linalg.cholesky(x)
 
