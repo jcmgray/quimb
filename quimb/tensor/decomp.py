@@ -3492,14 +3492,24 @@ def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
             pass
         x = x + shift * trace * xp.eye(x.shape[-1])
 
-    L = xp.linalg.cholesky(x)
+    if absorb == get_sqVH:
+        # can compute the right factor directly using upper
+        return None, None, xp.linalg.cholesky(x, upper=True)
+
+    left = xp.linalg.cholesky(x, upper=False)
 
     if absorb == get_Usq:
-        return L, None, None
-    if absorb == get_sqVH:
-        return None, None, dag(L)
-    # absorb == get_Usq_sqVH
-    return L, None, dag(L)
+        return left, None, None
+
+    if absorb == get_Usq_sqVH:
+        # compute upper from lower
+        right = xp.conj(left).swapaxes(-2, -1)
+        return left, None, right
+
+    raise ValueError(
+        f"Invalid absorb={absorb} in cholesky_regularized. Should be one "
+        "of 'both'/'get_Usq_sqVH', 'lsqrt'/'get_Usq' or rsqrt'/'get_sqVH'."
+    )
 
 
 @register_split_driver("cholesky")
