@@ -608,6 +608,8 @@ def _trim_and_renorm_svd_result(
             cutoff_mode_sum1,
             cutoff_mode_rsum1,
         ):
+            # TODO: if we are truncating a batch result, we might want to treat
+            # all singular values together, assuming block diagonal form
             if cutoff_mode in (cutoff_mode_sum2, cutoff_mode_rsum2):
                 pow = 2
                 sp = sabs**pow
@@ -618,13 +620,15 @@ def _trim_and_renorm_svd_result(
             csp = xp.cumsum(sp, axis=-1)
             tot = csp[..., -1:]
 
-            if cutoff_mode in (cutoff_mode_sum2, cutoff_mode_rsum2):
-                n_chi = xp.count_nonzero(csp < (1 - cutoff) * tot, axis=-1) + 1
+            if cutoff_mode in (cutoff_mode_rsum1, cutoff_mode_rsum2):
+                above_thresh = csp < tot * (1 - cutoff)
             else:
-                n_chi = xp.count_nonzero((tot - csp) > cutoff, axis=-1) + 1
+                above_thresh = csp < tot - cutoff
+
+            n_chi = xp.count_nonzero(above_thresh, axis=-1) + 1
 
         if batch_dims:
-            # batch -> take maximum bond needed
+            # batch -> take maximum bond needed for any single batch
             n_chi = xp.max(n_chi)
 
         n_chi = max(n_chi, 1)
