@@ -309,21 +309,11 @@ def parse_split_left_right_isom(method, absorb):
     absorb = _ABSORB_MAP[absorb]
     left_isom = (method in _LEFT_ISOM_METHODS) or (
         method in _BOTH_ISOM_METHODS
-        and absorb
-        in (
-            get_U_s_VH,
-            get_U_sVH,
-            get_U,
-        )
+        and absorb in (get_U_s_VH, get_U_sVH, get_U)
     )
     right_isom = (method in _RIGHT_ISOM_METHODS) or (
         method in _BOTH_ISOM_METHODS
-        and absorb
-        in (
-            get_U_s_VH,
-            get_Us_VH,
-            get_VH,
-        )
+        and absorb in (get_U_s_VH, get_Us_VH, get_VH)
     )
     return left_isom, right_isom
 
@@ -439,12 +429,12 @@ def safe_inverse_numba(s, cutoff):
 @compose
 def rdmul(x, d):
     """Right-multiplication a matrix by a vector representing a diagonal."""
-    return x * d[None, :]
+    return x * d[..., None, :]
 
 
 @njit  # pragma: no cover
 def rdmul_numba(x, d):
-    return x * d[None, :]
+    return x * d[..., None, :]
 
 
 @compose
@@ -452,7 +442,7 @@ def rddiv(x, d):
     """Right-multiplication of a matrix by a vector representing an inverse
     diagonal.
     """
-    return x / d[None, :]
+    return x / d[..., None, :]
 
 
 @njit  # pragma: no cover
@@ -463,12 +453,12 @@ def rddiv_numba(x, d):
 @compose
 def ldmul(d, x):
     """Left-multiplication a matrix by a vector representing a diagonal."""
-    return x * d[:, None]
+    return x * d[..., :, None]
 
 
 @njit  # pragma: no cover
 def ldmul_numba(d, x):
-    return x * d[:, None]
+    return x * d[..., :, None]
 
 
 @compose
@@ -476,12 +466,12 @@ def lddiv(d, x):
     """Left-multiplication of a matrix by a vector representing an inverse
     diagonal.
     """
-    return x / d[:, None]
+    return x / d[..., :, None]
 
 
 @njit  # pragma: no cover
 def lddiv_numba(d, x):
-    return x / d[:, None]
+    return x / d[..., :, None]
 
 
 @compose
@@ -602,15 +592,15 @@ def _trim_and_renorm_svd_result(
         # assume already all positive
         sabs = s
 
-    d = xp.shape(sabs)[0]
+    *batch_dims, d = xp.shape(sabs)
 
     if (cutoff > 0.0) or (renorm > 0):
         # need to dynamically truncate based on spectrum
         if cutoff_mode == cutoff_mode_abs:
-            n_chi = xp.count_nonzero(sabs > cutoff)
+            n_chi = xp.count_nonzero(sabs > cutoff, axis=-1)
 
         elif cutoff_mode == cutoff_mode_rel:
-            n_chi = xp.count_nonzero(sabs > cutoff * sabs[0])
+            n_chi = xp.count_nonzero(sabs > cutoff * sabs[..., 0:1], axis=-1)
 
         elif cutoff_mode in (
             cutoff_mode_sum2,
@@ -625,13 +615,17 @@ def _trim_and_renorm_svd_result(
                 pow = 1
                 sp = sabs
 
-            csp = xp.cumsum(sp, 0)
-            tot = csp[-1]
+            csp = xp.cumsum(sp, axis=-1)
+            tot = csp[..., -1:]
 
             if cutoff_mode in (cutoff_mode_sum2, cutoff_mode_rsum2):
-                n_chi = xp.count_nonzero(csp < (1 - cutoff) * tot) + 1
+                n_chi = xp.count_nonzero(csp < (1 - cutoff) * tot, axis=-1) + 1
             else:
-                n_chi = xp.count_nonzero((tot - csp) > cutoff) + 1
+                n_chi = xp.count_nonzero((tot - csp) > cutoff, axis=-1) + 1
+
+        if batch_dims:
+            # batch -> take maximum bond needed
+            n_chi = xp.max(n_chi)
 
         n_chi = max(n_chi, 1)
         if max_bond > 0:
@@ -647,16 +641,16 @@ def _trim_and_renorm_svd_result(
 
     if n_chi < d:
         # some truncation
-        s = s[:n_chi]
-        U = U[:, :n_chi]
-        VH = VH[:n_chi, :]
+        s = s[..., :n_chi]
+        U = U[..., :, :n_chi]
+        VH = VH[..., :n_chi, :]
 
         if renorm > 0:
             norm = (tot / csp[n_chi - 1]) ** (1 / pow)
             s *= norm
 
         if "error" in info:
-            info["error"] = xp.sqrt(xp.sum(sabs[n_chi:] ** 2))
+            info["error"] = xp.sqrt(xp.sum(sabs[..., n_chi:] ** 2, axis=-1))
 
     elif "error" in info:
         # no truncation
@@ -911,6 +905,18 @@ def svd_truncated_numpy(
     """Numpy version of ``svd_truncated``, trying the accelerated version
     first, then falling back to the more stable scipy version.
     """
+    if x.ndim > 2:
+        # XXX: batch truncation not implemented in numba version yet
+        return svd_truncated._default_fn(
+            x,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            max_bond=max_bond,
+            absorb=absorb,
+            renorm=renorm,
+            info=info,
+        )
+
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
@@ -962,7 +968,7 @@ def svd_truncated_lazy(
     if cutoff != 0.0:
         raise ValueError("Can't handle dynamic cutoffs in lazy mode.")
 
-    m, n = x.shape
+    *b, m, n = x.shape
     k = min(m, n)
     if max_bond > 0:
         k = min(k, max_bond)
@@ -973,12 +979,19 @@ def svd_truncated_lazy(
         shape=(3,),
     )
 
-    U = lsvdt.to(operator.getitem, (lsvdt, 0), shape=(m, k))
+    U = lsvdt.to(operator.getitem, (lsvdt, 0), shape=(*b, m, k))
     if absorb is None:
-        s = lsvdt.to(operator.getitem, (lsvdt, 1), shape=(k,))
+        s = lsvdt.to(
+            operator.getitem,
+            (lsvdt, 1),
+            shape=(
+                *b,
+                k,
+            ),
+        )
     else:
         s = None
-    VH = lsvdt.to(operator.getitem, (lsvdt, 2), shape=(k, n))
+    VH = lsvdt.to(operator.getitem, (lsvdt, 2), shape=(*b, k, n))
 
     return U, s, VH
 
@@ -1047,8 +1060,8 @@ def svd_via_eig(
         if not requested.
     """
     xp = get_namespace(x)
-    m, n = xp.shape(x)
-    xdag = xp.conj(xp.transpose(x))
+    *_, m, n = xp.shape(x)
+    xdag = xp.conj(xp.swapaxes(x, -2, -1))
     absorb = _ABSORB_MAP[absorb]
 
     if right is None:
@@ -1064,76 +1077,80 @@ def svd_via_eig(
         # tall: eigendecompose xdag @ x
         s2, V = xp.linalg.eigh(xdag @ x)
         if 0 < max_bond < min(m, n):
-            s2 = s2[-max_bond:]
-            V = V[:, -max_bond:]
+            s2 = s2[..., -max_bond:]
+            V = V[..., :, -max_bond:]
         if descending:
             # maybe match svd convention, by default eigh is *ascending*
-            s2 = xp.flip(s2, axis=0)
-            V = xp.flip(V, axis=1)
-        s2 = xp.maximum(s2, 0.0)
+            s2 = xp.flip(s2, axis=-1)
+            V = xp.flip(V, axis=-1)
+        s2 = xp.clip(s2, 0.0, None)
 
         if absorb == get_s:  # 'svals'
             s = xp.sqrt(s2)
             return None, s, None
         if absorb == get_VH:  # 'rorthog'
-            VH = xp.conj(xp.transpose(V))
+            VH = xp.conj(xp.swapaxes(V, -2, -1))
             return None, None, VH
         if absorb == get_sVH:  # 'rfactor'
-            VH = xp.conj(xp.transpose(V))
+            VH = xp.conj(xp.swapaxes(V, -2, -1))
             s = xp.sqrt(s2)
-            sVH = s[:, None] * VH
+            sVH = s[..., :, None] * VH
             return None, None, sVH
         if absorb == get_sqVH:  # 'rsqrt'
             sq = xp.sqrt(xp.sqrt(s2))
-            VH = xp.conj(xp.transpose(V))
-            sqVH = sq[:, None] * VH
+            VH = xp.conj(xp.swapaxes(V, -2, -1))
+            sqVH = sq[..., :, None] * VH
             return None, None, sqVH
 
         Us = x @ V
         if absorb == get_Us:  # 'lfactor'
             return Us, None, None
         if absorb == get_Us_VH:  # 'left'
-            VH = xp.conj(xp.transpose(V))
+            VH = xp.conj(xp.swapaxes(V, -2, -1))
             return Us, None, VH
 
         # for all other options we need U
         s = xp.sqrt(s2)
         eps = xp.finfo(s.dtype).eps
-        cutoff = xp.max(s) * eps * max(m, n)
+        if descending:
+            smax = s[..., 0:1]
+        else:
+            smax = s[..., -1:]
+        cutoff = smax * eps * max(m, n)
         sinv = safe_inverse(s, cutoff)
-        U = Us * sinv[None, :]
+        U = Us * sinv[..., None, :]
 
         if absorb == get_U:  # 'lorthog'
             return U, None, None
         if absorb == get_Usq:  # 'lsqrt'
             sq = xp.sqrt(s)
-            Usq = U * sq[None, :]
+            Usq = U * sq[..., None, :]
             return Usq, None, None
 
         # need U and VH for all remaining options
-        VH = xp.conj(xp.transpose(V))
+        VH = xp.conj(xp.swapaxes(V, -2, -1))
         if absorb == get_U_s_VH:  # 'full'
             return U, s, VH
         if absorb == get_U_sVH:  # 'right'
-            sVH = s[:, None] * VH
+            sVH = s[..., :, None] * VH
             return U, None, sVH
         if absorb == get_Usq_sqVH:  # 'both'
             sq = xp.sqrt(s)
-            Usq = U * sq[None, :]
-            sqVH = sq[:, None] * VH
+            Usq = U * sq[..., None, :]
+            sqVH = sq[..., :, None] * VH
             return Usq, None, sqVH
 
     else:
         # wide: eigendecompose x @ xdag
         s2, U = xp.linalg.eigh(x @ xdag)
         if 0 < max_bond < min(m, n):
-            s2 = s2[-max_bond:]
-            U = U[:, -max_bond:]
+            s2 = s2[..., -max_bond:]
+            U = U[..., :, -max_bond:]
         if descending:
             # maybe match svd convention, by default eigh is *ascending*
-            s2 = xp.flip(s2)
-            U = xp.flip(U, axis=1)
-        s2 = xp.maximum(s2, 0.0)
+            s2 = xp.flip(s2, axis=-1)
+            U = xp.flip(U, axis=-1)
+        s2 = xp.clip(s2, 0.0, None)
 
         if absorb == get_s:  # 'svals'
             s = xp.sqrt(s2)
@@ -1142,14 +1159,14 @@ def svd_via_eig(
             return U, None, None
         if absorb == get_Us:  # 'lfactor'
             s = xp.sqrt(s2)
-            Us = U * s[None, :]
+            Us = U * s[..., None, :]
             return Us, None, None
         if absorb == get_Usq:  # 'lsqrt'
             sq = xp.sqrt(xp.sqrt(s2))
-            Usq = U * sq[None, :]
+            Usq = U * sq[..., None, :]
             return Usq, None, None
 
-        sVH = xp.conj(xp.transpose(U)) @ x
+        sVH = xp.conj(xp.swapaxes(U, -2, -1)) @ x
         if absorb == get_sVH:  # 'rfactor'
             return None, None, sVH
         if absorb == get_U_sVH:  # 'right'
@@ -1158,21 +1175,25 @@ def svd_via_eig(
         # for all other options we need VH
         s = xp.sqrt(s2)
         eps = xp.finfo(s.dtype).eps
-        cutoff = xp.max(s) * eps * max(m, n)
+        if descending:
+            smax = s[..., 0:1]
+        else:
+            smax = s[..., -1:]
+        cutoff = smax * eps * max(m, n)
         sinv = safe_inverse(s, cutoff)
-        VH = sinv[:, None] * sVH
+        VH = sinv[..., :, None] * sVH
 
         if absorb == get_VH:  # 'rorthog'
             return None, None, VH
         if absorb == get_U_s_VH:  # 'full'
             return U, s, VH
         if absorb == get_Us_VH:  # 'left'
-            Us = U * s[None, :]
+            Us = U * s[..., None, :]
             return Us, None, VH
         sq = xp.sqrt(s)
-        sqVH = sq[:, None] * VH
+        sqVH = sq[..., :, None] * VH
         if absorb == get_Usq_sqVH:  # 'both'
-            Usq = U * sq[None, :]
+            Usq = U * sq[..., None, :]
             return Usq, None, sqVH
         if absorb == get_sqVH:  # 'rsqrt'
             return None, None, sqVH
@@ -1458,6 +1479,18 @@ def svd_via_eig_truncated_numpy(
     renorm=0,
     info=None,
 ):
+    if x.ndim > 2:
+        # XXX: batch truncation not implemented in numba version yet
+        return svd_via_eig_truncated._default_fn(
+            x,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            max_bond=max_bond,
+            absorb=absorb,
+            renorm=renorm,
+            info=info,
+        )
+
     info = parse_info_extras(info, ("error",))
 
     calc_error = "error" in info
@@ -1577,7 +1610,7 @@ def svd_rand_truncated(
     lorthog_opts.setdefault("method", method_lorthog)
 
     xp = get_namespace(x)
-    m, n = xp.shape(x)
+    *batch_dims, m, n = xp.shape(x)
 
     # determine target rank and sketch size
     if max_bond < 0:
@@ -1592,9 +1625,9 @@ def svd_rand_truncated(
 
     if right is None:
         # avoid svd on reduced factor if possible
-        if absorb in (get_U, get_sVH, get_sVH):
+        if absorb in (get_U_sVH, get_U, get_sVH):
             right = True
-        elif absorb in (get_Us, get_Us_VH, get_VH):
+        elif absorb in (get_Us_VH, get_Us, get_VH):
             right = False
         else:
             # note unlike svd via eig, tall vs wide is secondary consideration
@@ -1604,10 +1637,10 @@ def svd_rand_truncated(
 
     if right:
         # tall: sketch from the right
-        omega = rng.normal(size=(n, k_sketch))
+        omega = rng.normal(size=(*batch_dims, n, k_sketch))
         y = x @ omega
         if num_iterations:
-            xdag = xp.conj(xp.transpose(x))
+            xdag = xp.conj(xp.swapaxes(x, -2, -1))
             for _ in range(num_iterations):
                 y = xdag @ y
                 y = x @ y
@@ -1617,37 +1650,37 @@ def svd_rand_truncated(
 
         # X ≈ Q @ B, maybe shortcut for some absorb if no truncation needed
         if k >= k_sketch:
+            if absorb == get_U_sVH:  # 'right'
+                return Q, None, xp.conj(xp.swapaxes(Q, -2, -1)) @ x
+            if absorb == get_sVH:  # 'rfactor'
+                return None, None, xp.conj(xp.swapaxes(Q, -2, -1)) @ x
             if absorb == get_U:  # 'lorthog'
                 return Q, None, None
-            if absorb == get_sVH:  # 'rfactor'
-                return None, None, xp.conj(xp.transpose(Q)) @ x
-            if absorb == get_U_sVH:  # 'right'
-                return Q, None, xp.conj(xp.transpose(Q)) @ x
 
         # form reduced factor
-        B = xp.conj(xp.transpose(Q)) @ x
+        B = xp.conj(xp.swapaxes(Q, -2, -1)) @ x
     else:
         # wide: sketch from the left
-        omega = rng.normal(size=(k_sketch, m))
+        omega = rng.normal(size=(*batch_dims, k_sketch, m))
         y = omega @ x
         if num_iterations:
-            xdag = xp.conj(xp.transpose(x))
+            xdag = xp.conj(xp.swapaxes(x, -2, -1))
             for _ in range(num_iterations):
                 y = y @ xdag
                 y = y @ x
-        y = xp.conj(xp.transpose(y))
+        y = xp.conj(xp.swapaxes(y, -2, -1))
 
         # form orthonormal basis of row space / 'V'
         Q, _, _ = array_split(y, absorb=get_U, **lorthog_opts)
 
         # X ≈ B @ Qdag, maybe shortcut for some absorb if no truncation needed
         if k >= k_sketch:
-            if absorb == get_VH:  # 'rorthog'
-                return None, None, xp.conj(xp.transpose(Q))
+            if absorb == get_Us_VH:  # 'left'
+                return x @ Q, None, xp.conj(xp.swapaxes(Q, -2, -1))
             if absorb == get_Us:  # 'lfactor'
                 return x @ Q, None, None
-            if absorb == get_Us_VH:  # 'left'
-                return x @ Q, None, xp.conj(xp.transpose(Q))
+            if absorb == get_VH:  # 'rorthog'
+                return None, None, xp.conj(xp.swapaxes(Q, -2, -1))
 
         # form reduced factor
         B = x @ Q
@@ -1663,7 +1696,7 @@ def svd_rand_truncated(
     if (U is not None) and right:
         U = Q @ U
     if (VH is not None) and not right:
-        VH = VH @ xp.conj(xp.transpose(Q))
+        VH = VH @ xp.conj(xp.swapaxes(Q, -2, -1))
 
     return U, s, VH
 
@@ -1696,19 +1729,20 @@ def eigh_truncated(
 
     # make sure largest singular value first
     if not positive:
-        idx = xp.argsort(-xp.abs(s))
-        s, U = s[idx], U[:, idx]
+        idx = xp.argsort(-xp.abs(s), axis=-1)
+        s = xp.take_along_axis(s, idx, axis=-1)
+        U = xp.take_along_axis(U, idx[..., None, :], axis=-1)
     else:
         # assume all positive, simply reverse
-        s = xp.flip(s)
-        U = xp.flip(U, axis=1)
+        s = xp.flip(s, axis=-1)
+        U = xp.flip(U, axis=-1)
 
         if absorb in (get_Usq_sqVH, get_Usq, get_sqVH):
             # operator assumed positive, but small negative eignvalues
             # will cause problems when taking sqrt, so clip to zero
             s = xp.clip(s, 0.0, None)
 
-    VH = dag(U)
+    VH = xp.conj(xp.swapaxes(U, -2, -1))
 
     # XXX: better to absorb phase in V and return positive 'values'?
     # V = ldmul(sgn(s), dag(U))
@@ -1728,7 +1762,6 @@ def eigh_truncated(
     )
 
 
-@eigh_truncated.register("numpy")
 @njit  # pragma: no cover
 def eigh_truncated_numba(
     x,
@@ -1770,6 +1803,32 @@ def eigh_truncated_numba(
     return U, s, VH
 
 
+@eigh_truncated.register("numpy")
+def eigh_truncated_numpy(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+    positive=0,
+):
+    if x.ndim > 2:
+        # XXX: batch truncation not implemented in numba version yet
+        return eigh_truncated._default_fn(
+            x,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            max_bond=max_bond,
+            absorb=absorb,
+            renorm=renorm,
+            positive=positive,
+        )
+    return eigh_truncated_numba(
+        x, cutoff, cutoff_mode, max_bond, absorb, renorm, positive
+    )
+
+
 # ---------------------- QR and LQ like decompositions ---------------------- #
 
 
@@ -1789,16 +1848,15 @@ def qr_stabilized(x):
     xp = get_namespace(x)
     Q, R = xp.linalg.qr(x)
     # stabilize the diagonal of R
-    rd = xp.diag(R)
+    rd = xp.diagonal(R, axis1=-2, axis2=-1)
     s = sgn(rd)
     Q = rdmul(Q, xp.conj(s))
     R = ldmul(s, R)
     return Q, None, R
 
 
-@qr_stabilized.register("numpy")
 @njit  # pragma: no cover
-def qr_stabilized_numba(x):
+def _qr_stabilized_numba(x):
     Q, R = np.linalg.qr(x)
     for i in range(R.shape[0]):
         rii = R[i, i]
@@ -1809,18 +1867,26 @@ def qr_stabilized_numba(x):
     return Q, None, R
 
 
+@qr_stabilized.register("numpy")
+def qr_stabilized_numpy(x):
+    if x.ndim > 2:
+        # XXX: batch not implemented in numba version yet
+        return qr_stabilized._default_fn(x)
+    return _qr_stabilized_numba(x)
+
+
 @qr_stabilized.register("autoray.lazy")
 @lazy.core.lazy_cache("qr_stabilized")
 def qr_stabilized_lazy(x):
-    m, n = x.shape
+    *batch_dims, m, n = x.shape
     k = min(m, n)
     lqrs = x.to(
         fn=get_lib_fn(x.backend, "qr_stabilized"),
         args=(x,),
         shape=(3,),
     )
-    Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(m, k))
-    R = lqrs.to(operator.getitem, (lqrs, 2), shape=(k, n))
+    Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(*batch_dims, m, k))
+    R = lqrs.to(operator.getitem, (lqrs, 2), shape=(*batch_dims, k, n))
     return Q, None, R
 
 
@@ -2018,17 +2084,24 @@ def lq_stabilized(x):
         The right isometric factor (Q).
     """
     xp = get_namespace(x)
-    QT, _, LT = qr_stabilized(xp.transpose(x))
-    Q = xp.transpose(QT)
-    L = xp.transpose(LT)
+    QT, _, LT = qr_stabilized(xp.swapaxes(x, -2, -1))
+    Q = xp.swapaxes(QT, -2, -1)
+    L = xp.swapaxes(LT, -2, -1)
     return L, None, Q
 
 
-@lq_stabilized.register("numpy")
 @njit  # pragma: no cover
-def lq_stabilized_numba(x):
-    Q, _, L = qr_stabilized_numba(x.T)
+def _lq_stabilized_numba(x):
+    Q, _, L = _qr_stabilized_numba(x.T)
     return L.T, None, Q.T
+
+
+@lq_stabilized.register("numpy")
+def lq_stabilized_numpy(x):
+    if x.ndim > 2:
+        # XXX: batch not implemented in numba version yet
+        return lq_stabilized._default_fn(x)
+    return _lq_stabilized_numba(x)
 
 
 @register_split_driver(
@@ -3411,7 +3484,9 @@ def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
         shift = xp.finfo(x.dtype).eps
 
     if shift > 0.0:
-        x = x + shift * xp.trace(x) * xp.eye(x.shape[0])
+        x = x + (
+            shift * xp.trace(x, axis1=-2, axis2=-1)[..., None, None]
+        ) * xp.eye(x.shape[-1])
 
     L = xp.linalg.cholesky(x)
 
@@ -3480,7 +3555,7 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift=True):
 
 
 @njit  # pragma: no cover
-def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=-1.0):
+def _cholesky_regularized_numba(x, absorb=get_Usq_sqVH, shift=-1.0):
     if shift < 0.0:
         # auto compute
         shift = np.finfo(x.dtype).eps
@@ -3502,20 +3577,24 @@ def _cholesky_numba(x, absorb=get_Usq_sqVH, shift=-1.0):
 
 
 @cholesky_regularized.register("numpy")
-def cholesky_numpy(x, absorb=get_Usq_sqVH, shift=True):
+def cholesky_regularized_numpy(x, absorb=get_Usq_sqVH, shift=True):
+    if x.ndim > 2:
+        # XXX:
+        return cholesky_regularized._default_fn(x, absorb=absorb, shift=shift)
+
     absorb = _ABSORB_MAP[absorb]
     if shift == "auto":
         try:
             # try without shift
-            return _cholesky_numba(x, absorb, shift=0.0)
+            return _cholesky_regularized_numba(x, absorb, shift=0.0)
         except Exception as e:
             warnings.warn(
                 f"Cholesky decomposition failed with error: {e}. "
                 "retrying with small regularization added to the diagonal."
             )
-            return _cholesky_numba(x, absorb, shift=-1.0)
+            return _cholesky_regularized_numba(x, absorb, shift=-1.0)
     shift = {False: 0.0, True: -1.0}.get(shift, shift)
-    return _cholesky_numba(x, absorb, shift=shift)
+    return _cholesky_regularized_numba(x, absorb, shift=shift)
 
 
 @register_split_driver("qr:cholesky", isom="left", default_absorb=get_U_sVH)
@@ -3556,7 +3635,7 @@ def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
         )
 
     xp = get_namespace(x)
-    m, n = xp.shape(x)
+    *_, m, n = xp.shape(x)
     if m < n:
         warnings.warn(
             f"qr_via_cholesky is not well-defined for wide "
@@ -3571,16 +3650,16 @@ def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
     }.get(absorb, get_Us_VH)
 
     R, _, Q = lq_via_cholesky(
-        xp.transpose(x),
+        xp.swapaxes(x, -2, -1),
         absorb=absorb_t,
         shift=shift,
         solve_triangular=solve_triangular,
     )
 
     if R is not None:
-        R = xp.transpose(R)
+        R = xp.swapaxes(R, -2, -1)
     if Q is not None:
-        Q = xp.transpose(Q)
+        Q = xp.swapaxes(Q, -2, -1)
 
     return Q, None, R
 
@@ -3597,14 +3676,14 @@ def lq_via_cholesky(x, absorb=get_Us_VH, shift=True, solve_triangular=True):
         )
 
     xp = get_namespace(x)
-    m, n = xp.shape(x)
+    *_, m, n = xp.shape(x)
     if m > n:
         warnings.warn(
             f"lq_via_cholesky is not well-defined for tall "
             f"matrices ({m} > {n}), consider using 'qr:cholesky'."
         )
 
-    xx = x @ xp.conj(xp.transpose(x))
+    xx = x @ xp.conj(xp.swapaxes(x, -2, -1))
     L, _, _ = cholesky_regularized(xx, absorb=get_Usq, shift=shift)
 
     if absorb == get_Us:

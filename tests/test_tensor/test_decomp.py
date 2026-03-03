@@ -1,9 +1,19 @@
+import autoray as ar
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
 import quimb as qu
-from quimb.tensor.decomp import _compute_number_svals_to_keep_numba
+from quimb.tensor.decomp import (
+    _compute_number_svals_to_keep_numba,
+    array_split,
+)
+
+from . import (
+    jax_case,
+    pytorch_case,
+    tensorflow_case,
+)
 
 
 def test_trim_singular_vals():
@@ -247,8 +257,6 @@ def test_svd_rand_truncated_warns():
 
 
 def test_svd_rand_via_array_split():
-    from quimb.tensor.decomp import array_split
-
     rng = np.random.default_rng(42)
     x = rng.uniform(size=(8, 5))
     x /= np.linalg.norm(x)
@@ -270,8 +278,6 @@ LQ_METHODS = ["lq", "lq:svd", "lq:eig", "lq:rand", "lq:cholesky"]
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_qr_methods(method, m, n, dtype):
-    from quimb.tensor.decomp import array_split
-
     if method == "qr:cholesky" and m < n:
         pytest.skip("cholesky QR requires m >= n")
 
@@ -297,8 +303,6 @@ def test_qr_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_lq_methods(method, m, n, dtype):
-    from quimb.tensor.decomp import array_split
-
     if method == "lq:cholesky" and m > n:
         pytest.skip("cholesky LQ requires m <= n")
 
@@ -322,8 +326,6 @@ def test_lq_methods(method, m, n, dtype):
 
 @pytest.mark.parametrize("method", QR_METHODS + LQ_METHODS)
 def test_qr_lq_methods_truncated(method):
-    from quimb.tensor.decomp import array_split
-
     if method in ("qr", "lq", "qr:cholesky", "lq:cholesky"):
         pytest.skip("no truncation support")
 
@@ -386,8 +388,6 @@ LORTHOG_METHODS = [
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_rfactor_methods(method, m, n, dtype):
-    from quimb.tensor.decomp import array_split
-
     if method == "rfactor:cholesky" and m < n:
         pytest.skip("cholesky rfactor requires m >= n")
 
@@ -411,8 +411,6 @@ def test_rfactor_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_lfactor_methods(method, m, n, dtype):
-    from quimb.tensor.decomp import array_split
-
     if method == "lfactor:cholesky" and m > n:
         pytest.skip("cholesky lfactor requires m <= n")
 
@@ -436,8 +434,6 @@ def test_lfactor_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_rorthog_methods(method, m, n, dtype):
-    from quimb.tensor.decomp import array_split
-
     if method == "rorthog:cholesky" and m > n:
         pytest.skip("cholesky rorthog requires m <= n")
 
@@ -462,8 +458,6 @@ def test_rorthog_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_lorthog_methods(method, m, n, dtype):
-    from quimb.tensor.decomp import array_split
-
     if method == "lorthog:cholesky" and m < n:
         pytest.skip("cholesky lorthog requires m >= n")
 
@@ -482,3 +476,96 @@ def test_lorthog_methods(method, m, n, dtype):
     assert right is None
     assert Q.shape == (m, k)
     assert_allclose(Q.conj().T @ Q, np.eye(k), atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("method", ["svd", "svd:eig", "svd:rand"])
+@pytest.mark.parametrize("max_bond", [None, 4])
+@pytest.mark.parametrize("absorb", ["both", "left", "right", None])
+def test_batch_svd(backend, method, max_bond, absorb):
+    xp = ar.get_namespace(backend)
+    rng = xp.random.default_rng(42)
+    x = rng.uniform(size=(3, 5, 7))
+
+    left, s, right = array_split(
+        x, method=method, max_bond=max_bond, absorb=absorb
+    )
+
+    if max_bond is None:
+        k = 5
+    else:
+        k = 4
+
+    assert left is None or left.shape == (3, 5, k)
+    assert s is None or s.shape == (3, k)
+    assert right is None or right.shape == (3, k, 7)
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "numpy",
+        jax_case,
+        tensorflow_case,
+        pytorch_case,
+    ],
+)
+@pytest.mark.parametrize("method", ["qr", "qr:cholesky"])
+def test_batch_qr(backend, method):
+    xp = ar.get_namespace(backend)
+    rng = xp.random.default_rng(42)
+    x = rng.uniform(size=(3, 7, 5))
+
+    left, s, right = array_split(x, method)
+    assert left is None or left.shape == (3, 7, 5)
+    assert s is None or s.shape == (3, 5)
+    assert right is None or right.shape == (3, 5, 5)
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "numpy",
+        "autoray.lazy",
+        jax_case,
+        tensorflow_case,
+        pytorch_case,
+    ],
+)
+@pytest.mark.parametrize("method", ["lq", "lq:cholesky"])
+def test_batch_lq(backend, method):
+    if backend == "autoray.lazy":
+        backend = "numpy"
+    xp = ar.get_namespace(backend)
+    rng = xp.random.default_rng(42)
+    x = rng.uniform(size=(3, 5, 7))
+
+    left, s, right = array_split(x, method)
+    assert left is None or left.shape == (3, 5, 5)
+    assert s is None or s.shape == (3, 5)
+    assert right is None or right.shape == (3, 5, 7)
+
+
+@pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("max_bond", [None, 4])
+@pytest.mark.parametrize("absorb", ["both", "left", "right", None])
+def test_batch_eigh(backend, max_bond, absorb):
+    xp = ar.get_namespace(backend)
+    rng = xp.random.default_rng(42)
+    # build a batch of symmetric (hermitian) matrices: x @ x.T
+    a = rng.uniform(size=(3, 6, 6))
+    x = a @ a.swapaxes(-1, -2)
+
+    left, s, right = array_split(
+        x, method="eigh", max_bond=max_bond, absorb=absorb
+    )
+
+    k = 4 if max_bond is not None else 6
+
+    assert left is None or left.shape == (3, 6, k)
+    assert s is None or s.shape == (3, k)
+    assert right is None or right.shape == (3, k, 6)

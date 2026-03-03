@@ -209,9 +209,13 @@ class Test3DManualContract:
             cyclic=(cyclicx, cyclicy, cyclicz),
         )
         if mode == "hotrg":
-            lZ = tn.contract_hotrg(max_bond=chi, cutoff=0.0)
+            lZ = tn.contract_hotrg(
+                max_bond=chi, cutoff=0.0, optimize="optimal"
+            )
         elif mode == "ctmrg":
-            lZ = tn.contract_ctmrg(max_bond=chi, cutoff=0.0)
+            lZ = tn.contract_ctmrg(
+                max_bond=chi, cutoff=0.0, optimize="optimal"
+            )
 
         if any((cyclicx, cyclicy, cyclicz)):
             assert lZ.history_max_size() < 2**16

@@ -1,12 +1,12 @@
-import importlib
-
 import numpy as np
 import pytest
 
 import quimb.tensor as qtn
 
+from . import found_autograd
+
 requires_autograd = pytest.mark.skipif(
-    importlib.util.find_spec("autograd") is None,
+    not found_autograd,
     reason="autograd not installed",
 )
 
