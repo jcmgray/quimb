@@ -146,9 +146,8 @@ def array_split(
         The right factor, or ``None`` if not requested by ``absorb``.
     """
     method = parse_method(method)
-    absorb = parse_absorb(absorb, method)
+
     kwargs.update(
-        # cached lookup of various defaults
         parse_split_opts(
             method,
             cutoff,
@@ -158,6 +157,7 @@ def array_split(
             renorm,
         )
     )
+
     if info is not None:
         # inject info dict for extra info returns (e.g. truncation error)
         kwargs["info"] = info
@@ -221,6 +221,21 @@ for mode, aliases in [
     for alias in aliases:
         _ABSORB_MAP[alias] = mode
 
+_ABSORB_TRANSPOSE_MAP = {
+    None: None,
+    get_s: get_s,
+    get_Usq: get_sqVH,
+    get_VH: get_U,
+    get_Us: get_sVH,
+    get_Us_VH: get_U_sVH,
+    get_Usq_sqVH: get_Usq_sqVH,
+    get_U_sVH: get_Us_VH,
+    get_U: get_VH,
+    get_sVH: get_Us,
+    get_sqVH: get_Usq,
+}
+
+
 # cutoff_mode aliases, and conversion to enum for numba functions
 cutoff_mode_abs = 1
 cutoff_mode_rel = 2
@@ -243,7 +258,12 @@ for mode, aliases in [
 
 _MAX_BOND_LOOKUP = {None: -1}
 _CUTOFF_LOOKUP = {None: -1.0}
-_RENORM_LOOKUP = {"sum2": 2, "rsum2": 2, "sum1": 1, "rsum1": 1}
+_RENORM_LOOKUP = {
+    cutoff_mode_sum2: 2,
+    cutoff_mode_rsum2: 2,
+    cutoff_mode_sum1: 1,
+    cutoff_mode_rsum1: 1,
+}
 
 
 def parse_method(method):
@@ -260,6 +280,9 @@ def parse_method(method):
 
 
 def parse_absorb(absorb, method):
+    """Parse the absorb option, converting from string aliases to numeric
+    codes, and using the method-specific default if 'auto' is specified.
+    """
     if absorb == "auto":
         return _DEFAULT_ABSORB[method]
     return _ABSORB_MAP[absorb]
@@ -270,32 +293,43 @@ def parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
     """Convert defaults and settings to numeric type for numba funcs, and only
     supply valid options for the given method.
     """
+    import inspect
+
+    signature = inspect.signature(_SPLIT_FNS[method])
+    absorb = parse_absorb(absorb, method)
     opts = dict()
-    absorb = _ABSORB_MAP[absorb]
-    if method in _DYNAMIC_SPLIT_METHODS:
-        # all options can be supplied
+
+    if "absorb" in signature.parameters:
         opts["absorb"] = absorb
-        opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
-        opts["cutoff"] = _CUTOFF_LOOKUP.get(cutoff, cutoff)
-        opts["cutoff_mode"] = _CUTOFF_MODE_MAP[cutoff_mode]
-        # renorm doubles up as the power used to renormalize
-        if renorm is True:
-            # match renorm power to cutoff mode
-            opts["renorm"] = _RENORM_LOOKUP.get(cutoff_mode, 0)
-        else:
-            # turn off, or use explicitly supplied power
-            opts["renorm"] = 0 if renorm is None else renorm
-    elif method in _STATIC_SPLIT_METHODS:
-        # dynamic cutoff options can't be supplied
-        opts["absorb"] = absorb
-        opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
     else:
-        # no singular value options should be supplied
         if absorb is None:
+            # no singular value options should be supplied
             raise ValueError(
                 "You can't return the singular values separately when "
                 "`method='{}'`.".format(method)
             )
+
+    if "max_bond" in signature.parameters:
+        opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
+
+    if "cutoff" in signature.parameters:
+        cutoff = _CUTOFF_LOOKUP.get(cutoff, cutoff)
+        opts["cutoff"] = cutoff
+
+        if "cutoff_mode" in signature.parameters:
+            cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
+            opts["cutoff_mode"] = cutoff_mode
+
+            # renorm doubles up as the power used to renormalize
+            if "renorm" in signature.parameters:
+                if renorm is True:
+                    # match renorm power to cutoff mode
+                    renorm = _RENORM_LOOKUP.get(cutoff_mode, 0)
+                    opts["renorm"] = renorm
+                else:
+                    # turn off, or use explicitly supplied power
+                    opts["renorm"] = 0 if renorm is None else renorm
+
     return opts
 
 
@@ -320,8 +354,6 @@ def parse_split_left_right_isom(method, absorb):
 
 _SPLIT_FNS = {}
 _SPLIT_VALUES_FNS = {}
-_DYNAMIC_SPLIT_METHODS = set()
-_STATIC_SPLIT_METHODS = set()
 _DENSE_ONLY_METHODS = set()
 _LEFT_ISOM_METHODS = set()
 _RIGHT_ISOM_METHODS = set()
@@ -331,7 +363,6 @@ _DEFAULT_ABSORB = {}
 
 def register_split_driver(
     name,
-    truncation="none",
     isom="none",
     sparse=False,
     default_absorb=get_Usq_sqVH,
@@ -355,13 +386,6 @@ def register_split_driver(
     sparse : bool, optional
         Whether the method can handle sparse arrays directly.
     """
-    if truncation == "dynamic":
-        _DYNAMIC_SPLIT_METHODS.add(name)
-    elif truncation == "static":
-        _STATIC_SPLIT_METHODS.add(name)
-    elif truncation != "none":
-        raise ValueError(f"Invalid truncation type: {truncation}")
-
     if isom == "left":
         _LEFT_ISOM_METHODS.add(name)
     elif isom == "right":
@@ -669,7 +693,7 @@ def _trim_and_renorm_svd_result(
     return _do_absorb(U, s, VH, absorb=absorb, xp=xp)
 
 
-@register_split_driver("svd", truncation="dynamic", isom="both")
+@register_split_driver("svd", isom="both")
 @compose
 def svd_truncated(
     x,
@@ -1205,7 +1229,7 @@ def svd_via_eig(
     raise ValueError(f"Invalid absorb mode: {absorb}")
 
 
-@register_split_driver("svd:eig", truncation="dynamic", isom="both")
+@register_split_driver("svd:eig", isom="both")
 @compose
 def svd_via_eig_truncated(
     x,
@@ -1530,7 +1554,7 @@ def svdvals_eig(x):
 # -------------------------------- rand svd --------------------------------- #
 
 
-@register_split_driver("svd:rand", truncation="static", isom="both")
+@register_split_driver("svd:rand", isom="both")
 @compose
 def svd_rand_truncated(
     x,
@@ -1708,7 +1732,7 @@ def svd_rand_truncated(
 # ---------------------------------- eigh ----------------------------------- #
 
 
-@register_split_driver("eigh", truncation="dynamic", isom="both")
+@register_split_driver("eigh", isom="both")
 @compose
 def eigh_truncated(
     x,
@@ -1838,7 +1862,7 @@ def eigh_truncated_numpy(
 
 @register_split_driver("qr", isom="left", default_absorb=get_U_sVH)
 @compose
-def qr_stabilized(x):
+def qr_stabilized(x, absorb=get_U_sVH):
     """QR-decomposition, with stabilized R factor.
 
     Returns
@@ -1849,13 +1873,28 @@ def qr_stabilized(x):
     right : array_like
         The right upper triangular factor (R).
     """
+    if absorb not in (get_U_sVH, get_U, get_sVH):
+        warnings.warn(
+            "By definition, absorb must be 1 / 'right', 10 / 'lorthog', or "
+            f"11 / 'rfactor' in qr_stabilized, got absorb={absorb}."
+        )
+
     xp = get_namespace(x)
     Q, R = xp.linalg.qr(x)
     # stabilize the diagonal of R
     rd = xp.diagonal(R, axis1=-2, axis2=-1)
     s = sgn(rd)
-    Q = rdmul(Q, xp.conj(s))
-    R = ldmul(s, R)
+
+    if absorb in (get_U_sVH, get_U):
+        Q = rdmul(Q, xp.conj(s))
+    else:
+        Q = None
+
+    if absorb in (get_U_sVH, get_sVH):
+        R = ldmul(s, R)
+    else:
+        R = None
+
     return Q, None, R
 
 
@@ -1872,16 +1911,16 @@ def _qr_stabilized_numba(x):
 
 
 @qr_stabilized.register("numpy")
-def qr_stabilized_numpy(x):
+def qr_stabilized_numpy(x, absorb=get_U_sVH):
     if x.ndim > 2:
         # XXX: batch not implemented in numba version yet
-        return qr_stabilized._default_fn(x)
+        return qr_stabilized._default_fn(x, absorb=absorb)
     return _qr_stabilized_numba(x)
 
 
 @qr_stabilized.register("autoray.lazy")
 @lazy.core.lazy_cache("qr_stabilized")
-def qr_stabilized_lazy(x):
+def qr_stabilized_lazy(x, absorb=get_U_sVH):
     *batch_dims, m, n = x.shape
     k = min(m, n)
     lqrs = x.to(
@@ -1889,14 +1928,20 @@ def qr_stabilized_lazy(x):
         args=(x,),
         shape=(3,),
     )
-    Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(*batch_dims, m, k))
-    R = lqrs.to(operator.getitem, (lqrs, 2), shape=(*batch_dims, k, n))
+    if absorb in (get_U_sVH, get_U):
+        Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(*batch_dims, m, k))
+    else:
+        Q = None
+
+    if absorb in (get_U_sVH, get_sVH):
+        R = lqrs.to(operator.getitem, (lqrs, 2), shape=(*batch_dims, k, n))
+    else:
+        R = None
+
     return Q, None, R
 
 
-@register_split_driver(
-    "qr:svd", truncation="dynamic", isom="left", default_absorb=get_U_sVH
-)
+@register_split_driver("qr:svd", isom="left", default_absorb=get_U_sVH)
 def qr_via_svd(
     x,
     cutoff=-1.0,
@@ -1954,9 +1999,7 @@ def qr_via_svd(
     )
 
 
-@register_split_driver(
-    "qr:eig", truncation="dynamic", isom="left", default_absorb=get_U_sVH
-)
+@register_split_driver("qr:eig", isom="left", default_absorb=get_U_sVH)
 def qr_via_eig(
     x,
     cutoff=-1.0,
@@ -2016,9 +2059,7 @@ def qr_via_eig(
     )
 
 
-@register_split_driver(
-    "qr:rand", truncation="static", isom="left", default_absorb=get_U_sVH
-)
+@register_split_driver("qr:rand", isom="left", default_absorb=get_U_sVH)
 @compose
 def qr_via_rand(
     x,
@@ -2076,7 +2117,7 @@ def qr_via_rand(
 
 @register_split_driver("lq", isom="right", default_absorb=get_Us_VH)
 @compose
-def lq_stabilized(x):
+def lq_stabilized(x, absorb=get_Us_VH):
     """LQ-decomposition, with stabilized L factor.
 
     Returns
@@ -2088,9 +2129,17 @@ def lq_stabilized(x):
         The right isometric factor (Q).
     """
     xp = get_namespace(x)
-    QT, _, LT = qr_stabilized(xp.swapaxes(x, -2, -1))
-    Q = xp.swapaxes(QT, -2, -1)
-    L = xp.swapaxes(LT, -2, -1)
+
+    absorb_t = _ABSORB_TRANSPOSE_MAP[absorb]
+    QT, _, LT = qr_stabilized(xp.swapaxes(x, -2, -1), absorb=absorb_t)
+    if QT is not None:
+        Q = xp.swapaxes(QT, -2, -1)
+    else:
+        Q = None
+    if LT is not None:
+        L = xp.swapaxes(LT, -2, -1)
+    else:
+        L = None
     return L, None, Q
 
 
@@ -2101,16 +2150,14 @@ def _lq_stabilized_numba(x):
 
 
 @lq_stabilized.register("numpy")
-def lq_stabilized_numpy(x):
+def lq_stabilized_numpy(x, absorb=get_Us_VH):
     if x.ndim > 2:
         # XXX: batch not implemented in numba version yet
-        return lq_stabilized._default_fn(x)
+        return lq_stabilized._default_fn(x, absorb=absorb)
     return _lq_stabilized_numba(x)
 
 
-@register_split_driver(
-    "lq:svd", truncation="dynamic", isom="right", default_absorb=get_Us_VH
-)
+@register_split_driver("lq:svd", isom="right", default_absorb=get_Us_VH)
 def lq_via_svd(
     x,
     cutoff=-1.0,
@@ -2168,9 +2215,7 @@ def lq_via_svd(
     )
 
 
-@register_split_driver(
-    "lq:eig", truncation="dynamic", isom="right", default_absorb=get_Us_VH
-)
+@register_split_driver("lq:eig", isom="right", default_absorb=get_Us_VH)
 def lq_via_eig(
     x,
     cutoff=-1.0,
@@ -2230,9 +2275,7 @@ def lq_via_eig(
     )
 
 
-@register_split_driver(
-    "lq:rand", truncation="static", isom="right", default_absorb=get_Us_VH
-)
+@register_split_driver("lq:rand", isom="right", default_absorb=get_Us_VH)
 @compose
 def lq_via_rand(
     x,
@@ -2314,9 +2357,7 @@ def rfactor(x, absorb=get_sVH, **kwargs):
     return None, None, R
 
 
-@register_split_driver(
-    "rfactor:svd", truncation="dynamic", default_absorb=get_sVH
-)
+@register_split_driver("rfactor:svd", default_absorb=get_sVH)
 def rfactor_via_svd(
     x,
     cutoff=-1.0,
@@ -2373,9 +2414,7 @@ def rfactor_via_svd(
     )
 
 
-@register_split_driver(
-    "rfactor:eig", truncation="dynamic", default_absorb=get_sVH
-)
+@register_split_driver("rfactor:eig", default_absorb=get_sVH)
 def rfactor_via_eig(
     x,
     cutoff=-1.0,
@@ -2432,9 +2471,7 @@ def rfactor_via_eig(
     )
 
 
-@register_split_driver(
-    "rfactor:rand", truncation="static", default_absorb=get_sVH
-)
+@register_split_driver("rfactor:rand", default_absorb=get_sVH)
 @compose
 def rfactor_via_rand(
     x,
@@ -2554,9 +2591,7 @@ def lfactor(x, absorb=get_Us, **kwargs):
     return L, None, None
 
 
-@register_split_driver(
-    "lfactor:svd", truncation="dynamic", default_absorb=get_Us
-)
+@register_split_driver("lfactor:svd", default_absorb=get_Us)
 def lfactor_via_svd(
     x,
     cutoff=-1.0,
@@ -2612,9 +2647,7 @@ def lfactor_via_svd(
     )
 
 
-@register_split_driver(
-    "lfactor:eig", truncation="dynamic", default_absorb=get_Us
-)
+@register_split_driver("lfactor:eig", default_absorb=get_Us)
 def lfactor_via_eig_truncated(
     x,
     cutoff=-1.0,
@@ -2671,9 +2704,7 @@ def lfactor_via_eig_truncated(
     )
 
 
-@register_split_driver(
-    "lfactor:rand", truncation="static", default_absorb=get_Us
-)
+@register_split_driver("lfactor:rand", default_absorb=get_Us)
 @compose
 def lfactor_via_rand(
     x,
@@ -2782,9 +2813,7 @@ def rorthog(x):
     return None, None, Q
 
 
-@register_split_driver(
-    "rorthog:svd", truncation="dynamic", isom="right", default_absorb=get_VH
-)
+@register_split_driver("rorthog:svd", isom="right", default_absorb=get_VH)
 def rorthog_via_svd(
     x,
     cutoff=-1.0,
@@ -2841,9 +2870,7 @@ def rorthog_via_svd(
     )
 
 
-@register_split_driver(
-    "rorthog:eig", truncation="dynamic", isom="right", default_absorb=get_VH
-)
+@register_split_driver("rorthog:eig", isom="right", default_absorb=get_VH)
 def rorthog_via_eig(
     x,
     cutoff=-1.0,
@@ -2900,12 +2927,7 @@ def rorthog_via_eig(
     )
 
 
-@register_split_driver(
-    "rorthog:rand",
-    truncation="static",
-    isom="right",
-    default_absorb=get_VH,
-)
+@register_split_driver("rorthog:rand", isom="right", default_absorb=get_VH)
 @compose
 def rorthog_via_rand(
     x,
@@ -3017,9 +3039,7 @@ def lorthog(x):
     return Q, None, None
 
 
-@register_split_driver(
-    "lorthog:svd", truncation="dynamic", isom="left", default_absorb=get_U
-)
+@register_split_driver("lorthog:svd", isom="left", default_absorb=get_U)
 def lorthog_via_svd(
     x,
     cutoff=-1.0,
@@ -3076,9 +3096,7 @@ def lorthog_via_svd(
     )
 
 
-@register_split_driver(
-    "lorthog:eig", truncation="dynamic", isom="left", default_absorb=get_U
-)
+@register_split_driver("lorthog:eig", isom="left", default_absorb=get_U)
 def lorthog_via_eig(
     x,
     cutoff=-1.0,
@@ -3135,12 +3153,7 @@ def lorthog_via_eig(
     )
 
 
-@register_split_driver(
-    "lorthog:rand",
-    truncation="static",
-    isom="left",
-    default_absorb=get_U,
-)
+@register_split_driver("lorthog:rand", isom="left", default_absorb=get_U)
 @compose
 def lorthog_via_rand(
     x,
@@ -3252,7 +3265,7 @@ def _choose_k(x, cutoff, max_bond):
     return "full" if k > d // 2 else k
 
 
-@register_split_driver("svds", truncation="dynamic", isom="both", sparse=True)
+@register_split_driver("svds", isom="both", sparse=True)
 def svds(
     x,
     cutoff=0.0,
@@ -3286,7 +3299,7 @@ def svds(
     return U, s, VH
 
 
-@register_split_driver("isvd", truncation="dynamic", isom="both", sparse=True)
+@register_split_driver("isvd", isom="both", sparse=True)
 def isvd(
     x,
     cutoff=0.0,
@@ -3344,7 +3357,7 @@ def _rsvd_numpy(
     return U, s, VH
 
 
-@register_split_driver("rsvd", truncation="dynamic", isom="both", sparse=True)
+@register_split_driver("rsvd", isom="both", sparse=True)
 def rsvd(
     x,
     cutoff=0.0,
@@ -3382,7 +3395,7 @@ def rsvd(
     )
 
 
-@register_split_driver("eigsh", truncation="dynamic", isom="both", sparse=True)
+@register_split_driver("eigsh", isom="both", sparse=True)
 def eigsh(
     x,
     cutoff=0.0,
@@ -3422,7 +3435,7 @@ def eigsh(
 # ---------------------- cholesky based decompositions ---------------------- #
 
 
-@register_split_driver("lu", truncation="dynamic")
+@register_split_driver("lu")
 @compose
 def lu_truncated(
     x,
@@ -3661,11 +3674,7 @@ def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
         )
 
     # map QR absorb to LQ absorb (transpose)
-    absorb_t = {
-        get_U_sVH: get_Us_VH,
-        get_sVH: get_Us,
-        get_U: get_VH,
-    }.get(absorb, get_Us_VH)
+    absorb_t = _ABSORB_TRANSPOSE_MAP[absorb]
 
     R, _, Q = lq_via_cholesky(
         xp.swapaxes(x, -2, -1),
