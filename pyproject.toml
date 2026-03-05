@@ -149,7 +149,7 @@ slepc4py = "*"
 [tool.pixi.feature.jax]
 platforms = ["linux-64", "osx-arm64"]
 [tool.pixi.feature.jax.pypi-dependencies]
-jax = "*"
+jax = "!=0.9.1"  # https://github.com/jax-ml/jax/issues/35646
 
 [tool.pixi.feature.torch]
 platforms = ["linux-64", "osx-arm64"]
