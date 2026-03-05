@@ -147,17 +147,17 @@ slepc = { version = "*", build = "complex*" }
 slepc4py = "*"
 
 [tool.pixi.feature.jax]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 [tool.pixi.feature.jax.pypi-dependencies]
-jax = { version = "*", extras = ["cpu"] }
+jax = "*"
 
 [tool.pixi.feature.torch]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 [tool.pixi.feature.torch.pypi-dependencies]
-torch = { version = "*", index = "https://download.pytorch.org/whl/cpu" }
+torch = "*"
 
 [tool.pixi.feature.tensorflow]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 [tool.pixi.feature.tensorflow.pypi-dependencies]
 tensorflow = "*"
 
@@ -194,9 +194,11 @@ testpyold = { features = ["pyold", "full", "testing"] }
 testpymid = { features = ["pymid", "full", "testing"] }
 testjax = { features = ["pymid", "full", "jax", "testing"] }
 testtorch = { features = ["pymid", "full", "torch", "testing"] }
-testtensorflow = { features = ["pymid", "full", "tensorflow", "testing"] }
+testtensorflow = { features = ["pyold", "full", "tensorflow", "testing"] }
 testslepc = { features = ["pynew", "slepc", "testing"] }
 docs = { features = ["pynew", "docs"] }
+
+# ---------------------------------- tasks ---------------------------------- #
 
 [tool.pixi.tasks.pytest]
 default-environment = "testpymid"

@@ -1,4 +1,8 @@
-"""Functions for decomposing and projecting matrices."""
+"""Functions for decomposing and projecting matrices, purely at the level of
+arrays (rather than wrapped as Tensors). The includes the main entry point
+``array_split``, which dispatches to a registered split driver based on the
+method.
+"""
 
 import functools
 import operator
@@ -37,14 +41,17 @@ def array_split(
     info=None,
     **kwargs,
 ):
-    """Split a 2D array into left and right factors (and possibly singular
-    values) using a matrix decomposition. This is the main array-level entry
-    point, dispatching to a registered split driver based on ``method``.
+    """Split a 2D array (or batch of 2D arrays) into left and right factors
+    (and possibly singular values) using a matrix decomposition. This is the
+    main array-level entry point, dispatching to a registered split driver
+    based on ``method``, with ``absorb`` controlling the output form of the
+    decomposition, and ``max_bond``, ``cutoff`` and others controlling
+    static and dynamic truncation respectively.
 
     Parameters
     ----------
     x : array_like
-        The 2D array to split.
+        The array or batch of arrays to split, of shape ``(..., m, n)``.
     method : str, optional
         The decomposition method to use:
 
@@ -1012,10 +1019,7 @@ def svd_truncated_lazy(
         s = lsvdt.to(
             operator.getitem,
             (lsvdt, 1),
-            shape=(
-                *b,
-                k,
-            ),
+            shape=(*b, k),
         )
     else:
         s = None
