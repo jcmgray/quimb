@@ -2,30 +2,32 @@
 
 `quimb` is available on both [pypi](https://pypi.org/project/quimb/) and
 [conda-forge](https://anaconda.org/conda-forge/quimb). While `quimb` is
-pure python and has no direct dependencies itself, the recommended distribution
-would be [miniforge](https://conda-forge.org/download/)
-for installing the various backend array libraries and their dependencies.
+pure python itself, the preferred way to install it is with
+[pixi](https://pixi.sh), which creates isolated and reproducible environments
+that can mix packages from [`conda-forge`](https://conda-forge.org/) (the
+default) and also [`pypi`](https://pypi.org/).
+
+**Installing with `pixi` (preferred):**
+```bash
+pixi init quimb-project
+cd quimb-project
+pixi add quimb
+```
 
 **Installing with `pip`:**
 ```bash
 pip install quimb
 ```
+It is recommended to use [`uv`](https://docs.astral.sh/uv/) to install and
+manage purely pypi based environments.
 
-**Installing with `conda`:**
+**Installing with `conda` / `mamba`:**
 ```bash
 conda install -c conda-forge quimb
 ```
+[`miniforge`](https://github.com/conda-forge/miniforge) is the recommended way
+to manage and install a conda-based environment.
 
-**Installing with `mamba`:**
-```bash
-mamba install quimb
-```
-```{hint}
-Mamba is a faster version of `conda` tool, and the -forge distribution comes
-pre-configured with the community `conda-forge` channel only, which further
-simplifies and speeds up installing dependencies. `mini-` refers to *not*
-including the many default packages that come with `Anaconda`.
-```
 
 **Installing the latest version directly from github:**
 
@@ -48,7 +50,7 @@ pip install --no-deps -U -e quimb/
 
 The core packages `quimb` requires are:
 
-- python 3.8+
+- python 3.11+
 - [numpy](http://www.numpy.org/)
 - [scipy](https://www.scipy.org/)
 - [numba](http://numba.pydata.org/)
@@ -56,10 +58,15 @@ The core packages `quimb` requires are:
 - [tqdm](https://github.com/tqdm/tqdm)
 - [psutil](https://github.com/giampaolo/psutil)
 
-For ease and performance (i.e. mkl compiled libraries), [miniforge](https://conda-forge.org/download/) is the recommended distribution with which to install these.
+For ease, reproducibility, and performance (i.e. mkl compiled libraries), using
+[pixi](https://pixi.sh) with `conda-forge` packages is the recommended way to
+install these dependencies.
 
 ```{hint}
-This is mostly becuase MKL still (as of January 2025) provides a significant performance boost over OpenBLAS for decompositions such as `svd`, `qr` and `eigh`. Using conda-forge you can specify MKL using `blas=*=mkl` in either the install command or your `environment.yml` file.
+This is mostly becuase MKL still (as of January 2025) provides a significant
+performance boost over OpenBLAS for decompositions such as `svd`, `qr` and
+`eigh`. Using conda-forge you can specify MKL using `blas=*=mkl` in either the
+install command or your `environment.yml` file.
 ```
 
 In addition, the tensor network library, {mod}`quimb.tensor`, requires:
@@ -67,8 +74,16 @@ In addition, the tensor network library, {mod}`quimb.tensor`, requires:
 - [autoray](https://autoray.readthedocs.io)
 - [cotengra](https://cotengra.readthedocs.io)
 
-`autoray` allows backend agnostic numeric code for various tensor network operations so that many libraries other than `numpy` can be used. It can be installed via `pip` from [pypi](https://pypi.org/project/autoray/) or via `conda` [from conda-forge](https://anaconda.org/conda-forge/autoray).
-`cotengra` efficiently optimizes and performs tensor contraction expressions. It can be installed with `pip` or from [conda-forge](https://conda-forge.org) and is a required dependency since various bits of the core `quimb` module now make use tensor-network functionality behind the scenes. If you are performing advanced contractions you may want to see the [cotengra installation docs](https://cotengra.readthedocs.io/en/latest/installation.html).
+`autoray` allows backend agnostic numeric code for various tensor network
+operations so that many libraries other than `numpy` can be used. It can be
+installed via `pip` from [pypi](https://pypi.org/project/autoray/) or via
+`conda` [from conda-forge](https://anaconda.org/conda-forge/autoray).
+`cotengra` efficiently optimizes and performs tensor contraction expressions.
+It can be installed with `pip` or from [conda-forge](https://conda-forge.org)
+and is a required dependency since various bits of the core `quimb` module now
+make use tensor-network functionality behind the scenes. If you are performing
+advanced contractions you may want to see the
+[cotengra installation docs](https://cotengra.readthedocs.io/en/latest/installation.html).
 
 ## Optional Dependencies
 
@@ -78,23 +93,31 @@ Plotting tensor networks as colored graphs with weighted edges requires:
 - [networkx](https://networkx.github.io/)
 - [pygraphviz](https://pygraphviz.github.io/) (optional, for faster layouts)
 
-Fast, multi-threaded random number generation no longer (with `numpy>1.17`) requires [randomgen](https://github.com/bashtage/randomgen) though its bit generators can still be used.
+Fast, multi-threaded random number generation no longer (with `numpy>1.17`)
+requires [randomgen](https://github.com/bashtage/randomgen) though its bit
+generators can still be used.
 
-Finally, fast and optionally distributed partial eigen-solving, SVD, exponentiation etc. can be accelerated with `slepc4py` and its dependencies:
+Finally, fast and optionally distributed partial eigen-solving, SVD,
+exponentiation etc. can be accelerated with `slepc4py` and its dependencies:
 
 - [slepc4py](https://bitbucket.org/slepc/slepc4py)
 - [slepc](http://slepc.upv.es/)
 - [petsc4py](https://bitbucket.org/petsc/petsc4py)
 - [petsc](http://www.mcs.anl.gov/petsc/)
 - [mpi4py](http://mpi4py.readthedocs.io/en/latest/) (v2.1.0+)
-- An MPI implementation ([OpenMPI](https://www.open-mpi.org/) recommended, the 1.10.x series seems most robust for spawning processes).
+- An MPI implementation ([OpenMPI](https://www.open-mpi.org/) recommended,
+  the 1.10.x series seems most robust for spawning processes).
 
-To install these from conda-forge, with complex dtype specified for example, use:
+To install these from conda-forge, with complex dtype specified for example,
+use:
 ```bash
 mamba install -c conda-forge mpi4py petsc=*=*complex* petsc4py slepc=*=*complex* slepc4py
 ```
 
-For best performance of some routines, (e.g. shift invert eigen-solving), petsc must be configured with certain options. Pip can handle this compilation and installation, for example the following script installs everything necessary on Ubuntu:
+For best performance of some routines, (e.g. shift invert eigen-solving), petsc
+must be configured with certain options. Pip can handle this compilation and
+installation, for example the following script installs everything necessary on
+Ubuntu:
 
 ```bash
 #!/bin/bash
@@ -117,6 +140,12 @@ pip install slepc4py==$PETSC_VERSION --no-binary :all:
 ```
 
 :::{note}
-For the most control and best performance it is recommended to compile and install these (apart from MPI if you are e.g. on a cluster) manually - see the [PETSc instructions](https://www.mcs.anl.gov/petsc/documentation/installation.html).
-It is possible to compile several versions of PETSc/SLEPc side by side, for example a `--with-scalar-type=complex` and/or a `--with-precision=single` version, naming them with different values of `PETSC_ARCH`. When loading PETSc/SLEPc, `quimb` respects `PETSC_ARCH` if it is set, but it cannot dynamically switch between them.
+For the most control and best performance it is recommended to compile and
+install these (apart from MPI if you are e.g. on a cluster) manually - see the
+[PETSc instructions](https://www.mcs.anl.gov/petsc/documentation/installation.html).
+It is possible to compile several versions of PETSc/SLEPc side by side, for
+example a `--with-scalar-type=complex` and/or a `--with-precision=single`
+version, naming them with different values of `PETSC_ARCH`. When loading
+PETSc/SLEPc, `quimb` respects `PETSC_ARCH` if it is set, but it cannot
+dynamically switch between them.
 :::
