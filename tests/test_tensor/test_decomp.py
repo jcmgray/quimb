@@ -40,6 +40,86 @@ def test_sgn_convention():
 
 
 @pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("shape", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("stabilized", [True, False])
+@pytest.mark.parametrize("absorb", ["right", "lorthog", "rfactor"])
+@pytest.mark.parametrize("dtype", ["complex128", "float32"])
+def test_qr_stabilized(backend, shape, stabilized, absorb, dtype):
+    xp = ar.get_namespace(backend)
+    rng = xp.random.default_rng(0)
+    a = rng.uniform(size=shape)
+    a = xp.astype(a, dtype)
+    q, _, r = array_split(a, method="qr", stabilized=stabilized, absorb=absorb)
+    if absorb != "rfactor":
+        assert q is not None
+        assert q.shape == (shape[0], min(shape))
+        assert_allclose(
+            xp.conj(xp.swapaxes(q, -2, -1)) @ q,
+            xp.eye(min(shape)),
+            rtol=1e-6,
+            atol=1e-6,
+        )
+    else:
+        assert q is None
+    if absorb != "lorthog":
+        assert r is not None
+        assert r.shape == (min(shape), shape[1])
+        if stabilized:
+            assert_allclose(
+                xp.sgn(xp.diag(r)),
+                xp.array(1.0, dtype=r.dtype),
+                rtol=1e-6,
+                atol=1e-6,
+            )
+    else:
+        assert r is None
+    if absorb == "both":
+        assert_allclose(q @ r, a, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("shape", [(8, 5), (5, 5), (5, 8)])
+@pytest.mark.parametrize("stabilized", [True, False])
+@pytest.mark.parametrize("absorb", ["left", "lfactor", "rorthog"])
+@pytest.mark.parametrize("dtype", ["complex128", "float32"])
+def test_lq_stabilized(backend, shape, stabilized, absorb, dtype):
+    xp = ar.get_namespace(backend)
+    rng = xp.random.default_rng(0)
+    a = rng.uniform(size=shape)
+    a = xp.astype(a, dtype)
+    l, _, q = array_split(a, method="lq", stabilized=stabilized, absorb=absorb)
+    if absorb != "lfactor":
+        assert q is not None
+        assert q.shape == (min(shape), shape[1])
+        assert_allclose(
+            q @ xp.conj(xp.swapaxes(q, -2, -1)),
+            xp.eye(min(shape)),
+            rtol=1e-6,
+            atol=1e-6,
+        )
+    else:
+        assert q is None
+    if absorb != "rorthog":
+        assert l is not None
+        assert l.shape == (shape[0], min(shape))
+        if stabilized:
+            assert_allclose(
+                xp.sgn(xp.diag(l)),
+                xp.array(1.0, dtype=l.dtype),
+                rtol=1e-6,
+                atol=1e-6,
+            )
+    else:
+        assert l is None
+    if absorb == "both":
+        assert_allclose(l @ q, a, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.parametrize(
     "dtype", ["float64", "float32", "complex128", "complex64"]
 )
 def test_qr_stabilized_sign_bug(dtype):
@@ -564,7 +644,7 @@ def test_batch_eigh(backend, max_bond, absorb):
     rng = xp.random.default_rng(42)
     # build a batch of symmetric (hermitian) matrices: x @ x.T
     a = rng.uniform(size=(3, 6, 6))
-    x = a @ a.swapaxes(-1, -2)
+    x = a @ xp.swapaxes(a, -2, -1)
 
     left, s, right = array_split(
         x, method="eigh", max_bond=max_bond, absorb=absorb

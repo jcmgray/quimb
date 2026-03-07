@@ -1866,7 +1866,7 @@ def eigh_truncated_numpy(
 
 @register_split_driver("qr", isom="left", default_absorb=get_U_sVH)
 @compose
-def qr_stabilized(x, absorb=get_U_sVH):
+def qr_stabilized(x, absorb=get_U_sVH, stabilized=True, **kwargs):
     """QR-decomposition, with stabilized R factor.
 
     Returns
@@ -1884,18 +1884,26 @@ def qr_stabilized(x, absorb=get_U_sVH):
         )
 
     xp = get_namespace(x)
-    Q, R = xp.linalg.qr(x)
-    # stabilize the diagonal of R
-    rd = xp.diagonal(R, axis1=-2, axis2=-1)
-    s = sgn(rd)
+    Q, R = xp.linalg.qr(x, **kwargs)
 
-    if absorb in (get_U_sVH, get_U):
-        Q = rdmul(Q, xp.conj(s))
+    if not stabilized:
+        if absorb == get_U:
+            R = None
+        elif absorb == get_sVH:
+            Q = None
+        return Q, None, R
+
+    # stabilize the diagonal of R -> set phase to 1, absorbing into Q
+    rd = xp.diagonal(R, axis1=-2, axis2=-1)
+    phase = sgn(rd)
+
+    if absorb != get_sVH:
+        Q = Q * xp.conj(phase)[..., None, :]
     else:
         Q = None
 
-    if absorb in (get_U_sVH, get_sVH):
-        R = ldmul(s, R)
+    if absorb != get_U:
+        R = phase[..., :, None] * R
     else:
         R = None
 
@@ -1903,45 +1911,72 @@ def qr_stabilized(x, absorb=get_U_sVH):
 
 
 @njit  # pragma: no cover
-def _qr_stabilized_numba(x):
+def _qr_stabilized_numba(x, absorb=get_U_sVH, stabilized=True):
     Q, R = np.linalg.qr(x)
-    for i in range(R.shape[0]):
-        rii = R[i, i]
-        si = sgn_numba(rii)
-        if si != 1.0:
-            Q[:, i] *= np.conj(si)
-            R[i, i:] *= si
+
+    if stabilized:
+        if absorb == get_U:
+            for i in range(R.shape[0]):
+                rii = R[i, i]
+                phase = sgn_numba(rii)
+                if phase != 1.0:
+                    Q[:, i] *= np.conj(phase)
+        elif absorb == get_sVH:
+            for i in range(R.shape[0]):
+                rii = R[i, i]
+                phase = sgn_numba(rii)
+                if phase != 1.0:
+                    R[i, i:] *= phase
+        else:
+            for i in range(R.shape[0]):
+                rii = R[i, i]
+                phase = sgn_numba(rii)
+                if phase != 1.0:
+                    Q[:, i] *= np.conj(phase)
+                    R[i, i:] *= phase
+
+    if absorb == get_U:
+        return Q, None, None
+
+    if absorb == get_sVH:
+        return None, None, R
+
     return Q, None, R
 
 
 @qr_stabilized.register("numpy")
-def qr_stabilized_numpy(x, absorb=get_U_sVH):
+def qr_stabilized_numpy(x, absorb=get_U_sVH, stabilized=True, **kwargs):
     if x.ndim > 2:
         # XXX: batch not implemented in numba version yet
-        return qr_stabilized._default_fn(x, absorb=absorb)
-    return _qr_stabilized_numba(x)
+        return qr_stabilized._default_fn(
+            x,
+            absorb=absorb,
+            stabilized=stabilized,
+            **kwargs,
+        )
+    return _qr_stabilized_numba(x, absorb=absorb, stabilized=stabilized)
 
 
 @qr_stabilized.register("autoray.lazy")
 @lazy.core.lazy_cache("qr_stabilized")
-def qr_stabilized_lazy(x, absorb=get_U_sVH):
+def qr_stabilized_lazy(x, absorb=get_U_sVH, **kwargs):
     *batch_dims, m, n = x.shape
     k = min(m, n)
+    kwargs["absorb"] = absorb
     lqrs = x.to(
         fn=get_lib_fn(x.backend, "qr_stabilized"),
         args=(x,),
+        kwargs=kwargs,
         shape=(3,),
     )
-    if absorb in (get_U_sVH, get_U):
+    if absorb != get_sVH:
         Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(*batch_dims, m, k))
     else:
         Q = None
-
-    if absorb in (get_U_sVH, get_sVH):
+    if absorb != get_U:
         R = lqrs.to(operator.getitem, (lqrs, 2), shape=(*batch_dims, k, n))
     else:
         R = None
-
     return Q, None, R
 
 
@@ -2121,7 +2156,7 @@ def qr_via_rand(
 
 @register_split_driver("lq", isom="right", default_absorb=get_Us_VH)
 @compose
-def lq_stabilized(x, absorb=get_Us_VH):
+def lq_stabilized(x, absorb=get_Us_VH, stabilized=True, **kwargs):
     """LQ-decomposition, with stabilized L factor.
 
     Returns
@@ -2134,31 +2169,54 @@ def lq_stabilized(x, absorb=get_Us_VH):
     """
     xp = get_namespace(x)
 
-    absorb_t = _ABSORB_TRANSPOSE_MAP[absorb]
-    QT, _, LT = qr_stabilized(xp.swapaxes(x, -2, -1), absorb=absorb_t)
+    QT, _, LT = qr_stabilized(
+        xp.swapaxes(x, -2, -1),
+        absorb=_ABSORB_TRANSPOSE_MAP[absorb],
+        stabilized=stabilized,
+        **kwargs,
+    )
+
     if QT is not None:
         Q = xp.swapaxes(QT, -2, -1)
     else:
         Q = None
+
     if LT is not None:
         L = xp.swapaxes(LT, -2, -1)
     else:
         L = None
+
     return L, None, Q
 
 
 @njit  # pragma: no cover
-def _lq_stabilized_numba(x):
-    Q, _, L = _qr_stabilized_numba(x.T)
-    return L.T, None, Q.T
+def _lq_stabilized_numba(x, absorb=get_Us_VH, stabilized=True):
+
+    if absorb == get_Us:
+        absorb_t = get_sVH
+    elif absorb == get_VH:
+        absorb_t = get_U
+    else:
+        absorb_t = get_U_sVH
+
+    Q, _, L = _qr_stabilized_numba(x.T, absorb=absorb_t, stabilized=stabilized)
+
+    if absorb == get_Us:
+        return L.T, None, None
+    elif absorb == get_VH:
+        return None, None, Q.T
+    else:
+        return L.T, None, Q.T
 
 
 @lq_stabilized.register("numpy")
-def lq_stabilized_numpy(x, absorb=get_Us_VH):
+def lq_stabilized_numpy(x, absorb=get_Us_VH, stabilized=True, **kwargs):
     if x.ndim > 2:
         # XXX: batch not implemented in numba version yet
-        return lq_stabilized._default_fn(x, absorb=absorb)
-    return _lq_stabilized_numba(x)
+        return lq_stabilized._default_fn(
+            x, absorb=absorb, stabilized=stabilized, **kwargs
+        )
+    return _lq_stabilized_numba(x, absorb=absorb, stabilized=stabilized)
 
 
 @register_split_driver("lq:svd", isom="right", default_absorb=get_Us_VH)
@@ -2357,7 +2415,7 @@ def rfactor(x, absorb=get_sVH, **kwargs):
             "By definition, absorb must be 1 (right) in rfactor, "
             f"ignoring absorb={absorb}."
         )
-    _, _, R = qr_stabilized(x, **kwargs)
+    _, _, R = qr_stabilized(x, absorb=absorb, **kwargs)
     return None, None, R
 
 
@@ -3029,7 +3087,7 @@ def rorthog_via_cholesky(x, absorb=get_VH, shift=True, solve_triangular=True):
 
 
 @register_split_driver("lorthog", isom="left", default_absorb=get_U)
-def lorthog(x):
+def lorthog(x, absorb=get_U, **kwargs):
     """Get the left orthogonal factor (Q in QR) via QR decomposition. No
     truncation.
 
@@ -3039,7 +3097,12 @@ def lorthog(x):
     s : None
     right : None
     """
-    Q, _, _ = qr_stabilized(x)
+    if absorb not in (get_U, get_U_sVH):
+        warnings.warn(
+            "By definition, absorb must be 1 (right) in lorthog, "
+            f"ignoring absorb={absorb}."
+        )
+    Q, _, _ = qr_stabilized(x, absorb=get_U, **kwargs)
     return Q, None, None
 
 
