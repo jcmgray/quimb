@@ -38,7 +38,7 @@ from .tensor_core import (
 )
 from .tn1d.core import MatrixProductOperator, MatrixProductState
 from .tn1d.tebd import LocalHam1D
-from .tn2d.core import TensorNetwork2D, gen_2d_bonds, gen_2d_plaquettes
+from .tn2d.core import PEPO, TensorNetwork2D, gen_2d_bonds, gen_2d_plaquettes
 from .tn2d.tebd import LocalHam2D
 from .tn3d.core import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
 from .tn3d.tebd import LocalHam3D
@@ -4107,6 +4107,66 @@ def MPO_product_operator(
             reshaped_arrays.append(reshape(array, tuple(shape)))
 
     return MatrixProductOperator(reshaped_arrays, shape="lrud", **mpo_opts)
+
+
+def PEPO_product_operator(
+    arrays,
+    cyclic=False,
+    **pepo_opts,
+):
+    """Return a PEPO of bond dimension 1 representing the product of raw
+    operators given in ``arrays``.
+
+    Parameters
+    ----------
+    arrays : sequence of sequence of 2D array_like
+        The operators to form a tensor product of, shape ``(Lx, Ly)`` such that
+        ``arrays[i][j]`` is the operator at site ``(i, j)``.
+    cyclic : bool or tuple[bool, bool], optional
+        Whether to generate a cyclic PEPO or not. Can be ``(cyclic_x, cyclic_y)``
+        to specify each direction separately. Note: the PEPO constructor infers
+        boundary conditions from array shapes; with bond dimension 1, cyclic
+        is not supported and open boundaries are always used.
+    pepo_opts
+        Supplied to :class:`~quimb.tensor.tn2d.core.PEPO`.
+
+    Returns
+    -------
+    PEPO
+    """
+    arrays = tuple(tuple(x for x in xs) for xs in arrays)
+    Lx = len(arrays)
+    Ly = len(arrays[0])
+
+    if Lx < 2 or Ly < 2:
+        raise ValueError(
+            "PEPO_product_operator requires Lx >= 2 and Ly >= 2. "
+            "The PEPO constructor infers boundary conditions from array layout."
+        )
+
+    # PEPO infers cyclic from array shapes (requires bond_dim > 1 for cyclic).
+    # With bond_dim=1, always use open boundaries.
+    cyclicx = cyclicy = False
+
+    reshaped_arrays = []
+    for i in range(Lx):
+        row = []
+        for j in range(Ly):
+            arr = arrays[i][j]
+            shape = []
+            if cyclicx or (i < Lx - 1):
+                shape.append(1)
+            if cyclicy or (j < Ly - 1):
+                shape.append(1)
+            if cyclicx or (i > 0):
+                shape.append(1)
+            if cyclicy or (j > 0):
+                shape.append(1)
+            shape.extend(ar.do("shape", arr))
+            row.append(reshape(arr, tuple(shape)))
+        reshaped_arrays.append(row)
+
+    return PEPO(reshaped_arrays, shape="urdlbk", **pepo_opts)
 
 
 @random_seed_fn
