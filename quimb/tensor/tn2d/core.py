@@ -32,6 +32,7 @@ from ..tnag.core import (
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
     tensor_network_ag_sum,
+    tensor_network_apply_op_op,
     tensor_network_apply_op_vec,
 )
 
@@ -5367,14 +5368,26 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             **compress_opts,
         )
 
+    def _apply_pepo(
+        self, other, compress=False, contract=True, **compress_opts
+    ):
+        return tensor_network_apply_op_op(
+            A=self,
+            B=other,
+            contract=contract,
+            compress=compress,
+            **compress_opts,
+        )
+
     def apply(self, other, compress=False, **compress_opts):
         """Act with this PEPO on ``other``, returning a new TN like ``other``
         with the same outer indices.
 
         Parameters
         ----------
-        other : PEPS
-            The TN to act on.
+        other : PEPS or PEPO
+            The TN to act on. If PEPS, returns a PEPS. If PEPO, returns the
+            composition as a PEPO.
         compress : bool, optional
             Whether to compress the resulting TN.
         compress_opts
@@ -5387,8 +5400,53 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         """
         if isinstance(other, PEPS):
             return self._apply_peps(other, compress=compress, **compress_opts)
+        if isinstance(other, PEPO):
+            return self._apply_pepo(other, compress=compress, **compress_opts)
 
-        raise TypeError("Can only apply PEPO to PEPS.")
+        raise TypeError("Can only apply PEPO to PEPS or PEPO.")
+
+    def trace(self, left_inds=None, right_inds=None, **contract_opts):
+        """Take the trace of this PEPO over bra and ket indices."""
+        if left_inds is None:
+            left_inds = tuple(
+                self.upper_ind(s) for s in self.gen_sites_present()
+            )
+        if right_inds is None:
+            right_inds = tuple(
+                self.lower_ind(s) for s in self.gen_sites_present()
+            )
+        return super().trace(left_inds, right_inds, **contract_opts)
+
+    def partial_transpose(self, sysa, inplace=False):
+        """Perform the partial transpose on this PEPO by swapping the bra and
+        ket indices on sites in ``sysa``.
+
+        Parameters
+        ----------
+        sysa : sequence of tuple[int, int] or tuple[int, int]
+            The sites (i, j) to transpose indices on.
+        inplace : bool, optional
+            Whether to perform the partial transposition inplace.
+
+        Returns
+        -------
+        PEPO
+        """
+        tn = self if inplace else self.copy()
+
+        if isinstance(sysa, tuple) and len(sysa) == 2 and all(
+            isinstance(x, Integral) for x in sysa
+        ):
+            sysa = (sysa,)
+
+        tmp_ind_id = "__tmp_{},{}__"
+        for site in sysa:
+            tn.reindex_({tn.upper_ind(site): tmp_ind_id.format(*site)})
+        for site in sysa:
+            tn.reindex_({tn.lower_ind(site): tn.upper_ind(site)})
+        for site in sysa:
+            tn.reindex_({tmp_ind_id.format(*site): tn.lower_ind(site)})
+        return tn
 
     def show(self):
         """Print a unicode schematic of this PEPO and its bond dimensions."""
