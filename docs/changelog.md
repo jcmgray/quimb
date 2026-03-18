@@ -58,6 +58,7 @@ Release notes for `quimb`.
 - fix cholesky decomposition `shift` kwarg forwarding and `absorb="right"` direction.
 - fix [`sample_hd1bp`](quimb.tensor.belief_propagation.hd1bp.sample_hd1bp) sub-progress bar display.
 - fix gate tag propagation in [`tensor_network_gate_inds`](quimb.tensor.gating.tensor_network_gate_inds).
+- handle `equalize_norms` correctly in [TensorNetwork2D.compute_environments](quimb.tensor.tn2d.core.TensorNetwork2D.compute_environments) ({issue}`352`).
 
 
 (whats-new-1-12-1)=

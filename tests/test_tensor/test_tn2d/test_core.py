@@ -383,6 +383,45 @@ class Test2DContract:
             x = norm_j.contract(all)
             assert x == pytest.approx(ex, rel=1e-2)
 
+    @pytest.mark.parametrize("initial_exponent", [False, True])
+    @pytest.mark.parametrize("equalize_norms", [False, 1.0, True])
+    def test_compute_envs_with_equalize_norms(
+        self, initial_exponent, equalize_norms
+    ):
+        tn = qtn.TN2D_rand(5, 5, 2, dist="uniform", seed=42)
+        if initial_exponent:
+            tn.equalize_norms_(1.0)
+        zex = tn.contract()
+        envs = {}
+        tn.compute_xmin_environments(
+            max_bond=8,
+            cutoff=0.0,
+            envs=envs,
+            equalize_norms=equalize_norms,
+        )
+        tn.compute_xmax_environments(
+            max_bond=8,
+            cutoff=0.0,
+            envs=envs,
+            equalize_norms=equalize_norms,
+        )
+        # test with full strips
+        for i in range(tn.Lx):
+            tni = (
+                envs["xmin", i]
+                | tn.select(tn.x_tag(i), with_exponent=True)
+                | envs["xmax", i]
+            )
+            zi = tni.contract()
+            assert zi == pytest.approx(zex, rel=1e-5)
+        # test with direct overlap of envs
+        for i in range(tn.Lx - 1):
+            tni = envs["xmin", i + 1] | envs["xmax", i]
+            # need to add back the original exponent in this case
+            tni.exponent += tn.exponent
+            zi = tni.contract()
+            assert zi == pytest.approx(zex, rel=1e-5)
+
     def test_normalize(self):
         psi = qtn.PEPS.rand(4, 5, 2, seed=42)
         norm = (psi.H | psi).contract(all)

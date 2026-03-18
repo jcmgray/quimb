@@ -4920,13 +4920,15 @@ class TensorNetwork:
         tids = self._get_tids_from_tags(tags, which=which)
         return tuple(self.tensor_map[n] for n in tids)
 
-    def _select_tids(self, tids, virtual=True):
+    def _select_tids(self, tids, virtual=True, with_exponent=False):
         """Get a copy or a virtual copy (doesn't copy the tensors) of this
         ``TensorNetwork``, only with the tensors corresponding to ``tids``.
         """
         tn = self.new(like=self)
         for tid in tids:
             tn.add_tensor(self.tensor_map[tid], tid=tid, virtual=virtual)
+        if with_exponent:
+            tn.exponent = self.exponent
         return tn
 
     def _select_without_tids(self, tids, virtual=True):
@@ -4938,7 +4940,7 @@ class TensorNetwork:
             tn.pop_tensor(tid)
         return tn
 
-    def select(self, tags, which="all", virtual=True):
+    def select(self, tags, which="all", virtual=True, with_exponent=False):
         """Get a TensorNetwork comprising tensors that match all or any of
         ``tags``, inherit the network properties/structure from ``self``.
         This returns a view of the tensors not a copy.
@@ -4952,6 +4954,9 @@ class TensorNetwork:
         virtual : bool, optional
             Whether the returned tensor network views the same tensors (the
             default) or takes copies (``virtual=False``) from ``self``.
+        with_exponent : bool, optional
+            Whether to propagate the current exponent to the selected sub
+            tensor network.
 
         Returns
         -------
@@ -4963,7 +4968,9 @@ class TensorNetwork:
         select_tensors, select_neighbors, partition, partition_tensors
         """
         tagged_tids = self._get_tids_from_tags(tags, which=which)
-        return self._select_tids(tagged_tids, virtual=virtual)
+        return self._select_tids(
+            tagged_tids, virtual=virtual, with_exponent=with_exponent
+        )
 
     select_any = functools.partialmethod(select, which="any")
     select_all = functools.partialmethod(select, which="all")
