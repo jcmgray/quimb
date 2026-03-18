@@ -13,6 +13,18 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- add [`array_split`](quimb.tensor.decomp.array_split) and [`array_svals`](quimb.tensor.decomp.array_svals) as the primary array-level entry points for matrix decomposition, consolidating dispatch logic that was previously internal to `tensor_core`.
+- add [`register_split_driver`](quimb.tensor.decomp.register_split_driver) and [`register_svals_driver`](quimb.tensor.decomp.register_svals_driver) decorators for registering custom matrix decomposition methods with `array_split` and `array_svals`.
+- allow [`array_split`](quimb.tensor.decomp.array_split) to handle *batches* of matrices (for most methods).
+- [`array_split`](quimb.tensor.decomp.array_split): automatically detect and forward valid kwargs to underlying decomposition methods.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. Add several accelerations for this method. `"eig"` remains as a deprecated alias for `"svd:eig"`.
+- add [`svd_via_eig`](quimb.tensor.decomp.svd_via_eig) for efficient partial SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add many new decomposition methods — `"qr:svd"`, `"qr:eig"`, `"qr:rand"`, `"qr:cholesky"`, `"lq:svd"`, `"lq:eig"`, `"lq:rand"`, `"lq:cholesky"`, `"rfactor"`, `"rfactor:svd"`, `"rfactor:eig"`, `"rfactor:rand"`, `"rfactor:cholesky"`, `"lfactor"`, `"lfactor:svd"`, `"lfactor:eig"`, `"lfactor:rand"`, `"lfactor:cholesky"`, `"rorthog"`, `"rorthog:svd"`, `"rorthog:eig"`, `"rorthog:rand"`, `"rorthog:cholesky"`, `"lorthog"`, `"lorthog:svd"`, `"lorthog:eig"`, `"lorthog:rand"`, `"lorthog:cholesky"`, and `"svd:rand"`. The `:svd` and `:eig` submethods allow dynamic truncation; the `:rand` submethods use randomized projection with static truncation via [`svd_rand_truncated`](quimb.tensor.decomp.svd_rand_truncated); the `:cholesky` submethods use Cholesky factorization via [`cholesky_regularized`](quimb.tensor.decomp.cholesky_regularized).
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): expand `absorb` options significantly beyond `"left"`, `"both"`, `"right"`, `None` to include `"lorthog"`, `"rorthog"`, `"lfactor"`, `"rfactor"`, and `"s"` for returning partial results (single factors or singular values only). Default changed from `"both"` to `"auto"`, which uses each method's natural default.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): add `"lsqrt"` and `"rsqrt"` absorb options, update cholesky decomposition to [`cholesky_regularized`](quimb.tensor.decomp.cholesky_regularized) with `shift` as exposed parameter.
+- [`compute_oblique_projectors`](quimb.tensor.decomp.compute_oblique_projectors): allow `method` kwarg.
+- QR decomposition: add `stabilize` kwarg for controlling QR stabilization behavior.
+- decomposition methods: various compatibility improvements for JAX backend.
 - add [`shift`](quimb.gen.operators.shift) and [`clock`](quimb.gen.operators.clock) operators.
 - add [`Tensor.isfermionic`](quimb.tensor.tensor_core.Tensor.isfermionic) and [`TensorNetwork.isfermionic`](quimb.tensor.tensor_core.TensorNetwork.isfermionic) methods.
 - add [`Tensor.isblocksparse`](quimb.tensor.tensor_core.Tensor.isblocksparse) and [`TensorNetwork.isblocksparse`](quimb.tensor.tensor_core.TensorNetwork.isblocksparse) methods.
@@ -25,16 +37,7 @@ Release notes for `quimb`.
 - add [`tensor_network_gate_sandwich_inds`](quimb.tensor.gating.tensor_network_gate_sandwich_inds) for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network.
 - [`tensor_network_ag_gate`](quimb.tensor.tnag.core.tensor_network_ag_gate): add `which="sandwich"` option for applying a gate and its conjugate like $G A G^\dagger$ to a tensor network, default to this if the supplied tensor network is a [`TensorNetworkGenOperator`](quimb.tensor.tnag.core.TensorNetworkGenOperator).
 - add function [`tensor_network_ag_gate_simple`](quimb.tensor.tnag.core.tensor_network_ag_gate_simple) for applying a gate to an arbitrary geometry tensor network vector or operator, using simple update style `gauges` to perform any compression.
-- add [`array_split`](quimb.tensor.decomp.array_split) and [`array_svals`](quimb.tensor.decomp.array_svals) as the primary array-level entry points for matrix decomposition, consolidating dispatch logic that was previously internal to `tensor_core`.
-- add [`register_split_driver`](quimb.tensor.decomp.register_split_driver) and [`register_svals_driver`](quimb.tensor.decomp.register_svals_driver) decorators for registering custom matrix decomposition methods with `array_split` and `array_svals`.
-- allow [`array_split`](quimb.tensor.decomp.array_split) to handle *batches* of matrices (for most methods).
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. Add several accelerations for this method. `"eig"` remains as a deprecated alias for `"svd:eig"`.
-- add [`svd_via_eig`](quimb.tensor.decomp.svd_via_eig) for efficient partial SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes.
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add many new decomposition methods — `"qr:svd"`, `"qr:eig"`, `"qr:rand"`, `"qr:cholesky"`, `"lq:svd"`, `"lq:eig"`, `"lq:rand"`, `"lq:cholesky"`, `"rfactor"`, `"rfactor:svd"`, `"rfactor:eig"`, `"rfactor:rand"`, `"rfactor:cholesky"`, `"lfactor"`, `"lfactor:svd"`, `"lfactor:eig"`, `"lfactor:rand"`, `"lfactor:cholesky"`, `"rorthog"`, `"rorthog:svd"`, `"rorthog:eig"`, `"rorthog:rand"`, `"rorthog:cholesky"`, `"lorthog"`, `"lorthog:svd"`, `"lorthog:eig"`, `"lorthog:rand"`, `"lorthog:cholesky"`, and `"svd:rand"`. The `:svd` and `:eig` submethods allow dynamic truncation; the `:rand` submethods use randomized projection with static truncation via [`svd_rand_truncated`](quimb.tensor.decomp.svd_rand_truncated); the `:cholesky` submethods use Cholesky factorization via [`cholesky_regularized`](quimb.tensor.decomp.cholesky_regularized).
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): expand `absorb` options significantly beyond `"left"`, `"both"`, `"right"`, `None` to include `"lorthog"`, `"rorthog"`, `"lfactor"`, `"rfactor"`, and `"s"` for returning partial results (single factors or singular values only). Default changed from `"both"` to `"auto"`, which uses each method's natural default.
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): add `"lsqrt"` and `"rsqrt"` absorb options, update cholesky decomposition to [`cholesky_regularized`](quimb.tensor.decomp.cholesky_regularized) with `shift` as exposed parameter.
 - [`insert_compressor_between_regions`](quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions) and upstream CTMRG/HOTRG methods: add explicit `contract_opts`, `reduce_opts`, and `compress_opts` keyword arguments for fine-grained control.
-- [`compute_oblique_projectors`](quimb.tensor.decomp.compute_oblique_projectors): allow `method` kwarg.
 - [`TensorNetwork2D.contract_boundary`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_boundary), [`contract_ctmrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_ctmrg), [`contract_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg), [`coarse_grain_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.coarse_grain_hotrg) and their 3D counterparts: add `strip_exponent` parameter and `equalize_norms="auto"` default.
 - [`TensorNetwork3D.contract_hotrg`](quimb.tensor.tn3d.core.TensorNetwork3D.contract_hotrg): use updated projecting/gauging scheme.
 - all compression methods: accept an explicit `compress_opts` kwarg.
@@ -48,6 +51,13 @@ Release notes for `quimb`.
 - fix [`isometrize_qr`](quimb.tensor.decomp.isometrize_qr) for complex torch arrays ({issue}`346`).
 - fix [`right_canonicalize`](quimb.tensor.tn1d.core.TensorNetwork1DFlat.right_canonicalize) to return the right canonicalized tensor network ({issue}`347`)
 - ensure all belief propagation contraction methods correctly propagate the target tensor network's `.exponent`.
+- fix cutoff mode bug in [`array_split`](quimb.tensor.decomp.array_split) decomposition truncation.
+- fix [`tensor_network_1d_compress_zipup`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_zipup) `equalize_norms` exponent accumulation.
+- fix `final_contract_opts` inplace handling in boundary contraction methods.
+- fix [`squared_op_to_reduced_factor`](quimb.tensor.decomp.squared_op_to_reduced_factor) argument handling.
+- fix cholesky decomposition `shift` kwarg forwarding and `absorb="right"` direction.
+- fix [`sample_hd1bp`](quimb.tensor.belief_propagation.hd1bp.sample_hd1bp) sub-progress bar display.
+- fix gate tag propagation in [`tensor_network_gate_inds`](quimb.tensor.gating.tensor_network_gate_inds).
 
 
 (whats-new-1-12-1)=
