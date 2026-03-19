@@ -75,79 +75,72 @@ def test_sgn_convention():
 )
 @pytest.mark.parametrize("shape", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("stabilized", [True, False])
-@pytest.mark.parametrize("absorb", ["right", "lorthog", "rfactor"])
-@pytest.mark.parametrize("dtype", ["complex128", "float32"])
-def test_qr_stabilized(backend, shape, stabilized, absorb, dtype):
-    xp = ar.get_namespace(backend)
-    rng = xp.random.default_rng(0)
-    a = rng.uniform(size=shape)
-    a = xp.astype(a, dtype)
-    q, _, r = array_split(a, method="qr", stabilized=stabilized, absorb=absorb)
-    if absorb != "rfactor":
-        assert q is not None
-        assert q.shape == (shape[0], min(shape))
-        assert_allclose(
-            xp.conj(xp.swapaxes(q, -2, -1)) @ q,
-            xp.eye(min(shape)),
-            rtol=1e-6,
-            atol=1e-6,
-        )
-    else:
-        assert q is None
-    if absorb != "lorthog":
-        assert r is not None
-        assert r.shape == (min(shape), shape[1])
-        if stabilized:
-            assert_allclose(
-                xp.sgn(xp.diag(r)),
-                xp.array(1.0, dtype=r.dtype),
-                rtol=1e-6,
-                atol=1e-6,
-            )
-    else:
-        assert r is None
-    if absorb == "both":
-        assert_allclose(q @ r, a, rtol=1e-6, atol=1e-6)
-
-
 @pytest.mark.parametrize(
-    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+    "method, absorb",
+    [
+        ("qr", "right"),
+        ("qr", "lorthog"),
+        ("qr", "rfactor"),
+        ("lq", "left"),
+        ("lq", "lfactor"),
+        ("lq", "rorthog"),
+    ],
 )
-@pytest.mark.parametrize("shape", [(8, 5), (5, 5), (5, 8)])
-@pytest.mark.parametrize("stabilized", [True, False])
-@pytest.mark.parametrize("absorb", ["left", "lfactor", "rorthog"])
 @pytest.mark.parametrize("dtype", ["complex128", "float32"])
-def test_lq_stabilized(backend, shape, stabilized, absorb, dtype):
+def test_qr_lq_stabilized(backend, shape, stabilized, method, absorb, dtype):
     xp = ar.get_namespace(backend)
     rng = xp.random.default_rng(0)
     a = rng.uniform(size=shape)
     a = xp.astype(a, dtype)
-    l, _, q = array_split(a, method="lq", stabilized=stabilized, absorb=absorb)
-    if absorb != "lfactor":
-        assert q is not None
-        assert q.shape == (min(shape), shape[1])
-        assert_allclose(
-            q @ xp.conj(xp.swapaxes(q, -2, -1)),
-            xp.eye(min(shape)),
-            rtol=1e-6,
-            atol=1e-6,
-        )
-    else:
-        assert q is None
-    if absorb != "rorthog":
-        assert l is not None
-        assert l.shape == (shape[0], min(shape))
-        if stabilized:
+    left, _, right = array_split(
+        a, method=method, stabilized=stabilized, absorb=absorb
+    )
+
+    is_qr = method == "qr"
+    orthog = left if is_qr else right
+    factor = right if is_qr else left
+    no_orthog = absorb in ("rfactor", "lfactor")
+    no_factor = absorb in ("lorthog", "rorthog")
+
+    if not no_orthog:
+        assert orthog is not None
+        if is_qr:
+            assert orthog.shape == (shape[0], min(shape))
             assert_allclose(
-                xp.sgn(xp.diag(l)),
-                xp.array(1.0, dtype=l.dtype),
+                xp.conj(xp.swapaxes(orthog, -2, -1)) @ orthog,
+                xp.eye(min(shape)),
+                rtol=1e-6,
+                atol=1e-6,
+            )
+        else:
+            assert orthog.shape == (min(shape), shape[1])
+            assert_allclose(
+                orthog @ xp.conj(xp.swapaxes(orthog, -2, -1)),
+                xp.eye(min(shape)),
                 rtol=1e-6,
                 atol=1e-6,
             )
     else:
-        assert l is None
+        assert orthog is None
+
+    if not no_factor:
+        assert factor is not None
+        if is_qr:
+            assert factor.shape == (min(shape), shape[1])
+        else:
+            assert factor.shape == (shape[0], min(shape))
+        if stabilized:
+            assert_allclose(
+                xp.sgn(xp.diag(factor)),
+                xp.array(1.0, dtype=factor.dtype),
+                rtol=1e-6,
+                atol=1e-6,
+            )
+    else:
+        assert factor is None
+
     if absorb == "both":
-        assert_allclose(l @ q, a, rtol=1e-6, atol=1e-6)
+        assert_allclose(left @ right, a, rtol=1e-6, atol=1e-6)
 
 
 @pytest.mark.parametrize(
@@ -367,20 +360,6 @@ def test_svd_rand_truncated_warns():
         svd_rand_truncated(x, max_bond=None)
 
 
-def test_svd_rand_via_array_split():
-    rng = np.random.default_rng(42)
-    x = rng.uniform(size=(8, 5))
-    x /= np.linalg.norm(x)
-
-    U, s, VH = array_split(x, method="svd:rand", absorb=None, max_bond=4)
-
-    assert U.shape == (8, 4)
-    assert s.shape == (4,)
-    assert VH.shape == (4, 5)
-    assert np.all(s >= 0)
-    assert np.linalg.norm(x - U @ np.diag(s) @ VH) < 0.5
-
-
 QR_METHODS = (
     "auto",
     "qr",
@@ -401,54 +380,43 @@ LQ_METHODS = (
 )
 
 
-@pytest.mark.parametrize("method", QR_METHODS)
+@pytest.mark.parametrize(
+    "methods, absorb",
+    [
+        (QR_METHODS, "right"),
+        (LQ_METHODS, "left"),
+    ],
+)
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
-def test_qr_methods(method, m, n, dtype):
-    if "cholesky" in method and m < n:
-        pytest.skip("cholesky QR requires m >= n")
+def test_qr_lq_methods(methods, absorb, m, n, dtype):
+    for method in methods:
+        if "cholesky" in method:
+            if absorb == "right" and m < n:
+                continue
+            if absorb == "left" and m > n:
+                continue
 
-    rng = np.random.default_rng(42)
-    x = rng.standard_normal((m, n))
-    if dtype == "complex128":
-        x = x + 1j * rng.standard_normal((m, n))
+        rng = np.random.default_rng(42)
+        x = rng.standard_normal((m, n))
+        if dtype == "complex128":
+            x = x + 1j * rng.standard_normal((m, n))
 
-    k = min(m, n)
-    opts = {}
-    if "rand" in method:
-        opts["max_bond"] = k
+        k = min(m, n)
+        opts = {}
+        if "rand" in method:
+            opts["max_bond"] = k
 
-    Q, _, R = array_split(x, method=method, absorb="right", **opts)
+        left, _, right = array_split(x, method=method, absorb=absorb, **opts)
 
-    assert Q.shape == (m, k)
-    assert R.shape == (k, n)
-    assert_allclose(Q @ R, x, atol=1e-10)
-    assert_allclose(Q.conj().T @ Q, np.eye(k), atol=1e-10)
+        assert left.shape == (m, k)
+        assert right.shape == (k, n)
+        assert_allclose(left @ right, x, atol=1e-10)
 
-
-@pytest.mark.parametrize("method", LQ_METHODS)
-@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
-@pytest.mark.parametrize("dtype", ["float64", "complex128"])
-def test_lq_methods(method, m, n, dtype):
-    if "cholesky" in method and m > n:
-        pytest.skip("cholesky LQ requires m <= n")
-
-    rng = np.random.default_rng(42)
-    x = rng.standard_normal((m, n))
-    if dtype == "complex128":
-        x = x + 1j * rng.standard_normal((m, n))
-
-    k = min(m, n)
-    opts = {}
-    if "rand" in method:
-        opts["max_bond"] = k
-
-    L, _, Q = array_split(x, method=method, absorb="left", **opts)
-
-    assert L.shape == (m, k)
-    assert Q.shape == (k, n)
-    assert_allclose(L @ Q, x, atol=1e-10)
-    assert_allclose(Q @ Q.conj().T, np.eye(k), atol=1e-10)
+        if absorb == "right":
+            assert_allclose(left.conj().T @ left, np.eye(k), atol=1e-10)
+        else:
+            assert_allclose(right @ right.conj().T, np.eye(k), atol=1e-10)
 
 
 @pytest.mark.parametrize("method", QR_METHODS + LQ_METHODS)
@@ -481,138 +449,79 @@ def test_qr_lq_methods_truncated(method, absorb):
     assert np.linalg.norm(x - left @ right) < 2.0
 
 
-RFACTOR_METHODS = [
-    "auto",
-    "qr",
-    "lq",
-    "svd",
-    "svd:eig",
-    "svd:rand",
-    "qr:cholesky",
-]
-LFACTOR_METHODS = [
-    "auto",
-    "qr",
-    "lq",
-    "svd",
-    "svd:eig",
-    "svd:rand",
-    "qr:cholesky",
-    "lq:cholesky",
-]
-RORTHOG_METHODS = [
-    "auto",
-    "qr",
-    "lq",
-    "svd",
-    "svd:eig",
-    "svd:rand",
-    "qr:cholesky",
-    "lq:cholesky",
-]
-LORTHOG_METHODS = [
-    "auto",
-    "qr",
-    "lq",
-    "svd",
-    "svd:eig",
-    "svd:rand",
-    "qr:cholesky",
-]
+_BASE_METHODS = ["auto", "qr", "lq", "svd", "svd:eig", "svd:rand"]
+
+_PARTIAL_ABSORB_CONFIG = {
+    # absorb: (extra_methods, cholesky_skip_condition, null_side, check_orthog)
+    #   null_side: "left" means left output is None
+    #   cholesky_skip: "m<n" or "m>n"
+    "rfactor": (
+        ["qr:cholesky"],
+        "m<n",
+        "left",
+        False,
+    ),
+    "lfactor": (
+        ["qr:cholesky", "lq:cholesky"],
+        "m>n",
+        "right",
+        False,
+    ),
+    "rorthog": (
+        ["qr:cholesky", "lq:cholesky"],
+        "m>n",
+        "left",
+        True,
+    ),
+    "lorthog": (
+        ["qr:cholesky"],
+        "m<n",
+        "right",
+        True,
+    ),
+}
 
 
-@pytest.mark.parametrize("method", RFACTOR_METHODS)
+@pytest.mark.parametrize(
+    "absorb", ["rfactor", "lfactor", "rorthog", "lorthog"]
+)
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
-def test_rfactor_methods(method, m, n, dtype):
-    if "cholesky" in method and m < n:
-        pytest.skip("cholesky rfactor requires m >= n")
+def test_partial_factor_methods(absorb, m, n, dtype):
+    extra_methods, chol_skip, null_side, check_orthog = _PARTIAL_ABSORB_CONFIG[
+        absorb
+    ]
+    methods = _BASE_METHODS + extra_methods
 
-    rng = np.random.default_rng(42)
-    x = rng.standard_normal((m, n))
-    if dtype == "complex128":
-        x = x + 1j * rng.standard_normal((m, n))
+    for method in methods:
+        if "cholesky" in method:
+            if chol_skip == "m<n" and m < n:
+                continue
+            if chol_skip == "m>n" and m > n:
+                continue
 
-    k = min(m, n)
-    opts = {}
-    if "rand" in method:
-        opts["max_bond"] = k
+        rng = np.random.default_rng(42)
+        x = rng.standard_normal((m, n))
+        if dtype == "complex128":
+            x = x + 1j * rng.standard_normal((m, n))
 
-    left, _, R = array_split(x, method=method, absorb="rfactor", **opts)
+        k = min(m, n)
+        opts = {}
+        if "rand" in method:
+            opts["max_bond"] = k
 
-    assert left is None
-    assert R.shape == (k, n)
+        left, _, right = array_split(x, method=method, absorb=absorb, **opts)
 
-
-@pytest.mark.parametrize("method", LFACTOR_METHODS)
-@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
-@pytest.mark.parametrize("dtype", ["float64", "complex128"])
-def test_lfactor_methods(method, m, n, dtype):
-    if "cholesky" in method and m > n:
-        pytest.skip("cholesky lfactor requires m <= n")
-
-    rng = np.random.default_rng(42)
-    x = rng.standard_normal((m, n))
-    if dtype == "complex128":
-        x = x + 1j * rng.standard_normal((m, n))
-
-    k = min(m, n)
-    opts = {}
-    if "rand" in method:
-        opts["max_bond"] = k
-
-    L, _, right = array_split(x, method=method, absorb="lfactor", **opts)
-
-    assert right is None
-    assert L.shape == (m, k)
-
-
-@pytest.mark.parametrize("method", RORTHOG_METHODS)
-@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
-@pytest.mark.parametrize("dtype", ["float64", "complex128"])
-def test_rorthog_methods(method, m, n, dtype):
-    if "cholesky" in method and m > n:
-        pytest.skip("cholesky rorthog requires m <= n")
-
-    rng = np.random.default_rng(42)
-    x = rng.standard_normal((m, n))
-    if dtype == "complex128":
-        x = x + 1j * rng.standard_normal((m, n))
-
-    k = min(m, n)
-    opts = {}
-    if "rand" in method:
-        opts["max_bond"] = k
-
-    left, _, Q = array_split(x, method=method, absorb="rorthog", **opts)
-
-    assert left is None
-    assert Q.shape == (k, n)
-    assert_allclose(Q @ Q.conj().T, np.eye(k), atol=1e-10)
-
-
-@pytest.mark.parametrize("method", LORTHOG_METHODS)
-@pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
-@pytest.mark.parametrize("dtype", ["float64", "complex128"])
-def test_lorthog_methods(method, m, n, dtype):
-    if "cholesky" in method and m < n:
-        pytest.skip("cholesky lorthog requires m >= n")
-
-    rng = np.random.default_rng(42)
-    x = rng.standard_normal((m, n))
-    if dtype == "complex128":
-        x = x + 1j * rng.standard_normal((m, n))
-
-    k = min(m, n)
-    opts = {}
-    if "rand" in method:
-        opts["max_bond"] = k
-
-    Q, _, right = array_split(x, method=method, absorb="lorthog", **opts)
-
-    assert right is None
-    assert Q.shape == (m, k)
-    assert_allclose(Q.conj().T @ Q, np.eye(k), atol=1e-10)
+        if null_side == "left":
+            assert left is None
+            assert right.shape == (k, n)
+            if check_orthog:
+                assert_allclose(right @ right.conj().T, np.eye(k), atol=1e-10)
+        else:
+            assert right is None
+            assert left.shape == (m, k)
+            if check_orthog:
+                assert_allclose(left.conj().T @ left, np.eye(k), atol=1e-10)
 
 
 @pytest.mark.parametrize(
@@ -650,45 +559,33 @@ def test_batch_svd(backend, method, max_bond, absorb):
     "backend",
     [
         "numpy",
-        jax_case,
-        tensorflow_case,
-        pytorch_case,
-    ],
-)
-@pytest.mark.parametrize("method", ["qr", "qr:cholesky"])
-def test_batch_qr(backend, method):
-    xp = ar.get_namespace(backend)
-    rng = xp.random.default_rng(42)
-    x = rng.uniform(size=(3, 7, 5))
-
-    left, s, right = array_split(x, method)
-    assert left is None or left.shape == (3, 7, 5)
-    assert s is None or s.shape == (3, 5)
-    assert right is None or right.shape == (3, 5, 5)
-
-
-@pytest.mark.parametrize(
-    "backend",
-    [
-        "numpy",
         "autoray.lazy",
         jax_case,
         tensorflow_case,
         pytorch_case,
     ],
 )
-@pytest.mark.parametrize("method", ["lq", "lq:cholesky"])
-def test_batch_lq(backend, method):
+@pytest.mark.parametrize(
+    "method, shape, expected_shapes",
+    [
+        ("qr", (3, 7, 5), ((3, 7, 5), (3, 5), (3, 5, 5))),
+        ("qr:cholesky", (3, 7, 5), ((3, 7, 5), (3, 5), (3, 5, 5))),
+        ("lq", (3, 5, 7), ((3, 5, 5), (3, 5), (3, 5, 7))),
+        ("lq:cholesky", (3, 5, 7), ((3, 5, 5), (3, 5), (3, 5, 7))),
+    ],
+)
+def test_batch_qr_lq(backend, method, shape, expected_shapes):
     if backend == "autoray.lazy":
         backend = "numpy"
     xp = ar.get_namespace(backend)
     rng = xp.random.default_rng(42)
-    x = rng.uniform(size=(3, 5, 7))
+    x = rng.uniform(size=shape)
 
     left, s, right = array_split(x, method)
-    assert left is None or left.shape == (3, 5, 5)
-    assert s is None or s.shape == (3, 5)
-    assert right is None or right.shape == (3, 5, 7)
+    left_shape, s_shape, right_shape = expected_shapes
+    assert left is None or left.shape == left_shape
+    assert s is None or s.shape == s_shape
+    assert right is None or right.shape == right_shape
 
 
 @pytest.mark.parametrize(
