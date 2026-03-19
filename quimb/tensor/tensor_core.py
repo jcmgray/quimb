@@ -391,13 +391,14 @@ _VALID_SPLIT_GET = {None, "arrays", "tensors", "values"}
 def tensor_split(
     T: "Tensor",
     left_inds,
-    method="svd",
-    get=None,
+    *,
+    method="auto",
     absorb="auto",
     max_bond=None,
     cutoff=1e-10,
     cutoff_mode="rel",
     renorm=None,
+    get=None,
     ltags=None,
     rtags=None,
     stags=None,
@@ -407,8 +408,13 @@ def tensor_split(
     info=None,
     **kwargs,
 ):
-    """Decompose a tensor into two tensors by fusing its indices into left
-    and right sets, and performing a matrix decomposition.
+    """Decompose a tensor into two tensors (and possibly singular values) by
+    fusing its indices into left and right sets, and performing a matrix
+    decomposition. Truncation is controlled by ``max_bond`` and ``cutoff``.
+
+    The key parameter ``absorb`` specifies the *desired form* of the returned
+    factors (i.e. where the singular values are effectively 'absorbed'), and
+    ``method`` specifies the underlying method used to compute that form.
 
     Parameters
     ----------
@@ -421,54 +427,44 @@ def tensor_split(
     method : str, optional
         The decomposition method to use:
 
+        - ``'auto'``: use the default method based on ``absorb`` and whether
+          truncation is requested via ``max_bond`` and/or ``cutoff``.
+
+        The five main methods are:
+
         - ``'svd'``: full SVD, allowing all truncation options.
-          Submethods: ``':eig'``, ``':rand'``.
-        - ``'qr'``: QR decomposition, left factor is isometric.
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'lq'``: LQ decomposition, right factor is isometric.
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'rfactor'``: *only* the right factor (R in QR).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'lfactor'``: *only* the left factor (L in LQ).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'rorthog'``: *only* the right isometric factor (Q in LQ).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'lorthog'``: *only* the left isometric factor (Q in QR).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'eigh'``: full eigen-decomposition, tensor must be hermitian.
-        - ``'eigsh'``: iterative eigen-decomposition, tensor must be hermitian.
+        - ``'svd:eig'``: full SVD via eigendecomposition, allowing all
+          truncation options. This can be faster than the standard SVD, but
+          entails some loss of precision.
+        - ``'svd:rand'``: low-rank SVD via randomized projection, allows
+          (and is only beneficial for) static truncation
+        - ``'qr'``: QR decomposition, by default left factor is isometric.
+        - ``'qr:cholesky'``: QR decomposition via Cholesky factorization, by
+          default left factor is isometric. This can be faster than the
+          standard QR, but entails some loss of precision.
+
+        All of these can return different forms (and take various shortucts)
+        based on ``absorb``. Other methods are:
+
+        - ``'lq'``: LQ decomposition, right factor is isometric. This is simply
+          an alias for ``method='qr'`` with ``absorb='left'``.
+        - ``'eigh'``: full eigen-decomposition, array must be hermitian.
+        - ``'eigsh'``: iterative eigen-decomposition, array must be hermitian.
         - ``'svds'``: iterative SVD, allows truncation.
         - ``'isvd'``: iterative SVD using interpolative methods, allows
-          truncation.
-        - ``'rsvd'``: randomized iterative SVD with truncation.
+          truncation (see :mod:`scipy.linalg.interpolative`).
+        - ``'rsvd'``: randomized iterative SVD with truncation (alternative
+          implementation).
         - ``'lu'``: full LU decomposition, allows truncation. Favors sparsity
           but is not rank optimal.
         - ``'polar_right'``: polar decomposition as ``A = U @ P``.
         - ``'polar_left'``: polar decomposition as ``A = P @ U``.
-        - ``'cholesky'``: cholesky decomposition, tensor must be positive
+        - ``'cholesky'``: cholesky decomposition, array must be positive
           definite.
 
-        The submethods (e.g. ``'qr:svd'``) select an alternative
-        implementation for the base method. ``':svd'`` performs the
-        decomposition via SVD, supporting dynamic truncation (``cutoff``
-        and ``cutoff_mode``). ``':eig'`` uses eigendecomposition, also
-        supporting dynamic truncation but with some loss of precision.
-        ``':rand'`` uses randomized projection, supporting static
-        truncation only (``max_bond``). ``':cholesky'`` uses Cholesky
-        factorization, with no truncation support.
-    get : {None, 'arrays', 'tensors', 'values'}
-        If given, what to return instead of a TN describing the split:
-
-        - ``None``: a tensor network of the two (or three) tensors.
-        - ``'arrays'``: the raw data arrays as a tuple ``(l, r)`` or
-          ``(l, s, r)`` depending on ``absorb``.
-        - ``'tensors'``: the new tensors as a tuple ``(Tl, Tr)`` or
-          ``(Tl, Ts, Tr)`` depending on ``absorb``.
-        - ``'values'``: only compute and return the singular values ``s``.
-
     absorb : str or None, optional
-        What to compute / where to absorb the singular- or eigen- values.
-        Common options are:
+        Desired form the decomposition / where to absorb the singular- or
+        eigen- values. Common options are:
 
         - ``'auto'``: use the method's default absorb mode.
         - ``'both'`` / ``'Usq,sqVH'``: absorb ``sqrt(s)`` into both factors.
@@ -710,10 +706,10 @@ def tensor_canonize_bond(
         modified defaults of ``method=='qr'`` and ``absorb='right'``.
     """
     check_opt("absorb", absorb, ("left", "both", "right"))
+    split_opts.setdefault("cutoff", 0.0)
 
     if absorb == "both":
         # same as doing reduced compression with no truncation
-        split_opts.setdefault("cutoff", 0.0)
         return tensor_compress_bond(
             T1,
             T2,
@@ -723,7 +719,7 @@ def tensor_canonize_bond(
             **split_opts,
         )
 
-    split_opts.setdefault("method", "qr")
+    split_opts.setdefault("absorb", "right")
     if absorb == "left":
         T1, T2 = T2, T1
 
@@ -871,10 +867,18 @@ def tensor_compress_bond(
     if reduced is True:
         # a) -> b)
         T1_L, T1_R = T1.split(
-            left_inds=lix, right_inds=bix, get="tensors", method="qr"
+            left_inds=lix,
+            right_inds=bix,
+            get="tensors",
+            absorb="right",
+            cutoff=0.0,
         )
         T2_L, T2_R = T2.split(
-            left_inds=bix, right_inds=rix, get="tensors", method="lq"
+            left_inds=bix,
+            right_inds=rix,
+            get="tensors",
+            absorb="left",
+            cutoff=0.0,
         )
 
         # b) -> c)
@@ -2606,13 +2610,13 @@ class Tensor:
         split_opts["left_inds"] = left_inds
         split_opts["right_inds"] = right_inds
         split_opts["get"] = "arrays"
-        # TODO: use 'lfactor:eig' or 'rfactor:eig' here?
+        split_opts["cutoff"] = 0.0
         if side == "right":
             which = 1
-            split_opts["method"] = "qr"
+            split_opts["absorb"] = "rfactor"
         else:  # side == "left"
             which = 0
-            split_opts["method"] = "lq"
+            split_opts["absorb"] = "lfactor"
 
         return tensor_split(self, **split_opts)[which]
 
@@ -6605,7 +6609,11 @@ class TensorNetwork:
 
         if ta.ndim > ndim_cutoff:
             self._split_tensor_tid(
-                tida, left_inds=None, right_inds=[inda, *bix], method="qr"
+                tida,
+                left_inds=None,
+                right_inds=[inda, *bix],
+                absorb="right",
+                cutoff=0.0,
             )
             # get new location of ind
             (tida,) = self._get_tids_from_inds(inda)
@@ -6614,7 +6622,11 @@ class TensorNetwork:
 
         if tb.ndim > ndim_cutoff:
             self._split_tensor_tid(
-                tidb, left_inds=None, right_inds=[indb, *bix], method="qr"
+                tidb,
+                left_inds=None,
+                right_inds=[indb, *bix],
+                absorb="right",
+                cutoff=0.0,
             )
             # get new location of ind
             (tidb,) = self._get_tids_from_inds(indb)

@@ -1108,8 +1108,9 @@ def _do_sweep_compress_from_low_rank_left_envs(
         defaults.
     project_opts : dict
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
-        orthogonal projectors. The method should product a left isometry, for
-        example ``method="qr"``. Values set here take precedence over defaults.
+        orthogonal projectors. The method should produce a left isometry, for
+        example ``method="svd:eig"``. Values set here take precedence over
+        defaults.
     equalize_norms : bool or float
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
@@ -1134,7 +1135,6 @@ def _do_sweep_compress_from_low_rank_left_envs(
     TensorNetwork
     """
     project_opts = ensure_dict(project_opts)
-    project_opts.setdefault("method", "lorthog")
     project_opts.setdefault("absorb", "lorthog")
 
     # we sweep in from the right
@@ -1337,7 +1337,8 @@ def tensor_network_1d_compress_src(
     project_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
         orthogonal projectors. The method should product a left isometry, for
-        example ``method="qr"``. Values set here take precedence over defaults.
+        example ``method="svd:eig"``. Values set here take precedence over
+        defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     kwargs
@@ -1527,8 +1528,8 @@ def tensor_network_1d_compress_src_oversample(
     project_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
         orthogonal projectors in the SRC step. The method should product a left
-        isometry, for example ``method="qr"``. Values set here take precedence
-        over defaults.
+        isometry, for example ``method="svd:eig"``. Values set here take
+        precedence over defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     compress_opts : dict, optional
@@ -1663,7 +1664,8 @@ def tensor_network_1d_compress_srcmps(
     project_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
         orthogonal projectors. The method should product a left isometry, for
-        example ``method="qr"``. Values set here take precedence over defaults.
+        example ``method="svd:eig"``. Values set here take precedence over
+        defaults.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     kwargs
@@ -1843,8 +1845,8 @@ def tensor_network_1d_compress_srcmps_oversample(
     project_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
         orthogonal projectors in the SRC step. The method should product a left
-        isometry, for example ``method="qr"``. Values set here take precedence
-        over defaults.
+        isometry, for example ``method="svd:eig"``. Values set here take
+        precedence over defaults.
     compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
         sweep. Values set here take precedence over defaults.

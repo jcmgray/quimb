@@ -7,6 +7,7 @@ import quimb as qu
 from quimb.tensor.decomp import (
     _compute_number_svals_to_keep_numba,
     array_split,
+    parse_split_opts,
 )
 
 from . import (
@@ -14,6 +15,36 @@ from . import (
     pytorch_case,
     tensorflow_case,
 )
+
+
+def test_parse_split_opts():
+    method, opts = parse_split_opts()
+    assert method == "svd"
+    assert opts["absorb"] == 0
+    assert opts["cutoff"] != 0.0
+    assert opts["max_bond"] == -1
+
+    method, opts = parse_split_opts("qr", "auto", max_bond=None, cutoff=0.0)
+    assert method == "qr"
+    assert opts["absorb"] == 1
+
+    method, opts = parse_split_opts("auto", "right", max_bond=None, cutoff=0.0)
+    assert method == "qr"
+    assert opts["absorb"] == 1
+
+    method, opts = parse_split_opts("lq", "auto", max_bond=None, cutoff=0.0)
+    assert method == "qr"
+    assert opts["absorb"] == -1
+
+    method, opts = parse_split_opts("auto", "left", max_bond=None, cutoff=0.0)
+    assert method == "qr"
+    assert opts["absorb"] == -1
+
+    method, opts = parse_split_opts(
+        "lq:cholesky", "auto", max_bond=None, cutoff=0.0
+    )
+    assert method == "qr:cholesky"
+    assert opts["absorb"] == -1
 
 
 def test_trim_singular_vals():
@@ -350,15 +381,31 @@ def test_svd_rand_via_array_split():
     assert np.linalg.norm(x - U @ np.diag(s) @ VH) < 0.5
 
 
-QR_METHODS = ["qr", "qr:svd", "qr:eig", "qr:rand", "qr:cholesky"]
-LQ_METHODS = ["lq", "lq:svd", "lq:eig", "lq:rand", "lq:cholesky"]
+QR_METHODS = (
+    "auto",
+    "qr",
+    "lq",
+    "qr:cholesky",
+    "svd",
+    "svd:eig",
+    "svd:rand",
+)
+LQ_METHODS = (
+    "auto",
+    "lq",
+    "qr",
+    "lq:cholesky",
+    "svd",
+    "svd:eig",
+    "svd:rand",
+)
 
 
 @pytest.mark.parametrize("method", QR_METHODS)
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_qr_methods(method, m, n, dtype):
-    if method == "qr:cholesky" and m < n:
+    if "cholesky" in method and m < n:
         pytest.skip("cholesky QR requires m >= n")
 
     rng = np.random.default_rng(42)
@@ -368,10 +415,10 @@ def test_qr_methods(method, m, n, dtype):
 
     k = min(m, n)
     opts = {}
-    if method == "qr:rand":
+    if "rand" in method:
         opts["max_bond"] = k
 
-    Q, _, R = array_split(x, method=method, **opts)
+    Q, _, R = array_split(x, method=method, absorb="right", **opts)
 
     assert Q.shape == (m, k)
     assert R.shape == (k, n)
@@ -383,7 +430,7 @@ def test_qr_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_lq_methods(method, m, n, dtype):
-    if method == "lq:cholesky" and m > n:
+    if "cholesky" in method and m > n:
         pytest.skip("cholesky LQ requires m <= n")
 
     rng = np.random.default_rng(42)
@@ -393,10 +440,10 @@ def test_lq_methods(method, m, n, dtype):
 
     k = min(m, n)
     opts = {}
-    if method == "lq:rand":
+    if "rand" in method:
         opts["max_bond"] = k
 
-    L, _, Q = array_split(x, method=method, **opts)
+    L, _, Q = array_split(x, method=method, absorb="left", **opts)
 
     assert L.shape == (m, k)
     assert Q.shape == (k, n)
@@ -405,24 +452,24 @@ def test_lq_methods(method, m, n, dtype):
 
 
 @pytest.mark.parametrize("method", QR_METHODS + LQ_METHODS)
-def test_qr_lq_methods_truncated(method):
-    if method in ("qr", "lq", "qr:cholesky", "lq:cholesky"):
+@pytest.mark.parametrize("absorb", ["left", "right"])
+def test_qr_lq_methods_truncated(method, absorb):
+    if "qr" in method or "lq" in method:
         pytest.skip("no truncation support")
 
     rng = np.random.default_rng(42)
     x = rng.standard_normal((8, 6))
 
-    is_qr = method.startswith("qr")
     max_bond = 4
     opts = {"max_bond": max_bond}
 
-    if method in ("qr:rand", "lq:rand"):
+    if "rand" in method:
         opts["oversample"] = 10
-        opts["max_iterations"] = 2
+        opts["num_iterations"] = 2
 
-    left, _, right = array_split(x, method=method, **opts)
+    left, _, right = array_split(x, method=method, absorb=absorb, **opts)
 
-    if is_qr:
+    if absorb == "right":
         assert left.shape == (8, max_bond)
         assert right.shape == (max_bond, 6)
         assert_allclose(left.conj().T @ left, np.eye(max_bond), atol=1e-10)
@@ -435,32 +482,42 @@ def test_qr_lq_methods_truncated(method):
 
 
 RFACTOR_METHODS = [
-    "rfactor",
-    "rfactor:svd",
-    "rfactor:eig",
-    "rfactor:rand",
-    "rfactor:cholesky",
+    "auto",
+    "qr",
+    "lq",
+    "svd",
+    "svd:eig",
+    "svd:rand",
+    "qr:cholesky",
 ]
 LFACTOR_METHODS = [
-    "lfactor",
-    "lfactor:svd",
-    "lfactor:eig",
-    "lfactor:rand",
-    "lfactor:cholesky",
+    "auto",
+    "qr",
+    "lq",
+    "svd",
+    "svd:eig",
+    "svd:rand",
+    "qr:cholesky",
+    "lq:cholesky",
 ]
 RORTHOG_METHODS = [
-    "rorthog",
-    "rorthog:svd",
-    "rorthog:eig",
-    "rorthog:rand",
-    "rorthog:cholesky",
+    "auto",
+    "qr",
+    "lq",
+    "svd",
+    "svd:eig",
+    "svd:rand",
+    "qr:cholesky",
+    "lq:cholesky",
 ]
 LORTHOG_METHODS = [
-    "lorthog",
-    "lorthog:svd",
-    "lorthog:eig",
-    "lorthog:rand",
-    "lorthog:cholesky",
+    "auto",
+    "qr",
+    "lq",
+    "svd",
+    "svd:eig",
+    "svd:rand",
+    "qr:cholesky",
 ]
 
 
@@ -468,7 +525,7 @@ LORTHOG_METHODS = [
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_rfactor_methods(method, m, n, dtype):
-    if method == "rfactor:cholesky" and m < n:
+    if "cholesky" in method and m < n:
         pytest.skip("cholesky rfactor requires m >= n")
 
     rng = np.random.default_rng(42)
@@ -478,10 +535,10 @@ def test_rfactor_methods(method, m, n, dtype):
 
     k = min(m, n)
     opts = {}
-    if method == "rfactor:rand":
+    if "rand" in method:
         opts["max_bond"] = k
 
-    left, _, R = array_split(x, method=method, **opts)
+    left, _, R = array_split(x, method=method, absorb="rfactor", **opts)
 
     assert left is None
     assert R.shape == (k, n)
@@ -491,7 +548,7 @@ def test_rfactor_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_lfactor_methods(method, m, n, dtype):
-    if method == "lfactor:cholesky" and m > n:
+    if "cholesky" in method and m > n:
         pytest.skip("cholesky lfactor requires m <= n")
 
     rng = np.random.default_rng(42)
@@ -501,10 +558,10 @@ def test_lfactor_methods(method, m, n, dtype):
 
     k = min(m, n)
     opts = {}
-    if method == "lfactor:rand":
+    if "rand" in method:
         opts["max_bond"] = k
 
-    L, _, right = array_split(x, method=method, **opts)
+    L, _, right = array_split(x, method=method, absorb="lfactor", **opts)
 
     assert right is None
     assert L.shape == (m, k)
@@ -514,7 +571,7 @@ def test_lfactor_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_rorthog_methods(method, m, n, dtype):
-    if method == "rorthog:cholesky" and m > n:
+    if "cholesky" in method and m > n:
         pytest.skip("cholesky rorthog requires m <= n")
 
     rng = np.random.default_rng(42)
@@ -524,10 +581,10 @@ def test_rorthog_methods(method, m, n, dtype):
 
     k = min(m, n)
     opts = {}
-    if method == "rorthog:rand":
+    if "rand" in method:
         opts["max_bond"] = k
 
-    left, _, Q = array_split(x, method=method, **opts)
+    left, _, Q = array_split(x, method=method, absorb="rorthog", **opts)
 
     assert left is None
     assert Q.shape == (k, n)
@@ -538,7 +595,7 @@ def test_rorthog_methods(method, m, n, dtype):
 @pytest.mark.parametrize("m, n", [(8, 5), (5, 5), (5, 8)])
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_lorthog_methods(method, m, n, dtype):
-    if method == "lorthog:cholesky" and m < n:
+    if "cholesky" in method and m < n:
         pytest.skip("cholesky lorthog requires m >= n")
 
     rng = np.random.default_rng(42)
@@ -548,10 +605,10 @@ def test_lorthog_methods(method, m, n, dtype):
 
     k = min(m, n)
     opts = {}
-    if method == "lorthog:rand":
+    if "rand" in method:
         opts["max_bond"] = k
 
-    Q, _, right = array_split(x, method=method, **opts)
+    Q, _, right = array_split(x, method=method, absorb="lorthog", **opts)
 
     assert right is None
     assert Q.shape == (m, k)

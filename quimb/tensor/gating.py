@@ -157,14 +157,16 @@ def _tensor_network_gate_inds_eager_split(
         tl_Q, tl_R = tl.split(
             left_inds=None,
             right_inds=[bix, ixl],
-            method="qr",
+            absorb="right",
+            cutoff=0.0,
             bond_ind=tmp_bix_l,
         )
         tmp_bix_r = rand_uuid()
         tr_L, tr_Q = tr.split(
             left_inds=[bix, ixr],
             right_inds=None,
-            method="lq",
+            absorb="left",
+            cutoff=0.0,
             bond_ind=tmp_bix_r,
         )
 
@@ -570,14 +572,16 @@ def _tensor_network_gate_sandwich_inds_eager_split(
         tl_Q, tl_R = tl.split(
             left_inds=None,
             right_inds=[bix, kixl, bixl],
-            method="qr",
+            absorb="right",
+            cutoff=0.0,
             bond_ind=tmp_bix_l,
         )
         tmp_bix_r = rand_uuid()
         tr_L, tr_Q = tr.split(
             left_inds=[bix, kixr, bixr],
             right_inds=None,
-            method="lq",
+            absorb="left",
+            cutoff=0.0,
             bond_ind=tmp_bix_r,
         )
 

@@ -68,6 +68,8 @@ def tensor_network_distance(
     -------
     D : float
     """
+    # TODO: add a direct sum mode for high precision distances
+
     check_opt("method", method, ("auto", "dense", "overlap"))
 
     tnA = tnA.as_network()

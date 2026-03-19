@@ -5,6 +5,7 @@ method.
 """
 
 import functools
+import inspect
 import operator
 import warnings
 
@@ -32,7 +33,7 @@ from .array_ops import isblocksparse, isfermionic
 
 def array_split(
     x,
-    method="svd",
+    method="auto",
     absorb="auto",
     max_bond=None,
     cutoff=1e-10,
@@ -55,26 +56,34 @@ def array_split(
     method : str, optional
         The decomposition method to use:
 
+        - ``'auto'``: use the default method based on ``absorb`` and whether
+          truncation is requested via ``max_bond`` and/or ``cutoff``.
+
+        The five main methods are:
+
         - ``'svd'``: full SVD, allowing all truncation options.
-          Submethods: ``':eig'``, ``':rand'``.
-        - ``'qr'``: QR decomposition, left factor is isometric.
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'lq'``: LQ decomposition, right factor is isometric.
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'rfactor'``: *only* the right factor (R in QR).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'lfactor'``: *only* the left factor (L in LQ).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'rorthog'``: *only* the right isometric factor (Q in LQ).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
-        - ``'lorthog'``: *only* the left isometric factor (Q in QR).
-          Submethods: ``':svd'``, ``':eig'``, ``':rand'``, ``':cholesky'``.
+        - ``'svd:eig'``: full SVD via eigendecomposition, allowing all
+          truncation options. This can be faster than the standard SVD, but
+          entails some loss of precision.
+        - ``'svd:rand'``: low-rank SVD via randomized projection, allows
+          (and is only beneficial for) static truncation
+        - ``'qr'``: QR decomposition, by default left factor is isometric.
+        - ``'qr:cholesky'``: QR decomposition via Cholesky factorization, by
+          default left factor is isometric. This can be faster than the
+          standard QR, but entails some loss of precision.
+
+        All of these can return different forms (and take various shortucts)
+        based on ``absorb``. Other methods are:
+
+        - ``'lq'``: LQ decomposition, right factor is isometric. This is simply
+          an alias for ``method='qr'`` with ``absorb='left'``.
         - ``'eigh'``: full eigen-decomposition, array must be hermitian.
         - ``'eigsh'``: iterative eigen-decomposition, array must be hermitian.
         - ``'svds'``: iterative SVD, allows truncation.
         - ``'isvd'``: iterative SVD using interpolative methods, allows
-          truncation.
-        - ``'rsvd'``: randomized iterative SVD with truncation.
+          truncation (see :mod:`scipy.linalg.interpolative`).
+        - ``'rsvd'``: randomized iterative SVD with truncation (alternative
+          implementation).
         - ``'lu'``: full LU decomposition, allows truncation. Favors sparsity
           but is not rank optimal.
         - ``'polar_right'``: polar decomposition as ``A = U @ P``.
@@ -82,17 +91,9 @@ def array_split(
         - ``'cholesky'``: cholesky decomposition, array must be positive
           definite.
 
-        The submethods (e.g. ``'qr:svd'``) select an alternative
-        implementation for the base method. ``':svd'`` performs the
-        decomposition via SVD, supporting dynamic truncation (``cutoff``
-        and ``cutoff_mode``). ``':eig'`` uses eigendecomposition, also
-        supporting dynamic truncation but with some loss of precision.
-        ``':rand'`` uses randomized projection, supporting static
-        truncation only (``max_bond``). ``':cholesky'`` uses Cholesky
-        factorization, with no truncation support.
     absorb : str or None, optional
-        What to compute / where to absorb the singular- or eigen- values.
-        Common options are:
+        Desired form the decomposition / where to absorb the singular- or
+        eigen- values. Common options are:
 
         - ``'auto'``: use the method's default absorb mode.
         - ``'both'`` / ``'Usq,sqVH'``: absorb ``sqrt(s)`` into both factors.
@@ -152,17 +153,14 @@ def array_split(
     right : array or None
         The right factor, or ``None`` if not requested by ``absorb``.
     """
-    method = parse_method(method)
 
-    kwargs.update(
-        parse_split_opts(
-            method,
-            cutoff,
-            absorb,
-            max_bond,
-            cutoff_mode,
-            renorm,
-        )
+    method, split_opts = parse_split_opts(
+        method,
+        absorb,
+        max_bond,
+        cutoff,
+        cutoff_mode,
+        renorm,
     )
 
     if info is not None:
@@ -172,7 +170,7 @@ def array_split(
     if method in _DENSE_ONLY_METHODS and isinstance(x, spla.LinearOperator):
         x = x.to_dense()
 
-    return _SPLIT_FNS[method](x, **kwargs)
+    return _SPLIT_FNS[method](x, **split_opts, **kwargs)
 
 
 def array_svals(x, method="svd", **kwargs):
@@ -242,6 +240,25 @@ _ABSORB_TRANSPOSE_MAP = {
     get_sqVH: get_Usq,
 }
 
+_RETURNS_LEFT_ABSORBS = {
+    get_U_s_VH,
+    get_Usq,
+    get_Us,
+    get_Us_VH,
+    get_Usq_sqVH,
+    get_U_sVH,
+    get_U,
+}
+_RETURNS_RIGHT_ABSORBS = {
+    get_U_s_VH,
+    get_VH,
+    get_Us_VH,
+    get_Usq_sqVH,
+    get_U_sVH,
+    get_sVH,
+    get_sqVH,
+}
+
 
 # cutoff_mode aliases, and conversion to enum for numba functions
 cutoff_mode_abs = 1
@@ -286,24 +303,91 @@ def parse_method(method):
     return method
 
 
-def parse_absorb(absorb, method):
-    """Parse the absorb option, converting from string aliases to numeric
-    codes, and using the method-specific default if 'auto' is specified.
+@functools.cache
+def parse_method_absorb(
+    method="auto",
+    absorb="auto",
+    truncation=True,
+):
+    """Parse the method and absorb options. Possibly resolve "auto" settings
+    to defaults, and  convert from string aliases to numeric codes.
     """
+    # handle deprecation aliases
+    method = parse_method(method)
+
+    # first we resolve method
+    if method == "auto":
+        if truncation:
+            # if truncating always default to SVD
+            method = "svd"
+        else:
+            if absorb == "auto":
+                # ... don't really have enough information to choose
+                warnings.warn(
+                    "No method, absorb, or truncation options specified. "
+                    "Defaulting to `method='svd'` and `absorb='both'`.",
+                )
+                method = "svd"
+            else:
+                # determine method based on absorb
+                absorb = _ABSORB_MAP[absorb]
+
+                dont_need_singular_values = absorb in (
+                    get_U_sVH,
+                    get_U,
+                    get_sVH,
+                    get_Us_VH,
+                    get_Us,
+                    get_VH,
+                )
+
+                if dont_need_singular_values:
+                    # note qr handles lq-like options via absorb
+                    method = "qr"
+                else:
+                    method = "svd"
+
+    # lq methods are simply qr with different default absorb
+    if method.startswith("lq"):
+        method = "qr" + method[2:]
+        if absorb == "auto":
+            absorb = "left"
+
+    # then we resolve absorb
     if absorb == "auto":
-        return _DEFAULT_ABSORB[method]
-    return _ABSORB_MAP[absorb]
+        # determined by method
+        absorb = _DEFAULT_ABSORB[method]
+    else:
+        # normalize to numeric code
+        absorb = _ABSORB_MAP[absorb]
+
+    return method, absorb
 
 
-@functools.lru_cache(None)
-def parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
-    """Convert defaults and settings to numeric type for numba funcs, and only
-    supply valid options for the given method.
+@functools.cache
+def parse_split_opts(
+    method="auto",
+    absorb="auto",
+    max_bond=None,
+    cutoff=1e-10,
+    cutoff_mode="rsum2",
+    renorm=None,
+):
+    """Automatically select method and absorb, convert defaults and settings to
+    numeric type for numba, and only supply valid options for given method.
     """
-    import inspect
+    # first normalize main truncation opts
+    max_bond = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
+    cutoff = _CUTOFF_LOOKUP.get(cutoff, cutoff)
 
+    # note: default options are truncating
+    truncation = (max_bond > 0) or (cutoff > 0.0)
+
+    # first we resolve the the possibly automatically chosen method and absorb
+    method, absorb = parse_method_absorb(method, absorb, truncation=truncation)
+
+    # finally we check which options to inject based on method capabilities
     signature = inspect.signature(_SPLIT_FNS[method])
-    absorb = parse_absorb(absorb, method)
     opts = dict()
 
     if "absorb" in signature.parameters:
@@ -317,10 +401,9 @@ def parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
             )
 
     if "max_bond" in signature.parameters:
-        opts["max_bond"] = _MAX_BOND_LOOKUP.get(max_bond, max_bond)
+        opts["max_bond"] = max_bond
 
     if "cutoff" in signature.parameters:
-        cutoff = _CUTOFF_LOOKUP.get(cutoff, cutoff)
         opts["cutoff"] = cutoff
 
         if "cutoff_mode" in signature.parameters:
@@ -337,43 +420,28 @@ def parse_split_opts(method, cutoff, absorb, max_bond, cutoff_mode, renorm):
                     # turn off, or use explicitly supplied power
                     opts["renorm"] = 0 if renorm is None else renorm
 
-    return opts
+    return method, opts
 
 
-@functools.lru_cache(None)
-def parse_split_left_right_isom(method, absorb):
+@functools.cache
+def parse_split_left_right_isom(method="auto", absorb="auto"):
     """Based on split method and absorb mode, determine whether the left and
     right factors are isometric, and can be marked as such.
     """
-    absorb = parse_absorb(absorb, method)
-
-    absorb = _ABSORB_MAP[absorb]
-    left_isom = (method in _LEFT_ISOM_METHODS) or (
-        method in _BOTH_ISOM_METHODS
-        and absorb in (get_U_s_VH, get_U_sVH, get_U)
-    )
-    right_isom = (method in _RIGHT_ISOM_METHODS) or (
-        method in _BOTH_ISOM_METHODS
-        and absorb in (get_U_s_VH, get_Us_VH, get_VH)
-    )
+    # NOTE: truncation can't (?) affect parsed absorb output
+    method, absorb = parse_method_absorb(method, absorb)
+    left_isom = absorb in (get_U_s_VH, get_U_sVH, get_U)
+    right_isom = absorb in (get_U_s_VH, get_Us_VH, get_VH)
     return left_isom, right_isom
 
 
 _SPLIT_FNS = {}
 _SPLIT_VALUES_FNS = {}
 _DENSE_ONLY_METHODS = set()
-_LEFT_ISOM_METHODS = set()
-_RIGHT_ISOM_METHODS = set()
-_BOTH_ISOM_METHODS = set()
 _DEFAULT_ABSORB = {}
 
 
-def register_split_driver(
-    name,
-    isom="none",
-    sparse=False,
-    default_absorb=get_Usq_sqVH,
-):
+def register_split_driver(name, sparse=False, default_absorb=get_Usq_sqVH):
     """Decorator to register functions which can decompose a matrix, and sets
     various flags specifying its capabilities and thus which options are valid
     to supply in ``array_split``.
@@ -387,21 +455,9 @@ def register_split_driver(
         Whether the method can handle truncation, and if so, whether it can
         only handle static truncation (i.e. `max_bond`) or dynamic truncation
         as well (i.e. `cutoff` and `cutoff_mode`).
-    isom : {'none', 'left', 'right', 'both'}, optional
-        Whether the method produces isometric factors on the left, right, or
-        both (depending on ``absorb``).
     sparse : bool, optional
         Whether the method can handle sparse arrays directly.
     """
-    if isom == "left":
-        _LEFT_ISOM_METHODS.add(name)
-    elif isom == "right":
-        _RIGHT_ISOM_METHODS.add(name)
-    elif isom == "both":
-        _BOTH_ISOM_METHODS.add(name)
-    elif isom != "none":
-        raise ValueError(f"Invalid isometry type: {isom}")
-
     if not sparse:
         _DENSE_ONLY_METHODS.add(name)
 
@@ -700,7 +756,7 @@ def _trim_and_renorm_svd_result(
     return _do_absorb(U, s, VH, absorb=absorb, xp=xp)
 
 
-@register_split_driver("svd", isom="both")
+@register_split_driver("svd")
 @compose
 def svd_truncated(
     x,
@@ -1233,7 +1289,7 @@ def svd_via_eig(
     raise ValueError(f"Invalid absorb mode: {absorb}")
 
 
-@register_split_driver("svd:eig", isom="both")
+@register_split_driver("svd:eig")
 @compose
 def svd_via_eig_truncated(
     x,
@@ -1558,7 +1614,7 @@ def svdvals_eig(x):
 # -------------------------------- rand svd --------------------------------- #
 
 
-@register_split_driver("svd:rand", isom="both")
+@register_split_driver("svd:rand")
 @compose
 def svd_rand_truncated(
     x,
@@ -1736,7 +1792,7 @@ def svd_rand_truncated(
 # ---------------------------------- eigh ----------------------------------- #
 
 
-@register_split_driver("eigh", isom="both")
+@register_split_driver("eigh")
 @compose
 def eigh_truncated(
     x,
@@ -1864,10 +1920,31 @@ def eigh_truncated_numpy(
 # ---------------------- QR and LQ like decompositions ---------------------- #
 
 
-@register_split_driver("qr", isom="left", default_absorb=get_U_sVH)
+@register_split_driver("qr", default_absorb=get_U_sVH)
 @compose
 def qr_stabilized(x, absorb=get_U_sVH, stabilized=True, **kwargs):
     """QR-decomposition, with stabilized R factor.
+
+    Parameters
+    ----------
+    x : array_like
+        The 2d array to decompose.
+    absorb : str or int, optional
+        What form to compute / where to 'absorb' the singular values:
+
+        - ``"right"`` / ``'U,sVH'``: usual QR decomposition.
+        - ``"lorthog"`` / ``"U"``: just the left isometric factor (Q).
+        - ``"rfactor"`` / ``"sVH"``: just the right factor (R).
+        - ``"left"`` / ``'Us,VH'``: LQ-like decomposition.
+        - ``"lfactor"`` / ``"Us"``: just the left factor (L) of LQ.
+        - ``"rorthog"`` / ``"VH"``: just the right isometric factor (Q) of LQ.
+
+    stabilized : bool, optional
+        Whether to stabilize the diagonal of R by setting its phase to 1 and
+        absorbing the phase into Q. This can improve the numerical stability
+        of gradients for example.
+    kwargs
+        Extra kwargs to pass to the underlying QR function.
 
     Returns
     -------
@@ -1877,37 +1954,62 @@ def qr_stabilized(x, absorb=get_U_sVH, stabilized=True, **kwargs):
     right : array_like
         The right upper triangular factor (R).
     """
-    if absorb not in (get_U_sVH, get_U, get_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 / 'right', 10 / 'lorthog', or "
-            f"11 / 'rfactor' in qr_stabilized, got absorb={absorb}."
-        )
+    absorb = _ABSORB_MAP[absorb]
+
+    if absorb in (get_U_sVH, get_U, get_sVH):
+        transposed = False
+    elif absorb in (get_Us_VH, get_Us, get_VH):
+        # performing LQ-like decomposition
+        transposed = True
+    else:
+        raise ValueError(f"Invalid absorb mode for qr_stabilized: {absorb}")
 
     xp = get_namespace(x)
+
+    if transposed:
+        x = xp.swapaxes(x, -2, -1)
+        absorb = _ABSORB_TRANSPOSE_MAP[absorb]
+
     Q, R = xp.linalg.qr(x, **kwargs)
 
     if not stabilized:
+        # set factors directly
         if absorb == get_U:
-            R = None
-        elif absorb == get_sVH:
-            Q = None
-        return Q, None, R
-
-    # stabilize the diagonal of R -> set phase to 1, absorbing into Q
-    rd = xp.diagonal(R, axis1=-2, axis2=-1)
-    phase = sgn(rd)
-
-    if absorb != get_sVH:
-        Q = Q * xp.conj(phase)[..., None, :]
+            right = None
+        else:
+            right = R
+        if absorb == get_sVH:
+            left = None
+        else:
+            left = Q
     else:
-        Q = None
+        # stabilize the diagonal of R -> set phase to 1, absorbing into Q
+        rd = xp.diagonal(R, axis1=-2, axis2=-1)
+        phase = sgn(rd)
 
-    if absorb != get_U:
-        R = phase[..., :, None] * R
-    else:
-        R = None
+        if absorb != get_sVH:
+            left = Q * xp.conj(phase)[..., None, :]
+        else:
+            left = None
 
-    return Q, None, R
+        if absorb != get_U:
+            right = phase[..., :, None] * R
+        else:
+            right = None
+
+    if transposed:
+        # swap and transpose back
+        QT, LT = left, right
+        if LT is not None:
+            left = xp.swapaxes(LT, -2, -1)
+        else:
+            left = None
+        if QT is not None:
+            right = xp.swapaxes(QT, -2, -1)
+        else:
+            right = None
+
+    return left, None, right
 
 
 @njit  # pragma: no cover
@@ -1944,6 +2046,23 @@ def _qr_stabilized_numba(x, absorb=get_U_sVH, stabilized=True):
     return Q, None, R
 
 
+@njit  # pragma: no cover
+def _lq_stabilized_numba(x, absorb=get_Us_VH, stabilized=True):
+    if absorb == get_Us:
+        absorb_t = get_sVH
+    elif absorb == get_VH:
+        absorb_t = get_U
+    else:
+        absorb_t = get_U_sVH
+    Q, _, L = _qr_stabilized_numba(x.T, absorb=absorb_t, stabilized=stabilized)
+    if absorb == get_Us:
+        return L.T, None, None
+    elif absorb == get_VH:
+        return None, None, Q.T
+    else:
+        return L.T, None, Q.T
+
+
 @qr_stabilized.register("numpy")
 def qr_stabilized_numpy(x, absorb=get_U_sVH, stabilized=True, **kwargs):
     if x.ndim > 2:
@@ -1954,7 +2073,15 @@ def qr_stabilized_numpy(x, absorb=get_U_sVH, stabilized=True, **kwargs):
             stabilized=stabilized,
             **kwargs,
         )
-    return _qr_stabilized_numba(x, absorb=absorb, stabilized=stabilized)
+
+    if absorb in (get_U_sVH, get_U, get_sVH):
+        # can be handled directly in qr
+        return _qr_stabilized_numba(x, absorb=absorb, stabilized=stabilized)
+    elif absorb in (get_Us_VH, get_Us, get_VH):
+        # perform LQ via transposed QR
+        return _lq_stabilized_numba(x, absorb=absorb, stabilized=stabilized)
+    else:
+        raise ValueError(f"Invalid absorb mode for qr_stabilized: {absorb}")
 
 
 @qr_stabilized.register("autoray.lazy")
@@ -1969,1595 +2096,18 @@ def qr_stabilized_lazy(x, absorb=get_U_sVH, **kwargs):
         kwargs=kwargs,
         shape=(3,),
     )
-    if absorb != get_sVH:
+    if absorb in _RETURNS_LEFT_ABSORBS:
         Q = lqrs.to(operator.getitem, (lqrs, 0), shape=(*batch_dims, m, k))
     else:
         Q = None
-    if absorb != get_U:
+    if absorb in _RETURNS_RIGHT_ABSORBS:
         R = lqrs.to(operator.getitem, (lqrs, 2), shape=(*batch_dims, k, n))
     else:
         R = None
     return Q, None, R
 
 
-@register_split_driver("qr:svd", isom="left", default_absorb=get_U_sVH)
-def qr_via_svd(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_U_sVH,
-    renorm=0,
-    info=None,
-):
-    """QR-like decomposition via SVD, with optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_U_sVH`` (right).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-        The left isometric factor (Q).
-    s : None
-    right : array_like
-        The right factor (R = s @ VH).
-    """
-    if absorb != get_U_sVH:
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in qr_via_svd, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_U_sVH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("qr:eig", isom="left", default_absorb=get_U_sVH)
-def qr_via_eig(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_U_sVH,
-    renorm=0,
-    info=None,
-):
-    """QR-like decomposition via SVD (via eigendecomp), with optional
-    truncation. Returns ``(Q, None, R)`` where ``Q`` is the left
-    isometric factor and ``R = s @ VH``.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_U_sVH`` (right).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-        The left isometric factor (Q).
-    s : None
-    right : array_like
-        The right factor (R = s @ VH).
-    """
-    if absorb != get_U_sVH:
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in qr_via_eig, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_via_eig_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_U_sVH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("qr:rand", isom="left", default_absorb=get_U_sVH)
-@compose
-def qr_via_rand(
-    x,
-    max_bond,
-    absorb=get_U_sVH,
-    oversample=0,
-    max_iterations=0,
-    seed=None,
-    **kwargs,
-):
-    """Decompose `x` into a low rank product of orthogonal matrix `Q` and right
-    factor `R`, via randomized projection, supporting static (and not
-    recommended without using) truncation. Note by default this uses a single
-    shot projection with no oversampling or power iterations.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    max_bond : int, optional
-        Maximum bond dimension, use -1 for no truncation.
-    absorb : int, optional
-        Ignored — this driver always returns ``(Q, None, R)`` corresponding
-        to ``'right'`` / ``'U,sVH'`` absorb. A warning is issued if a
-        different value is passed.
-    seed : int or None, optional
-        Random seed for the randomized projection.
-    kwargs
-        Supplied to :func:`svd_rand_truncated`.
-
-    Returns
-    -------
-    left : array_like
-        The left isometric factor (Q).
-    s : None
-    right : array_like
-        The right factor (R).
-    """
-    if absorb != get_U_sVH:
-        warnings.warn(
-            "By definition, absorb must be 1 == 'right' == 'U,sVH' in "
-            f"qr_via_randqb, ignoring absorb={absorb}."
-        )
-
-    return svd_rand_truncated(
-        x,
-        max_bond=max_bond,
-        absorb=get_U_sVH,
-        oversample=oversample,
-        num_iterations=max_iterations,
-        seed=seed,
-        **kwargs,
-    )
-
-
-@register_split_driver("lq", isom="right", default_absorb=get_Us_VH)
-@compose
-def lq_stabilized(x, absorb=get_Us_VH, stabilized=True, **kwargs):
-    """LQ-decomposition, with stabilized L factor.
-
-    Returns
-    -------
-    left : array_like
-        The left lower triangular factor (L).
-    s : None
-    right : array_like
-        The right isometric factor (Q).
-    """
-    xp = get_namespace(x)
-
-    QT, _, LT = qr_stabilized(
-        xp.swapaxes(x, -2, -1),
-        absorb=_ABSORB_TRANSPOSE_MAP[absorb],
-        stabilized=stabilized,
-        **kwargs,
-    )
-
-    if QT is not None:
-        Q = xp.swapaxes(QT, -2, -1)
-    else:
-        Q = None
-
-    if LT is not None:
-        L = xp.swapaxes(LT, -2, -1)
-    else:
-        L = None
-
-    return L, None, Q
-
-
-@njit  # pragma: no cover
-def _lq_stabilized_numba(x, absorb=get_Us_VH, stabilized=True):
-
-    if absorb == get_Us:
-        absorb_t = get_sVH
-    elif absorb == get_VH:
-        absorb_t = get_U
-    else:
-        absorb_t = get_U_sVH
-
-    Q, _, L = _qr_stabilized_numba(x.T, absorb=absorb_t, stabilized=stabilized)
-
-    if absorb == get_Us:
-        return L.T, None, None
-    elif absorb == get_VH:
-        return None, None, Q.T
-    else:
-        return L.T, None, Q.T
-
-
-@lq_stabilized.register("numpy")
-def lq_stabilized_numpy(x, absorb=get_Us_VH, stabilized=True, **kwargs):
-    if x.ndim > 2:
-        # XXX: batch not implemented in numba version yet
-        return lq_stabilized._default_fn(
-            x, absorb=absorb, stabilized=stabilized, **kwargs
-        )
-    return _lq_stabilized_numba(x, absorb=absorb, stabilized=stabilized)
-
-
-@register_split_driver("lq:svd", isom="right", default_absorb=get_Us_VH)
-def lq_via_svd(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Us_VH,
-    renorm=0,
-    info=None,
-):
-    """LQ-like decomposition via SVD, with optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_Us_VH`` (left).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-        The left factor (L = U @ diag(s)).
-    s : None
-    right : array_like
-        The right isometric factor (Q).
-    """
-    if absorb != get_Us_VH:
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in lq_via_svd, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_Us_VH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("lq:eig", isom="right", default_absorb=get_Us_VH)
-def lq_via_eig(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Us_VH,
-    renorm=0,
-    info=None,
-):
-    """LQ-like decomposition via SVD (via eigendecomp), with optional
-    truncation. Returns ``(L, None, Q)`` where ``L = U @ s`` and ``Q``
-    is the right isometric factor.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_Us_VH`` (left).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-        The left factor (L = U @ s).
-    s : None
-    right : array_like
-        The right isometric factor (Q).
-    """
-    if absorb != get_Us_VH:
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in lq_via_eig, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_via_eig_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_Us_VH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("lq:rand", isom="right", default_absorb=get_Us_VH)
-@compose
-def lq_via_rand(
-    x,
-    max_bond,
-    absorb=get_Us_VH,
-    oversample=0,
-    max_iterations=0,
-    seed=None,
-    **kwargs,
-):
-    """Decompose `x` into a low rank product of left factor `L` and orthogonal
-    matrix `Q`, via randomized projection, supporting static (and not
-    recommended without using) truncation. Note by default this uses a single
-    shot projection with no oversampling or power iterations.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    max_bond : int, optional
-        Maximum bond dimension, use -1 for no truncation.
-    absorb : int, optional
-        Ignored — this driver always returns ``(L, None, Q)`` corresponding
-        to ``'left'`` / ``'Us,VH'`` absorb. A warning is issued if a
-        different value is passed.
-    seed : int or None, optional
-        Random seed for the randomized projection.
-    kwargs
-        Supplied to :func:`svd_rand_truncated`.
-
-    Returns
-    -------
-    left : array_like
-        The left factor (L).
-    s : None
-    right : array_like
-        The right isometric factor (Q).
-    """
-    if absorb != get_Us_VH:
-        warnings.warn(
-            "By definition, absorb must be -1 == 'left' == 'Us,VH' in "
-            f"lq_via_randqb, ignoring absorb={absorb}."
-        )
-
-    return svd_rand_truncated(
-        x,
-        max_bond=max_bond,
-        absorb=get_Us_VH,
-        oversample=oversample,
-        num_iterations=max_iterations,
-        seed=seed,
-        **kwargs,
-    )
-
-
-@register_split_driver("rfactor", default_absorb=get_sVH)
-def rfactor(x, absorb=get_sVH, **kwargs):
-    """Get the right factor (R in QR) via QR decomposition. No truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored, always returns ``(None, None, R)``.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_sVH, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in rfactor, "
-            f"ignoring absorb={absorb}."
-        )
-    _, _, R = qr_stabilized(x, absorb=absorb, **kwargs)
-    return None, None, R
-
-
-@register_split_driver("rfactor:svd", default_absorb=get_sVH)
-def rfactor_via_svd(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_sVH,
-    renorm=0,
-    info=None,
-):
-    """Get the right factor (``s @ VH``) via SVD, with optional
-    truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_sVH`` (rfactor).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_sVH, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in "
-            f"rfactor_via_svd, ignoring absorb={absorb}."
-        )
-    return svd_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_sVH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("rfactor:eig", default_absorb=get_sVH)
-def rfactor_via_eig(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_sVH,
-    renorm=0,
-    info=None,
-):
-    """Get the right factor (``s @ VH``) via eigendecomposition, with
-    optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_sVH`` (rfactor).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_sVH, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in "
-            f"rfactor_via_eig, ignoring absorb={absorb}."
-        )
-    return svd_via_eig_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_sVH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("rfactor:rand", default_absorb=get_sVH)
-@compose
-def rfactor_via_rand(
-    x,
-    max_bond,
-    absorb=get_sVH,
-    oversample=0,
-    max_iterations=0,
-    seed=None,
-    **kwargs,
-):
-    """Get the right factor (``s @ VH``) via randomized projection,
-    supporting static (and not recommended without using) truncation.
-    Note by default this uses a single shot projection with no
-    oversampling or power iterations.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    max_bond : int
-        Maximum bond dimension, use -1 for no truncation.
-    absorb : int, optional
-        Ignored — this driver always returns ``(None, None, sVH)``.
-        A warning is issued if a different value is passed.
-    oversample : int, optional
-        Extra dimensions for the random sketch, default 0.
-    max_iterations : int, optional
-        Number of power iterations, default 0.
-    seed : int or None, optional
-        Random seed for the randomized projection.
-    kwargs
-        Supplied to :func:`svd_rand_truncated`.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_sVH, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 11 == 'rfactor' == 'sVH' in "
-            f"rfactor_via_rand, ignoring absorb={absorb}."
-        )
-
-    return svd_rand_truncated(
-        x,
-        max_bond=max_bond,
-        absorb=get_sVH,
-        oversample=oversample,
-        num_iterations=max_iterations,
-        seed=seed,
-        **kwargs,
-    )
-
-
-@register_split_driver("rfactor:cholesky", default_absorb=get_sVH)
-@compose
-def rfactor_via_cholesky(x, absorb=get_sVH, shift=True, solve_triangular=True):
-    """Get the right factor (R) via Cholesky-based QR. Only works if ``x`` has
-    full column rank (m >= n).
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored — this driver always returns ``(None, None, R)``.
-    shift : bool or float, optional
-        Regularization for the Cholesky decomposition, see
-        :func:`cholesky_regularized`.
-    solve_triangular : bool, optional
-        Whether to use triangular solve. Default is True.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_sVH, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 11 == 'rfactor' == 'sVH' in "
-            f"rfactor_via_cholesky, ignoring absorb={absorb}."
-        )
-    return qr_via_cholesky(
-        x,
-        absorb=get_sVH,
-        shift=shift,
-        solve_triangular=solve_triangular,
-    )
-
-
-@register_split_driver("lfactor", default_absorb=get_Us)
-def lfactor(x, absorb=get_Us, **kwargs):
-    """Get the left factor (L in LQ) via LQ decomposition. No truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored, always returns ``(L, None, None)``.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_Us, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in lfactor, "
-            f"ignoring absorb={absorb}."
-        )
-    L, _, _ = lq_stabilized(x, **kwargs)
-    return L, None, None
-
-
-@register_split_driver("lfactor:svd", default_absorb=get_Us)
-def lfactor_via_svd(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Us,
-    renorm=0,
-    info=None,
-):
-    """Get the left factor (``U @ s``) via SVD, with optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_Us`` (lfactor).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_Us, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in "
-            f"lfactor_via_svd, ignoring absorb={absorb}."
-        )
-    return svd_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_Us,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("lfactor:eig", default_absorb=get_Us)
-def lfactor_via_eig_truncated(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Us,
-    renorm=0,
-    info=None,
-):
-    """Get the left factor (``U @ s``) via eigendecomposition, with
-    optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_Us`` (lfactor).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_Us, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in "
-            f"lfactor_via_eig_truncated, ignoring absorb={absorb}."
-        )
-    return svd_via_eig_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_Us,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("lfactor:rand", default_absorb=get_Us)
-@compose
-def lfactor_via_rand(
-    x,
-    max_bond,
-    absorb=get_Us,
-    oversample=0,
-    max_iterations=0,
-    seed=None,
-    **kwargs,
-):
-    """Get the left factor (``U @ s``) via randomized projection,
-    supporting static (and not recommended without using) truncation.
-    Note by default this uses a single shot projection with no
-    oversampling or power iterations.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    max_bond : int
-        Maximum bond dimension, use -1 for no truncation.
-    absorb : int, optional
-        Ignored — this driver always returns ``(Us, None, None)``.
-        A warning is issued if a different value is passed.
-    oversample : int, optional
-        Extra dimensions for the random sketch, default 0.
-    max_iterations : int, optional
-        Number of power iterations, default 0.
-    seed : int or None, optional
-        Random seed for the randomized projection.
-    kwargs
-        Supplied to :func:`svd_rand_truncated`.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_Us, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -10 == 'lfactor' == 'Us' in "
-            f"lfactor_via_rand, ignoring absorb={absorb}."
-        )
-
-    return svd_rand_truncated(
-        x,
-        max_bond=max_bond,
-        absorb=get_Us,
-        oversample=oversample,
-        num_iterations=max_iterations,
-        seed=seed,
-        **kwargs,
-    )
-
-
-@register_split_driver("lfactor:cholesky", default_absorb=get_Us)
-@compose
-def lfactor_via_cholesky(x, absorb=get_Us, shift=True, solve_triangular=True):
-    """Get the left factor (L) via Cholesky-based LQ. Only works if ``x`` has
-    full row rank (m <= n).
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored — this driver always returns ``(L, None, None)``.
-    shift : bool or float, optional
-        Regularization for the Cholesky decomposition, see
-        :func:`cholesky_regularized`.
-    solve_triangular : bool, optional
-        Whether to use triangular solve. Default is True.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_Us, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -10 == 'lfactor' == 'Us' in "
-            f"lfactor_via_cholesky, ignoring absorb={absorb}."
-        )
-    return lq_via_cholesky(
-        x,
-        absorb=get_Us,
-        shift=shift,
-        solve_triangular=solve_triangular,
-    )
-
-
-@register_split_driver("rorthog", isom="right", default_absorb=get_VH)
-def rorthog(x):
-    """Get the right orthogonal factor (Q in LQ) via LQ decomposition. No
-    truncation.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    _, _, Q = lq_stabilized(x)
-    return None, None, Q
-
-
-@register_split_driver("rorthog:svd", isom="right", default_absorb=get_VH)
-def rorthog_via_svd(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_VH,
-    renorm=0,
-    info=None,
-):
-    """Get the right isometric factor (``VH``) via SVD, with optional
-    truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_VH`` (rorthog).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_VH, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in rorthog_via_svd, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_VH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("rorthog:eig", isom="right", default_absorb=get_VH)
-def rorthog_via_eig(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_VH,
-    renorm=0,
-    info=None,
-):
-    """Get the right isometric factor (``VH``) via eigen-decomposition,
-    with optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_VH`` (rorthog).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_VH, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -1 (left) in rorthog_via_eig, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_via_eig_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_VH,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("rorthog:rand", isom="right", default_absorb=get_VH)
-@compose
-def rorthog_via_rand(
-    x,
-    max_bond,
-    absorb=get_VH,
-    oversample=0,
-    max_iterations=0,
-    seed=None,
-    **kwargs,
-):
-    """Get the right isometric factor (``VH``) via randomized projection,
-    supporting static (and not recommended without using) truncation.
-    Note by default this uses a single shot projection with no
-    oversampling or power iterations.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    max_bond : int
-        Maximum bond dimension, use -1 for no truncation.
-    absorb : int, optional
-        Ignored — this driver always returns ``(None, None, VH)``.
-        A warning is issued if a different value is passed.
-    oversample : int, optional
-        Extra dimensions for the random sketch, default 0.
-    max_iterations : int, optional
-        Number of power iterations, default 0.
-    seed : int or None, optional
-        Random seed for the randomized projection.
-    kwargs
-        Supplied to :func:`svd_rand_truncated`.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_VH, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -11 == 'rorthog' == 'VH' in "
-            f"rorthog_via_rand, ignoring absorb={absorb}."
-        )
-
-    return svd_rand_truncated(
-        x,
-        max_bond=max_bond,
-        absorb=get_VH,
-        oversample=oversample,
-        num_iterations=max_iterations,
-        seed=seed,
-        **kwargs,
-    )
-
-
-@register_split_driver("rorthog:cholesky", isom="right", default_absorb=get_VH)
-@compose
-def rorthog_via_cholesky(x, absorb=get_VH, shift=True, solve_triangular=True):
-    """Get the right isometric factor (Q in LQ) via Cholesky-based LQ. Only
-    works if ``x`` has full row rank (m <= n).
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored — this driver always returns ``(None, None, VH)``.
-    shift : bool or float, optional
-        Regularization for the Cholesky decomposition, see
-        :func:`cholesky_regularized`.
-    solve_triangular : bool, optional
-        Whether to use triangular solve. Default is True.
-
-    Returns
-    -------
-    left : None
-    s : None
-    right : array_like
-    """
-    if absorb not in (get_VH, get_Us_VH):
-        warnings.warn(
-            "By definition, absorb must be -11 == 'rorthog' == 'VH' in "
-            f"rorthog_via_cholesky, ignoring absorb={absorb}."
-        )
-    return lq_via_cholesky(
-        x,
-        absorb=get_VH,
-        shift=shift,
-        solve_triangular=solve_triangular,
-    )
-
-
-# --------------------------------- lorthog --------------------------------- #
-
-
-@register_split_driver("lorthog", isom="left", default_absorb=get_U)
-def lorthog(x, absorb=get_U, **kwargs):
-    """Get the left orthogonal factor (Q in QR) via QR decomposition. No
-    truncation.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_U, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in lorthog, "
-            f"ignoring absorb={absorb}."
-        )
-    Q, _, _ = qr_stabilized(x, absorb=get_U, **kwargs)
-    return Q, None, None
-
-
-@register_split_driver("lorthog:svd", isom="left", default_absorb=get_U)
-def lorthog_via_svd(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_U,
-    renorm=0,
-    info=None,
-):
-    """Get the left isometric factor (``U``) via SVD, with optional
-    truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_U`` (lorthog).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_U, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in lorthog_via_svd, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_U,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("lorthog:eig", isom="left", default_absorb=get_U)
-def lorthog_via_eig(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_U,
-    renorm=0,
-    info=None,
-):
-    """Get the left isometric factor (``U``) via eigen-decomposition, with
-    optional truncation.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    cutoff : float, optional
-        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
-        ``max_bond`` is used.
-    cutoff_mode : int, optional
-        How to interpret the cutoff, see
-        :func:`~quimb.tensor.decomp.svd_truncated`.
-    max_bond : int, optional
-        An explicit maximum bond dimension, use -1 for none.
-    absorb : int, optional
-        Ignored, always uses ``get_U`` (lorthog).
-    renorm : int, optional
-        Whether to renormalize the kept singular values. ``0`` means
-        no renormalization, ``1`` maintains the trace norm, ``2``
-        maintains the Frobenius norm.
-    info : dict or None, optional
-        If a dict is passed, store truncation info in the dict. Currently
-        only supports the key ``'error'`` for the truncation error.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_U, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 1 (right) in lorthog_via_eig, "
-            f"ignoring absorb={absorb}."
-        )
-    return svd_via_eig_truncated(
-        x,
-        cutoff=cutoff,
-        cutoff_mode=cutoff_mode,
-        max_bond=max_bond,
-        absorb=get_U,
-        renorm=renorm,
-        info=info,
-    )
-
-
-@register_split_driver("lorthog:rand", isom="left", default_absorb=get_U)
-@compose
-def lorthog_via_rand(
-    x,
-    max_bond,
-    absorb=get_U,
-    oversample=0,
-    max_iterations=0,
-    seed=None,
-    **kwargs,
-):
-    """Get the left isometric factor (``U``) via randomized projection,
-    supporting static (and not recommended without using) truncation.
-    Note by default this uses a single shot projection with no
-    oversampling or power iterations.
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    max_bond : int
-        Maximum bond dimension, use -1 for no truncation.
-    absorb : int, optional
-        Ignored — this driver always returns ``(U, None, None)``.
-        A warning is issued if a different value is passed.
-    oversample : int, optional
-        Extra dimensions for the random sketch, default 0.
-    max_iterations : int, optional
-        Number of power iterations, default 0.
-    seed : int or None, optional
-        Random seed for the randomized projection.
-    kwargs
-        Supplied to :func:`svd_rand_truncated`.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_U, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 10 == 'lorthog' == 'U' in "
-            f"lorthog_via_rand, ignoring absorb={absorb}."
-        )
-
-    return svd_rand_truncated(
-        x,
-        max_bond=max_bond,
-        absorb=get_U,
-        oversample=oversample,
-        num_iterations=max_iterations,
-        seed=seed,
-        **kwargs,
-    )
-
-
-@register_split_driver("lorthog:cholesky", isom="left", default_absorb=get_U)
-@compose
-def lorthog_via_cholesky(x, absorb=get_U, shift=True, solve_triangular=True):
-    """Get the left isometric factor (Q in QR) via Cholesky-based QR. Only
-    works if ``x`` has full column rank (m >= n).
-
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored — this driver always returns ``(U, None, None)``.
-    shift : bool or float, optional
-        Regularization for the Cholesky decomposition, see
-        :func:`cholesky_regularized`.
-    solve_triangular : bool, optional
-        Whether to use triangular solve. Default is True.
-
-    Returns
-    -------
-    left : array_like
-    s : None
-    right : None
-    """
-    if absorb not in (get_U, get_U_sVH):
-        warnings.warn(
-            "By definition, absorb must be 10 == 'lorthog' == 'U' in "
-            f"lorthog_via_cholesky, ignoring absorb={absorb}."
-        )
-    return qr_via_cholesky(
-        x,
-        absorb=get_U,
-        shift=shift,
-        solve_triangular=solve_triangular,
-    )
-
-
-# ------------------------ iterative decompositions ------------------------- #
-
-
-def _choose_k(x, cutoff, max_bond):
-    """Choose the number of singular values to target."""
-    d = min(x.shape)
-
-    if cutoff != 0.0:
-        k = rand_linalg.estimate_rank(
-            x, cutoff, k_max=None if max_bond < 0 else max_bond
-        )
-    else:
-        k = min(d, max_bond)
-
-    # if computing more than half of spectrum then just use dense method
-    return "full" if k > d // 2 else k
-
-
-@register_split_driver("svds", isom="both", sparse=True)
-def svds(
-    x,
-    cutoff=0.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-    renorm=0,
-):
-    """SVD-decomposition using iterative methods. Allows the
-    computation of only a certain number of singular values, e.g. max_bond,
-    from the get-go, and is thus more efficient. Can also supply
-    ``scipy.sparse.linalg.LinearOperator``.
-
-    Returns
-    -------
-    left : array_like or None
-    s : array_like or None
-    right : array_like or None
-    """
-    k = _choose_k(x, cutoff, max_bond)
-
-    if k == "full":
-        if not isinstance(x, np.ndarray):
-            x = x.to_dense()
-        return svd_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
-
-    U, s, VH = base_linalg.svds(x, k=k)
-    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
-    )
-    return U, s, VH
-
-
-@register_split_driver("isvd", isom="both", sparse=True)
-def isvd(
-    x,
-    cutoff=0.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-    renorm=0,
-):
-    """SVD-decomposition using interpolative matrix random methods. Allows the
-    computation of only a certain number of singular values, e.g. max_bond,
-    from the get-go, and is thus more efficient. Can also supply
-    ``scipy.sparse.linalg.LinearOperator``.
-
-    Returns
-    -------
-    left : array_like or None
-    s : array_like or None
-    right : array_like or None
-    """
-    k = _choose_k(x, cutoff, max_bond)
-
-    if k == "full":
-        if not isinstance(x, np.ndarray):
-            x = x.to_dense()
-        return svd_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
-
-    U, s, V = sli.svd(x, k)
-    VH = dag_numba(V)
-    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
-    )
-    return U, s, VH
-
-
-def _rsvd_numpy(
-    x,
-    cutoff=0.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-    renorm=0,
-):
-    if max_bond > 0:
-        if cutoff > 0.0:
-            # adapt and block
-            U, s, VH = rand_linalg.rsvd(x, cutoff, k_max=max_bond)
-        else:
-            U, s, VH = rand_linalg.rsvd(x, max_bond)
-    else:
-        U, s, VH = rand_linalg.rsvd(x, cutoff)
-
-    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
-    )
-    return U, s, VH
-
-
-@register_split_driver("rsvd", isom="both", sparse=True)
-def rsvd(
-    x,
-    cutoff=0.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-    renorm=0,
-):
-    """SVD-decomposition using randomized methods (due to Halko). Allows the
-    computation of only a certain number of singular values, e.g. max_bond,
-    from the get-go, and is thus more efficient. Can also supply
-    ``scipy.sparse.linalg.LinearOperator``.
-
-    Returns
-    -------
-    left : array_like or None
-    s : array_like or None
-    right : array_like or None
-    """
-    if isinstance(x, (np.ndarray, spla.LinearOperator)):
-        return _rsvd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
-
-    xp = get_namespace(x)
-    U, s, VH = xp.linalg.rsvd(x, max_bond)
-    return _trim_and_renorm_svd_result(
-        U,
-        s,
-        VH,
-        cutoff,
-        cutoff_mode,
-        max_bond,
-        absorb,
-        renorm,
-        xp=xp,
-    )
-
-
-@register_split_driver("eigsh", isom="both", sparse=True)
-def eigsh(
-    x,
-    cutoff=0.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-    renorm=0,
-):
-    """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
-    that ``x`` is hermitian. Allows the computation of only a certain number of
-    singular values, e.g. max_bond, from the get-go, and is thus more
-    efficient. Can also supply ``scipy.sparse.linalg.LinearOperator``.
-
-    Returns
-    -------
-    left : array_like or None
-    s : array_like or None
-    right : array_like or None
-    """
-    k = _choose_k(x, cutoff, max_bond)
-
-    if k == "full":
-        if not isinstance(x, np.ndarray):
-            x = x.to_dense()
-        return eigh_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
-
-    s, U = base_linalg.eigh(x, k=k)
-    s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
-    V = ldmul_numba(sgn(s), dag_numba(U))
-    s = np.abs(s)
-    U, s, V, _ = _trim_and_renorm_svd_result_numba(
-        U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
-    )
-    return U, s, V
-
-
 # ---------------------- cholesky based decompositions ---------------------- #
-
-
-@register_split_driver("lu")
-@compose
-def lu_truncated(
-    x,
-    cutoff=-1.0,
-    cutoff_mode=cutoff_mode_rsum2,
-    max_bond=-1,
-    absorb=get_Usq_sqVH,
-    renorm=0,
-):
-    """LU-decomposition with optional truncation.
-
-    Returns
-    -------
-    left : array_like
-        The permuted lower triangular factor (PL).
-    s : None
-    right : array_like
-        The upper triangular factor (U).
-    """
-    if absorb != get_Usq_sqVH:
-        raise NotImplementedError(
-            f"Can't handle absorb{absorb} in lu_truncated."
-        )
-    elif renorm != 0:
-        raise NotImplementedError(
-            f"Can't handle renorm={renorm} in lu_truncated."
-        )
-    elif max_bond != -1:
-        # use argsort(sl * su) to handle this?
-        raise NotImplementedError(
-            f"Can't handle max_bond={max_bond} in lu_truncated."
-        )
-
-    xp = get_namespace(x)
-    PL, U = xp.scipy.linalg.lu(x, permute_l=True)
-
-    sl = xp.sum(xp.abs(PL), axis=0)
-    su = xp.sum(xp.abs(U), axis=1)
-
-    if cutoff_mode == 2:
-        abs_cutoff_l = cutoff * xp.max(sl)
-        abs_cutoff_u = cutoff * xp.max(su)
-    elif cutoff_mode == 1:
-        abs_cutoff_l = abs_cutoff_u = cutoff
-    else:
-        raise NotImplementedError(
-            f"Can't handle cutoff_mode={cutoff_mode} in lu_truncated."
-        )
-
-    idx = (sl > abs_cutoff_l) & (su > abs_cutoff_u)
-
-    PL = PL[:, idx]
-    U = U[idx, :]
-
-    return PL, None, U
 
 
 def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
@@ -3695,112 +2245,321 @@ def cholesky_regularized_numpy(x, absorb=get_Usq_sqVH, shift=True):
     return _cholesky_regularized_numba(x, absorb, shift=shift)
 
 
-@register_split_driver("qr:cholesky", isom="left", default_absorb=get_U_sVH)
+@register_split_driver("qr:cholesky", default_absorb=get_U_sVH)
 @compose
-def qr_via_cholesky(x, absorb=get_U_sVH, shift=True, solve_triangular=True):
-    """QR-like decomposition via Cholesky factorization of ``x^H @ x``.
-    Computes ``x = Q @ R`` where ``R`` is upper triangular and ``Q`` is
-    isometric. Implemented via transposed :func:`lq_via_cholesky`.
+def qr_via_cholesky(x, absorb=get_Us_VH, shift=True, solve_triangular=True):
+    """Perform a QR-like or LQ-like decomposition via Cholesky decomposition
+    of the Gram matrix.
+    """
+    absorb = _ABSORB_MAP[absorb]
 
-    Parameters
-    ----------
-    x : array_like
-        The 2D array to decompose.
-    absorb : int, optional
-        Ignored — this driver always returns ``(Q, None, R)``.
-        A warning is issued if a different value is passed.
-    shift : bool or float, optional
-        Regularization for the Cholesky decomposition, see
-        :func:`cholesky_regularized`.
-    solve_triangular : bool, optional
-        Whether to use triangular solve (faster) or general solve
-        to compute Q. Default is True.
+    if absorb in (get_U_sVH, get_U, get_sVH):
+        # performing QR-like decomposition
+        #     NOTE: the cholesky method naturally gives us LQ-like
+        #     decomposition so *this* is the case we transpose
+        transposed = True
+    elif absorb in (get_Us_VH, get_Us, get_VH):
+        # performing LQ-like decomposition
+        transposed = False
+    else:
+        raise ValueError(f"Invalid absorb mode for qr_via_cholesky: {absorb}")
+
+    xp = get_namespace(x)
+
+    if transposed:
+        absorb = _ABSORB_TRANSPOSE_MAP[absorb]
+        # avoid transposing twice
+        xT = xp.swapaxes(x, -2, -1)
+        xx = xT @ xp.conj(x)
+        x = xT
+    else:
+        xx = x @ xp.conj(xp.swapaxes(x, -2, -1))
+
+    *_, m, n = xp.shape(x)
+    if m > n:
+        warnings.warn(
+            f"qr_via_cholesky not well-defined for tall matrices ({m} > {n})."
+        )
+
+    L, _, _ = cholesky_regularized(xx, absorb=get_Usq, shift=shift)
+
+    if absorb != get_Us:
+        # need Q / rorthog
+        if solve_triangular:
+            right = xp.scipy.linalg.solve_triangular(L, x, lower=True)
+        else:
+            right = xp.linalg.solve(L, x)
+    else:
+        right = None
+
+    if absorb != get_VH:
+        # need lfactor
+        left = L
+    else:
+        left = None
+
+    if transposed:
+        # swap and transpose back
+        RT, QT = left, right
+        if QT is not None:
+            left = xp.swapaxes(QT, -2, -1)
+        else:
+            left = None
+        if RT is not None:
+            right = xp.swapaxes(RT, -2, -1)
+        else:
+            right = None
+
+    return left, None, right
+
+
+# ------------------------ iterative decompositions ------------------------- #
+
+
+def _choose_k(x, cutoff, max_bond):
+    """Choose the number of singular values to target."""
+    d = min(x.shape)
+
+    if cutoff != 0.0:
+        k = rand_linalg.estimate_rank(
+            x, cutoff, k_max=None if max_bond < 0 else max_bond
+        )
+    else:
+        k = min(d, max_bond)
+
+    # if computing more than half of spectrum then just use dense method
+    return "full" if k > d // 2 else k
+
+
+@register_split_driver("svds", sparse=True)
+def svds(
+    x,
+    cutoff=0.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+):
+    """SVD-decomposition using iterative methods. Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
 
     Returns
     -------
     left : array_like or None
-        The left isometric factor (Q).
-    s : None
+    s : array_like or None
     right : array_like or None
-        The right upper triangular factor (R).
     """
-    absorb = _ABSORB_MAP[absorb]
-    if absorb not in (get_U_sVH, get_sVH, get_U):
-        warnings.warn(
-            "qr_via_cholesky only supports absorb in "
-            "('right', 'rfactor', 'lorthog'), "
-            f"ignoring absorb={absorb}."
-        )
+    k = _choose_k(x, cutoff, max_bond)
+
+    if k == "full":
+        if not isinstance(x, np.ndarray):
+            x = x.to_dense()
+        return svd_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
+
+    U, s, VH = base_linalg.svds(x, k=k)
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
+        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+    )
+    return U, s, VH
+
+
+@register_split_driver("isvd", sparse=True)
+def isvd(
+    x,
+    cutoff=0.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+):
+    """SVD-decomposition using interpolative matrix random methods. Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
+    """
+    k = _choose_k(x, cutoff, max_bond)
+
+    if k == "full":
+        if not isinstance(x, np.ndarray):
+            x = x.to_dense()
+        return svd_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
+
+    U, s, V = sli.svd(x, k)
+    VH = dag_numba(V)
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
+        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+    )
+    return U, s, VH
+
+
+def _rsvd_numpy(
+    x,
+    cutoff=0.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+):
+    if max_bond > 0:
+        if cutoff > 0.0:
+            # adapt and block
+            U, s, VH = rand_linalg.rsvd(x, cutoff, k_max=max_bond)
+        else:
+            U, s, VH = rand_linalg.rsvd(x, max_bond)
+    else:
+        U, s, VH = rand_linalg.rsvd(x, cutoff)
+
+    U, s, VH, _ = _trim_and_renorm_svd_result_numba(
+        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm
+    )
+    return U, s, VH
+
+
+@register_split_driver("rsvd", sparse=True)
+def rsvd(
+    x,
+    cutoff=0.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+):
+    """SVD-decomposition using randomized methods (due to Halko). Allows the
+    computation of only a certain number of singular values, e.g. max_bond,
+    from the get-go, and is thus more efficient. Can also supply
+    ``scipy.sparse.linalg.LinearOperator``.
+
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
+    """
+    if isinstance(x, (np.ndarray, spla.LinearOperator)):
+        return _rsvd_numpy(x, cutoff, cutoff_mode, max_bond, absorb, renorm)
 
     xp = get_namespace(x)
-    *_, m, n = xp.shape(x)
-    if m < n:
-        warnings.warn(
-            f"qr_via_cholesky is not well-defined for wide "
-            f"matrices ({m} < {n}), consider using 'lq:cholesky'."
-        )
-
-    # map QR absorb to LQ absorb (transpose)
-    absorb_t = _ABSORB_TRANSPOSE_MAP[absorb]
-
-    R, _, Q = lq_via_cholesky(
-        xp.swapaxes(x, -2, -1),
-        absorb=absorb_t,
-        shift=shift,
-        solve_triangular=solve_triangular,
+    U, s, VH = xp.linalg.rsvd(x, max_bond)
+    return _trim_and_renorm_svd_result(
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        xp=xp,
     )
 
-    if R is not None:
-        R = xp.swapaxes(R, -2, -1)
-    if Q is not None:
-        Q = xp.swapaxes(Q, -2, -1)
 
-    return Q, None, R
+@register_split_driver("eigsh", sparse=True)
+def eigsh(
+    x,
+    cutoff=0.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+):
+    """SVD-decomposition using iterative hermitian eigen decomp, thus assuming
+    that ``x`` is hermitian. Allows the computation of only a certain number of
+    singular values, e.g. max_bond, from the get-go, and is thus more
+    efficient. Can also supply ``scipy.sparse.linalg.LinearOperator``.
 
+    Returns
+    -------
+    left : array_like or None
+    s : array_like or None
+    right : array_like or None
+    """
+    k = _choose_k(x, cutoff, max_bond)
 
-@register_split_driver("lq:cholesky", isom="right", default_absorb=get_Us_VH)
-@compose
-def lq_via_cholesky(x, absorb=get_Us_VH, shift=True, solve_triangular=True):
-    absorb = _ABSORB_MAP[absorb]
-    if absorb not in (get_Us_VH, get_Us, get_VH):
-        warnings.warn(
-            "lq_via_cholesky only supports absorb in "
-            "('left', 'lfactor', 'rorthog'), "
-            f"ignoring absorb={absorb}."
-        )
+    if k == "full":
+        if not isinstance(x, np.ndarray):
+            x = x.to_dense()
+        return eigh_truncated(x, cutoff, cutoff_mode, max_bond, absorb)
 
-    xp = get_namespace(x)
-    *_, m, n = xp.shape(x)
-    if m > n:
-        warnings.warn(
-            f"lq_via_cholesky is not well-defined for tall "
-            f"matrices ({m} > {n}), consider using 'qr:cholesky'."
-        )
-
-    xx = x @ xp.conj(xp.swapaxes(x, -2, -1))
-    L, _, _ = cholesky_regularized(xx, absorb=get_Usq, shift=shift)
-
-    if absorb == get_Us:
-        return L, None, None
-
-    if solve_triangular:
-        Q = xp.scipy.linalg.solve_triangular(L, x, lower=True)
-    else:
-        Q = xp.linalg.solve(L, x)
-
-    if absorb == get_VH:
-        return None, None, Q
-
-    if absorb == get_Us_VH:
-        return L, None, Q
-
-    raise ValueError(f"Invalid absorb={absorb} in lq_via_cholesky.")
+    s, U = base_linalg.eigh(x, k=k)
+    s, U = s[::-1], U[:, ::-1]  # make sure largest singular value first
+    V = ldmul_numba(sgn(s), dag_numba(U))
+    s = np.abs(s)
+    U, s, V, _ = _trim_and_renorm_svd_result_numba(
+        U, s, V, cutoff, cutoff_mode, max_bond, absorb, renorm
+    )
+    return U, s, V
 
 
 # ------------------------ misc other decompositions ------------------------ #
 
 
-@register_split_driver("polar_right", isom="left", default_absorb=get_U_sVH)
+@register_split_driver("lu")
+@compose
+def lu_truncated(
+    x,
+    cutoff=-1.0,
+    cutoff_mode=cutoff_mode_rsum2,
+    max_bond=-1,
+    absorb=get_Usq_sqVH,
+    renorm=0,
+):
+    """LU-decomposition with optional truncation.
+
+    Returns
+    -------
+    left : array_like
+        The permuted lower triangular factor (PL).
+    s : None
+    right : array_like
+        The upper triangular factor (U).
+    """
+    if absorb != get_Usq_sqVH:
+        raise NotImplementedError(
+            f"Can't handle absorb{absorb} in lu_truncated."
+        )
+    elif renorm != 0:
+        raise NotImplementedError(
+            f"Can't handle renorm={renorm} in lu_truncated."
+        )
+    elif max_bond != -1:
+        # use argsort(sl * su) to handle this?
+        raise NotImplementedError(
+            f"Can't handle max_bond={max_bond} in lu_truncated."
+        )
+
+    xp = get_namespace(x)
+    PL, U = xp.scipy.linalg.lu(x, permute_l=True)
+
+    sl = xp.sum(xp.abs(PL), axis=0)
+    su = xp.sum(xp.abs(U), axis=1)
+
+    if cutoff_mode == 2:
+        abs_cutoff_l = cutoff * xp.max(sl)
+        abs_cutoff_u = cutoff * xp.max(su)
+    elif cutoff_mode == 1:
+        abs_cutoff_l = abs_cutoff_u = cutoff
+    else:
+        raise NotImplementedError(
+            f"Can't handle cutoff_mode={cutoff_mode} in lu_truncated."
+        )
+
+    idx = (sl > abs_cutoff_l) & (su > abs_cutoff_u)
+
+    PL = PL[:, idx]
+    U = U[idx, :]
+
+    return PL, None, U
+
+
+@register_split_driver("polar_right", default_absorb=get_U_sVH)
 @compose
 def polar_right(x):
     """Polar decomposition of ``x`` as x = U @ P, where U is unitary and P is
@@ -3830,7 +2589,7 @@ def polar_right_numba(x):
     return U, None, P
 
 
-@register_split_driver("polar_left", isom="right", default_absorb=get_Us_VH)
+@register_split_driver("polar_left", default_absorb=get_Us_VH)
 @compose
 def polar_left(x):
     """Polar decomposition of ``x`` as x = P @ U, where U is unitary and P is
@@ -4623,7 +3382,7 @@ def compute_bondenv_projectors(
 
     for it in range(max_iterations):
         if condition == "iso":
-            Lr, _, Pr = lq_stabilized(Pr)
+            Lr, _, Pr = qr_stabilized(Pr, absorb="left")
             Pl = Pl @ Lr
 
         elif condition:

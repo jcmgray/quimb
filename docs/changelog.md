@@ -13,18 +13,24 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+Major updates to splitting/decomposing individual tensors/arrays:
+
 - add [`array_split`](quimb.tensor.decomp.array_split) and [`array_svals`](quimb.tensor.decomp.array_svals) as the primary array-level entry points for matrix decomposition, consolidating dispatch logic that was previously internal to `tensor_core`.
 - add [`register_split_driver`](quimb.tensor.decomp.register_split_driver) and [`register_svals_driver`](quimb.tensor.decomp.register_svals_driver) decorators for registering custom matrix decomposition methods with `array_split` and `array_svals`.
 - allow [`array_split`](quimb.tensor.decomp.array_split) to handle *batches* of matrices (for most methods).
 - [`array_split`](quimb.tensor.decomp.array_split): automatically detect and forward valid kwargs to underlying decomposition methods.
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. Add several accelerations for this method. `"eig"` remains as a deprecated alias for `"svd:eig"`.
-- add [`svd_via_eig`](quimb.tensor.decomp.svd_via_eig) for efficient partial SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes.
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): add many new decomposition methods — `"qr:svd"`, `"qr:eig"`, `"qr:rand"`, `"qr:cholesky"`, `"lq:svd"`, `"lq:eig"`, `"lq:rand"`, `"lq:cholesky"`, `"rfactor"`, `"rfactor:svd"`, `"rfactor:eig"`, `"rfactor:rand"`, `"rfactor:cholesky"`, `"lfactor"`, `"lfactor:svd"`, `"lfactor:eig"`, `"lfactor:rand"`, `"lfactor:cholesky"`, `"rorthog"`, `"rorthog:svd"`, `"rorthog:eig"`, `"rorthog:rand"`, `"rorthog:cholesky"`, `"lorthog"`, `"lorthog:svd"`, `"lorthog:eig"`, `"lorthog:rand"`, `"lorthog:cholesky"`, and `"svd:rand"`. The `:svd` and `:eig` submethods allow dynamic truncation; the `:rand` submethods use randomized projection with static truncation via [`svd_rand_truncated`](quimb.tensor.decomp.svd_rand_truncated); the `:cholesky` submethods use Cholesky factorization via [`cholesky_regularized`](quimb.tensor.decomp.cholesky_regularized).
-- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): expand `absorb` options significantly beyond `"left"`, `"both"`, `"right"`, `None` to include `"lorthog"`, `"rorthog"`, `"lfactor"`, `"rfactor"`, and `"s"` for returning partial results (single factors or singular values only). Default changed from `"both"` to `"auto"`, which uses each method's natural default.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): expand `absorb` options significantly beyond `"left"`, `"both"`, `"right"`, `None` to include `"lorthog"`, `"rorthog"`, `"lfactor"`, `"rfactor"`, `"lsqrt"`, `"rsqrt` and `"s"` for returning partial results (single factors or singular values only). Default changed from `"both"` to `"auto"`, which uses each method's natural default.
+- add method `"svd:eig"` with main implementation [`svd_via_eig`](quimb.tensor.decomp.svd_via_eig) for efficient SVD via hermitian eigen-decomposition, with shortcuts for all absorb modes. This can be faster (especially e.g. on GPU) than the standard SVD, but entails some loss of precision.
+- [`tensor_split`](quimb.tensor.tensor_core.tensor_split): rename `method` option `"eig"` to `"svd:eig"` to make it clearer that this is an SVD split via eigen-decomposition. `"eig"` remains as a deprecated alias for `"svd:eig"`.
+- add method `"svd:rand"` with main implementation [`svd_rand_truncated`](quimb.tensor.decomp.svd_rand_truncated) for randomized SVD with truncation, with shortcuts for all absorb modes. (This is a new and backend agnostic implementation as opposed to the existing `'rsvd'` method).
+- add method `"qr:cholesky"` [`qr_via_cholesky`](quimb.tensor.decomp.qr_via_cholesky) for efficient QR or LQ like decompositions via cholesky decomposition, with shortcuts for all absorb modes. This can be faster than the standard QR (especially on GPU) but entails some loss of precision.
 - [`tensor_split`](quimb.tensor.tensor_core.tensor_split) and [`array_split`](quimb.tensor.decomp.array_split): add `"lsqrt"` and `"rsqrt"` absorb options, update cholesky decomposition to [`cholesky_regularized`](quimb.tensor.decomp.cholesky_regularized) with `shift` as exposed parameter.
 - [`compute_oblique_projectors`](quimb.tensor.decomp.compute_oblique_projectors): allow `method` kwarg.
 - QR decomposition: add `stabilize` kwarg for controlling QR stabilization behavior.
 - decomposition methods: various compatibility improvements for JAX backend.
+
+Other enhancements:
+
 - add [`shift`](quimb.gen.operators.shift) and [`clock`](quimb.gen.operators.clock) operators.
 - add [`Tensor.isfermionic`](quimb.tensor.tensor_core.Tensor.isfermionic) and [`TensorNetwork.isfermionic`](quimb.tensor.tensor_core.TensorNetwork.isfermionic) methods.
 - add [`Tensor.isblocksparse`](quimb.tensor.tensor_core.Tensor.isblocksparse) and [`TensorNetwork.isblocksparse`](quimb.tensor.tensor_core.TensorNetwork.isblocksparse) methods.

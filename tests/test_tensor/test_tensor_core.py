@@ -507,7 +507,7 @@ class TestTensorSplit:
         t.normalize_()
         tq, tr = t.split(
             ["a", "c"],
-            method="qr:rand",
+            method="svd:rand",
             max_bond=chi,
             cutoff=0.0,
             absorb="right",
@@ -524,7 +524,7 @@ class TestTensorSplit:
         t.normalize_()
         tl, tq = t.split(
             ["a", "c"],
-            method="lq:rand",
+            method="svd:rand",
             max_bond=chi,
             cutoff=0.0,
             absorb="left",
