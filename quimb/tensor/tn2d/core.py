@@ -5434,8 +5434,10 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         """
         tn = self if inplace else self.copy()
 
-        if isinstance(sysa, tuple) and len(sysa) == 2 and all(
-            isinstance(x, Integral) for x in sysa
+        if (
+            isinstance(sysa, tuple)
+            and len(sysa) == 2
+            and all(isinstance(x, Integral) for x in sysa)
         ):
             sysa = (sysa,)
 

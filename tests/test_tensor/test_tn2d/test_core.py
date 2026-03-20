@@ -1,3 +1,4 @@
+import functools
 import itertools
 
 import autoray as ar
@@ -682,6 +683,61 @@ class TestPEPO:
         assert_allclose(Ad @ xd, yd)
         yc = A.apply(x, compress=True, max_bond=3)
         assert yc.max_bond() == 3
+
+    def test_pepo_product_operator(self):
+        Lx = Ly = 2
+        Z = qu.pauli("Z")
+        arrays = [[Z, Z], [Z, Z]]
+        P = qtn.PEPO_product_operator(arrays)
+        flat = [arrays[i][j] for i in range(Lx) for j in range(Ly)]
+        expected = functools.reduce(np.kron, flat)
+        assert_allclose(P.to_qarray(), expected)
+
+        I2 = np.eye(2)
+        arrays_i = [[I2, I2], [I2, I2]]
+        Pi = qtn.PEPO_product_operator(arrays_i)
+        assert_allclose(Pi.to_qarray(), np.eye(2 ** (Lx * Ly)))
+
+    def test_pepo_product_operator_shape_raises(self):
+        Z = qu.pauli("Z")
+        with pytest.raises(ValueError, match="Lx >= 2"):
+            qtn.PEPO_product_operator([[Z, Z]])
+        with pytest.raises(ValueError, match="Lx >= 2"):
+            qtn.PEPO_product_operator([[Z], [Z]])
+
+    def test_apply_pepo_to_pepo(self):
+        A = qtn.PEPO.rand(Lx=3, Ly=2, bond_dim=2, seed=2)
+        B = qtn.PEPO.rand(Lx=3, Ly=2, bond_dim=2, seed=3)
+        C = A.apply(B)
+        assert isinstance(C, qtn.PEPO)
+        Ad, Bd, Cd = A.to_qarray(), B.to_qarray(), C.to_qarray()
+        assert_allclose(Ad @ Bd, Cd)
+        Cc = A.apply(B, compress=True, max_bond=4)
+        assert Cc.max_bond() == 4
+
+    def test_pepo_trace(self):
+        P = qtn.PEPO.rand(Lx=2, Ly=2, bond_dim=2, seed=4)
+        assert_allclose(P.trace(), np.trace(P.to_qarray()))
+
+    def test_pepo_partial_transpose_involution(self):
+        P = qtn.PEPO.rand(Lx=3, Ly=2, bond_dim=2, seed=5)
+        site = (0, 1)
+        P1 = P.partial_transpose(site)
+        P2 = P1.partial_transpose(site)
+        assert_allclose(P.to_qarray(), P2.to_qarray())
+        P3 = P.partial_transpose((site,))
+        assert_allclose(P1.to_qarray(), P3.to_qarray())
+
+    def test_pepo_apply_typeerror(self):
+        P = qtn.PEPO.rand(Lx=2, Ly=2, bond_dim=2, seed=6)
+        with pytest.raises(TypeError, match="PEPS or PEPO"):
+            P.apply("not a peps")
+
+    def test_build_pepo_propagator_trotterized_identity(self):
+        ham = qtn.LocalHam2D(2, 2, qu.rand_herm(4))
+        U = ham.build_pepo_propagator_trotterized(0.0)
+        d = U.to_qarray().shape[0]
+        assert_allclose(U.to_qarray(), np.eye(d))
 
 
 class TestMisc:

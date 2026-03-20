@@ -51,6 +51,9 @@ Other enhancements:
 - [`TensorNetworkGen.flatten`](quimb.tensor.tnag.core.TensorNetworkGen.flatten): add arbitrary geometry flatten method, used in 1D/2D/3D.
 - [`RegionGraph`](quimb.tensor.belief_propagation.regions.RegionGraph): various improvements.
 - add [`hash_kwargs_to_int`](quimb.utils.hash_kwargs_to_int) utility for hashing keyword arguments to a deterministic integer.
+- add [`PEPO_product_operator`](quimb.tensor.tensor_builder.PEPO_product_operator) for bond-dimension-1 PEPOs given by a product of on-site operators.
+- [`PEPO`](quimb.tensor.tn2d.core.PEPO): `apply` can act on another PEPO; add [`trace`](quimb.tensor.tn2d.core.PEPO.trace) and [`partial_transpose`](quimb.tensor.tn2d.core.PEPO.partial_transpose).
+- add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO.
 
 **Bug fixes:**
 
