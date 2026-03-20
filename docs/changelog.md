@@ -2,8 +2,8 @@
 
 Release notes for `quimb`.
 
-(whats-new-unreleased)=
-## Unreleased
+(whats-new-1-13-0)=
+## v1.13.0 (2026-03-19)
 
 **Breaking Changes**
 
