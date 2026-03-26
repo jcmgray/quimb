@@ -2,6 +2,20 @@
 
 Release notes for `quimb`.
 
+
+## v1.13.1 (unreleased)
+
+**Breaking Changes**
+
+- [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): rename input tensor args `ta` and `tb`
+
+
+**Enhancements:**
+
+- [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add `reduce_opts` for controlling the decomposition options used when reducing each tensor before the main truncating decomposition. For example ``reduce_opts={"method": "qr:cholesky"}``.
+
+
+
 (whats-new-1-13-0)=
 ## v1.13.0 (2026-03-19)
 

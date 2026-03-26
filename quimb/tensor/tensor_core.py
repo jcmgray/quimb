@@ -794,15 +794,18 @@ def choose_local_compress_gauge_settings(
 
 
 def tensor_compress_bond(
-    T1: "Tensor",
-    T2: "Tensor",
+    ta: "Tensor",
+    tb: "Tensor",
+    *,
     reduced=True,
     absorb="both",
     gauges=None,
     gauge_smudge=1e-6,
     create_bond=False,
     info=None,
-    **compress_opts,
+    reduce_opts=None,
+    compress_opts=None,
+    **kwargs,
 ):
     r"""Inplace compress between the two single tensors. It follows the
     following steps (by default) to minimize the size of SVD performed::
@@ -821,9 +824,9 @@ def tensor_compress_bond(
 
     Parameters
     ----------
-    T1 : Tensor
+    ta : Tensor
         The left tensor.
-    T2 : Tensor
+    tb : Tensor
         The right tensor.
     max_bond : int or None, optional
         The maxmimum bond dimension.
@@ -847,11 +850,25 @@ def tensor_compress_bond(
         new bond with size 1 before compressing. Else raise an error.
     info : None or dict, optional
         A dict for returning extra information such as the singular values.
-    compress_opts :
-        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+    reduce_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for the
+        reduction step. Values set here take precedence over any defaults.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`. Values set
+        here take precedence over any defaults.
+    kwargs
+        Extra keyword arguments are combined into `compress_opts`, though
+        existing items in `compress_opts` take precedence over `kwargs`.
     """
+    reduce_opts = ensure_dict(reduce_opts)
+    reduce_opts.setdefault("get", "tensors")
+    reduce_opts.setdefault("cutoff", 0.0)
+
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("get", "tensors")
+
     lix, bix, rix = tensor_make_single_bond(
-        T1, T2, gauges=gauges, create_bond=create_bond
+        ta, tb, gauges=gauges, create_bond=create_bond
     )
     if not bix:
         raise ValueError(
@@ -861,53 +878,55 @@ def tensor_compress_bond(
 
     if gauges is not None:
         absorb = None
-        tn = T1 | T2
+        tn = ta | tb
         outer, _ = tn.gauge_simple_insert(gauges, smudge=gauge_smudge)
 
     if reduced is True:
-        # a) -> b)
-        T1_L, T1_R = T1.split(
+        # a) -> b) : decompose both into isometric and reduced factors
+        tmp_bix_1 = rand_uuid()
+        ta_Q, ta_R = ta.split(
             left_inds=lix,
             right_inds=bix,
-            get="tensors",
+            bond_ind=tmp_bix_1,
             absorb="right",
-            cutoff=0.0,
+            **reduce_opts,
         )
-        T2_L, T2_R = T2.split(
+        tmp_bix_2 = rand_uuid()
+        tb_R, tb_Q = tb.split(
             left_inds=bix,
             right_inds=rix,
-            get="tensors",
+            bond_ind=tmp_bix_2,
             absorb="left",
-            cutoff=0.0,
+            **reduce_opts,
         )
 
-        # b) -> c)
-        M = T1_R @ T2_L
-        # c) -> d)
-        M_L, *s, M_R = M.split(
-            left_inds=T1_L.bonds(M),
+        # b) -> c) : form the reduced core
+        tc = ta_R @ tb_R
+
+        # c) -> d) : split the reduced core
+        tc_left, *s, tc_right = tc.split(
+            left_inds=[tmp_bix_1],
+            right_inds=[tmp_bix_2],
             bond_ind=bix,
-            get="tensors",
             absorb=absorb,
             **compress_opts,
         )
 
-        # d) -> e)
-        T1C = T1_L.contract(M_L, output_inds=T1.inds)
-        T2C = M_R.contract(T2_R, output_inds=T2.inds)
+        # d) -> e) : combine core factors with isometric factors
+        ta_compressed = ta_Q.contract(tc_left, output_inds=ta.inds)
+        tb_compressed = tc_right.contract(tb_Q, output_inds=tb.inds)
 
     elif reduced == "right":
         # if left canonical, just do svd on right tensor
-        M, *s, T2C = T2.split(
+        tc, *s, tb_compressed = tb.split(
             left_inds=bix,
             right_inds=rix,
-            get="tensors",
             absorb=absorb,
             **compress_opts,
         )
-        T1C = T1 @ M
-        T1C.transpose_like_(T1)
-        T2C.transpose_like_(T2)
+        ta_compressed = ta @ tc
+        ta_compressed.transpose_like_(ta)
+        tb_compressed.transpose_like_(tb)
 
         if absorb == "right":
             # can't mark left tensor as isometric if absorbed into right tensor
@@ -915,16 +934,15 @@ def tensor_compress_bond(
 
     elif reduced == "left":
         # if right canonical, just do svd on left tensor
-        T1C, *s, M = T1.split(
+        ta_compressed, *s, tc = ta.split(
             left_inds=lix,
             right_inds=bix,
-            get="tensors",
             absorb=absorb,
             **compress_opts,
         )
-        T2C = M @ T2
-        T1C.transpose_like_(T1)
-        T2C.transpose_like_(T2)
+        tb_compressed = tc @ tb
+        ta_compressed.transpose_like_(ta)
+        tb_compressed.transpose_like_(tb)
 
         if absorb == "left":
             # can't mark right tensor as isometric if absorbed into left tensor
@@ -932,18 +950,23 @@ def tensor_compress_bond(
 
     elif reduced == "lazy":
         compress_opts.setdefault("method", "isvd")
-        T12 = TNLinearOperator((T1, T2), lix, rix)
-        T1C, *s, T2C = T12.split(get="tensors", absorb=absorb, **compress_opts)
-        T1C.transpose_like_(T1)
-        T2C.transpose_like_(T2)
+        tc = TNLinearOperator((ta, tb), lix, rix)
+        ta_compressed, *s, tb_compressed = tc.split(
+            absorb=absorb,
+            **compress_opts,
+        )
+        ta_compressed.transpose_like_(ta)
+        tb_compressed.transpose_like_(tb)
 
     elif reduced is False:
-        T12 = T1 @ T2
-        T1C, *s, T2C = T12.split(
-            left_inds=lix, get="tensors", absorb=absorb, **compress_opts
+        tc = ta @ tb
+        ta_compressed, *s, tb_compressed = tc.split(
+            left_inds=lix,
+            absorb=absorb,
+            **compress_opts,
         )
-        T1C.transpose_like_(T1)
-        T2C.transpose_like_(T2)
+        ta_compressed.transpose_like_(ta)
+        tb_compressed.transpose_like_(tb)
 
     else:
         raise ValueError(
@@ -952,13 +975,14 @@ def tensor_compress_bond(
         )
 
     # update with the new compressed data
-    T1.modify(data=T1C.data)
-    T2.modify(data=T2C.data)
+    ta.modify(data=ta_compressed.data)
+    tb.modify(data=tb_compressed.data)
 
     if absorb == "right":
-        T1.modify(left_inds=lix)
+        ta.modify(left_inds=lix)
     elif absorb == "left":
-        T2.modify(left_inds=rix)
+        tb.modify(left_inds=rix)
+    # XXX: could also set both sides if absorb=None?
 
     if s and info is not None:
         info["singular_values"] = s[0].data
@@ -970,8 +994,8 @@ def tensor_compress_bond(
         g = g / fact
         gauges[bix] = g
         fact_1_2 = fact**0.5
-        T1 *= fact_1_2
-        T2 *= fact_1_2
+        ta *= fact_1_2
+        tb *= fact_1_2
 
 
 def tensor_balance_bond(t1: "Tensor", t2: "Tensor", smudge=1e-6):
@@ -6450,6 +6474,7 @@ class TensorNetwork:
             for tida, tidb, _ in span:
                 tn._canonize_between_tids(tida, tidb, absorb="right")
             compress_opts.setdefault("absorb", "right")
+            compress_opts.setdefault("reduced", "left")
         else:
             compress_opts.setdefault("absorb", "both")
 
@@ -7124,6 +7149,8 @@ class TensorNetwork:
         touched_tids=None,
         info=None,
         progbar=False,
+        reduce_opts=None,
+        compress_opts=None,
         inplace=False,
     ):
         """Iterative gauge all the bonds in this tensor network with a 'simple
@@ -7277,7 +7304,13 @@ class TensorNetwork:
 
                 # perform SVD to get new bond gauge
                 tensor_compress_bond(
-                    t1, t2, absorb=None, info=sub_info, cutoff=0.0
+                    t1,
+                    t2,
+                    absorb=None,
+                    info=sub_info,
+                    cutoff=0.0,
+                    reduce_opts=reduce_opts,
+                    compress_opts=compress_opts,
                 )
 
                 s = sub_info["singular_values"]
