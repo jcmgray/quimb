@@ -1,15 +1,88 @@
 """Draw 2D and pseudo-3D diagrams programmatically using matplotlib."""
 
 import warnings
+from contextlib import contextmanager
 from math import atan2, ceil, cos, degrees, floor, pi, sin
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+_PROJECTION_DEFAULTS = {
+    "orthographic": ("orthographic", 20, 40),
+    "axonometric": ("axonometric", 15, 120),
+    "isometric": ("axonometric", 30, 150),
+}
+
+
+def _readable_angle(angle):
+    """Normalize an angle to (-90, 90] so text reads right-way-up.
+
+    Returns
+    -------
+    normalized : float
+        The angle in (-90, 90].
+    flipped : bool
+        Whether the angle was flipped by 180 degrees.
+    """
+    angle = angle % 360
+    if angle > 90 and angle <= 270:
+        angle -= 180
+        flipped = True
+    else:
+        flipped = False
+    if angle > 180:
+        angle -= 360
+    return angle, flipped
+
+
+def parse_projection(projection):
+    """Parse a projection specification into a normalized tuple of
+    ``(mode, arg1, arg2)``.
+
+    Parameters
+    ----------
+    projection : str or tuple
+        The projection specification. Can be:
+
+        - A 3-tuple ``(mode, arg1, arg2)`` specifying the projection
+          mode and its parameters explicitly, e.g.
+          ``("orthographic", 20, 40)`` or ``("axonometric", 50, 12)``.
+        - A 2-tuple ``(arg1, arg2)`` which defaults to orthographic,
+          e.g. ``(20, 40)`` is equivalent to
+          ``("orthographic", 20, 40)``.
+        - A string ``"orthographic"`` or ``"axonometric"`` which uses
+          the default parameters for that mode.
+
+    Returns
+    -------
+    tuple
+        A 3-tuple of ``(mode, arg1, arg2)``.
+    """
+    if isinstance(projection, str):
+        try:
+            return _PROJECTION_DEFAULTS[projection]
+        except KeyError:
+            raise ValueError(
+                f"Unknown projection mode: {projection!r}. "
+                "Expected 'orthographic' or 'axonometric'."
+            )
+
+    mode, *args = projection
+    if isinstance(mode, str):
+        if mode not in _PROJECTION_DEFAULTS:
+            raise ValueError(
+                f"Unknown projection mode: {mode!r}. "
+                "Expected 'orthographic' or 'axonometric'."
+            )
+        return (mode, *args)
+
+    # no string mode given, assume orthographic with (arg1, arg2)
+    return ("orthographic", mode, *args)
+
 
 class Drawing:
     """Draw 2D or pseudo-3D diagrams using matplotlib. This handles the
-    axonometric projection and the z-ordering of the elements, as well as named
+    3D projection and the z-ordering of the elements, as well as named
     preset styles for repeated elements, and the automatic adjustment of the
     figure limits. It also has basic support for drawing smooth curves and
     shaded areas around certain elements automatically.
@@ -22,10 +95,23 @@ class Drawing:
         The default color to draw lines and text in.
     shapecolor : color, optional
         The default color to fill shapes with.
-    a : float
-        The axonometric angle of the x-axis in degrees.
-    b : float
-        The axonometric angle of the y-axis in degrees.
+    projection : tuple, optional
+        The 3D projection mode and parameters, specified as a tuple of
+        ``(mode, *args)``. Available modes:
+
+        - ``("orthographic", azimuth, elevation)`` : Orthographic
+          projection (camera at infinity). ``azimuth`` is the horizontal
+          camera angle in degrees (0 means looking along +y, i.e. the
+          y-axis extends into the page). ``elevation`` is the vertical
+          angle above the horizontal (0 is side-on, 90 is top-down).
+          ``("orthographic", 0, 90)`` gives an exact top-down view.
+        - ``("axonometric", a, b)`` : Axonometric projection
+          where ``a`` and ``b`` are the angles of the x and y axes
+          measured counterclockwise from horizontal, in degrees. True
+          isometric projection is ``("axonometric", 30, 150)``, which you can
+          also specify with the string ``"isometric"``.
+
+        Default is ``("orthographic", 20, 40)``.
     xscale : float
         A factor to scale the x-axis by.
     yscale : float
@@ -52,8 +138,7 @@ class Drawing:
         background=(0, 0, 0, 0),
         drawcolor=(0.14, 0.15, 0.16, 1.0),
         shapecolor=(0.45, 0.50, 0.55, 1.0),
-        a=50,
-        b=12,
+        projection=("orthographic", 20, 40),
         xscale=1,
         yscale=1,
         zscale=1,
@@ -92,11 +177,18 @@ class Drawing:
         self.presets = {} if presets is None else dict(presets)
         self.presets.setdefault(None, {})
 
-        self._project_a = a
-        self._project_b = b
         self._project_xscale = xscale
         self._project_yscale = yscale
         self._project_zscale = zscale
+
+        mode, *proj_args = parse_projection(projection)
+        self._projection = mode
+        if mode == "orthographic":
+            self._project_azimuth = proj_args[0]
+            self._project_elevation = proj_args[1]
+        else:
+            self._project_a = proj_args[0]
+            self._project_b = proj_args[1]
 
         self._3d_xmin = None
         self._3d_xmax = None
@@ -104,6 +196,17 @@ class Drawing:
         self._3d_ymax = None
         self._3d_zmin = None
         self._3d_zmax = None
+
+        self._offset = (0, 0, 0)
+        self._screen_offset = (0, 0)
+
+    def _axis_angle(self, axis):
+        """Get the screen rotation angle (in degrees) of a 3D axis."""
+        coo = [0, 0, 0]
+        coo[axis] = 1
+        sx, sy = self._3d_project(*coo)
+        ox, oy = self._3d_project(0, 0, 0)
+        return degrees(atan2(sy - oy, sx - ox))
 
     def _2d_project(self, x, y):
         return simple_scale(
@@ -132,26 +235,146 @@ class Drawing:
             self._3d_zmin = min(self._3d_zmin, z)
             self._3d_zmax = max(self._3d_zmax, z)
 
-        return axonometric_project(
-            x,
-            y,
-            z,
-            a=self._project_a,
-            b=self._project_b,
-            xscale=self._project_xscale,
-            yscale=self._project_yscale,
-            zscale=self._project_zscale,
-        )
+        if self._projection == "orthographic":
+            return orthographic_project(
+                x,
+                y,
+                z,
+                azimuth=self._project_azimuth,
+                elevation=self._project_elevation,
+                xscale=self._project_xscale,
+                yscale=self._project_yscale,
+                zscale=self._project_zscale,
+            )
+        else:
+            return axonometric_project(
+                x,
+                y,
+                z,
+                a=self._project_a,
+                b=self._project_b,
+                xscale=self._project_xscale,
+                yscale=self._project_yscale,
+                zscale=self._project_zscale,
+            )
 
     def _coo_to_zorder(self, x, y, z):
-        return coo_to_zorder(
-            x,
-            y,
-            z,
-            xscale=self._project_xscale,
-            yscale=self._project_yscale,
-            zscale=self._project_zscale,
-        )
+        if self._projection == "orthographic":
+            return orthographic_zorder(
+                x,
+                y,
+                z,
+                azimuth=self._project_azimuth,
+                elevation=self._project_elevation,
+                xscale=self._project_xscale,
+                yscale=self._project_yscale,
+                zscale=self._project_zscale,
+            )
+        else:
+            return coo_to_zorder(
+                x,
+                y,
+                z,
+                a=self._project_a,
+                b=self._project_b,
+                xscale=self._project_xscale,
+                yscale=self._project_yscale,
+                zscale=self._project_zscale,
+            )
+
+    @contextmanager
+    def translate(self, dx=0, dy=0, dz=0):
+        """Context manager to temporarily translate all draw operations, in
+        coordinate space (i.e. before any projection and scaling).
+
+        Parameters
+        ----------
+        dx : float
+            The x offset.
+        dy : float
+            The y offset.
+        dz : float
+            The z offset (only relevant for 3D coordinates).
+
+        Examples
+        --------
+
+            >>> d = Drawing()
+            >>> with d.translate(10, 5):
+            ...     d.circle((0, 0))  # drawn at (10, 5)
+        """
+        ox, oy, oz = self._offset
+        self._offset = (ox + dx, oy + dy, oz + dz)
+        try:
+            yield self
+        finally:
+            self._offset = (ox, oy, oz)
+
+    @contextmanager
+    def translate_screen(self, dx=0, dy=0):
+        """Context manager to temporarily translate all draw operations
+        in 2D screen space (i.e. *after* any projection and scaling).
+
+        Parameters
+        ----------
+        dx : float
+            The x screen offset.
+        dy : float
+            The y screen offset.
+
+        Examples
+        --------
+
+            >>> d = Drawing()
+            >>> with d.translate_screen(10, 5):
+            ...     d.circle((0, 0, 0))  # 3D projected, then shifted
+        """
+        ox, oy = self._screen_offset
+        self._screen_offset = (ox + dx, oy + dy)
+        try:
+            yield self
+        finally:
+            self._screen_offset = (ox, oy)
+
+    def _project_coos(
+        self,
+        coos,
+        style,
+        zorder_delta=0.0,
+        zorder_aggregate="mean",
+        project=True,
+    ):
+        """Possibly project sequence of coordinates and inject zorder."""
+        if not project:
+            # allow disabling via kwarg
+            return coos
+
+        if zorder_aggregate == "mean":
+            zorder_aggregate = mean
+        elif zorder_aggregate == "max":
+            zorder_aggregate = max
+        elif zorder_aggregate == "min":
+            zorder_aggregate = min
+        # else: assume it's a function already
+
+        if len(coos[0]) == 2:
+            # 2d specified directly
+            dx, dy, _ = self._offset
+            coos = [(x + dx, y + dy) for x, y in coos]
+            style.setdefault("zorder", zorder_delta)
+            projected = [self._2d_project(*coo) for coo in coos]
+        else:
+            # assume 3d and project to 2d
+            dx, dy, dz = self._offset
+            coos = [(x + dx, y + dy, z + dz) for x, y, z in coos]
+            zm = zorder_aggregate(self._coo_to_zorder(*coo) for coo in coos)
+            style.setdefault("zorder", zm + zorder_delta)
+            projected = [self._3d_project(*coo) for coo in coos]
+
+        sx, sy = self._screen_offset
+        if sx or sy:
+            projected = [(x + sx, y + sy) for x, y in projected]
+        return projected
 
     def _adjust_lims(self, x, y):
         if not self.adjust_lims:
@@ -206,17 +429,11 @@ class Drawing:
         style.setdefault("horizontalalignment", "center")
         style.setdefault("verticalalignment", "center")
         style.setdefault("clip_on", False)
-        zorder_delta = style.pop("zorder_delta", 0.02)
-
-        if len(coo) == 2:
-            x, y = self._2d_project(*coo)
-            style.setdefault("zorder", zorder_delta)
-        else:
-            x, y = self._3d_project(*coo)
-            style.setdefault(
-                "zorder", self._coo_to_zorder(*coo) + zorder_delta
-            )
-
+        ((x, y),) = self._project_coos(
+            [coo],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.02),
+        )
         self.ax.text(x, y, text, **style)
         self._adjust_lims(x, y)
 
@@ -250,32 +467,16 @@ class Drawing:
         style.setdefault("clip_on", False)
         center = style.pop("center", 0.5)
         shorten = style.pop("shorten", None)
-        zorder_delta = style.pop("zorder_delta", 0.02)
 
-        if len(cooa) == 2:
-            xa, ya = self._2d_project(*cooa)
-            xb, yb = self._2d_project(*coob)
-            style.setdefault("zorder", zorder_delta)
-        else:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
-                + zorder_delta,
-            )
-            xa, ya = self._3d_project(*cooa)
-            xb, yb = self._3d_project(*coob)
+        (xa, ya), (xb, yb) = self._project_coos(
+            [cooa, coob],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.02),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
 
         if shorten is not None:
-            forward, inverse = get_rotator_and_inverse((xa, ya), (xb, yb))
-            R = forward(xb, yb)[0]
-            try:
-                start, end = shorten
-            except TypeError:
-                start = end = shorten
-            ra = (start, 0.0)
-            rb = (R - end, 0.0)
-            xa, ya = inverse(*ra)
-            xb, yb = inverse(*rb)
+            (xa, ya), (xb, yb) = shorten_line((xa, ya), (xb, yb), shorten)
 
         # compute midpoint
         x = xa * (1 - center) + xb * center
@@ -335,7 +536,13 @@ class Drawing:
         style.setdefault("transform", self.fig.transFigure)
         self.ax.text(x, y, text, **style)
 
-    def _parse_style_for_marker(self, coo, preset=None, **kwargs):
+    def _project_and_parse_style_for_marker(
+        self,
+        coo,
+        preset=None,
+        project=True,
+        **kwargs,
+    ):
         style = parse_style_preset(self.presets, preset, **kwargs)
         if "color" in style:
             # assume coloring whole shape
@@ -344,17 +551,12 @@ class Drawing:
         style.setdefault("edgecolor", darken_color(style["facecolor"]))
         style.setdefault("linewidth", 1)
         style.setdefault("radius", 0.25)
-        zorder_delta = style.pop("zorder_delta", 0.01)
-
-        if len(coo) == 2:
-            x, y = self._2d_project(*coo)
-            style.setdefault("zorder", zorder_delta)
-        else:
-            x, y = self._3d_project(*coo)
-            style.setdefault(
-                "zorder", self._coo_to_zorder(*coo) + zorder_delta
-            )
-
+        ((x, y),) = self._project_coos(
+            [coo],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.01),
+            project=project,
+        )
         return x, y, style
 
     def _adjust_lims_for_marker(self, x, y, r):
@@ -379,9 +581,16 @@ class Drawing:
         kwargs
             Specific style options passed to ``matplotlib.patches.Circle``.
         """
-        x, y, style = self._parse_style_for_marker(
+        x, y, style = self._project_and_parse_style_for_marker(
             coo, preset=preset, **kwargs
         )
+
+        if style.pop("marker", "o") != "o":
+            warnings.warn(
+                "Marker style specified for circle, but circle always uses "
+                "a circular marker. Did you mean to use marker() instead?"
+            )
+
         circle = mpl.patches.Circle((x, y), **style)
         self.ax.add_artist(circle)
         self._adjust_lims_for_marker(x, y, style["radius"])
@@ -403,7 +612,7 @@ class Drawing:
         kwargs
             Specific style options passed to ``matplotlib.patches.Wedge``.
         """
-        x, y, style = self._parse_style_for_marker(
+        x, y, style = self._project_and_parse_style_for_marker(
             coo, preset=preset, **kwargs
         )
 
@@ -455,7 +664,7 @@ class Drawing:
         kwargs
             Specific style options passed to ``matplotlib.patches.Polygon``.
         """
-        x, y, style = self._parse_style_for_marker(
+        x, y, style = self._project_and_parse_style_for_marker(
             coo, preset=preset, **kwargs
         )
 
@@ -473,16 +682,12 @@ class Drawing:
         radius = style.pop("radius", 0.1)
         npoint = style.pop("npoint", 9)
         orientation = style.pop("orientation", 0)
-        zorder_delta = style.pop("zorder_delta", 0.01)
 
-        if len(coo) == 2:
-            x, y = self._2d_project(*coo)
-            style.setdefault("zorder", zorder_delta)
-        else:
-            x, y = self._3d_project(*coo)
-            style.setdefault(
-                "zorder", self._coo_to_zorder(*coo) + zorder_delta
-            )
+        ((x, y),) = self._project_coos(
+            [coo],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.01),
+        )
 
         for i in range(npoint):
             # start at vertical
@@ -513,10 +718,15 @@ class Drawing:
         kwargs
             Specific style options.
         """
-        style = parse_style_preset(self.presets, preset, **kwargs)
+        x, y, style = self._project_and_parse_style_for_marker(
+            coo,
+            preset=preset,
+            **kwargs,
+        )
+
         marker = style.pop("marker", "s")
         if marker in ("o", "."):
-            return self.circle(coo, preset=preset, **style)
+            return self.circle((x, y), **style)
 
         if isinstance(marker, int):
             n = marker
@@ -536,11 +746,24 @@ class Drawing:
             }[marker]
 
         self.regular_polygon(
-            coo, preset=preset, n=n, orientation=orientation, **style
+            (x, y), n=n, orientation=orientation, project=False, **style
         )
 
     def square(self, coo, preset=None, **kwargs):
-        return self.marker(coo, preset=preset, marker="s", **kwargs)
+        """Draw a square of 'radius' `radius` at the specified coordinate.
+        This is a shorthand for `Drawing.marker` with marker='s'.
+        """
+        x, y, style = self._project_and_parse_style_for_marker(
+            coo, preset=preset, **kwargs
+        )
+
+        if style.pop("marker", "s") != "s":
+            warnings.warn(
+                "Marker style specified for square, but square always uses "
+                "a square marker. Did you mean to use marker() instead?"
+            )
+
+        return self.marker((x, y), marker="s", project=False, **style)
 
     def cube(self, coo, preset=None, **kwargs):
         """Draw a cube at the specified coordinate, which must be 3D.
@@ -604,6 +827,8 @@ class Drawing:
         --------
         Drawing.arrowhead, Drawing.curve
         """
+        project = kwargs.pop("project", True)
+
         style = parse_style_preset(self.presets, preset, **kwargs)
         style.setdefault("color", self.drawcolor)
         style.setdefault("solid_capstyle", "round")
@@ -614,38 +839,23 @@ class Drawing:
         text = style.pop("text")
         text_left = style.pop("text_left", None)
         text_right = style.pop("text_right", None)
-        zorder_delta = style.pop("zorder_delta", 0.0)
 
-        if len(cooa) == 2:
-            xa, ya = self._2d_project(*cooa)
-            xb, yb = self._2d_project(*coob)
-            style.setdefault("zorder", zorder_delta)
-        else:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
-                + zorder_delta,
-            )
-            xa, ya = self._3d_project(*cooa)
-            xb, yb = self._3d_project(*coob)
+        (xa, ya), (xb, yb) = self._project_coos(
+            [cooa, coob],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+            project=project,
+        )
 
         if stretch is not None:
-            # shorten around center
+            # stretch around center
             center = (xa + xb) / 2, (ya + yb) / 2
             xa, xb = [center[0] + stretch * (x - center[0]) for x in (xa, xb)]
             ya, yb = [center[1] + stretch * (y - center[1]) for y in (ya, yb)]
 
         if shorten is not None:
-            forward, inverse = get_rotator_and_inverse((xa, ya), (xb, yb))
-            R = forward(xb, yb)[0]
-            try:
-                start, end = shorten
-            except TypeError:
-                start = end = shorten
-            ra = (start, 0.0)
-            rb = (R - end, 0.0)
-            xa, ya = inverse(*ra)
-            xb, yb = inverse(*rb)
+            (xa, ya), (xb, yb) = shorten_line((xa, ya), (xb, yb), shorten)
 
         cooa, coob = (xa, ya), (xb, yb)
 
@@ -735,21 +945,14 @@ class Drawing:
         text = style.pop("text")
         text_left = style.pop("text_left", None)
         text_right = style.pop("text_right", None)
-        zorder_delta = style.pop("zorder_delta", 0.0)
 
-        if len(cooa) == 2:
-            xs, ys = zip(*[self._2d_project(*coo) for coo in [cooa, coob]])
-            style.setdefault("zorder", zorder_delta)
-        else:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
-                + zorder_delta,
-            )
-            xs, ys = zip(*[self._3d_project(*coo) for coo in [cooa, coob]])
+        cooa, coob = self._project_coos(
+            [cooa, coob],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
 
-        cooa = xs[0], ys[0]
-        coob = xs[1], ys[1]
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         R = forward(*coob)[0]
 
@@ -829,6 +1032,10 @@ class Drawing:
         density : float, optional
             The density of the zig-zags, where 1.0 is the default density
             resulting in approximately 8 zig-zags along the line.
+        shorten : float or tuple[float, float], optional
+            Shorten the zigzag by this *absolute* amount at each end. If a
+            tuple, the first value is the start shortening, the second the end
+            shortening.
         preset : str, optional
             A preset style to use for the line.
         kwargs
@@ -839,21 +1046,18 @@ class Drawing:
         w = style.pop("width", "auto")
         extend = style.pop("extend", 0.0)
         density = style.pop("density", 1.0)
+        shorten = style.pop("shorten", None)
         style.setdefault("smoothing", 0.2)
 
-        zorder_delta = style.pop("zorder_delta", 0.0)
-        if len(cooa) == 2:
-            xa, ya = self._2d_project(*cooa)
-            xb, yb = self._2d_project(*coob)
-            style.setdefault("zorder", zorder_delta)
-        else:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
-                + zorder_delta,
-            )
-            xa, ya = self._3d_project(*cooa)
-            xb, yb = self._3d_project(*coob)
+        (xa, ya), (xb, yb) = self._project_coos(
+            [cooa, coob],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
+
+        if shorten is not None:
+            (xa, ya), (xb, yb) = shorten_line((xa, ya), (xb, yb), shorten)
 
         f, b = get_rotator_and_inverse((xa, ya), (xb, yb))
         R = f(xb, yb)[0]
@@ -881,7 +1085,7 @@ class Drawing:
         # transform back to
         pts = [b(*pt) for pt in pts]
 
-        self.curve(pts, **style)
+        self.curve(pts, project=False, **style)
 
     def arrowhead(self, cooa, coob, preset=None, **kwargs):
         """Draw just a arrowhead on the line between ``cooa`` and ``coob``.
@@ -925,19 +1129,12 @@ class Drawing:
         if reverse:
             cooa, coob = coob, cooa
 
-        zorder_delta = style.pop("zorder_delta", 0.0)
-        if len(cooa) != 2:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in [cooa, coob])
-                + zorder_delta,
-            )
-            cooa = self._3d_project(*cooa)
-            coob = self._3d_project(*coob)
-        else:
-            style.setdefault("zorder", zorder_delta)
-            cooa = self._2d_project(*cooa)
-            coob = self._2d_project(*coob)
+        cooa, coob = self._project_coos(
+            [cooa, coob],
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
 
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         rb = forward(*coob)
@@ -988,6 +1185,8 @@ class Drawing:
         """
         from matplotlib.path import Path
 
+        project = kwargs.pop("project", True)
+
         style = parse_style_preset(self.presets, preset, **kwargs)
         if "color" in style:
             # presume that edge color is being specified
@@ -1001,17 +1200,13 @@ class Drawing:
         smoothing = style.pop("smoothing")
         shorten = style.pop("shorten", None)
 
-        zorder_delta = style.pop("zorder_delta", 0.0)
-        if len(coos[0]) != 2:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
-            )
-            coos = [self._3d_project(*coo) for coo in coos]
-        else:
-            style.setdefault("zorder", zorder_delta)
-            coos = [self._2d_project(*coo) for coo in coos]
-
+        coos = self._project_coos(
+            coos,
+            style,
+            project=project,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
         N = len(coos)
 
         if shorten is not None:
@@ -1088,17 +1283,13 @@ class Drawing:
         style.setdefault("edgecolor", darken_color(style["facecolor"]))
         style.setdefault("linewidth", 1)
         style.setdefault("joinstyle", "round")
-        zorder_delta = style.pop("zorder_delta", 0.0)
 
-        if len(coos[0]) != 2:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
-            )
-            coos = [self._3d_project(*coo) for coo in coos]
-        else:
-            style.setdefault("zorder", zorder_delta)
-            coos = [self._2d_project(*coo) for coo in coos]
+        coos = self._project_coos(
+            coos,
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
 
         path = [coos[0]]
         moves = [Path.MOVETO]
@@ -1162,20 +1353,15 @@ class Drawing:
         style.setdefault("facecolor", (0.5, 0.5, 0.5, 0.25))
         style.setdefault("smoothing", 1 / 2)
         smoothing = style.pop("smoothing")
-        zorder_delta = style.pop("zorder_delta", -0.01)
 
-        if len(coos[0]) != 2:
-            # use min so the patch appears *just* behind the elements
-            # its meant to highlight
-            style.setdefault(
-                "zorder",
-                min(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
-            )
-            coos = [self._3d_project(*coo) for coo in coos]
-        else:
-            style.setdefault("zorder", -0.01)
-            coos = [self._2d_project(*coo) for coo in coos]
-
+        coos = self._project_coos(
+            coos,
+            style,
+            zorder_delta=style.pop("zorder_delta", -0.01),
+            # default to min so the patch appears *just*
+            # behind the elements its meant to highlight
+            zorder_aggregate=style.pop("zorder_aggregate", "min"),
+        )
         N = len(coos)
 
         control_pts = {}
@@ -1233,21 +1419,18 @@ class Drawing:
         style = parse_style_preset(self.presets, preset, **kwargs)
         radius = style.pop("radius", 0.0)
         resolution = style.pop("resolution", 12)
-        zorder_delta = style.pop("zorder_delta", -0.01)
 
         if isinstance(radius, (int, float)):
             radius = [radius] * len(coos)
 
-        if len(coos[0]) != 2:
-            # use min so the patch appears *just* behind the elements
-            # its meant to highlight
-            style.setdefault(
-                "zorder",
-                min(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
-            )
-            coos = [self._3d_project(*coo) for coo in coos]
-        else:
-            style.setdefault("zorder", zorder_delta)
+        coos = self._project_coos(
+            coos,
+            style,
+            zorder_delta=style.pop("zorder_delta", -0.01),
+            # default to min so the patch appears *just*
+            # behind the elements its meant to highlight
+            zorder_aggregate=style.pop("zorder_aggregate", "min"),
+        )
 
         expanded_pts = []
         for coo, r in zip(coos, radius):
@@ -1295,17 +1478,31 @@ class Drawing:
         style.setdefault("capstyle", "round")
         # match Line2D
         style.setdefault("linewidth", 1.5)
+        shorten = style.pop("shorten", None)
 
-        zorder_delta = style.pop("zorder_delta", 0.0)
-        if len(coos[0]) != 2:
-            style.setdefault(
-                "zorder",
-                mean(self._coo_to_zorder(*coo) for coo in coos) + zorder_delta,
-            )
-            coos = [self._3d_project(*coo) for coo in coos]
-        else:
-            style.setdefault("zorder", zorder_delta)
-            coos = [self._2d_project(*coo) for coo in coos]
+        coos = self._project_coos(
+            coos,
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
+
+        if shorten is not None:
+            try:
+                shrt0, shrt1 = shorten
+            except TypeError:
+                shrt0 = shrt1 = shorten
+
+            if shrt0:
+                # just move first point
+                coo0, coo1 = coos[0], coos[1]
+                coo0, coo1 = shorten_line(coo0, coo1, (shrt0, 0))
+                coos = (coo0, coo1, *coos[2:])
+            if shrt1:
+                # and just move last point
+                cooa, coob = coos[-2], coos[-1]
+                cooa, coob = shorten_line(cooa, coob, (0, shrt1))
+                coos = (*coos[:-2], cooa, coob)
 
         N = len(coos)
         moves = [Path.MOVETO] + [Path.CURVE4] * (N - 1)
@@ -1420,23 +1617,16 @@ class Drawing:
         """
         style = parse_style_preset(self.presets, preset, **kwargs)
         style.setdefault("smoothing", 1.0)
-        zorder_delta = style.pop("zorder_delta", -0.01)
 
         if pinch is True:
             pinch = 1 - padding
 
-        if len(cooa) != 2:
-            style.setdefault(
-                "zorder",
-                min(self._coo_to_zorder(*coo) for coo in [cooa, coob])
-                + zorder_delta,
-            )
-            cooa = self._3d_project(*cooa)
-            coob = self._3d_project(*coob)
-        else:
-            style.setdefault("zorder", zorder_delta)
-            cooa = self._2d_project(*cooa)
-            coob = self._2d_project(*coob)
+        cooa, coob = self._project_coos(
+            [cooa, coob],
+            style,
+            zorder_delta=style.pop("zorder_delta", -0.01),
+            zorder_aggregate=style.pop("zorder_aggregate", "min"),
+        )
 
         forward, inverse = get_rotator_and_inverse(cooa, coob)
         xb = forward(*coob)[0]
@@ -1555,12 +1745,12 @@ class Drawing:
         self,
         color=(0, 0.7, 0.8),
         alpha=0.3,
-        zorder=-100,
+        zorder_delta=-1000,
         subdivisions=(1 / 4, 2 / 4, 3 / 4),
         margin=0.5,
         ticklabels=True,
     ):
-        style = dict(color=color, alpha=alpha, zorder=zorder)
+        style = dict(color=color, alpha=alpha, zorder_delta=zorder_delta)
 
         if self._3d_xmin is None:
             warnings.warn(
@@ -1577,10 +1767,33 @@ class Drawing:
             zmin = floor(self._3d_zmin - margin)
             zmax = ceil(self._3d_zmax + margin)
 
-        plane = xmin
+        # determine which plane sides face away from the viewer
+        # -> back wall = lower z-order = drawn behind
+        zx = self._coo_to_zorder(1, 0, 0)
+        zy = self._coo_to_zorder(0, 1, 0)
+        zz = self._coo_to_zorder(0, 0, 1)
+
+        xback = xmin if zx >= 0 else xmax
+        yback = ymin if zy >= 0 else ymax
+        zback = zmin if zz >= 0 else zmax
+
+        # opposite (viewer-facing) sides for tick label placement
+        xopp = xmax if xback == xmin else xmin
+        yopp = ymax if yback == ymin else ymin
+
+        # tick label offsets (pointing outward from bounding box)
+        xopp_off = 0.5 if xopp == xmax else -0.5
+        yopp_off = 0.5 if yopp == ymax else -0.5
+        yback_off = 0.5 if yback == ymax else -0.5
+
+        # --- x = xback face (yz grid) ---
+        plane = xback
         for j in range(ymin, ymax):
             self.line(
-                (plane, j, zmin), (plane, j, zmax), linewidth=0.5, **style
+                (plane, j, zmin),
+                (plane, j, zmax),
+                linewidth=0.5,
+                **style,
             )
             for s in subdivisions:
                 self.line(
@@ -1591,7 +1804,10 @@ class Drawing:
                 )
         for k in range(zmin, zmax + 1):
             self.line(
-                (plane, ymin, k), (plane, ymax, k), linewidth=0.5, **style
+                (plane, ymin, k),
+                (plane, ymax, k),
+                linewidth=0.5,
+                **style,
             )
             if k < zmax:
                 for s in subdivisions:
@@ -1602,10 +1818,14 @@ class Drawing:
                         **style,
                     )
 
-        plane = ymax
+        # --- y = yback face (xz grid) ---
+        plane = yback
         for i in range(xmin, xmax + 1):
             self.line(
-                (i, plane, zmin), (i, plane, zmax), linewidth=0.5, **style
+                (i, plane, zmin),
+                (i, plane, zmax),
+                linewidth=0.5,
+                **style,
             )
             if i < xmax:
                 for s in subdivisions:
@@ -1617,7 +1837,10 @@ class Drawing:
                     )
         for k in range(zmin, zmax + 1):
             self.line(
-                (xmin, plane, k), (xmax, plane, k), linewidth=0.5, **style
+                (xmin, plane, k),
+                (xmax, plane, k),
+                linewidth=0.5,
+                **style,
             )
             if k < zmax:
                 for s in subdivisions:
@@ -1628,12 +1851,16 @@ class Drawing:
                         **style,
                     )
 
-        plane = zmin
+        # --- z = zback face (xy grid) ---
+        plane = zback
         for i in range(xmin, xmax + 1):
-            if i != xmin:
-                # already have this line
+            if i != xback:
+                # skip edge shared with x-plane
                 self.line(
-                    (i, ymin, plane), (i, ymax, plane), linewidth=0.5, **style
+                    (i, ymin, plane),
+                    (i, ymax, plane),
+                    linewidth=0.5,
+                    **style,
                 )
             if i < xmax:
                 for s in subdivisions:
@@ -1645,7 +1872,10 @@ class Drawing:
                     )
         for j in range(ymin, ymax):
             self.line(
-                (xmin, j, plane), (xmax, j, plane), linewidth=0.5, **style
+                (xmin, j, plane),
+                (xmax, j, plane),
+                linewidth=0.5,
+                **style,
             )
             for s in subdivisions:
                 self.line(
@@ -1656,39 +1886,59 @@ class Drawing:
                 )
 
         if ticklabels:
+            # normalize angles so text is always readable
+            x_rot, x_flip = _readable_angle(self._axis_angle(0))
+            y_rot, y_flip = _readable_angle(self._axis_angle(1))
+            z_rot, z_flip = _readable_angle(self._axis_angle(2))
+            x_arrow_str = "$\\leftarrow x$" if x_flip else "$x \\rightarrow$"
+            y_arrow_str = "$\\leftarrow y$" if y_flip else "$y \\rightarrow$"
+            z_arrow_str = "$\\leftarrow z$" if z_flip else "$z \\rightarrow$"
+
+            # extend z axis label outward so it sits at the top of the
+            # z tick column in screen space (which end of the z range is
+            # "above" depends on the projection)
+            _, oy = self._3d_project(0, 0, 0)
+            _, zy = self._3d_project(0, 0, 1)
+            z_top = zmax + 1 if (zy - oy) >= 0 else zmin - 1
+
             for i in range(xmin, xmax + 1):
                 self.text(
-                    (i, ymin - 0.5, zmin),
+                    (i, yopp + yopp_off, zback),
                     f"{i}",
-                    rotation=-self._project_a,
+                    rotation=x_rot,
                     **style,
                 )
             for j in range(ymin, ymax + 1):
                 self.text(
-                    (xmax + 0.5, j, zmin),
+                    (xopp + xopp_off, j, zback),
                     f"{j}",
-                    rotation=self._project_b,
+                    rotation=y_rot,
                     **style,
                 )
             for k in range(zmin, zmax + 1):
-                self.text((xmax, ymax + 0.5, k), f"{k}", rotation=90, **style)
+                self.text(
+                    (xopp, yback + yback_off, k),
+                    f"{k}",
+                    rotation=z_rot,
+                    **style,
+                )
 
             self.text(
-                (xmax + 1, ymin - 0.5, zmin),
-                "$x \\rightarrow$",
-                rotation=-self._project_a,
+                (xmax + 1, yopp + yopp_off, zback),
+                x_arrow_str,
+                rotation=x_rot,
                 **style,
             )
             self.text(
-                (xmax + 0.5, ymax + 1, zmin),
-                "$y \\rightarrow$",
-                rotation=self._project_b,
+                (xopp + xopp_off, ymax + 1, zback),
+                y_arrow_str,
+                rotation=y_rot,
                 **style,
             )
             self.text(
-                (xmax, ymax + 0.5, zmax + 1),
-                "$z \\rightarrow$",
-                rotation=90,
+                (xopp, yback + yback_off, z_top),
+                z_arrow_str,
+                rotation=z_rot,
                 **style,
             )
 
@@ -1760,8 +2010,8 @@ def axonometric_project(
     i,
     j,
     k,
-    a=50,
-    b=12,
+    a=15,
+    b=120,
     xscale=1,
     yscale=1,
     zscale=1,
@@ -1769,16 +2019,17 @@ def axonometric_project(
     """Project the 3D location ``(i, j, k)`` onto the 2D plane, using
     the axonometric projection with the given angles ``a`` and ``b``.
 
-    The ``xscale``, ``yscale`` and ``zscale`` parameters can be used to
-    scale the axes, including flipping them.
+    Both angles are measured counterclockwise from the horizontal
+    (3 o'clock direction), following the standard math convention.
+    The z-axis always points straight up.
 
     Parameters
     ----------
     i, j, k : float
         The 3D coordinates of the point to project.
     a, b : float
-        The left and right angles to displace x and y axes, from horizontal,
-        in degrees.
+        The angles of the x and y axes respectively, measured
+        counterclockwise from horizontal, in degrees.
     xscale, yscale, zscale : float
         The scaling factor for the x, y and z axes. If negative, the axis
         is flipped.
@@ -1788,26 +2039,109 @@ def axonometric_project(
     x, y : float
         The 2D coordinates of the projected point.
     """
-    i *= xscale * 0.8
+    i *= xscale
     j *= yscale
     k *= zscale
+    a_rad = pi * a / 180
+    b_rad = pi * b / 180
     return (
-        +i * cos(pi * a / 180) + j * cos(pi * b / 180),
-        -i * sin(pi * a / 180) + j * sin(pi * b / 180) + k,
+        i * cos(a_rad) + j * cos(b_rad),
+        i * sin(a_rad) + j * sin(b_rad) + k,
     )
 
 
-def coo_to_zorder(i, j, k, xscale=1, yscale=1, zscale=1):
+def coo_to_zorder(i, j, k, a=15, b=120, xscale=1, yscale=1, zscale=1):
     """Given the coordinates of a point in 3D space, return a z-order value
     that can be used to draw it on top of other elements in the diagram.
-    Take into account the scaling of the axes, so that the z-ordering
-    is correct even if the axes flipped.
+
+    The depth direction is the null space of the axonometric projection
+    matrix: ``(cos(b), -cos(a), sin(b-a))``, with axis flipping from
+    the sign of the scale factors.
     """
+    a_rad = pi * a / 180
+    b_rad = pi * b / 180
     return (
-        +i * xscale / abs(xscale)
-        - j * yscale / abs(yscale)
-        + k * zscale / abs(zscale)
+        +i * (xscale / abs(xscale)) * cos(b_rad)
+        - j * (yscale / abs(yscale)) * cos(a_rad)
+        + k * (zscale / abs(zscale)) * sin(b_rad - a_rad)
     )
+
+
+def orthographic_project(
+    i,
+    j,
+    k,
+    azimuth=20,
+    elevation=40,
+    xscale=1,
+    yscale=1,
+    zscale=1,
+):
+    """Project the 3D location ``(i, j, k)`` onto the 2D plane using an
+    orthographic projection (camera at infinity, no perspective distortion)
+    with the given camera ``azimuth`` and ``elevation``.
+
+    The camera convention is:
+
+    - ``azimuth=0`` means looking along the +y direction, so the y-axis
+      extends "into the page" (y=1 is behind y=0).
+    - Increasing ``azimuth`` rotates the camera clockwise when viewed
+      from above.
+    - ``elevation=0`` is a horizontal (side-on) view, ``elevation=90``
+      is directly above. ``(0, 90)`` gives an exact top-down view with
+      x to the right and y up.
+
+    Parameters
+    ----------
+    i, j, k : float
+        The 3D coordinates of the point to project.
+    azimuth : float
+        Horizontal camera angle in degrees.
+    elevation : float
+        Vertical camera angle above the horizontal, in degrees.
+    xscale, yscale, zscale : float
+        Scaling factors for each axis. If negative, the axis is flipped.
+
+    Returns
+    -------
+    x, y : float
+        The 2D screen coordinates of the projected point.
+    """
+    i *= xscale
+    j *= yscale
+    k *= zscale
+    az = pi * azimuth / 180
+    el = pi * elevation / 180
+    # camera position ∝ (-sin(az)*cos(el), -cos(az)*cos(el), sin(el))
+    # screen right = (cos(az), -sin(az), 0)
+    # screen up = (sin(el)*sin(az), sin(el)*cos(az), cos(el))
+    x = i * cos(az) - j * sin(az)
+    y = i * sin(el) * sin(az) + j * sin(el) * cos(az) + k * cos(el)
+    return x, y
+
+
+def orthographic_zorder(
+    i,
+    j,
+    k,
+    azimuth=20,
+    elevation=40,
+    xscale=1,
+    yscale=1,
+    zscale=1,
+):
+    """Compute z-order (depth) for orthographic projection by projecting
+    onto the camera view direction. Higher values are closer to the
+    camera and should be drawn on top.
+    """
+    i *= xscale
+    j *= yscale
+    k *= zscale
+    az = pi * azimuth / 180
+    el = pi * elevation / 180
+    # depth toward camera = dot(point, cam_dir), where
+    # cam_dir = (-sin(az)*cos(el), -cos(az)*cos(el), sin(el))
+    return -i * sin(az) * cos(el) - j * cos(az) * cos(el) + k * sin(el)
 
 
 # colorblind palettes by Okabe & Ito (https://jfly.uni-koeln.de/color/)
@@ -2123,6 +2457,18 @@ def get_rotator_and_inverse(pa, pb):
         return x + dx, y + dy
 
     return forward, inverse
+
+
+def shorten_line(pa, pb, amount):
+    forward, inverse = get_rotator_and_inverse(pa, pb)
+    R = forward(*pb)[0]
+    try:
+        start, end = amount
+    except TypeError:
+        start = end = amount
+    ra = (start, 0.0)
+    rb = (R - end, 0.0)
+    return inverse(*ra), inverse(*rb)
 
 
 def get_control_points(pa, pb, pc, spacing=1 / 3):
