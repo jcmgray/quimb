@@ -17,6 +17,8 @@ pixi add quimb
 **Installing with `pip`:**
 ```bash
 pip install quimb
+# or
+uv pip install quimb
 ```
 It is recommended to use [`uv`](https://docs.astral.sh/uv/) to install and
 manage purely pypi based environments.

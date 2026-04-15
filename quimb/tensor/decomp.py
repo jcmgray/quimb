@@ -1845,7 +1845,7 @@ def eigh_truncated(
         max_bond,
         absorb,
         renorm,
-        use_abs=True,
+        use_abs=not positive,
         xp=xp,
     )
 
@@ -1885,7 +1885,15 @@ def eigh_truncated_numba(
     # s = np.abs(s)
 
     U, s, VH, _ = _trim_and_renorm_svd_result_numba(
-        U, s, VH, cutoff, cutoff_mode, max_bond, absorb, renorm, use_abs=True
+        U,
+        s,
+        VH,
+        cutoff,
+        cutoff_mode,
+        max_bond,
+        absorb,
+        renorm,
+        use_abs=not positive,
     )
 
     return U, s, VH

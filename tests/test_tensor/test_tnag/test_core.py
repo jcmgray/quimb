@@ -154,6 +154,34 @@ def test_gate_sandwich_with_op_lazy():
     assert_allclose(B.to_dense(), y)
 
 
+def test_select_sites():
+    edges = [(0, 1), (0, 2), (2, 3), (1, 3), (2, 4), (3, 5), (4, 5)]
+    psi = qtn.TN_from_edges_rand(edges, D=2, phys_dim=2, seed=42)
+    psi.exponent = 1.5
+
+    sub = psi.select_sites([0, 2, 4])
+    assert isinstance(sub, psi.__class__)
+    assert sub.num_tensors == 3
+    assert set(sub.gen_sites_present()) == {0, 2, 4}
+    for site in (0, 2, 4):
+        assert psi.site_tag(site) in sub.tag_map
+    for site in (1, 3, 5):
+        assert psi.site_tag(site) not in sub.tag_map
+    # exponent not propagated by default
+    assert sub.exponent == 0.0
+    # virtual=True (default) shares tensor data with parent
+    assert sub[0] is psi[0]
+
+    # virtual=False takes copies
+    sub_copy = psi.select_sites([0, 2, 4], virtual=False)
+    assert sub_copy[0] is not psi[0]
+    assert_allclose(sub_copy[0].data, psi[0].data)
+
+    # with_exponent propagates the exponent
+    sub_exp = psi.select_sites([0, 2, 4], with_exponent=True)
+    assert sub_exp.exponent == 1.5
+
+
 def test_normalize_simple():
     psi = qtn.PEPS.rand(3, 3, 2, dtype=complex)
     gauges = {}

@@ -2,6 +2,25 @@
 
 Release notes for `quimb`.
 
+
+## v1.13.1 (unreleased)
+
+**Breaking Changes**
+
+- [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): rename input tensor args `ta` and `tb`
+
+
+**Enhancements:**
+
+- [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add `reduce_opts` for controlling the decomposition options used when reducing each tensor before the main truncating decomposition. For example ``reduce_opts={"method": "qr:cholesky"}``.
+- add [`TensorNetworkGen.select_sites`](quimb.tensor.tnag.core.TensorNetworkGen.select_sites) as a convenience method for selecting a sub network given a list of sites.
+- [`Drawing`](quimb.schematic.Drawing): add orthographic projection mode alongside the existing axonometric projection via the new `projection` parameter (replaces `a`/`b`). Named presets include `"orthographic"`, `"axonometric"`, and `"isometric"`.
+- [`Drawing.translate`](quimb.schematic.Drawing.translate): new context manager to temporarily offset all draw operations in coordinate space (before projection).
+- [`Drawing.translate_screen`](quimb.schematic.Drawing.translate_screen): new context manager to temporarily offset all draw operations in screen space (after projection).
+- [`Drawing.grid3d`](quimb.schematic.Drawing.grid3d): automatically select back-facing planes based on projection so grids always appear behind the scene, use readable tick label orientations for all projections, and place axis labels correctly.
+
+
+
 (whats-new-1-13-0)=
 ## v1.13.0 (2026-03-19)
 
