@@ -468,15 +468,15 @@ class Drawing:
         center = style.pop("center", 0.5)
         shorten = style.pop("shorten", None)
 
+        if shorten is not None:
+            cooa, coob = shorten_line(cooa, coob, shorten)
+
         (xa, ya), (xb, yb) = self._project_coos(
             [cooa, coob],
             style,
             zorder_delta=style.pop("zorder_delta", 0.02),
             zorder_aggregate=style.pop("zorder_aggregate", "mean"),
         )
-
-        if shorten is not None:
-            (xa, ya), (xb, yb) = shorten_line((xa, ya), (xb, yb), shorten)
 
         # compute midpoint
         x = xa * (1 - center) + xb * center
@@ -840,6 +840,9 @@ class Drawing:
         text_left = style.pop("text_left", None)
         text_right = style.pop("text_right", None)
 
+        if shorten is not None:
+            cooa, coob = shorten_line(cooa, coob, shorten)
+
         (xa, ya), (xb, yb) = self._project_coos(
             [cooa, coob],
             style,
@@ -853,9 +856,6 @@ class Drawing:
             center = (xa + xb) / 2, (ya + yb) / 2
             xa, xb = [center[0] + stretch * (x - center[0]) for x in (xa, xb)]
             ya, yb = [center[1] + stretch * (y - center[1]) for y in (ya, yb)]
-
-        if shorten is not None:
-            (xa, ya), (xb, yb) = shorten_line((xa, ya), (xb, yb), shorten)
 
         cooa, coob = (xa, ya), (xb, yb)
 
@@ -1049,15 +1049,15 @@ class Drawing:
         shorten = style.pop("shorten", None)
         style.setdefault("smoothing", 0.2)
 
+        if shorten is not None:
+            cooa, coob = shorten_line(cooa, coob, shorten)
+
         (xa, ya), (xb, yb) = self._project_coos(
             [cooa, coob],
             style,
             zorder_delta=style.pop("zorder_delta", 0.0),
             zorder_aggregate=style.pop("zorder_aggregate", "mean"),
         )
-
-        if shorten is not None:
-            (xa, ya), (xb, yb) = shorten_line((xa, ya), (xb, yb), shorten)
 
         f, b = get_rotator_and_inverse((xa, ya), (xb, yb))
         R = f(xb, yb)[0]
@@ -1480,17 +1480,12 @@ class Drawing:
         style.setdefault("linewidth", 1.5)
         shorten = style.pop("shorten", None)
 
-        coos = self._project_coos(
-            coos,
-            style,
-            zorder_delta=style.pop("zorder_delta", 0.0),
-            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
-        )
-
         if shorten is not None:
             try:
+                # different shortening for start and end
                 shrt0, shrt1 = shorten
             except TypeError:
+                # symmetric shortening
                 shrt0 = shrt1 = shorten
 
             if shrt0:
@@ -1503,6 +1498,13 @@ class Drawing:
                 cooa, coob = coos[-2], coos[-1]
                 cooa, coob = shorten_line(cooa, coob, (0, shrt1))
                 coos = (*coos[:-2], cooa, coob)
+
+        coos = self._project_coos(
+            coos,
+            style,
+            zorder_delta=style.pop("zorder_delta", 0.0),
+            zorder_aggregate=style.pop("zorder_aggregate", "mean"),
+        )
 
         N = len(coos)
         moves = [Path.MOVETO] + [Path.CURVE4] * (N - 1)
@@ -2459,15 +2461,87 @@ def get_rotator_and_inverse(pa, pb):
     return forward, inverse
 
 
+def get_rotator_and_inverse_3d(pa, pb):
+    """Get forward and inverse functions that translate ``pa`` to the
+    origin and rotate so that ``pb`` lies along the positive x-axis.
+    """
+    xa, ya, za = pa
+    xb, yb, zb = pb
+    vx, vy, vz = xb - xa, yb - ya, zb - za
+    r = (vx * vx + vy * vy + vz * vz) ** 0.5
+    ux, uy, uz = vx / r, vy / r, vz / r
+
+    # rotation axis k = u × e_x = (0, uz, -uy); s = |k|, c = u · e_x
+    ky, kz = uz, -uy
+    s = (ky * ky + kz * kz) ** 0.5
+    c = ux
+
+    if s < 1e-12:
+        if ux > 0:
+
+            def forward(x, y, z):
+                return x - xa, y - ya, z - za
+
+            def inverse(x, y, z):
+                return x + xa, y + ya, z + za
+        else:
+            # 180° about the y-axis
+            def forward(x, y, z):
+                return -(x - xa), y - ya, -(z - za)
+
+            def inverse(x, y, z):
+                return -x + xa, y + ya, -z + za
+
+        return forward, inverse
+
+    ky, kz = ky / s, kz / s
+    C = 1 - c
+
+    # Rodrigues matrix (kx = 0)
+    r11 = c
+    r12 = -kz * s
+    r13 = ky * s
+    r21 = kz * s
+    r22 = c + ky * ky * C
+    r23 = ky * kz * C
+    r31 = -ky * s
+    r32 = ky * kz * C
+    r33 = c + kz * kz * C
+
+    def forward(x, y, z):
+        """Translate then rotate a point."""
+        x, y, z = x - xa, y - ya, z - za
+        return (
+            r11 * x + r12 * y + r13 * z,
+            r21 * x + r22 * y + r23 * z,
+            r31 * x + r32 * y + r33 * z,
+        )
+
+    def inverse(x, y, z):
+        """Inverse rotate then translate a point."""
+        return (
+            r11 * x + r21 * y + r31 * z + xa,
+            r12 * x + r22 * y + r32 * z + ya,
+            r13 * x + r23 * y + r33 * z + za,
+        )
+
+    return forward, inverse
+
+
 def shorten_line(pa, pb, amount):
-    forward, inverse = get_rotator_and_inverse(pa, pb)
+    if len(pa) == 3:
+        forward, inverse = get_rotator_and_inverse_3d(pa, pb)
+        zero_tail = (0.0, 0.0)
+    else:
+        forward, inverse = get_rotator_and_inverse(pa, pb)
+        zero_tail = (0.0,)
     R = forward(*pb)[0]
     try:
         start, end = amount
     except TypeError:
         start = end = amount
-    ra = (start, 0.0)
-    rb = (R - end, 0.0)
+    ra = (start, *zero_tail)
+    rb = (R - end, *zero_tail)
     return inverse(*ra), inverse(*rb)
 
 
