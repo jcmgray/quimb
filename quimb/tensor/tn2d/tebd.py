@@ -97,6 +97,7 @@ class LocalHam2D(LocalHamGen):
     def build_pepo_propagator_trotterized(
         self,
         x,
+        ordering="sort",
         site_tag_id="I{},{}",
         tags=None,
         upper_ind_id="k{},{}",
@@ -154,7 +155,10 @@ class LocalHam2D(LocalHamGen):
             y_tag_id="Y{}",
         )
 
-        for (coo_a, coo_b), _ in self.terms.items():
+        if ordering is None or isinstance(ordering, str):
+            ordering = self.get_auto_ordering(ordering)
+
+        for coo_a, coo_b in ordering:
             # get a tensor of the local exponentiated term
             U = self.get_gate_expm((coo_a, coo_b), x)
             d = int(U.shape[0] ** 0.5)
