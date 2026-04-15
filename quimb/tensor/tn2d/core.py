@@ -3762,11 +3762,8 @@ class TensorNetwork2D(TensorNetworkGen):
             else:
                 final_contract_opts = ensure_dict(final_contract_opts)
                 final_contract_opts.setdefault("optimize", optimize)
-            return tn.contract(
-                strip_exponent=strip_exponent,
-                inplace=inplace,
-                **final_contract_opts,
-            )
+            final_contract_opts.setdefault("strip_exponent", strip_exponent)
+            return tn.contract(inplace=inplace, **final_contract_opts)
 
         return tn
 
