@@ -901,9 +901,38 @@ class TensorNetworkGen(TensorNetwork):
         """
         tid2site = {}
         for site in self.sites:
-            (tid,) = self._get_tids_from_tags(site)
-            tid2site[tid] = site
+            try:
+                (tid,) = self._get_tids_from_tags(site)
+                tid2site[tid] = site
+            except KeyError:
+                # site not present (e.g. we have called `select_sites`)
+                pass
         return tid2site
+
+    def select_sites(self, sites, virtual=True, with_exponent=False):
+        """Select a sub-tensor network containing only the given sites. This is
+        a simple wrapper that generates the relevant tags and calls
+        ``self.select_any``.
+
+        Parameters
+        ----------
+        sites : sequence[hashable]
+            The sites to select.
+        virtual : bool, optional
+            Whether the returned tensor network views the same tensors (the
+            default) or takes copies (``virtual=False``) from ``self``.
+        with_exponent : bool, optional
+            Whether to propagate the current exponent to the selected sub
+            tensor network.
+
+        Returns
+        -------
+        TensorNetworkGen
+        """
+        tags = tuple(map(self.site_tag, sites))
+        return self.select_any(
+            tags, virtual=virtual, with_exponent=with_exponent
+        )
 
     def bond(self, coo1, coo2):
         """Get the name of the index defining the bond between sites at
