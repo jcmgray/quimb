@@ -14,6 +14,12 @@ Release notes for `quimb`.
 
 - [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add `reduce_opts` for controlling the decomposition options used when reducing each tensor before the main truncating decomposition. For example ``reduce_opts={"method": "qr:cholesky"}``.
 - add [`TensorNetworkGen.select_sites`](quimb.tensor.tnag.core.TensorNetworkGen.select_sites) as a convenience method for selecting a sub network given a list of sites.
+- add [`PEPO_product_operator`](quimb.tensor.tensor_builder.PEPO_product_operator) for bond-dimension-1 PEPOs given by a product of on-site operators.
+- [`PEPO`](quimb.tensor.tn2d.core.PEPO): `apply` can act on another PEPO; add [`trace`](quimb.tensor.tn2d.core.PEPO.trace) and [`partial_transpose`](quimb.tensor.tn2d.core.PEPO.partial_transpose).
+- add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO.
+
+Drawing and schematic updates:
+
 - [`Drawing`](quimb.schematic.Drawing): add orthographic projection mode alongside the existing axonometric projection via the new `projection` parameter (replaces `a`/`b`). Named presets include `"orthographic"`, `"axonometric"`, and `"isometric"`.
 - [`Drawing.translate`](quimb.schematic.Drawing.translate): new context manager to temporarily offset all draw operations in coordinate space (before projection).
 - [`Drawing.translate_screen`](quimb.schematic.Drawing.translate_screen): new context manager to temporarily offset all draw operations in screen space (after projection).
@@ -70,9 +76,6 @@ Other enhancements:
 - [`TensorNetworkGen.flatten`](quimb.tensor.tnag.core.TensorNetworkGen.flatten): add arbitrary geometry flatten method, used in 1D/2D/3D.
 - [`RegionGraph`](quimb.tensor.belief_propagation.regions.RegionGraph): various improvements.
 - add [`hash_kwargs_to_int`](quimb.utils.hash_kwargs_to_int) utility for hashing keyword arguments to a deterministic integer.
-- add [`PEPO_product_operator`](quimb.tensor.tensor_builder.PEPO_product_operator) for bond-dimension-1 PEPOs given by a product of on-site operators.
-- [`PEPO`](quimb.tensor.tn2d.core.PEPO): `apply` can act on another PEPO; add [`trace`](quimb.tensor.tn2d.core.PEPO.trace) and [`partial_transpose`](quimb.tensor.tn2d.core.PEPO.partial_transpose).
-- add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO.
 
 **Bug fixes:**
 
