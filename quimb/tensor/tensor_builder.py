@@ -4120,13 +4120,11 @@ def PEPO_product_operator(
     Parameters
     ----------
     arrays : sequence of sequence of 2D array_like
-        The operators to form a tensor product of, shape ``(Lx, Ly)`` such that
-        ``arrays[i][j]`` is the operator at site ``(i, j)``.
+        The operators to form a tensor product of, shape ``(Lx, Ly)`` such
+        that ``arrays[i][j]`` is the operator at site ``(i, j)``.
     cyclic : bool or tuple[bool, bool], optional
-        Whether to generate a cyclic PEPO or not. Can be ``(cyclic_x, cyclic_y)``
-        to specify each direction separately. Note: the PEPO constructor infers
-        boundary conditions from array shapes; with bond dimension 1, cyclic
-        is not supported and open boundaries are always used.
+        Whether to generate a cyclic PEPO or not. Can be
+        ``(cyclic_x, cyclic_y)`` to specify each direction separately.
     pepo_opts
         Supplied to :class:`~quimb.tensor.tn2d.core.PEPO`.
 
@@ -4138,15 +4136,10 @@ def PEPO_product_operator(
     Lx = len(arrays)
     Ly = len(arrays[0])
 
-    if Lx < 2 or Ly < 2:
-        raise ValueError(
-            "PEPO_product_operator requires Lx >= 2 and Ly >= 2. "
-            "The PEPO constructor infers boundary conditions from array layout."
-        )
-
-    # PEPO infers cyclic from array shapes (requires bond_dim > 1 for cyclic).
-    # With bond_dim=1, always use open boundaries.
-    cyclicx = cyclicy = False
+    try:
+        cyclicx, cyclicy = cyclic
+    except (TypeError, ValueError):
+        cyclicx = cyclicy = cyclic
 
     reshaped_arrays = []
     for i in range(Lx):
@@ -4166,7 +4159,12 @@ def PEPO_product_operator(
             row.append(reshape(arr, tuple(shape)))
         reshaped_arrays.append(row)
 
-    return PEPO(reshaped_arrays, shape="urdlbk", **pepo_opts)
+    return PEPO(
+        reshaped_arrays,
+        shape="urdlbk",
+        cyclic=(cyclicx, cyclicy),
+        **pepo_opts,
+    )
 
 
 @random_seed_fn

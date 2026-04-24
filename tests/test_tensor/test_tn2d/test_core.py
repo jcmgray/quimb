@@ -1,4 +1,3 @@
-import functools
 import itertools
 
 import autoray as ar
@@ -686,24 +685,46 @@ class TestPEPO:
 
     def test_pepo_product_operator(self):
         Lx = Ly = 2
+        N = Lx * Ly
         Z = qu.pauli("Z")
         arrays = [[Z, Z], [Z, Z]]
         P = qtn.PEPO_product_operator(arrays)
         flat = [arrays[i][j] for i in range(Lx) for j in range(Ly)]
-        expected = functools.reduce(np.kron, flat)
+        expected = qu.ikron(flat, dims=[2] * N, inds=range(N))
         assert_allclose(P.to_qarray(), expected)
 
         I2 = np.eye(2)
         arrays_i = [[I2, I2], [I2, I2]]
         Pi = qtn.PEPO_product_operator(arrays_i)
-        assert_allclose(Pi.to_qarray(), np.eye(2 ** (Lx * Ly)))
+        assert_allclose(Pi.to_qarray(), np.eye(2**N))
 
-    def test_pepo_product_operator_shape_raises(self):
+    @pytest.mark.parametrize("cyclic", [True, (True, False), (False, True)])
+    def test_pepo_product_operator_cyclic(self, cyclic):
+        # 3x3 is the smallest grid where shape-inference can distinguish
+        # cyclic in each direction (mixed cyclicity on 2x2 is ambiguous)
+        Lx = Ly = 3
+        N = Lx * Ly
+        X = qu.pauli("X")
         Z = qu.pauli("Z")
-        with pytest.raises(ValueError, match="Lx >= 2"):
-            qtn.PEPO_product_operator([[Z, Z]])
-        with pytest.raises(ValueError, match="Lx >= 2"):
-            qtn.PEPO_product_operator([[Z], [Z]])
+        arrays = [
+            [X if (i + j) % 2 else Z for j in range(Ly)] for i in range(Lx)
+        ]
+
+        P = qtn.PEPO_product_operator(arrays, cyclic=cyclic)
+
+        # confirm boundary conditions match explicit request
+        try:
+            cx_expected, cy_expected = cyclic
+        except TypeError:
+            cx_expected = cy_expected = cyclic
+        assert P.is_cyclic_x() == cx_expected
+        assert P.is_cyclic_y() == cy_expected
+
+        # dense should be the Kronecker product regardless of BC (bond
+        # dim 1 cyclic wraps add no new structure to the dense operator)
+        flat = [arrays[i][j] for i in range(Lx) for j in range(Ly)]
+        expected = qu.ikron(flat, dims=[2] * N, inds=range(N))
+        assert_allclose(P.to_qarray(), expected)
 
     def test_apply_pepo_to_pepo(self):
         A = qtn.PEPO.rand(Lx=3, Ly=2, bond_dim=2, seed=2)
@@ -714,6 +735,21 @@ class TestPEPO:
         assert_allclose(Ad @ Bd, Cd)
         Cc = A.apply(B, compress=True, max_bond=4)
         assert Cc.max_bond() == 4
+
+    def test_apply_pepo_inplace_consumes_acting(self):
+        # inplace=True should leave `other` untouched and consume `self`
+        A = qtn.PEPO.rand(Lx=2, Ly=2, bond_dim=2, seed=11)
+        x = qtn.PEPS.rand(Lx=2, Ly=2, bond_dim=2, seed=12)
+
+        Ad = A.to_qarray()
+        xd_before = x.to_qarray()
+
+        y = A.apply_(x)
+
+        # other (x) must be untouched
+        assert_allclose(x.to_qarray(), xd_before)
+        # result equals A @ x
+        assert_allclose(y.to_qarray(), Ad @ xd_before)
 
     def test_pepo_trace(self):
         P = qtn.PEPO.rand(Lx=2, Ly=2, bond_dim=2, seed=4)
@@ -728,9 +764,38 @@ class TestPEPO:
         P3 = P.partial_transpose((site,))
         assert_allclose(P1.to_qarray(), P3.to_qarray())
 
+    def test_pepo_partial_transpose_vs_dense(self):
+        # non-involution check: compare PEPO partial_transpose to the
+        # dense reference qu.partial_transpose on a non-hermitian PEPO
+        Lx, Ly = 2, 3
+        P = qtn.PEPO.rand(Lx=Lx, Ly=Ly, bond_dim=2, seed=7)
+        N = Lx * Ly
+        dims = [2] * N
+
+        # test a few different subsystem choices
+        for sysa_sites in [
+            [(0, 0)],
+            [(0, 1), (1, 2)],
+            [(0, 0), (0, 1), (0, 2)],
+        ]:
+            # gen_site_coos for TN2D is product(range(Lx), range(Ly)), so
+            # the flat index for to_qarray is i*Ly + j
+            sysa_flat = [i * Ly + j for (i, j) in sysa_sites]
+
+            P_pt = P.partial_transpose(sysa_sites)
+            expected = qu.partial_transpose(
+                P.to_qarray(), dims=dims, sysa=sysa_flat
+            )
+            assert_allclose(P_pt.to_qarray(), expected)
+            # original unchanged
+            assert_allclose(P.to_qarray(), P.to_qarray())
+
     def test_pepo_apply_typeerror(self):
         P = qtn.PEPO.rand(Lx=2, Ly=2, bond_dim=2, seed=6)
-        with pytest.raises(TypeError, match="PEPS or PEPO"):
+        with pytest.raises(
+            TypeError,
+            match="TensorNetworkGenOperator or TensorNetworkGenVector",
+        ):
             P.apply("not a peps")
 
     def test_build_pepo_propagator_trotterized_identity(self):

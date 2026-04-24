@@ -548,7 +548,7 @@ def tensor_network_ag_gate(
 
     tn = self if inplace else self.copy()
 
-    if not isinstance(where, (tuple, list)):
+    if tn.has_site(where):
         where = (where,)
 
     tags = tags_to_oset(tags)
@@ -785,6 +785,17 @@ class TensorNetworkGen(TensorNetwork):
         if getattr(self, "_site_set", None) is None:
             self._site_set = set(self.sites)
         return self._site_set
+
+    def has_site(self, site):
+        """Whether ``site`` is a valid site of this tensor network. The generic
+        implementation tests membership in the full site set; structured
+        subclasses (1D, 2D, 3D) override this with a cheap bounds check.
+        Unhashable inputs return ``False``.
+        """
+        try:
+            return site in self._get_site_set()
+        except TypeError:
+            return False
 
     def gen_sites_present(self):
         """Generate the sites which are currently present (e.g. if a local view
@@ -1881,6 +1892,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         layer_tags : tuple of str, optional
             The tags to apply to the ket and bra tensor network layers.
         """
+        if self.has_site(where):
+            where = (where,)
+
         where = set(where)
         reindex_map = {}
         phys_inds = set()
@@ -1945,6 +1959,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         array or Tensor or dict or (array, float), (Tensor, float)
         """
+        if self.has_site(where):
+            where = (where,)
+
         k_inds = tuple(map(self.site_ind, where))
         bra_ind_id = "_bra{}"
         b_inds = tuple(map(bra_ind_id.format, where))
@@ -3868,6 +3885,159 @@ class TensorNetworkGenOperator(TensorNetworkGen):
 
     gate_sandwich_with_op_lazy_ = functools.partialmethod(
         gate_sandwich_with_op_lazy, inplace=True
+    )
+
+    def apply(
+        self,
+        other,
+        compress=False,
+        contract=True,
+        inplace=False,
+        **compress_opts,
+    ):
+        r"""Act with this operator tensor network on another operator or
+        vector tensor network (``other``), returning a new tensor network with
+        the same structure/outer indices as ``other``.
+
+        For a vector (``TensorNetworkGenVector``)::
+
+                   | | | | | | | | | | | | | | | | | |
+             self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
+                   | | | | | | | | | | | | | | | | | |
+            other: x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x
+
+                                   -->
+
+                   | | | | | | | | | | | | | | | | | |   <- other.site_ind_id
+              out: y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y
+
+        For an operator (``TensorNetworkGenOperator``)::
+
+                   | | | | | | | | | | | | | | | | | |
+             self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
+                   | | | | | | | | | | | | | | | | | |
+            other: B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B
+                   | | | | | | | | | | | | | | | | | |
+
+                                   -->
+
+                   | | | | | | | | | | | | | | | | | |   <- other.upper_ind_id
+              out: C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C
+                   | | | | | | | | | | | | | | | | | |   <- other.lower_ind_id
+
+        Parameters
+        ----------
+        other : TensorNetworkGenOperator or TensorNetworkGenVector
+            The tensor network to act on.
+        compress : bool, optional
+            Whether to compress the resulting tensor network.
+        contract : bool, optional
+            Whether to contract the tensors at each site after applying.
+        inplace : bool, optional
+            Whether to act in place *on this operator* (``self``, the one
+            that is acting) rather than on ``other`` (the one being acted
+            on). The returned tensor network always has the same outer
+            structure as ``other``; with ``inplace=True`` the tensors and
+            indices of ``self`` are consumed (reused without copying) into
+            the result, so ``self`` should not be used afterwards. ``other``
+            is always left untouched.
+        compress_opts
+            Supplied to the ``compress`` method of the resulting tensor network.
+
+        Returns
+        -------
+        TensorNetworkGenOperator or TensorNetworkGenVector
+            Same type as ``other``.
+        """
+        if isinstance(other, TensorNetworkGenOperator):
+            return tensor_network_apply_op_op(
+                A=self,
+                B=other,
+                compress=compress,
+                contract=contract,
+                inplace_A=inplace,
+                **compress_opts,
+            )
+        if isinstance(other, TensorNetworkGenVector):
+            return tensor_network_apply_op_vec(
+                A=self,
+                x=other,
+                compress=compress,
+                contract=contract,
+                inplace_A=inplace,
+                **compress_opts,
+            )
+        raise TypeError(
+            "Can only apply a TensorNetworkGenOperator to a "
+            "TensorNetworkGenOperator or TensorNetworkGenVector, got "
+            f"{type(other)}."
+        )
+
+    apply_ = functools.partialmethod(apply, inplace=True)
+    dot = apply
+
+    def trace(self, left_inds=None, right_inds=None, **contract_opts):
+        """Take the trace of this operator tensor network by contracting
+        the upper and lower physical indices on each currently present site.
+
+        Parameters
+        ----------
+        left_inds : sequence of str, optional
+            The 'left' (upper / ket-like) indices to trace over. If not given,
+            defaults to the upper index at each present site.
+        right_inds : sequence of str, optional
+            The 'right' (lower / bra-like) indices to trace over. If not given,
+            defaults to the lower index at each present site.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract_tags`.
+        """
+        if left_inds is None:
+            left_inds = tuple(map(self.upper_ind, self.gen_sites_present()))
+        if right_inds is None:
+            right_inds = tuple(map(self.lower_ind, self.gen_sites_present()))
+        return super().trace(left_inds, right_inds, **contract_opts)
+
+    def partial_transpose(self, sysa, inplace=False):
+        """Perform a partial transpose on this operator tensor network, by
+        swapping the upper and lower physical indices on the sites in
+        ``sysa``.
+
+        Since sites here may be arbitrary hashable objects (e.g. ``int``,
+        ``(i, j)`` tuples, strings, ...), ``sysa`` is treated as a single
+        site if it is itself a valid site of this tensor network, and as an
+        iterable of sites otherwise.
+
+        Parameters
+        ----------
+        sysa : site or sequence of sites
+            The site(s) to transpose the physical indices on. A single hashable
+            site is auto-wrapped; anything else is treated as an iterable of
+            sites.
+        inplace : bool, optional
+            Whether to perform the partial transposition inplace.
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        tn = self if inplace else self.copy()
+
+        if tn.has_site(sysa):
+            sysa = (sysa,)
+        else:
+            # ensure we can iterate multiple times
+            sysa = tuple(sysa)
+
+        # unique temporary index per site - works for arbitrary hashable sites
+        tmp_ids = {s: rand_uuid() for s in sysa}
+        tn.reindex_({tn.upper_ind(s): tmp_ids[s] for s in sysa})
+        tn.reindex_({tn.lower_ind(s): tn.upper_ind(s) for s in sysa})
+        tn.reindex_({tmp_ids[s]: tn.lower_ind(s) for s in sysa})
+        return tn
+
+    partial_transpose_ = functools.partialmethod(
+        partial_transpose, inplace=True
     )
 
 

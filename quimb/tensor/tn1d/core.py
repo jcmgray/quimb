@@ -45,8 +45,6 @@ from ..tnag.core import (
     TensorNetworkGenVector,
     tensor_network_ag_sum,
     tensor_network_align,
-    tensor_network_apply_op_op,
-    tensor_network_apply_op_vec,
 )
 
 align_TN_1D = deprecated(
@@ -496,6 +494,10 @@ class TensorNetwork1D(TensorNetworkGen):
             return tuple(map(self.site_tag, self.slice2sites(x)))
 
         return x
+
+    def has_site(self, site):
+        """Whether ``site`` is a valid integer site index in ``[0, L)``."""
+        return isinstance(site, Integral) and (0 <= site < self.L)
 
     def contract_structured(
         self,
@@ -4392,87 +4394,6 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
 
     add_MPO_ = functools.partialmethod(add_MPO, inplace=True)
 
-    def _apply_mps(
-        self, other, compress=False, contract=True, **compress_opts
-    ):
-        return tensor_network_apply_op_vec(
-            A=self,
-            x=other,
-            compress=compress,
-            contract=contract,
-            **compress_opts,
-        )
-
-    def _apply_mpo(
-        self, other, compress=False, contract=True, **compress_opts
-    ):
-        return tensor_network_apply_op_op(
-            A=self,
-            B=other,
-            contract=contract,
-            compress=compress,
-            **compress_opts,
-        )
-
-    def apply(self, other, compress=False, **compress_opts):
-        r"""Act with this MPO on another MPO or MPS, such that the resulting
-        object has the same tensor network structure/indices as ``other``.
-
-        For an MPS::
-
-                   | | | | | | | | | | | | | | | | | |
-             self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
-                   | | | | | | | | | | | | | | | | | |
-            other: x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x
-
-                                   -->
-
-                   | | | | | | | | | | | | | | | | | |   <- other.site_ind_id
-              out: y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y=y
-
-        For an MPO::
-
-                   | | | | | | | | | | | | | | | | | |
-             self: A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A-A
-                   | | | | | | | | | | | | | | | | | |
-            other: B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B-B
-                   | | | | | | | | | | | | | | | | | |
-
-                                   -->
-
-                   | | | | | | | | | | | | | | | | | |   <- other.upper_ind_id
-              out: C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C=C
-                   | | | | | | | | | | | | | | | | | |   <- other.lower_ind_id
-
-        The resulting TN will have the same structure/indices as ``other``, but
-        probably with larger bonds (depending on compression).
-
-
-        Parameters
-        ----------
-        other : MatrixProductOperator or MatrixProductState
-            The object to act on.
-        compress : bool, optional
-            Whether to compress the resulting object.
-        compress_opts
-            Supplied to :meth:`TensorNetwork1DFlat.compress`.
-
-        Returns
-        -------
-        MatrixProductOperator or MatrixProductState
-        """
-        if isinstance(other, MatrixProductState):
-            return self._apply_mps(other, compress=compress, **compress_opts)
-        elif isinstance(other, MatrixProductOperator):
-            return self._apply_mpo(other, compress=compress, **compress_opts)
-        else:
-            raise TypeError(
-                "Can only Dot with a MatrixProductOperator or a "
-                f"MatrixProductState, got {type(other)}"
-            )
-
-    dot = apply
-
     def permute_arrays(self, shape="lrud"):
         """Permute the indices of each tensor in this MPO to match ``shape``.
         This doesn't change how the overall object interacts with other tensor
@@ -4495,42 +4416,6 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
                 inds["r"] = self.bond(i, (i + 1) % self.L)
             inds = [inds[s] for s in shape if s in inds]
             self[i].transpose_(*inds)
-
-    def trace(self, left_inds=None, right_inds=None):
-        """Take the trace of this MPO."""
-        if left_inds is None:
-            left_inds = map(self.upper_ind, self.gen_sites_present())
-        if right_inds is None:
-            right_inds = map(self.lower_ind, self.gen_sites_present())
-
-        return super().trace(left_inds, right_inds)
-
-    def partial_transpose(self, sysa, inplace=False):
-        """Perform the partial transpose on this MPO by swapping the bra and
-        ket indices on sites in ``sysa``.
-
-        Parameters
-        ----------
-        sysa : sequence of int or int
-            The sites to transpose indices on.
-        inplace : bool, optional
-            Whether to perform the partial transposition inplace.
-
-        Returns
-        -------
-        MatrixProductOperator
-        """
-        tn = self if inplace else self.copy()
-
-        if isinstance(sysa, Integral):
-            sysa = (sysa,)
-
-        tmp_ind_id = "__tmp_{}__"
-
-        tn.reindex_({tn.upper_ind(i): tmp_ind_id.format(i) for i in sysa})
-        tn.reindex_({tn.lower_ind(i): tn.upper_ind(i) for i in sysa})
-        tn.reindex_({tmp_ind_id.format(i): tn.lower_ind(i) for i in sysa})
-        return tn
 
     def rand_state(self, bond_dim, **mps_opts):
         """Get a random vector matching this MPO."""
