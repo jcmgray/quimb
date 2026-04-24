@@ -599,6 +599,23 @@ class TensorNetwork3D(TensorNetworkGen):
                 pass
         return coo
 
+    def has_site(self, site):
+        """Whether ``site`` is a valid ``(i, j, k)`` coordinate of this 3D
+        tensor network, with ``0 <= i < Lx``, ``0 <= j < Ly`` and
+        ``0 <= k < Lz``.
+        """
+        if not isinstance(site, tuple) or len(site) != 3:
+            return False
+        i, j, k = site
+        return (
+            isinstance(i, Integral)
+            and isinstance(j, Integral)
+            and isinstance(k, Integral)
+            and (0 <= i < self.Lx)
+            and (0 <= j < self.Ly)
+            and (0 <= k < self.Lz)
+        )
+
     def _get_tids_from_tags(self, tags, which="all"):
         """This is the function that lets coordinates such as ``(i, j, k)`` be
         used for many 'tag' based functions.
@@ -2696,7 +2713,7 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
         """Apply a gate ``G`` to sites ``where``, preserving the outer site
         inds.
         """
-        if is_lone_coo(where):
+        if self.has_site(where):
             where = (where,)
         else:
             where = tuple(where)
@@ -3141,7 +3158,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         get=None,
         **contract_boundary_opts,
     ):
-        if is_lone_coo(keep):
+        if self.has_site(keep):
             keep = (keep,)
 
         tags = [self.site_tag(i, j, k) for i, j, k in keep]
@@ -3236,7 +3253,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             symmetrized = not flatten
 
         # get minimal covering cell, allow single coordinate
-        if is_lone_coo(keep):
+        if self.has_site(keep):
             keep = (keep,)
         cell = sites_to_cell(keep)
 

@@ -32,7 +32,6 @@ from ..tnag.core import (
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
     tensor_network_ag_sum,
-    tensor_network_apply_op_vec,
 )
 
 
@@ -500,6 +499,20 @@ class TensorNetwork2D(TensorNetworkGen):
             except (ValueError, TypeError):
                 pass
         return x
+
+    def has_site(self, site):
+        """Whether ``site`` is a valid ``(i, j)`` coordinate of this 2D
+        tensor network, with ``0 <= i < Lx`` and ``0 <= j < Ly``.
+        """
+        if not isinstance(site, tuple) or len(site) != 2:
+            return False
+        i, j = site
+        return (
+            isinstance(i, Integral)
+            and isinstance(j, Integral)
+            and (0 <= i < self.Lx)
+            and (0 <= j < self.Ly)
+        )
 
     def _get_tids_from_tags(self, tags, which="all"):
         """This is the function that lets coordinates such as ``(i, j)`` be
@@ -4099,7 +4112,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         For one site gates when one of the 'split' methods is supplied
         ``contract=True`` is assumed.
         """
-        if is_lone_coo(where):
+        if self.has_site(where):
             where = (where,)
         else:
             where = tuple(where)
@@ -5075,6 +5088,13 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         String specifier for naming convention of row ('x') tags.
     y_tag_id : str, optional
         String specifier for naming convention of column ('y') tags.
+    cyclic : None, bool, or tuple[bool, bool], optional
+        Whether the lattice is cyclic in the x and y directions. If
+        ``None`` (default), infer from the array shapes (requires any
+        non-singleton bond dimension). Pass an explicit ``bool`` or
+        ``(cyclic_x, cyclic_y)`` to override inference; this is needed
+        when bond dimensions are 1 (shape inference then cannot detect
+        cyclic boundaries).
     """
 
     _EXTRA_PROPS = (
@@ -5098,6 +5118,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         site_tag_id="I{},{}",
         x_tag_id="X{}",
         y_tag_id="Y{}",
+        cyclic=None,
         **tn_opts,
     ):
         if isinstance(arrays, PEPO):
@@ -5119,8 +5140,15 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         ix = defaultdict(rand_uuid)
         tensors = []
 
-        cyclicx = sum(d > 1 for d in ar.shape(arrays[0][1])) == 6
-        cyclicy = sum(d > 1 for d in ar.shape(arrays[1][0])) == 6
+        if cyclic is None:
+            # infer boundary conditions from array shapes
+            cyclicx = sum(d > 1 for d in ar.shape(arrays[0][1])) == 6
+            cyclicy = sum(d > 1 for d in ar.shape(arrays[1][0])) == 6
+        else:
+            try:
+                cyclicx, cyclicy = cyclic
+            except (TypeError, ValueError):
+                cyclicx = cyclicy = cyclic
 
         for i, j in product(range(self.Lx), range(self.Ly)):
             array = arrays[i][j]
@@ -5352,40 +5380,6 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         return tensor_network_ag_sum(self, other, inplace=inplace)
 
     add_PEPO_ = functools.partialmethod(add_PEPO, inplace=True)
-
-    def _apply_peps(
-        self, other, compress=False, contract=True, **compress_opts
-    ):
-        return tensor_network_apply_op_vec(
-            A=self,
-            x=other,
-            compress=compress,
-            contract=contract,
-            **compress_opts,
-        )
-
-    def apply(self, other, compress=False, **compress_opts):
-        """Act with this PEPO on ``other``, returning a new TN like ``other``
-        with the same outer indices.
-
-        Parameters
-        ----------
-        other : PEPS
-            The TN to act on.
-        compress : bool, optional
-            Whether to compress the resulting TN.
-        compress_opts
-            Supplied to
-            :meth:`~quimb.tensor.tn2d.core.TensorNetwork2DFlat.compress`.
-
-        Returns
-        -------
-        TensorNetwork2DFlat
-        """
-        if isinstance(other, PEPS):
-            return self._apply_peps(other, compress=compress, **compress_opts)
-
-        raise TypeError("Can only apply PEPO to PEPS.")
 
     def show(self):
         """Print a unicode schematic of this PEPO and its bond dimensions."""

@@ -1,6 +1,6 @@
 """Tools for performing TEBD like algorithms on a 2D lattice."""
 
-from itertools import starmap
+from itertools import product, starmap
 
 import numpy as np
 import scipy.sparse.linalg as spla
@@ -93,6 +93,117 @@ class LocalHam2D(LocalHamGen):
     def nsites(self):
         """The number of sites in the system."""
         return self.Lx * self.Ly
+
+    def build_pepo_propagator_trotterized(
+        self,
+        x,
+        ordering="sort",
+        site_tag_id="I{},{}",
+        tags=None,
+        upper_ind_id="k{},{}",
+        lower_ind_id="b{},{}",
+        shape="urdlbk",
+        contract_sites=True,
+        **split_opts,
+    ):
+        """Build a PEPO representation of ``expm(H * x)``, i.e. the imaginary
+        or real time propagator of this local 2D hamiltonian, using a first
+        order trotterized decomposition.
+
+        Parameters
+        ----------
+        x : float
+            The time to evolve for. Note this does **not** include the
+            imaginary prefactor of the Schrodinger equation, so real ``x``
+            corresponds to imaginary time evolution, and vice versa.
+        site_tag_id : str
+            A string specifying how to tag the tensors at each site. Should
+            contain two ``'{}'`` placeholders for (row, col). It is used to
+            generate the actual tags like: ``site_tag_id.format(i, j)``.
+        tags : str or sequence of str, optional
+            Global tags to attach to all tensors.
+        upper_ind_id : str
+            A string specifying how to label the upper physical site indices.
+            Should contain two ``'{}'`` placeholders for (row, col).
+        lower_ind_id : str
+            A string specifying how to label the lower physical site indices.
+            Should contain two ``'{}'`` placeholders for (row, col).
+        shape : str, optional
+            String specifying layout of the tensors. E.g. 'urdlbk' (the default)
+            indicates the shape corresponds up-bond, right-bond, down-bond,
+            left-bond, bra (lower) physical index, ket (upper) physical index.
+        contract_sites : bool, optional
+            Whether to contract all the decomposed factors at each site to
+            yield a single tensor per site, by default True.
+        split_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+
+        Returns
+        -------
+        PEPO
+        """
+        from ..tensor_core import Tensor
+        from .core import PEPO
+
+        pepo = PEPO.new(
+            Lx=self.Lx,
+            Ly=self.Ly,
+            site_tag_id=site_tag_id,
+            upper_ind_id=upper_ind_id,
+            lower_ind_id=lower_ind_id,
+            x_tag_id="X{}",
+            y_tag_id="Y{}",
+        )
+
+        if ordering is None or isinstance(ordering, str):
+            ordering = self.get_auto_ordering(ordering)
+
+        for coo_a, coo_b in ordering:
+            # get a tensor of the local exponentiated term
+            U = self.get_gate_expm((coo_a, coo_b), x)
+            d = int(U.shape[0] ** 0.5)
+            U = do("reshape", U, (d, d, d, d))
+
+            ia, ja = coo_a
+            ib, jb = coo_b
+
+            ki = upper_ind_id.format(ia, ja)
+            kj = upper_ind_id.format(ib, jb)
+            bi = lower_ind_id.format(ia, ja)
+            bj = lower_ind_id.format(ib, jb)
+
+            # split spatially
+            tnU = Tensor(
+                data=U,
+                inds=(ki, kj, bi, bj),
+            ).split(
+                left_inds=(ki, bi),
+                ltags=site_tag_id.format(ia, ja),
+                rtags=site_tag_id.format(ib, jb),
+                **split_opts,
+            )
+            # add tensors to pepo
+            pepo.gate_inds_with_tn_(
+                inds=(ki, kj),
+                gate=tnU,
+                gate_inds_inner=(bi, bj),
+                gate_inds_outer=(ki, kj),
+            )
+
+        if contract_sites:
+            # combine site groups into single tensors
+            for i, j in product(range(self.Lx), range(self.Ly)):
+                st = pepo.site_tag(i, j)
+                if st in pepo.tag_map:
+                    pepo ^= st
+
+        if tags is not None:
+            pepo.add_tag(tags)
+
+        if shape is not None and hasattr(pepo, "permute_arrays"):
+            pepo.permute_arrays(shape)
+
+        return pepo
 
     def __repr__(self):
         s = "<LocalHam2D(Lx={}, Ly={}, num_terms={})>"

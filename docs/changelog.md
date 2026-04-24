@@ -14,6 +14,14 @@ Release notes for `quimb`.
 
 - [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add `reduce_opts` for controlling the decomposition options used when reducing each tensor before the main truncating decomposition. For example ``reduce_opts={"method": "qr:cholesky"}``.
 - add [`TensorNetworkGen.select_sites`](quimb.tensor.tnag.core.TensorNetworkGen.select_sites) as a convenience method for selecting a sub network given a list of sites.
+- add [`PEPO_product_operator`](quimb.tensor.tensor_builder.PEPO_product_operator) for bond-dimension-1 PEPOs given by a product of on-site operators, including cyclic boundary conditions via ``cyclic=True`` or ``cyclic=(cyclic_x, cyclic_y)``.
+- [`PEPO`](quimb.tensor.tn2d.core.PEPO): accept explicit ``cyclic`` kwarg in the constructor, to override shape-based boundary-condition inference (required for bond dimension 1 cyclic PEPOs).
+- [`TensorNetworkGenOperator`](quimb.tensor.tnag.core.TensorNetworkGenOperator): add generic [`apply`](quimb.tensor.tnag.core.TensorNetworkGenOperator.apply) (dispatching on operator/vector tensor networks), [`trace`](quimb.tensor.tnag.core.TensorNetworkGenOperator.trace) and [`partial_transpose`](quimb.tensor.tnag.core.TensorNetworkGenOperator.partial_transpose) methods. These now work for arbitrary geometry operator tensor networks (including MPO and PEPO); ``partial_transpose`` supports arbitrary hashable site labels. ``apply`` also gains an ``inplace`` option that propagates to the *acting* operator rather than the one being acted on.
+- add [`TensorNetworkGen.has_site`](quimb.tensor.tnag.core.TensorNetworkGen.has_site) to test whether an object is a valid site label of a tensor network. The generic implementation checks membership in the site set; 1D, 2D and 3D tensor networks override it with a fast bounds check.
+- add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO.
+
+Drawing and schematic updates:
+
 - [`Drawing`](quimb.schematic.Drawing): add orthographic projection mode alongside the existing axonometric projection via the new `projection` parameter (replaces `a`/`b`). Named presets include `"orthographic"`, `"axonometric"`, and `"isometric"`.
 - [`Drawing.translate`](quimb.schematic.Drawing.translate): new context manager to temporarily offset all draw operations in coordinate space (before projection).
 - [`Drawing.translate_screen`](quimb.schematic.Drawing.translate_screen): new context manager to temporarily offset all draw operations in screen space (after projection).
