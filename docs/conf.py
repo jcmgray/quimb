@@ -35,14 +35,15 @@ version = ".".join(release.split(".")[:2])
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "sphinx.ext.intersphinx",
-    "sphinx.ext.extlinks",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.linkcode",
-    "myst_nb",
-    "sphinx_design",
-    "sphinx_copybutton",
     "autoapi.extension",
+    "myst_nb",
+    "sphinx_copybutton",
+    "sphinx_design",
+    "sphinx.ext.autosectionlabel",
+    "sphinx.ext.extlinks",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.linkcode",
+    "sphinx.ext.napoleon",
 ]
 
 # msyt_nb configuration
@@ -55,6 +56,7 @@ myst_enable_extensions = [
     "dollarmath",
     "html_image",
 ]
+autosectionlabel_prefix_document = True
 
 
 # sphinx-autoapi
@@ -158,7 +160,7 @@ def linkcode_resolve(domain, info):
 
     if "+" in quimb.__version__:
         return (
-            f"https://github.com/jcmgray/quimb/blob/main/quimb/{fn}{linespec}"
+            f"https://github.com/jcmgray/quimb/blob/HEAD/quimb/{fn}{linespec}"
         )
     else:
         return (
