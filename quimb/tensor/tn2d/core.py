@@ -3435,6 +3435,7 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=False,
         canonize_opts=None,
+        gauge_power=1.0,
         lazy=False,
         strip_exponent=False,
         equalize_norms="auto",
@@ -3456,6 +3457,14 @@ class TensorNetwork2D(TensorNetworkGen):
             The maximum bond dimension of the projector pairs inserted.
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
+        canonize : bool, optional
+            Whether to canonize all tensors before computing projectors,
+            via :meth:`gauge_all_simple_`.
+        canonize_opts : None or dict, optional
+            Additional options to pass to :meth:`gauge_all_simple_`.
+        gauge_power : float, optional
+            If `canonize=True`, the power to which to raise the computed bond
+            gauge weights when before computing the compressed projectors.
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
@@ -3566,6 +3575,7 @@ class TensorNetwork2D(TensorNetworkGen):
                         contract_opts=contract_opts,
                         reduce_opts=reduce_opts,
                         compress_opts=compress_opts,
+                        gauge_power=gauge_power,
                     )
 
             retag_map[r.x_tag(i)] = r.x_tag(i // 2)
@@ -3603,6 +3613,7 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=False,
         canonize_opts=None,
+        gauge_power=1.0,
         sequence=("x", "y"),
         max_separation=1,
         max_unfinished=1,
@@ -3635,11 +3646,13 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff : float, optional
             The cutoff for the singular values of the projector pairs.
         canonize : bool, optional
-            Whether to canonize all tensors before each contraction,
-            via :meth:`gauge_all`.
+            Whether to canonize all tensors before computing projectors,
+            via :meth:`gauge_all_simple_`.
         canonize_opts : None or dict, optional
-            Additional options to pass to
-            :meth:`gauge_all`.
+            Additional options to pass to :meth:`gauge_all_simple_`.
+        gauge_power : float, optional
+            If `canonize=True`, the power to which to raise the computed bond
+            gauge weights when before computing the compressed projectors.
         sequence : tuple of str, optional
             The directions to contract in.  Default is to contract in all
             directions.
@@ -3749,6 +3762,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 max_bond=max_bond,
                 canonize=canonize,
                 canonize_opts=canonize_opts,
+                gauge_power=gauge_power,
                 cutoff=cutoff,
                 lazy=lazy,
                 equalize_norms=equalize_norms,

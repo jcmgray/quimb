@@ -57,4 +57,5 @@ div.cell div.cell_input {
 
 code.literal {
 	color: hsl(32, 85%, 50%);
+	font-weight: 450;
 }

@@ -27,6 +27,7 @@ def tensor_network_ag_compress_projector(
     contract_opts=None,
     reduce_opts=None,
     compress_opts=None,
+    gauge_power=1.0,
     inplace=False,
     **kwargs,
 ):
@@ -99,6 +100,8 @@ def tensor_network_ag_compress_projector(
     edges, _ = create_lazy_edge_map(tn, site_tags)
 
     if canonize:
+        # XXX: use belief propagation messages for speed here?
+
         # optionally precondition the uncontracted network
         canonize_opts = ensure_dict(canonize_opts)
         gauges = canonize_opts.pop("gauges", {})
@@ -147,6 +150,7 @@ def tensor_network_ag_compress_projector(
             contract_opts=contract_opts,
             reduce_opts=reduce_opts,
             compress_opts=compress_opts,
+            gauge_power=gauge_power,
         )
 
     if not lazy:
