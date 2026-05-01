@@ -10657,7 +10657,7 @@ class TensorNetwork:
             if cache_key in cache:
                 continue
 
-            found = False
+            cands = []
             for lix, rix in gen_bipartitions(t.inds):
                 tl, tr = t.split(
                     lix,
@@ -10667,25 +10667,24 @@ class TensorNetwork:
                     **split_opts,
                 )
                 new_size = max(tl.size, tr.size)
-                if new_size < t.size:
-                    found = True
-                    break
+                score = new_size / t.size
+                if score < 1.0:
+                    cands.append((score, lix, rix, tl, tr))
 
-            if found:
-                tn.pop_tensor(tid)
-                tn |= tl
-                tn |= tr
-
-                if equalize_norms:
-                    tn.strip_exponent(
-                        tl, equalize_norms, check_zero=check_zero
-                    )
-                    tn.strip_exponent(
-                        tr, equalize_norms, check_zero=check_zero
-                    )
-
-            else:
+            if not cands:
                 cache.add(cache_key)
+                continue
+
+            # accept the decomposition that minimizes the new size
+            _, lix, rix, tl, tr = min(cands, key=lambda x: x[0])
+
+            tn.pop_tensor(tid)
+            tn |= tl
+            tn |= tr
+
+            if equalize_norms:
+                tn.strip_exponent(tl, equalize_norms, check_zero=check_zero)
+                tn.strip_exponent(tr, equalize_norms, check_zero=check_zero)
 
         return tn
 
@@ -10778,7 +10777,7 @@ class TensorNetwork:
                     cache.add(key)
                 continue
 
-            # perform the decomposition that minimizes the new size
+            # accept the decomposition that minimizes the new size
             _, pair, tl, tr = min(cands, key=lambda x: x[0])
             for tid in tuple(pair):
                 tn.pop_tensor(tid)
