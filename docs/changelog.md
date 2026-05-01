@@ -18,7 +18,9 @@ Release notes for `quimb`.
 - [`PEPO`](quimb.tensor.tn2d.core.PEPO): accept explicit ``cyclic`` kwarg in the constructor, to override shape-based boundary-condition inference (required for bond dimension 1 cyclic PEPOs).
 - [`TensorNetworkGenOperator`](quimb.tensor.tnag.core.TensorNetworkGenOperator): add generic [`apply`](quimb.tensor.tnag.core.TensorNetworkGenOperator.apply) (dispatching on operator/vector tensor networks), [`trace`](quimb.tensor.tnag.core.TensorNetworkGenOperator.trace) and [`partial_transpose`](quimb.tensor.tnag.core.TensorNetworkGenOperator.partial_transpose) methods. These now work for arbitrary geometry operator tensor networks (including MPO and PEPO); ``partial_transpose`` supports arbitrary hashable site labels. ``apply`` also gains an ``inplace`` option that propagates to the *acting* operator rather than the one being acted on.
 - add [`TensorNetworkGen.has_site`](quimb.tensor.tnag.core.TensorNetworkGen.has_site) to test whether an object is a valid site label of a tensor network. The generic implementation checks membership in the site set; 1D, 2D and 3D tensor networks override it with a fast bounds check.
-- add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO.
+- add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO. Accepts an `ordering` argument to control the order in which terms are applied.
+- [`TensorNetwork.split_simplify`](quimb.tensor.tensor_core.TensorNetwork.split_simplify): consider all candidate bipartitions for each tensor and accept the one that minimizes the resulting maximum tensor size, rather than the first reduction found.
+- [`contract_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg), [`coarse_grain_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.coarse_grain_hotrg), their 3D counterparts, and [`tensor_network_ag_compress_projector`](quimb.tensor.tnag.compress.tensor_network_ag_compress_projector): add `gauge_power` parameter to control the power applied to the bond gauge weights when `canonize=True` before computing the compressed projectors.
 
 Drawing and schematic updates:
 
@@ -27,6 +29,10 @@ Drawing and schematic updates:
 - [`Drawing.translate_screen`](quimb.schematic.Drawing.translate_screen): new context manager to temporarily offset all draw operations in screen space (after projection).
 - [`Drawing.grid3d`](quimb.schematic.Drawing.grid3d): automatically select back-facing planes based on projection so grids always appear behind the scene, use readable tick label orientations for all projections, and place axis labels correctly.
 
+
+**Bug fixes:**
+
+- [`contract_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg) and 3D counterpart: fix bug when specifying `strip_exponent` in `final_contract_opts`.
 
 
 (whats-new-1-13-0)=
