@@ -69,7 +69,16 @@ class RegionGraph:
 
     @property
     def regions(self):
+        """Return a tuple of all regions in the graph."""
         return tuple(self.children)
+
+    def get_maximal_regions(self):
+        """Get all maximal regions, i.e. those with no parents."""
+        return {r for r in self.regions if not self.parents[r]}
+
+    def get_minimal_regions(self):
+        """Get all minimal regions, i.e. those with no children."""
+        return {r for r in self.regions if not self.children[r]}
 
     def get_overlapping(self, region):
         """Get all regions that intersect with the given region."""
@@ -223,6 +232,13 @@ class RegionGraph:
                     queue.append(rp)
         return seen
 
+    @cached_region_property("maximal_ancestors")
+    def get_maximal_ancestors(self, region):
+        """Get all maximal regions (top level regions not contained in any
+        other region) that contain the given region.
+        """
+        return {r for r in self.get_ancestors(region) if not self.parents[r]}
+
     @cached_region_property("descendents")
     def get_descendents(self, region):
         """Get all regions that are contained by the given region, not just
@@ -373,7 +389,7 @@ class RegionGraph:
                 assert not rca.issubset(rcb)
                 assert not rcb.issubset(rca)
 
-    def draw(self, pos=None, a=20, scale=1.0, radius=0.1, **drawing_opts):
+    def draw(self, pos=None, scale=1.0, radius=0.1, **drawing_opts):
         from quimb.schematic import Drawing, hash_to_color
 
         if pos is None:
@@ -386,7 +402,7 @@ class RegionGraph:
         levelmap = {s: i for i, s in enumerate(sorted(sizes))}
         centers = {}
 
-        d = Drawing(a=a, **drawing_opts)
+        d = Drawing(**drawing_opts)
         for region in sorted(self.regions, key=len, reverse=True):
             # level = self.get_level(region)
             # level = len(region)
