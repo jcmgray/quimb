@@ -1,5 +1,6 @@
 import pytest
 
+import quimb as qu
 import quimb.tensor as qtn
 import quimb.tensor.belief_propagation as qbp
 
@@ -89,3 +90,24 @@ def test_sample(dtype):
 
     # check we are doing better than random guessing
     assert ptotal > nrepeat * 2**-peps.nsites
+
+
+@pytest.mark.parametrize("seed", range(2))
+def test_gate(seed):
+    peps = qtn.PEPS.rand(3, 4, 3, seed=seed)
+    peps.normalize_()
+    G = qu.rand_uni(4, seed=seed)
+    where = [(1, 1), (1, 2)]
+    peps_g_ex = peps.gate(G, where, contract=False)
+    # compute with no gauging
+    peps_g_basic = peps.gate(G, where, contract="reduce-split", max_bond=3)
+    d1 = peps_g_basic.distance_normalized(peps_g_ex)
+    # run BP
+    bp = qbp.D2BP(peps)
+    bp.run()
+    # gate with BP gauging
+    bp.gate_(G, where, max_bond=3)
+    bp.run()
+    d2 = bp.tn.distance_normalized(peps_g_ex)
+    assert d2 < d1
+    assert abs(bp.contract()) ** 0.5 > 0.5

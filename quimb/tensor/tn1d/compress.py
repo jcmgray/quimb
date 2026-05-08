@@ -2906,6 +2906,10 @@ def tensor_network_1d_compress(
     f_tn1d = _TN1D_COMPRESS_METHODS.get(method, None)
     if f_tn1d is not None:
         # 1D specific compression methods
+
+        # XXX: check if system has only a long range cyclic bond
+        # -> warn that these methods are not suitable for PBC?
+
         return f_tn1d(
             tn,
             max_bond=max_bond,

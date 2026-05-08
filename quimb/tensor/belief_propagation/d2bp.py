@@ -934,12 +934,10 @@ class D2BP(BeliefPropagationCommon):
             Whether to un-gauge the outer indices of the tensor network.
         """
         outer = self.gauge_insert(tn)
-        try:
-            yield outer
-        finally:
-            if ungauge_outer:
-                for t, ix, msqrt_inv in outer:
-                    t.gate_(msqrt_inv, ix)
+        yield outer
+        if ungauge_outer:
+            for t, ix, msqrt_inv in outer:
+                t.gate_(msqrt_inv, ix)
 
     def gate_(
         self,
@@ -993,17 +991,14 @@ class D2BP(BeliefPropagationCommon):
             ma = ar.dag(A) @ A
             mb = B @ ar.dag(B)
 
-            shape_changed = self.messages[ix, tidb].shape != ma.shape
-
             self.messages[ix, tidb] = ma
             self.messages[ix, tida] = mb
 
-            # mark the sites as touched
-            self.update_touched_from_tids(tida, tidb)
-            if shape_changed:
-                # rebuild the contraction expressions if shapes changed
-                self._init_tid(tida)
-                self._init_tid(tidb)
+        # mark the sites as touched
+        self.update_touched_from_tids(tida, tidb)
+        # rebuild the local contraction expressions
+        self._init_tid(tida)
+        self._init_tid(tidb)
 
     def get_cluster_norm(
         self,
