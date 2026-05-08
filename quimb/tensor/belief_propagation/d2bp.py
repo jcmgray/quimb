@@ -1,3 +1,12 @@
+"""Dense 2-norm belief propagation for standard PEPS like tensor networks, with
+one tensor per site and no hyper indices. This is the basic 'quantum' BP.
+
+TODO:
+- [ ] cache gauges computed from messages until out-of-date
+- [ ] fix fermionic compress and gate (non-hermitian messages currently?)
+- [ ] gauge function
+"""
+
 import contextlib
 import functools
 import itertools
@@ -121,7 +130,6 @@ class D2BP(BeliefPropagationCommon):
             contract_every=contract_every,
             inplace=inplace,
         )
-
         self.contract_opts = contract_opts
         self.contract_opts.setdefault("optimize", optimize)
         self.local_convergence = local_convergence
@@ -140,60 +148,93 @@ class D2BP(BeliefPropagationCommon):
         self.touch_map = {}
         self.touched = oset()
         self.exprs = {}
+        self.index_dual_map = {}
+        self.tensor_dual_map = {}
+        for tid in self.tn.tensor_map:
+            self._init_tid(tid)
 
-        # populate any messages
-        for ix, tids in self.tn.ind_map.items():
-            if ix in self.output_inds:
-                continue
-
-            tida, tidb = tids
-            jx = ix + "*"
-            ta, tb = self.tn._tids_get(tida, tidb)
-
-            for tid, t, t_in in ((tida, ta, tb), (tidb, tb, ta)):
-                this_touchmap = []
-                for nx in t.inds:
-                    if nx in self.output_inds or nx == ix:
-                        continue
-                    # where this message will be sent on to
-                    (tidn,) = (n for n in self.tn.ind_map[nx] if n != tid)
-                    this_touchmap.append((nx, tidn))
-                self.touch_map[ix, tid] = this_touchmap
-
-                if (ix, tid) not in self.messages:
-                    m = (t_in.reindex({ix: jx}).conj_() @ t_in).data
-                    self.messages[ix, tid] = self._normalize_fn(m)
-
-        # for efficiency setup all the contraction expressions ahead of time
-        for ix, tids in self.tn.ind_map.items():
-            if ix not in self.output_inds:
-                self.build_expr(ix)
-
-    def build_expr(self, ix):
+    def _init_tid(self, tid):
+        """Setup any missing input messages and build contraction expressions
+        for output message updates for each bond around tensor at `tid`.
+        """
         from quimb.tensor.contraction import array_contract_expression
 
-        tids = self.tn.ind_map[ix]
+        t = self.tn.tensor_map[tid]
+        ix_neighbors = {}
+        axs_output = []
 
-        for tida, tidb in (sorted(tids), sorted(tids, reverse=True)):
-            ta = self.tn.tensor_map[tida]
-            kix = ta.inds
-            bix = tuple(i if i in self.output_inds else i + "*" for i in kix)
-            inputs = [kix, bix]
-            data = [ta.data, ta.data.conj()]
-            shapes = [ta.shape, ta.shape]
-            for i in kix:
-                if (i != ix) and i not in self.output_inds:
-                    inputs.append((i + "*", i))
-                    data.append((i, tida))
-                    shapes.append(self.messages[i, tida].shape)
+        # first build initial messages from ix->tid
+        for ax, ix in enumerate(t.inds):
+            if ix in self.output_inds:
+                # output index -> directly contract without message
+                # if fermionic we may need to phase flip -> record
+                axs_output.append(ax)
+                continue
+
+            # bond index -> mangle for bra
+            try:
+                ixc = self.index_dual_map[ix]
+            except KeyError:
+                ixc = qtn.rand_uuid()
+                self.index_dual_map[ix] = ixc
+
+            # get neighbor tid
+            tidn = next(tidn for tidn in self.tn.ind_map[ix] if tidn != tid)
+            ix_neighbors[ix] = tidn
+
+            if (ix, tid) not in self.messages:
+                # only create missing messages
+                # fermions: use select here to generate initial cluster phases
+                k = self.tn._select_tids([tidn], virtual=False)
+                b = k.conj().reindex({ix: ixc})
+                m = (b | k).to_dense((ixc,), (ix,))
+                self.messages[ix, tid] = self._normalize_fn(m)
+
+            # make sure touch_map entry exists
+            self.touch_map.setdefault((ix, tid), {})
+
+        t_dag = t.conj().reindex_(self.index_dual_map)
+        if t_dag.isfermionic():
+            # need to phase dual output indices only
+            data = t_dag.data
+            axs_phase = tuple(
+                ax for ax in axs_output if not data.indices[ax].dual
+            )
+            if axs_phase:
+                t_dag.modify(data=data.phase_flip(*axs_phase))
+
+        self.tensor_dual_map[tid] = t_dag
+        kix = t.inds
+        bix = t_dag.inds
+
+        # then we build contraction expressions for tid->ix message updates
+        for ix_next, tid_next in ix_neighbors.items():
+            inputs = [bix, kix]
+            data = [t_dag.data, t.data]
+            shapes = [t_dag.shape, t.shape]
+            # define the messages
+            for k, b in zip(kix, bix):
+                if k == ix_next:
+                    # the message output *bond* index
+                    output = (b, k)
+                elif k != b:
+                    # inner bond with associated message -> attach
+                    inputs.append((b, k))
+                    data.append((k, tid))
+                    shapes.append(self.messages[k, tid].shape)
+                    # also populate touch_map for this message:
+                    # (k->tid) propagates to (ix_next->tid_next)
+                    self.touch_map[k, tid][ix_next, tid_next] = None
+                # else:
+                # global output -> directly traced without message
 
             expr = array_contract_expression(
                 inputs=inputs,
-                output=(ix + "*", ix),
+                output=output,
                 shapes=shapes,
                 **self.contract_opts,
             )
-            self.exprs[ix, tidb] = expr, data
+            self.exprs[ix_next, tid_next] = expr, data
 
     def update_touched_from_tids(self, *tids):
         """Specify that the messages for the given ``tids`` have changed."""
@@ -233,9 +274,17 @@ class D2BP(BeliefPropagationCommon):
 
         def _compute_m(key):
             expr, data = self.exprs[key]
-            m = expr(*data[:2], *(self.messages[mkey] for mkey in data[2:]))
-            # enforce hermiticity and normalize
-            return self._normalize_fn(m + ar.dag(m))
+            x, xc, *mkeys = data
+            ms = [self.messages[mkey] for mkey in mkeys]
+
+            # contract update!
+            m = expr(x, xc, *ms)
+
+            # for stability enforce hermiticity
+            m = m + ar.dag(m)
+
+            # finally normalize the message
+            return self._normalize_fn(m)
 
         def _update_m(key, new_m):
             nonlocal nconv, max_mdiff
@@ -344,7 +393,8 @@ class D2BP(BeliefPropagationCommon):
     def local_tensor_contract(self, tid):
         """Contract the local region of the tensor at ``tid``."""
         t = self.tn.tensor_map[tid]
-        arrays = [t.data, ar.do("conj", t.data)]
+        t_dag = self.tensor_dual_map[tid]
+        arrays = [t.data, t_dag.data]
         k_input = []
         b_input = []
         m_inputs = []
@@ -355,7 +405,8 @@ class D2BP(BeliefPropagationCommon):
             else:
                 b_input.append(-i)
                 m_inputs.append((-i, i))
-                arrays.append(self.messages[ix, tid])
+                m = self.messages[ix, tid]
+                arrays.append(m)
 
         inputs = (tuple(k_input), tuple(b_input), *m_inputs)
         output = ()
@@ -791,18 +842,18 @@ class D2BP(BeliefPropagationCommon):
 
             # messages are left and right factors squared already
             ta = tn.tensor_map[tida]
-            dm = ta.ind_size(ix)
-            dl = ta.size // dm
+            dim_bond = ta.ind_size(ix)
+            dim_left = ta.size // dim_bond
             ml = self.messages[ix, tidb]
             Rl = qtn.decomp.squared_op_to_reduced_factor(
-                ml, dl, dm, right=True, **reduce_opts
+                ml, dim_left, dim_bond, right=True, **reduce_opts
             )
 
             tb = tn.tensor_map[tidb]
-            dr = tb.size // dm
+            dim_right = tb.size // dim_bond
             mr = self.messages[ix, tida].T
             Rr = qtn.decomp.squared_op_to_reduced_factor(
-                mr, dm, dr, right=False, **reduce_opts
+                mr, dim_bond, dim_right, right=False, **reduce_opts
             )
 
             # compute the compressors
@@ -951,9 +1002,8 @@ class D2BP(BeliefPropagationCommon):
             self.update_touched_from_tids(tida, tidb)
             if shape_changed:
                 # rebuild the contraction expressions if shapes changed
-                for cix in (*lix, ix, *rix):
-                    if cix not in self.output_inds:
-                        self.build_expr(cix)
+                self._init_tid(tida)
+                self._init_tid(tidb)
 
     def get_cluster_norm(
         self,
@@ -977,20 +1027,23 @@ class D2BP(BeliefPropagationCommon):
         TensorNetwork
         """
         k = self.tn._select_tids(tids, virtual=False)
-        b = k.conj()
+        b = qtn.TensorNetwork(self.tensor_dual_map[tid] for tid in tids)
 
         if partial_trace_map:
             # open up the bra indices
             b.reindex_(partial_trace_map)
 
+        tn_cluster = b | k
+
         for ix in k.outer_inds():
             if (ix not in partial_trace_map) and (ix not in self.output_inds):
-                # dangling index -> absorb message into ket
+                # dangling index -> attach message
                 (tid,) = k.ind_map[ix]
-                t = k.tensor_map[tid]
-                t.gate_(self.messages[ix, tid], ix)
+                ixc = self.index_dual_map[ix]
+                tm = qtn.Tensor(self.messages[ix, tid], inds=(ixc, ix))
+                tn_cluster |= tm
 
-        return b | k
+        return tn_cluster
 
     def partial_trace(
         self,
