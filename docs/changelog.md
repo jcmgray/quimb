@@ -12,6 +12,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- [`D2BP`](quimb.tensor.belief_propagation.d2bp.D2BP): support fermionic tensor networks (only computing norm^2 so far, gating/compression need work).
 - [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond): add `reduce_opts` for controlling the decomposition options used when reducing each tensor before the main truncating decomposition. For example ``reduce_opts={"method": "qr:cholesky"}``.
 - add [`TensorNetworkGen.select_sites`](quimb.tensor.tnag.core.TensorNetworkGen.select_sites) as a convenience method for selecting a sub network given a list of sites.
 - add [`PEPO_product_operator`](quimb.tensor.tensor_builder.PEPO_product_operator) for bond-dimension-1 PEPOs given by a product of on-site operators, including cyclic boundary conditions via ``cyclic=True`` or ``cyclic=(cyclic_x, cyclic_y)``.
