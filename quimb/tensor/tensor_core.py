@@ -4183,6 +4183,19 @@ class TensorNetwork:
                 axb = ts[1].inds.index(ix)
                 ts[0].data.check_with(ts[1].data, [axa], [axb])
 
+    def _add_tag_to_tids(self, tag, tids, record=None):
+        """Add a tag to the tensors with ids in ``tids``."""
+        for tid in tids:
+            t = self.tensor_map[tid]
+            t.add_tag(tag)
+
+            if record is not None:
+                if isinstance(tag, str):
+                    record.setdefault(t, set()).add(tag)
+                else:
+                    # sequence of tags
+                    record.setdefault(t, set()).update(tag)
+
     def add_tag(self, tag, where=None, which="all", record=None):
         """Add tag(s) to every tensor in this network, or if ``where`` is
         specified, the tensors matching those tags -- i.e. adds the tag to
@@ -4205,17 +4218,7 @@ class TensorNetwork:
             added. If ``None`` (the default), no record is kept.
         """
         tids = self._get_tids_from_tags(where, which=which)
-
-        for tid in tids:
-            t = self.tensor_map[tid]
-            t.add_tag(tag)
-
-            if record is not None:
-                if isinstance(tag, str):
-                    record.setdefault(t, set()).add(tag)
-                else:
-                    # sequence of tags
-                    record.setdefault(t, set()).update(tag)
+        self._add_tag_to_tids(tag, tids, record=record)
 
     def drop_tags(self, tags=None):
         """Remove a tag or tags from this tensor network, defaulting to all.
