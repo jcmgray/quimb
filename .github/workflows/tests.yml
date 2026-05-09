@@ -66,10 +66,10 @@ jobs:
           flaky: false
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Setup pixi
-      uses: prefix-dev/setup-pixi@v0.9.3
+      uses: prefix-dev/setup-pixi@v0.9.5
       with:
         environments: ${{ matrix.pixi_environment }}
 
@@ -77,6 +77,6 @@ jobs:
       run: pixi run -e ${{ matrix.pixi_environment }} ${{ matrix.pixi_task }}
 
     - name: Report to codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v6
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
