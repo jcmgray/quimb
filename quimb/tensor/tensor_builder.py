@@ -108,6 +108,8 @@ def rand_tensor(
         matrix. This can be useful, for example, when automatically applying
         unitary constraints to impose a certain flow on a tensor network but at
         the atomistic (Tensor) level.
+    randn_opts
+        Supplied to :func:`~quimb.gen.rand.randn`.
 
     Returns
     -------
@@ -306,6 +308,18 @@ def TN_from_sites_computational_state(
 
 
 def gen_unique_edges(edges):
+    """Generate unique, canonically ordered graph edges.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges.
+
+    Yields
+    ------
+    tuple[hashable, hashable]
+        Unique edges with the lower-sorting node first.
+    """
     seen = set()
     for node_a, node_b in edges:
         if node_b < node_a:
@@ -320,6 +334,15 @@ def gen_unique_edges(edges):
 def compute_string_edge_frequencies(strings):
     """Compute a dictionary of edge frequencies for a list of strings,
     including plaquettes.
+
+    Parameters
+    ----------
+    strings : sequence of sequence[hashable]
+        The strings of connected sites.
+
+    Returns
+    -------
+    dict[tuple[hashable, hashable], int]
     """
     counts = collections.defaultdict(int)
     for s in strings:
@@ -542,14 +565,14 @@ def TN_from_edges_rand(
 
     Parameters
     ----------
-    G : sequence of tuple[node, node]
+    edges : sequence of tuple[hashable, hashable]
         The edges defining a graph, each element should be a pair of nodes
         described by hashable objects.
     D : int
         The bond dimension connecting tensors.
     phys_dim : int, optional
         If not ``None``, give each tensor a 'physical', free index of this size
-        to mimic a wavefunction of ``len(G)`` sites.
+        to mimic a wavefunction.
     seed : int, optional
         A random seed.
     dtype : str, optional
@@ -609,10 +632,14 @@ def TN_rand_reg(
         to mimic a wavefunction of ``n`` sites.
     seed : int, optional
         A random seed.
+    dtype : str, optional
+        The data type of the tensors.
     site_tag_id : str, optional
         String with formatter to tag sites.
     site_ind_id : str, optional
         String with formatter to tag indices (if ``phys_dim`` specified).
+    randn_opts
+        Supplied to :func:`~quimb.gen.rand.randn`.
 
     Returns
     -------
@@ -661,10 +688,14 @@ def TN_rand_tree(
         binary tree (1 parent and two children).
     seed : int, optional
         A random seed.
+    dtype : str, optional
+        The data type of the tensors.
     site_tag_id : str, optional
         String with formatter to tag sites.
     site_ind_id : str, optional
         String with formatter to tag indices (if ``phys_dim`` specified).
+    randn_opts
+        Supplied to :func:`~quimb.gen.rand.randn`.
 
     Returns
     -------
@@ -699,6 +730,49 @@ def TN_from_strings(
     fuse_multibonds=True,
     **contract_opts,
 ) -> TensorNetworkGen:
+    """Create a tensor network from strings of connected sites.
+
+    Each string is converted to a line of tensors, with repeated sites
+    becoming shared site tags. Optionally, tensors at each site are contracted
+    together to produce one tensor per site.
+
+    Parameters
+    ----------
+    strings : sequence of sequence[hashable]
+        The strings of connected sites to place in the network.
+    fill_fn : callable, optional
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor. Defaults to :func:`delta_array`.
+    line_dim : int, optional
+        The dimension of each line index.
+    allow_plaquettes : bool, optional
+        Whether to interpret closed strings as plaquette loops.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    random_rewire : bool, optional
+        Whether to randomly permute the indices at each site.
+    random_rewire_seed : int, optional
+        A random seed for ``random_rewire``.
+    join : bool or {"all"}, optional
+        Whether to join dangling string ends at each site.
+    join_avoid_self_loops : bool, optional
+        Whether to avoid joining string ends that form self-loops.
+    normalize : bool, optional
+        Whether to normalize the tensor network while it is still made from
+        disconnected loops.
+    contract_sites : bool, optional
+        Whether to contract all tensors at each site into a single tensor.
+    fuse_multibonds : bool, optional
+        Whether to fuse multiple bonds between the same sites after
+        contracting sites.
+    contract_opts
+        Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`
+        when ``normalize=True``.
+
+    Returns
+    -------
+    TensorNetworkGen
+    """
     if fill_fn is None:
         fill_fn = delta_array
 
@@ -863,6 +937,16 @@ def HTN_rand(
         The maximum size of any dimension.
     seed : int, optional
         A random seed.
+    dtype : str, optional
+        The data type of the tensors.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    site_ind_id : str, optional
+        String with formatter to label outer indices.
 
     Returns
     -------
@@ -905,7 +989,7 @@ def HTN_CP_from_inds_and_fill_fn(
     tags=None,
     bond_ind=None,
 ):
-    """reate a CP-decomposition structured hyper tensor network from a
+    """Create a CP-decomposition structured hyper tensor network from a
     sequence of indices and a fill function.
 
     Parameters
@@ -922,6 +1006,10 @@ def HTN_CP_from_inds_and_fill_fn(
         A tag for each tensor if supplied.
     bond_ind : str, optional
         If given, a specific name for the inner hyper index.
+
+    Returns
+    -------
+    TensorNetwork
     """
 
     tn = TensorNetwork()
@@ -968,6 +1056,8 @@ def HTN_CP_from_sites_and_fill_fn(
         String with formatter to tag sites.
     site_ind_id : str, optional
         String with formatter to tag indices (if ``phys_dim`` specified).
+    bond_ind : str, optional
+        If given, a specific name for the inner hyper index.
 
     Returns
     -------
@@ -1076,6 +1166,28 @@ def HTN_dual_from_edges_and_fill_fn(
 ):
     """Create a hyper tensor network with a tensor on each bond and a hyper
     index on each node.
+
+    Parameters
+    ----------
+    fill_fn : callable
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor.
+    edges : sequence of tuple[hashable, hashable]
+        The graph edges, as a sequence of pairs of hashable objects. You can
+        redundantly specify ``(u, v)`` and ``(v, u)`` and only one edge will be
+        added.
+    D : int
+        The hyper bond dimension connecting tensors.
+    phys_dim : int, optional
+        If not ``None``, add a physical index of this size at each node.
+    site_tag_id : str, optional
+        String with formatter to tag sites.
+    site_ind_id : str, optional
+        String with formatter to tag physical indices.
+
+    Returns
+    -------
+    TensorNetworkGen or TensorNetworkGenVector
     """
     bonds = collections.defaultdict(rand_uuid)
 
@@ -1124,9 +1236,30 @@ def convert_to_2d(
     inplace=False,
 ) -> TensorNetwork2D:
     """Convert ``tn`` to a :class:`~quimb.tensor.tn2d.core.TensorNetwork2D`,
-    assuming that is has a generic geometry with sites labelled by (i, j)
+    assuming that it has a generic geometry with sites labelled by ``(i, j)``
     coordinates already. Useful for constructing 2D tensor networks from
     functions that only require a list of edges etc.
+
+    Parameters
+    ----------
+    tn : TensorNetworkGen
+        The tensor network to convert.
+    Lx : int, optional
+        Length of side x. If not given, inferred from ``tn.sites``.
+    Ly : int, optional
+        Length of side y. If not given, inferred from ``tn.sites``.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    inplace : bool, optional
+        Whether to convert ``tn`` in place.
+
+    Returns
+    -------
+    TensorNetwork2D
     """
     import itertools
 
@@ -1577,6 +1710,50 @@ def TN2D_rand_hidden_loop(
     y_tag_id="Y{}",
     **kwargs,
 ) -> TensorNetwork2D:
+    """Build a random 2D hidden-loop tensor network.
+
+    The network is first constructed from random strings on lattice edges,
+    then optionally randomly gauged, rewired, joined, and converted to
+    :class:`~quimb.tensor.tn2d.core.TensorNetwork2D`.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    line_dim : int, optional
+        The dimension of each hidden line index.
+    line_density : int, optional
+        The number of hidden lines placed on each lattice edge.
+    seed : int, optional
+        A random seed.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    dtype : str, optional
+        The data type of the tensors.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    gauge_random : bool, optional
+        Whether to apply a random gauge transformation to the tensor network.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetwork2D
+    """
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     edges = tuple(gen_2d_bonds(Lx, Ly, cyclic=cyclic)) * line_density
@@ -1612,9 +1789,34 @@ def convert_to_3d(
     inplace=False,
 ) -> TensorNetwork3D:
     """Convert ``tn`` to a :class:`~quimb.tensor.tn3d.core.TensorNetwork3D`,
-    assuming that is has a generic geometry with sites labelled by (i, j, k)
-    coordinates already. Useful for constructing 3D tensor networks from
-    functions that only require a list of edges etc.
+    assuming that it has a generic geometry with sites labelled by
+    ``(i, j, k)`` coordinates already. Useful for constructing 3D tensor
+    networks from functions that only require a list of edges etc.
+
+    Parameters
+    ----------
+    tn : TensorNetworkGen
+        The tensor network to convert.
+    Lx : int, optional
+        Length of side x. If not given, inferred from ``tn.sites``.
+    Ly : int, optional
+        Length of side y. If not given, inferred from ``tn.sites``.
+    Lz : int, optional
+        Length of side z. If not given, inferred from ``tn.sites``.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of x-plane tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of y-plane tags.
+    z_tag_id : str, optional
+        String specifier for naming convention of z-plane tags.
+    inplace : bool, optional
+        Whether to convert ``tn`` in place.
+
+    Returns
+    -------
+    TensorNetwork3D
     """
     import itertools
 
@@ -1681,8 +1883,12 @@ def TN3D_from_fill_fn(
         specified separately using a tuple.
     site_tag_id : str, optional
         String formatter specifying how to label each site.
-    dtype : dtype, optional
-        Data type of the random arrays.
+    x_tag_id : str, optional
+        String formatter specifying how to label each x-plane.
+    y_tag_id : str, optional
+        String formatter specifying how to label each y-plane.
+    z_tag_id : str, optional
+        String formatter specifying how to label each z-plane.
 
     Returns
     -------
@@ -1769,10 +1975,14 @@ def TN3D_empty(
         specified separately using a tuple.
     site_tag_id : str, optional
         String formatter specifying how to label each site.
+    x_tag_id : str, optional
+        String formatter specifying how to label each x-plane.
+    y_tag_id : str, optional
+        String formatter specifying how to label each y-plane.
+    z_tag_id : str, optional
+        String formatter specifying how to label each z-plane.
     dtype : dtype, optional
-        Data type of the random arrays.
-    seed : int, optional
-        Random seed.
+        Data type of the arrays.
 
     Returns
     -------
@@ -1809,7 +2019,7 @@ def TN3D_with_value(
     z_tag_id="Z{}",
     dtype=None,
 ) -> TensorNetwork3D:
-    """A scalar 2D lattice tensor network with every element set to ``value``.
+    """A scalar 3D lattice tensor network with every element set to ``value``.
     This uses ``numpy.broadcast_to`` and therefore essentially no memory.
 
     Parameters
@@ -1829,10 +2039,14 @@ def TN3D_with_value(
         specified separately using a tuple.
     site_tag_id : str, optional
         String formatter specifying how to label each site.
+    x_tag_id : str, optional
+        String formatter specifying how to label each x-plane.
+    y_tag_id : str, optional
+        String formatter specifying how to label each y-plane.
+    z_tag_id : str, optional
+        String formatter specifying how to label each z-plane.
     dtype : dtype, optional
-        Data type of the random arrays.
-    seed : int, optional
-        Random seed.
+        Data type of the arrays.
 
     Returns
     -------
@@ -1890,6 +2104,18 @@ def TN3D_rand(
         specified separately using a tuple.
     site_tag_id : str, optional
         String formatter specifying how to label each site.
+    x_tag_id : str, optional
+        String formatter specifying how to label each x-plane.
+    y_tag_id : str, optional
+        String formatter specifying how to label each y-plane.
+    z_tag_id : str, optional
+        String formatter specifying how to label each z-plane.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
     dtype : dtype, optional
         Data type of the random arrays.
     seed : int, optional
@@ -1897,7 +2123,7 @@ def TN3D_rand(
 
     Returns
     -------
-    TensorNetwork
+    TensorNetwork3D
     """
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
@@ -1928,6 +2154,44 @@ def TN3D_corner_double_line(
     z_tag_id="Z{}",
     **kwargs,
 ) -> TensorNetwork3D:
+    """Build a 3D 'corner double line' (CDL) tensor network.
+
+    Each plaquette contributes matrices connected in a loop, then the corners
+    for each site are grouped and optionally contracted.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    line_dim : int, optional
+        The dimension of the matrices at each corner.
+    tiling : int, optional
+        How densely to tile the plaquettes.
+    fill_missing_edges : bool, optional
+        Whether to fill missing edges around the border with open strings.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of x-plane tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of y-plane tags.
+    z_tag_id : str, optional
+        String specifier for naming convention of z-plane tags.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetwork3D
+
+    See Also
+    --------
+    TN_from_strings
+    """
     # start with a tiling of plaquettes (loop strings)
     strings = list(gen_3d_plaquettes(Lx, Ly, Lz, tiling=tiling))
 
@@ -1974,6 +2238,54 @@ def TN3D_rand_hidden_loop(
     z_tag_id="Z{}",
     **kwargs,
 ) -> TensorNetwork3D:
+    """Build a random 3D hidden-loop tensor network.
+
+    The network is first constructed from random strings on lattice edges,
+    then optionally randomly gauged, rewired, joined, and converted to
+    :class:`~quimb.tensor.tn3d.core.TensorNetwork3D`.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    line_dim : int, optional
+        The dimension of each hidden line index.
+    line_density : int, optional
+        The number of hidden lines placed on each lattice edge.
+    seed : int, optional
+        A random seed.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    dtype : str, optional
+        The data type of the tensors.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    gauge_random : bool, optional
+        Whether to apply a random gauge transformation to the tensor network.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of x-plane tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of y-plane tags.
+    z_tag_id : str, optional
+        String specifier for naming convention of z-plane tags.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetwork3D
+    """
     fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
 
     edges = tuple(gen_3d_bonds(Lx, Ly, Lz, cyclic=cyclic)) * line_density
@@ -2004,7 +2316,19 @@ def TN3D_rand_hidden_loop(
 
 @functools.lru_cache(128)
 def classical_ising_S_matrix(beta, j=1.0):
-    """The interaction term for the classical ising model."""
+    """The interaction term for the classical ising model.
+
+    Parameters
+    ----------
+    beta : float
+        The inverse temperature.
+    j : float, optional
+        The interaction strength.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
     S = np.array(
         [
             [math.exp(+j * beta), math.exp(-j * beta)],
@@ -2017,7 +2341,19 @@ def classical_ising_S_matrix(beta, j=1.0):
 
 @functools.lru_cache(128)
 def classical_ising_H_matrix(beta, h=0.0):
-    """The magnetic field term for the classical ising model."""
+    """The magnetic field term for the classical ising model.
+
+    Parameters
+    ----------
+    beta : float
+        The inverse temperature.
+    h : float, optional
+        The magnetic field strength.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
     H = np.array([math.exp(-beta * h), math.exp(beta * h)])
     make_immutable(H)
     return H
@@ -2029,6 +2365,19 @@ def classical_ising_sqrtS_matrix(beta, j=1.0, asymm=None):
     If ``j`` is negative you can supply ``asymm='l'`` or ``'r'`` to
     keep the matrix real, but it must be paired with the opposite in a tensor
     network.
+
+    Parameters
+    ----------
+    beta : float
+        The inverse temperature.
+    j : float, optional
+        The interaction strength.
+    asymm : {None, "l", "r"}, optional
+        Which asymmetric factor to generate for negative ``j``.
+
+    Returns
+    -------
+    numpy.ndarray
     """
     if (j < 0.0) and (asymm is not None):
         if asymm == "l":
@@ -2073,7 +2422,27 @@ def classical_ising_T_matrix(
     output=False,
     asymm=None,
 ):
-    """The single effective TN site for the classical ising model."""
+    """The single effective TN site for the classical ising model.
+
+    Parameters
+    ----------
+    beta : float
+        The inverse temperature.
+    j : float or sequence of float, optional
+        The interaction strength for each direction.
+    h : float, optional
+        The magnetic field strength.
+    directions : str, optional
+        The labels of the lattice directions to generate legs for.
+    output : bool, optional
+        Whether to include an output spin index.
+    asymm : None or sequence of {None, "l", "r"}, optional
+        Which asymmetric interaction factor to use for each direction.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
     try:
         js = tuple(j)
     except TypeError:
@@ -2101,6 +2470,15 @@ def parse_j_coupling_to_function(j):
     """Parse the ``j`` argument to a function that can be called to get the
     coupling strength between two nodes. The input can be a constant, dict or
     function.
+
+    Parameters
+    ----------
+    j : float, dict, or callable
+        The coupling specification.
+
+    Returns
+    -------
+    callable
     """
     if callable(j):
         return functools.cache(j)
@@ -2677,8 +3055,13 @@ def TN_classical_partition_function_from_edges(
         A string formatter for naming tensor tags like
         ``site_ind_id.format(node)``.
     bond_ind_id : str, optional
-        A string formatter for naming the indices bewteen tensors like
+        A string formatter for naming the indices between tensors like
         ``bond_ind_id.format(node_a, node_b)``.
+    outputs : sequence of hashable, optional
+        Which nodes to leave as output indices.
+    ind_id : str, optional
+        A string formatter for naming output indices like
+        ``ind_id.format(node)``.
 
     Returns
     -------
@@ -3040,6 +3423,21 @@ def TN2D_embedded_classical_ising_partition_function(
 
 @functools.lru_cache(128)
 def dimer_data(d, cover_count=1, dtype=float):
+    """Get the local tensor data for enforcing dimer covering constraints.
+
+    Parameters
+    ----------
+    d : int
+        The number of incident edges.
+    cover_count : int, optional
+        The exact number of incident edges that should be occupied.
+    dtype : dtype, optional
+        The data type of the array.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
     shape = [2] * d
     x = np.zeros(shape, dtype=dtype)
     index_sum = np.indices(shape).sum(axis=0)
@@ -3071,8 +3469,10 @@ def TN_dimer_covering_from_edges(
         A string formatter for naming tensor tags like
         ``site_ind_id.format(node)``.
     bond_ind_id : str, optional
-        A string formatter for naming the indices bewteen tensors like
+        A string formatter for naming the indices between tensors like
         ``bond_ind_id.format(node_a, node_b)``.
+    dtype : dtype, optional
+        The data type of the tensors.
 
     Returns
     -------
@@ -3102,7 +3502,17 @@ def TN_dimer_covering_from_edges(
 
 
 def clause_negmask(clause):
-    """Encode a clause as a single integer ``m``."""
+    """Encode a clause as a single integer ``m``.
+
+    Parameters
+    ----------
+    clause : sequence of int
+        The clause to encode.
+
+    Returns
+    -------
+    int
+    """
     return int("".join("0" if x > 0 else "1" for x in clause), 2)
 
 
@@ -3110,6 +3520,21 @@ def clause_negmask(clause):
 def or_clause_data(ndim, m=0, dtype=float, q=2):
     """Get the array representing satisfiability of ``ndim`` clauses with
     unsatisfied condition encoded in ``m``.
+
+    Parameters
+    ----------
+    ndim : int
+        The number of variables in the clause.
+    m : int, optional
+        The encoded unsatisfied condition.
+    dtype : dtype, optional
+        The data type of the array.
+    q : int, optional
+        The local variable dimension.
+
+    Returns
+    -------
+    numpy.ndarray
     """
     shape = [q] * ndim
     t = np.ones(shape, dtype=dtype)
@@ -3120,6 +3545,23 @@ def or_clause_data(ndim, m=0, dtype=float, q=2):
 def or_clause_tensor(ndim, m, inds, tags=None, dtype="float64"):
     """Get the tensor representing satisfiability of ``ndim`` clauses with
     unsatisfied condition encoded in ``m`` labelled by ``inds`` and ``tags``.
+
+    Parameters
+    ----------
+    ndim : int
+        The number of variables in the clause.
+    m : int
+        The encoded unsatisfied condition.
+    inds : sequence of str
+        The indices to label the tensor with.
+    tags : sequence of str, optional
+        The tags to label the tensor with.
+    dtype : dtype, optional
+        The data type of the tensor.
+
+    Returns
+    -------
+    Tensor
     """
     data = or_clause_data(ndim, m=m, dtype=dtype)
     return Tensor(data=data, inds=inds, tags=tags)
@@ -3129,6 +3571,23 @@ def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype="float64"):
     """Get the set of MPS tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
+
+    Parameters
+    ----------
+    ndim : int
+        The number of variables in the clause.
+    m : int
+        The encoded unsatisfied condition.
+    inds : sequence of str
+        The indices to label the tensors with.
+    tags : sequence of str, optional
+        The tags to label the tensors with.
+    dtype : dtype, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    tuple[Tensor]
     """
     mps = MPS_computational_state("+" * ndim, dtype=dtype) * (
         2 ** (ndim / 2)
@@ -3144,6 +3603,19 @@ def or_clause_mps_tensors(ndim, m, inds, tags=None, dtype="float64"):
 def or_clause_parafac_data(ndim, m, dtype="float64"):
     """Get the set of PARAFAC arrays representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m``.
+
+    Parameters
+    ----------
+    ndim : int
+        The number of variables in the clause.
+    m : int
+        The encoded unsatisfied condition.
+    dtype : dtype, optional
+        The data type of the arrays.
+
+    Returns
+    -------
+    tuple[numpy.ndarray]
     """
     inds = [f"k{i}" for i in range(ndim)]
     bond = "b"
@@ -3174,6 +3646,23 @@ def clause_parafac_tensors(ndim, m, inds, tags=None, dtype="float64"):
     """Get the set of PARAFAC tensors representing satisfiability of ``ndim``
     clauses with unsatisfied condition encoded in ``m`` labelled by ``inds``
     and ``tags``.
+
+    Parameters
+    ----------
+    ndim : int
+        The number of variables in the clause.
+    m : int
+        The encoded unsatisfied condition.
+    inds : sequence of str
+        The indices to label the tensors with.
+    tags : sequence of str, optional
+        The tags to label the tensors with.
+    dtype : dtype, optional
+        The data type of the tensors.
+
+    Returns
+    -------
+    list[Tensor]
     """
     bond = rand_uuid()
     return [
@@ -3212,13 +3701,13 @@ def HTN_from_clauses(
     mode : {'parafac', 'mps', 'dense', int}, optional
         How to represent the clauses:
 
-            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
-              You could further call :meth:`hyperinds_resolve` for more options
-              to convert the hyper index into a (decomposed) COPY-tensor.
-            * 'mps' - `N` rank-3 tensors connected along a 1D line.
-            * 'dense' - contract the hyper index.
-            * int - use the 'parafac' mode, but only if the length of a clause
-              is larger than this threshold.
+        * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+          You could further call :meth:`hyperinds_resolve` for more options
+          to convert the hyper index into a (decomposed) COPY-tensor.
+        * 'mps' - `N` rank-3 tensors connected along a 1D line.
+        * 'dense' - contract the hyper index.
+        * int - use the 'parafac' mode, but only if the length of a clause
+          is larger than this threshold.
 
         Note that variables are always represented by a single (hyper) index,
         which is like an implicit PARAFAC decomposition.
@@ -3395,13 +3884,13 @@ def HTN_from_cnf(
     mode : {'parafac', 'mps', 'dense', int}, optional
         How to represent the clauses:
 
-            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
-              You could further call :meth:`hyperinds_resolve` for more options
-              to convert the hyper index into a (decomposed) COPY-tensor.
-            * 'mps' - `N` rank-3 tensors connected along a 1D line.
-            * 'dense' - contract the hyper index.
-            * int - use the 'parafac' mode, but only if the length of a clause
-              is larger than this threshold.
+        * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+          You could further call :meth:`hyperinds_resolve` for more options
+          to convert the hyper index into a (decomposed) COPY-tensor.
+        * 'mps' - `N` rank-3 tensors connected along a 1D line.
+        * 'dense' - contract the hyper index.
+        * int - use the 'parafac' mode, but only if the length of a clause
+          is larger than this threshold.
 
     dtype : str or dtype, optional
         Data type of the tensors.
@@ -3528,13 +4017,13 @@ def HTN_random_ksat(
     mode : {'parafac', 'mps', 'dense', int}, optional
         How to represent the clauses:
 
-            * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
-              You could further call :meth:`hyperinds_resolve` for more options
-              to convert the hyper index into a (decomposed) COPY-tensor.
-            * 'mps' - `N` rank-3 tensors connected along a 1D line.
-            * 'dense' - contract the hyper index.
-            * int - use the 'parafac' mode, but only if the length of a clause
-              is larger than this threshold.
+        * 'parafac' - `N` rank-2 tensors connected by a single hyper index.
+          You could further call :meth:`hyperinds_resolve` for more options
+          to convert the hyper index into a (decomposed) COPY-tensor.
+        * 'mps' - `N` rank-3 tensors connected along a 1D line.
+        * 'dense' - contract the hyper index.
+        * int - use the 'parafac' mode, but only if the length of a clause
+          is larger than this threshold.
 
         Note that variables are always represented by a single (hyper) index,
         which is like an implicit PARAFAC decomposition.
@@ -3588,6 +4077,9 @@ def TN_matching(
         The tags to use to select the tensors from ``tn``. If not given, uses
         ``tn.site_tags``. The tensor network built will have one tensor per
         site, in the order given by ``site_tags``.
+    fill_fn : callable, optional
+        A function with signature ``fill_fn(shape) -> array``, used to fill
+        each tensor. If not given, random data is used.
     dtype : dtype, optional
         The data type to use for the new tensors, if not given uses the same as
         the original tensors.
@@ -3726,8 +4218,22 @@ def MPS_rand_state(
 
 
 def MPS_product_state(arrays, cyclic=False, **mps_opts):
-    """Generate a product state in MatrixProductState form, i,e,
+    """Generate a product state in MatrixProductState form, i.e.
     with bond dimension 1, from single site vectors described by ``arrays``.
+
+    Parameters
+    ----------
+    arrays : sequence of 1D array_like
+        The single-site vectors.
+    cyclic : bool, optional
+        Generate a MPS with periodic boundary conditions or not, default open
+        boundary conditions.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
+
+    Returns
+    -------
+    MatrixProductState
     """
     arrays = tuple(arrays)
     L = len(arrays)
@@ -3794,8 +4300,10 @@ def MPS_neel_state(L, down_first=False, dtype="float64", **mps_opts):
         The number of spins.
     down_first : bool, optional
         Whether to start with '1' (down) or '0' (up) first.
+    dtype : {'float64', 'complex128', 'float32', 'complex64'}, optional
+        The data type to use for the array representation.
     mps_opts
-        Supplied to MatrixProductState constructor.
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
     """
     binary_str = "01" * (L // 2) + (L % 2 == 1) * "0"
     if down_first:
@@ -3819,6 +4327,8 @@ def MPS_COPY(
         The physical (site) dimensions, defaults to 2.
     dtype : str or dtype, optional
         The data type of the tensor network, defaults to 'float64'.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
 
     Returns
     -------
@@ -3887,8 +4397,6 @@ def MPS_rand_computational_state(L, dtype="float64", **mps_opts):
     ----------
     L : int
         The number of qubits.
-    seed : int, optional
-        The seed to use.
     dtype : {float, complex} or numpy dtype, optional
         Data type of the tensor network.
     mps_opts
@@ -3937,6 +4445,21 @@ def MPS_sampler(L, dtype=complex, squeeze=True, **mps_opts):
     """A product state for sampling tensor network traces. Seen as a vector it
     has the required property that ``psi.H @ psi == d`` always for hilbert
     space size ``d``.
+
+    Parameters
+    ----------
+    L : int
+        The number of sites.
+    dtype : dtype, optional
+        Data type of the tensor network.
+    squeeze : bool, optional
+        Whether to remove the bond dimensions.
+    mps_opts
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
+
+    Returns
+    -------
+    MatrixProductState
     """
     arrays = [rand_phase(2, dtype=dtype) for _ in range(L)]
     psi = MPS_product_state(arrays, **mps_opts)
@@ -3959,6 +4482,8 @@ def MPO_identity(
     ----------
     L : int
         The number of sites.
+    sites : sequence of int, optional
+        The site labels to use. If not given, use ``range(L)``.
     phys_dim : int, optional
         The physical (site) dimensions, defaults to 2.
     dtype : {float, complex} or numpy dtype, optional
@@ -3968,6 +4493,10 @@ def MPO_identity(
         open boundary conditions.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     II = np.identity(phys_dim, dtype=dtype)
     cyc_dim = (1,) if cyclic else ()
@@ -4000,6 +4529,17 @@ def MPO_identity(
 def MPO_identity_like(mpo, **mpo_opts):
     """Return an identity matrix operator with the same physical index and
     inds/tags as ``mpo``.
+
+    Parameters
+    ----------
+    mpo : MatrixProductOperator
+        The MPO to copy the shape of.
+    mpo_opts
+        Supplied to :func:`MPO_identity`.
+
+    Returns
+    -------
+    MatrixProductOperator
     """
     mpo_opts.setdefault("L", mpo.L)
     mpo_opts.setdefault("phys_dim", mpo.phys_dim())
@@ -4049,6 +4589,8 @@ def MPO_zeros_like(mpo, **mpo_opts):
     ----------
     mpo : MatrixProductOperator
         The MPO to copy the shape of.
+    mpo_opts
+        Supplied to :func:`MPO_zeros`.
 
     Returns
     -------
@@ -4181,7 +4723,7 @@ def MPO_rand(
     scale=1.0,
     **mpo_opts,
 ):
-    """Generate a random matrix product state.
+    """Generate a random matrix product operator.
 
     Parameters
     ----------
@@ -4252,7 +4794,29 @@ def MPO_rand_herm(
     L, bond_dim, phys_dim=2, normalize=True, dtype="float64", **mpo_opts
 ):
     """Generate a random hermitian matrix product operator.
-    See :class:`~quimb.tensor.tensor_builder.MPO_rand`.
+
+    Parameters
+    ----------
+    L : int
+        The number of sites.
+    bond_dim : int
+        The bond dimension.
+    phys_dim : int, optional
+        The physical (site) dimensions, defaults to 2.
+    normalize : bool, optional
+        Whether to normalize the operator such that ``trace(A.H @ A) == 1``.
+    dtype : {float, complex} or numpy dtype, optional
+        Data type of the tensor network.
+    mpo_opts
+        Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
+
+    Returns
+    -------
+    MatrixProductOperator
+
+    See Also
+    --------
+    MPO_rand
     """
     return MPO_rand(
         L,
@@ -4269,7 +4833,17 @@ def MPO_rand_herm(
 
 
 def maybe_make_real(X):
-    """Check if ``X`` is real, if so, convert to contiguous array."""
+    """Check if ``X`` is real, if so, convert to contiguous array.
+
+    Parameters
+    ----------
+    X : array_like
+        The array to check.
+
+    Returns
+    -------
+    array_like
+    """
     if np.allclose(X.imag, np.zeros_like(X)):
         return np.ascontiguousarray(X.real)
     return X
@@ -4740,7 +5314,7 @@ def MPO_ham_ising(L, j=1.0, bx=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or local_ham_1d_opts
+    mpo_opts
         Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
@@ -4779,8 +5353,8 @@ def ham_1d_ising(
     cyclic : bool, optional
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
-    mpo_opts or local_ham_1d_opts
-        Supplied to :class:`~quimb.tensor.tn1d.core.LocalHam1D`.
+    local_ham_1d_opts
+        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam1D`.
 
     Returns
     -------
@@ -4842,7 +5416,7 @@ def MPO_ham_XY(L, j=1.0, bz=0.0, *, S=1 / 2, cyclic=False, **mpo_opts):
     cyclic : bool, optional
         Generate a MPO with periodic boundary conditions or not, default is
         open boundary conditions.
-    mpo_opts or local_ham_1d_opts
+    mpo_opts
         Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
     Returns
@@ -5138,6 +5712,8 @@ def MPO_ham_bilinear_biquadratic(
     cyclic : bool, optional
         Generate a hamiltonian with periodic boundary conditions or not,
         default is open boundary conditions.
+    compress : bool, optional
+        Whether to compress the resulting MPO.
     mpo_opts
         Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductOperator`.
 
@@ -5258,7 +5834,9 @@ def MPO_ham_mbl(
     cyclic : bool, optional
         Whether to use periodic boundary conditions - default is False.
     dh_dist : {'s', 'g', 'qp'}, optional
-        Whether to use sqaure, guassian or quasiperiodic noise.
+        Whether to use square, gaussian or quasiperiodic noise.
+    dh_dim : int, optional
+        The number of random field directions to use.
     beta : float, optional
         Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
     mpo_opts
@@ -5327,7 +5905,9 @@ def ham_1d_mbl(
     cyclic : bool, optional
         Whether to use periodic boundary conditions - default is False.
     dh_dist : {'s', 'g', 'qp'}, optional
-        Whether to use sqaure, guassian or quasiperiodic noise.
+        Whether to use square, gaussian or quasiperiodic noise.
+    dh_dim : int, optional
+        The number of random field directions to use.
     beta : float, optional
         Frequency of the quasirandom noise, only if ``dh_dist='qr'``.
     local_ham_1d_opts
@@ -5356,7 +5936,7 @@ NNI_ham_mbl = deprecated(ham_1d_mbl, "NNI_ham_mbl", "ham_1d_mbl")
 
 def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
     r"""Ising Hamiltonian in
-    :class:`~quimb.tensor.tn1d.tebd.LocalHam2D` form.
+    :class:`~quimb.tensor.tn2d.tebd.LocalHam2D` form.
 
     .. math::
 
@@ -5378,7 +5958,7 @@ def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
     bx : float, optional
         The X-magnetic field strength.
     local_ham_2d_opts
-        Supplied to :class:`~quimb.tensor.tn2d.core.LocalHam2D`.
+        Supplied to :class:`~quimb.tensor.tn2d.tebd.LocalHam2D`.
 
     Returns
     -------
@@ -5394,7 +5974,7 @@ def ham_2d_ising(Lx, Ly, j=1.0, bx=0.0, **local_ham_2d_opts):
 
 def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`. form.
+    :class:`~quimb.tensor.tn2d.tebd.LocalHam2D` form.
 
     .. math::
 
@@ -5420,7 +6000,7 @@ def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
     bz : float, optional
         The Z-magnetic field strength.
     local_ham_2d_opts
-        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`.
+        Supplied to :class:`~quimb.tensor.tn2d.tebd.LocalHam2D`.
 
     Returns
     -------
@@ -5436,7 +6016,7 @@ def ham_2d_heis(Lx, Ly, j=1.0, bz=0.0, **local_ham_2d_opts):
 
 def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`. form.
+    :class:`~quimb.tensor.tn2d.tebd.LocalHam2D` form.
 
     .. math::
 
@@ -5464,7 +6044,7 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
         The number of rows.
     Ly : int
         The number of columns.
-    j2 : float or (float, float, float), optional
+    j1 : float or (float, float, float), optional
         The nearest neighbor  XX, YY and ZZ interaction strength. Positive is
         antiferromagnetic.
     j2 : float or (float, float, float), optional
@@ -5473,7 +6053,7 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
     bz : float, optional
         The Z-magnetic field strength.
     local_ham_2d_opts
-        Supplied to :class:`~quimb.tensor.tn1d.tebd.LocalHam2D`.
+        Supplied to :class:`~quimb.tensor.tn2d.tebd.LocalHam2D`.
 
     Returns
     -------
@@ -5505,7 +6085,7 @@ def ham_2d_j1j2(Lx, Ly, j1=1.0, j2=0.5, bz=0.0, **local_ham_2d_opts):
 
 def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
     r"""Heisenberg Hamiltonian in
-    :class:`~quimb.tensor..tn3d.tebd.LocalHam3D`. form.
+    :class:`~quimb.tensor.tn3d.tebd.LocalHam3D` form.
 
     .. math::
 
@@ -5526,14 +6106,14 @@ def ham_3d_heis(Lx, Ly, Lz, j=1.0, bz=0.0, **local_ham_3d_opts):
         The number of x-planes.
     Ly : int
         The number of y-planes.
-    Ly : int
+    Lz : int
         The number of z-planes.
     j : float or (float, float, float), optional
         The XX, YY and ZZ interaction strength. Positive is antiferromagnetic.
     bz : float, optional
         The Z-magnetic field strength.
     local_ham_3d_opts
-        Supplied to :class:`~quimb.tensor..tn3d.tebd.LocalHam3D`.
+        Supplied to :class:`~quimb.tensor.tn3d.tebd.LocalHam3D`.
 
     Returns
     -------
