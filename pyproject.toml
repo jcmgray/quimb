@@ -255,25 +255,25 @@ description = "Serve the documentation locally."
 
 [tool.pixi.feature.docs.tasks.lint]
 cmd = """
-    ruff check --select I
-    && ruff format --check
+    ruff check --select I &&
+    ruff format --check
 """
 cwd = "."
 description = "Check code formatting and imports with ruff."
 
 [tool.pixi.feature.docs.tasks.format]
 cmd = """
-    ruff check --select I --fix
-    && ruff format
+    ruff check --select I --fix &&
+    ruff format
 """
 cwd = "."
 description = "Apply code formatting and fix imports with ruff."
 
 [tool.pixi.feature.docs.tasks.format-all]
 cmd = """
-    ruff check --select I --fix
-    && ruff format
-    && find . -name "*.ipynb" -print0 | xargs -0 squeaky
+    ruff check --select I --fix &&
+    ruff format &&
+    find . -name "*.ipynb" -print0 | xargs -0 squeaky
 """
 cwd = "."
 description = "Format all files including notebooks with squeaky."
