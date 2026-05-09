@@ -5434,9 +5434,9 @@ class TensorNetwork:
 
     def _split_tensor_tid(self, tid, left_inds, **split_opts):
         t = self.pop_tensor(tid)
-        tl, tr = t.split(left_inds=left_inds, get="tensors", **split_opts)
-        self.add_tensor(tl)
-        self.add_tensor(tr)
+        ts = t.split(left_inds=left_inds, get="tensors", **split_opts)
+        for t in ts:
+            self.add_tensor(t, virtual=True)
         return self
 
     def split_tensor(
