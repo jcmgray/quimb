@@ -2,22 +2,77 @@
 
 ## Contributing
 
-Things to check if new functionality added:
+Contributions to `quimb` are very welcome, whether they are bug reports,
+documentation fixes, examples, tests, or new features. If you are planning a
+larger change, opening an issue first is often the easiest way to check the
+approach before spending too much time on implementation.
+
+Please also read the
+[`quimb` Code of Conduct](https://github.com/jcmgray/quimb/blob/main/CODE_OF_CONDUCT.md).
+
+Things to check if new functionality is added:
 
 1. Ensure functions are unit tested.
 2. Ensure functions have
-   [numpy style docstrings](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_numpy.html).
-3. Ensure code is PEP8 compliant.
+   [NumPy-style docstrings](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_numpy.html).
+3. Ensure code is formatted and linted with `pixi run lint`.
 4. Add to `quimb/__init__.py` and `"__all__"` if appropriate (or the
    tensor network equivalent `quimb.tensor.__init__.py`).
 5. Add to changelog and elsewhere in docs.
 
 
+## Development Setup
+
+`quimb` uses [pixi](https://pixi.sh) to manage development environments and
+reproducible tasks. The environments and tasks are defined in
+`pyproject.toml`, which is the source of truth for the commands below.
+
+After cloning the repository, install the pixi environments from the project
+root:
+
+```bash
+git clone https://github.com/jcmgray/quimb.git
+cd quimb
+pixi install
+```
+
+You can then run project tasks with `pixi run ...`. For example, to run a
+short Python command inside the current default test environment:
+
+```bash
+pixi run -e testpymid python -c "import quimb; print(quimb.__version__)"
+```
+
+
 ## Running the Tests
 
-Testing `quimb` requires [pytest](https://docs.pytest.org/en/latest/index.html)
-(as well as `coverage` and `pytest-cov`) and simply involves running `pytest`
-in the root `quimb` directory.
+Testing `quimb` is also handled by pixi tasks. The most common commands are:
+
+```bash
+pixi run pytest tests/
+pixi run testmatrix
+pixi run testtensor
+```
+
+The `pytest` task runs in the default test environment. For a narrower check,
+pass pytest arguments after the task name:
+
+```bash
+pixi run pytest tests/test_utils.py
+pixi run pytest tests/test_utils.py::TestOset
+pixi run pytest tests/test_utils.py::TestOset::test_basic
+```
+
+To run a task in a specific test environment, use `-e`:
+
+```bash
+pixi run -e testpyold testmatrix
+pixi run -e testpynew testtensor
+pixi run -e testjax testtensor
+pixi run -e testtorch testtensor
+pixi run -e testtensorflow testtensor
+pixi run -e testslepc testmatrix
+```
 
 The tests can also be run with pre-spawned mpi workers using the command
 `quimb-mpi-python -m pytest` (but not in syncro mode -- see {ref}`mpistuff`).
@@ -25,26 +80,34 @@ The tests can also be run with pre-spawned mpi workers using the command
 
 ## Formatting the Code
 
-`quimb` uses [`ruff`](https://docs.astral.sh/ruff/) to format imports and
-code style. You can use the pixi task `format` to install and run both:
+`quimb` uses [`ruff`](https://docs.astral.sh/ruff/) to format imports and code
+style. Use the predefined pixi tasks rather than running the tools directly:
 
 ```bash
+pixi run lint
 pixi run format
+```
+
+The `format-all` task also runs notebook cleanup with `squeaky`:
+
+```bash
+pixi run format-all
 ```
 
 
 ## Building the docs locally
 
-Building the docs requires [sphinx](http://www.sphinx-doc.org),
-[myst_nb](https://myst-nb.readthedocs.io),
-[sphinx-autoapi](https://sphinx-autoapi.readthedocs.io),
-[sphinx_copybutton](https://sphinx-copybutton.readthedocs.io),
-and [furo](https://github.com/pradyunsg/furo).
+The documentation dependencies are also managed by pixi. To build, clean, and
+serve the docs locally, use:
 
-1. `cd` into the `quimb/docs` folder.
-2. To start from scratch, remove the `_build` folder.
-3. Run `sphinx-build -b html . ./_build/html/`.
-4. Launch the page: `open _build/html/index.html`.
+```bash
+pixi run docs
+pixi run docs-clean
+pixi run docs-serve
+```
+
+The local server hosts the built docs at
+`http://localhost:8000/`. The generated HTML is in `docs/_build/html/`.
 
 
 ### Building the DocSet
@@ -70,9 +133,8 @@ new release:
 
 ## Minting a Release
 
-`quimb` uses [hatch-vcs](https://github.com/ofek/hatch-vcs)
-to manage version. The steps to release a new version
-on [pypi](https://pypi.org)  are as follows:
+`quimb` uses [hatch-vcs](https://github.com/ofek/hatch-vcs) to manage version.
+The steps to release a new version on [pypi](https://pypi.org) are as follows:
 
 1. Make sure all tests are passing, as well as the continuous integration
    and readthedocs build.

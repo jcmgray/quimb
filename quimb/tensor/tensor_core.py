@@ -5448,6 +5448,18 @@ class TensorNetwork:
         """Split the single tensor uniquely identified by ``tags``, adding the
         resulting tensors from the decomposition back into the network. Inplace
         operation.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tags uniquely identifying the tensor to split. There should be
+            a single tensor that has all of these tags.
+        left_inds : ind or sequence of inds
+            The indices to group together on the left hand side of the
+            decomposition.
+        **split_opts : dict
+            Additional options for the split operation. See
+            :func:`~quimb.tensor.tensor_core.tensor_split` for options.
         """
         (tid,) = self._get_tids_from_tags(tags, which="all")
         self._split_tensor_tid(tid, left_inds, **split_opts)
