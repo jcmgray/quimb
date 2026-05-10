@@ -5026,10 +5026,15 @@ class CircuitPermMPS(CircuitMPS):
         else:
             psi = self._psi
 
-        # configuring is in physical order, so need to reorder for sampling
-        ordering = self.calc_qubit_ordering()
+        # configurations are sampled in physical order, so invert the current
+        # physical-site-to-logical-qubit mapping for logical bitstring output
+        site_from_qubit = {
+            qubit: site for site, qubit in enumerate(self.qubits)
+        }
         for config, _ in psi.sample(C, seed=seed):
-            yield "".join(str(config[i]) for i in ordering)
+            yield "".join(
+                str(config[site_from_qubit[i]]) for i in range(self.N)
+            )
 
     @property
     def psi(self):

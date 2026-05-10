@@ -828,6 +828,14 @@ class TestCircuitMPS:
         samples = list(circ.sample(10, seed=1234))
         assert len(set(samples)) == 2
 
+    def test_permmps_sampling_inverts_qubit_ordering(self):
+        circ = qtn.CircuitPermMPS(4)
+        circ.x(1)
+        circ.cx(0, 3)
+
+        assert circ.qubits == [0, 3, 1, 2]
+        assert set(circ.sample(10, seed=42)) == {"0100"}
+
 
 class TestCircuitGen:
     @pytest.mark.parametrize(
