@@ -1328,7 +1328,10 @@ class TensorNetwork2D(TensorNetworkGen):
                     if layer_tag is None:
                         # tag and compress any inner tensors
                         self.add_tag(
-                            st, where=(tag1, tag2), which="any", record=record
+                            st,
+                            where=(tag1, tag2),
+                            which="any",
+                            record=record,
                         )
                     else:
                         # only tag and compress one inner layer
