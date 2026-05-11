@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 
-## v1.13.1 (unreleased)
+## v1.14.0 (2026-05-10)
 
 **Breaking Changes**
 
@@ -22,6 +22,7 @@ Release notes for `quimb`.
 - add [`LocalHam2D.build_pepo_propagator_trotterized`](quimb.tensor.tn2d.tebd.LocalHam2D.build_pepo_propagator_trotterized) for a first-order Trotter decomposition of ``expm(x H)`` as a PEPO. Accepts an `ordering` argument to control the order in which terms are applied.
 - [`TensorNetwork.split_simplify`](quimb.tensor.tensor_core.TensorNetwork.split_simplify): consider all candidate bipartitions for each tensor and accept the one that minimizes the resulting maximum tensor size, rather than the first reduction found.
 - [`contract_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg), [`coarse_grain_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.coarse_grain_hotrg), their 3D counterparts, and [`tensor_network_ag_compress_projector`](quimb.tensor.tnag.compress.tensor_network_ag_compress_projector): add `gauge_power` parameter to control the power applied to the bond gauge weights when `canonize=True` before computing the compressed projectors.
+- [`RegionGraph`](quimb.tensor.belief_propagation.regions.RegionGraph): add `get_maximal_regions`, `get_minimal_regions`, and `get_maximal_ancestors` helpers for querying the region hierarchy.
 
 Drawing and schematic updates:
 
@@ -33,6 +34,9 @@ Drawing and schematic updates:
 
 **Bug fixes:**
 
+- [`CircuitPermMPS.sample`](quimb.tensor.circuit.CircuitPermMPS.sample): fix output bitstring ordering when the internal MPS qubit order is permuted ({issue}`327`).
+- [`TensorNetwork.split_tensor`](quimb.tensor.tensor_core.TensorNetwork.split_tensor): fix handling of `absorb=None`, adding all tensors returned by the split ({issue}`260`).
+- [`D2BP.gate_`](quimb.tensor.belief_propagation.d2bp.D2BP.gate_): correctly mark touched tensors and rebuild local contraction expressions after applying gates.
 - [`contract_hotrg`](quimb.tensor.tn2d.core.TensorNetwork2D.contract_hotrg) and 3D counterpart: fix bug when specifying `strip_exponent` in `final_contract_opts`.
 
 
