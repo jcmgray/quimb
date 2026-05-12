@@ -59,6 +59,17 @@ class TestPEPSConstruct:
         assert len(peps[0, 1].bonds(peps[1, 1])) == 2
         assert peps.num_indices == 16
 
+    def test_cyclic_two_by_two_creates_all_gauges(self):
+        peps = qtn.PEPS.rand(2, 2, bond_dim=3, cyclic=True)
+        gauges = {}
+        peps.gauge_all_simple_(
+            max_iterations=1,
+            gauges=gauges,
+            fuse_multibonds=False,
+        )
+        assert len(gauges) == 8
+        assert all(gauge.shape == (3,) for gauge in gauges.values())
+
     @pytest.mark.parametrize(
         "Lx,Ly,cyclic,site,repeat",
         [

@@ -5,6 +5,11 @@ Release notes for `quimb`.
 
 ## v1.14.1 (2026-05-12)
 
+**Enhancements:**
+
+- [`TensorNetwork.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond).
+
+
 **Bug fixes:**
 
 - [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.

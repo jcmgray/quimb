@@ -802,6 +802,7 @@ def tensor_compress_bond(
     gauges=None,
     gauge_smudge=1e-6,
     create_bond=False,
+    inds=None,
     info=None,
     reduce_opts=None,
     compress_opts=None,
@@ -848,6 +849,10 @@ def tensor_compress_bond(
     create_bond : bool, optional
         If ``True``, and there is no bond between the two tensors, create a
         new bond with size 1 before compressing. Else raise an error.
+    inds : None or tuple[sequence[str], str, sequence[str]], optional
+        Optionally specify the left, bond, and right indices to use for the
+        compression. By default these are worked out automatically, but this
+        can be supplied to exclude for example shared indices.
     info : None or dict, optional
         A dict for returning extra information such as the singular values.
     reduce_opts : dict, optional
@@ -867,9 +872,13 @@ def tensor_compress_bond(
     compress_opts = kwargs | ensure_dict(compress_opts)
     compress_opts.setdefault("get", "tensors")
 
-    lix, bix, rix = tensor_make_single_bond(
-        ta, tb, gauges=gauges, create_bond=create_bond
-    )
+    if inds is None:
+        lix, bix, rix = tensor_make_single_bond(
+            ta, tb, gauges=gauges, create_bond=create_bond
+        )
+    else:
+        lix, bix, rix = inds
+
     if not bix:
         raise ValueError(
             "The tensors specified don't share an bond. "
@@ -7160,6 +7169,7 @@ class TensorNetwork:
         power=1.0,
         damping=0.0,
         gauges=None,
+        fuse_multibonds=True,
         equalize_norms=False,
         touched_tids=None,
         info=None,
@@ -7190,6 +7200,10 @@ class TensorNetwork:
             The damping factor to apply to the gauging updates.
         gauges : dict, optional
             Supply the initial gauges to use.
+        fuse_multibonds : bool, optional
+            Whether to fuse multibonds before gauging, this is usually
+            desirable unless you want to explicitly retain the exact
+            multi-index structure.
         equalize_norms : bool, optional
             Whether to equalize the norms of the tensors after each update.
         touched_tids : sequence of int, optional
@@ -7279,7 +7293,14 @@ class TensorNetwork:
 
                 t1 = tn.tensor_map[tid1]
                 t2 = tn.tensor_map[tid2]
-                lix, bond, rix = tensor_make_single_bond(t1, t2, gauges=gauges)
+                if fuse_multibonds:
+                    lix, bond, rix = tensor_make_single_bond(
+                        t1, t2, gauges=gauges
+                    )
+                else:
+                    lix = tuple(jx for jx in t1.inds if jx != ind)
+                    bond = ind
+                    rix = tuple(jx for jx in t2.inds if jx != ind)
 
                 # absorb 'outer' gauges into tensors
                 inv_gauges = []
@@ -7326,6 +7347,7 @@ class TensorNetwork:
                     cutoff=0.0,
                     reduce_opts=reduce_opts,
                     compress_opts=compress_opts,
+                    inds=(lix, bond, rix),
                 )
 
                 s = sub_info["singular_values"]
