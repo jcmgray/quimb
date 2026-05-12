@@ -582,6 +582,33 @@ def gen_bipartitions(it):
             yield l, r
 
 
+def gen_bipartitions_balanced_first(it):
+    """Generate all unique bipartitions of ``it``, yield most balanced ones
+    first. Unique up to swapping the two sites.
+
+    Parameters
+    ----------
+    it : iterable
+        The items to bipartition.
+
+    Yields
+    ------
+    (left, right) : tuple
+        A bipartition of the items, with the most balanced ones first.
+    """
+    first, *rem = it
+    m = len(rem)
+
+    # sizes: we'll add k elements to `first`, sorted by imbalance
+    sizes = sorted(range(m), key=lambda k: abs((k + 1) - (m - k)))
+
+    for k in sizes:
+        for ladd in itertools.combinations(rem, k):
+            left = (first, *ladd)
+            right = tuple(x for x in rem if x not in left)
+            yield left, right
+
+
 TREE_MAP_REGISTRY = {}
 TREE_APPLY_REGISTRY = {}
 TREE_ITER_REGISTRY = {}
