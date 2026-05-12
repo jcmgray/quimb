@@ -35,6 +35,33 @@ class TestTensorNetwork3D:
         )
 
 
+class TestPEPS3D:
+    def test_cyclic_length_two_keeps_boundary_bonds(self):
+        peps = qtn.PEPS3D.rand(
+            2, 3, 3, bond_dim=1, cyclic=(True, False, False)
+        )
+        assert not peps.is_cyclic_y()
+        assert not peps.is_cyclic_z()
+        assert len(peps[0, 1, 1].bonds(peps[1, 1, 1])) == 2
+        assert peps.num_indices == 60
+
+    @pytest.mark.parametrize(
+        "Lx,Ly,Lz,cyclic,site,repeat",
+        [
+            (1, 3, 3, (True, False, False), (0, 1, 1), (0, 3)),
+            (3, 1, 3, (False, True, False), (1, 0, 1), (1, 4)),
+            (3, 3, 1, (False, False, True), (1, 1, 0), (2, 5)),
+        ],
+    )
+    def test_cyclic_length_one_keeps_self_bond(
+        self, Lx, Ly, Lz, cyclic, site, repeat
+    ):
+        peps = qtn.PEPS3D.rand(Lx, Ly, Lz, bond_dim=1, cyclic=cyclic)
+        tensor = peps[site]
+        assert tensor.inds[repeat[0]] == tensor.inds[repeat[1]]
+        assert peps.num_indices == 30
+
+
 class Test3DManualContract:
     @pytest.mark.parametrize("canonize", [False, True])
     def test_contract_boundary_ising_model(self, canonize):

@@ -2782,6 +2782,9 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         String specifier for naming convention of y-slice tags.
     z_tag_id : str, optional
         String specifier for naming convention of z-slice tags.
+    cyclic : None, bool, or tuple[bool, bool, bool], optional
+        Whether the lattice is cyclic in the x, y and z directions. If
+        ``None`` (default), infer from the array shapes.
     """
 
     _EXTRA_PROPS = (
@@ -2806,6 +2809,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         x_tag_id="X{}",
         y_tag_id="Y{}",
         z_tag_id="Z{}",
+        cyclic=None,
         **tn_opts,
     ):
         if isinstance(arrays, PEPS3D):
@@ -2824,9 +2828,35 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         self._Ly = len(arrays[0])
         self._Lz = len(arrays[0][0])
 
-        cyclicx = sum(d > 1 for d in arrays[0][1][1].shape) == 7
-        cyclicy = sum(d > 1 for d in arrays[1][0][1].shape) == 7
-        cyclicz = sum(d > 1 for d in arrays[0][1][0].shape) == 7
+        if cyclic is None:
+            # infer boundary conditions from array shapes
+            shape_on_xmin_edge = arrays[0][self._Ly // 2][self._Lz // 2].shape
+            shape_on_ymin_edge = arrays[self._Lx // 2][0][self._Lz // 2].shape
+            shape_on_zmin_edge = arrays[self._Lx // 2][self._Ly // 2][0].shape
+            ndim_xmin_edge = len(shape_on_xmin_edge)
+            ndim_ymin_edge = len(shape_on_ymin_edge)
+            ndim_zmin_edge = len(shape_on_zmin_edge)
+
+            cyclicx = (sum(d > 1 for d in shape_on_xmin_edge) == 7) or (
+                # handle D=1 PBC case
+                (ndim_xmin_edge == 7)
+                and (sum(d == 1 for d in shape_on_xmin_edge) == 6)
+            )
+            cyclicy = (sum(d > 1 for d in shape_on_ymin_edge) == 7) or (
+                # handle D=1 PBC case
+                (ndim_ymin_edge == 7)
+                and (sum(d == 1 for d in shape_on_ymin_edge) == 6)
+            )
+            cyclicz = (sum(d > 1 for d in shape_on_zmin_edge) == 7) or (
+                # handle D=1 PBC case
+                (ndim_zmin_edge == 7)
+                and (sum(d == 1 for d in shape_on_zmin_edge) == 6)
+            )
+        else:
+            try:
+                cyclicx, cyclicy, cyclicz = cyclic
+            except (TypeError, ValueError):
+                cyclicx = cyclicy = cyclicz = cyclic
 
         # cache for both creating and retrieving indices
         ix = defaultdict(rand_uuid)
@@ -2864,23 +2894,47 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                i_u = (i + 1) % self.Lx
-                inds.append(ix[frozenset(((i, j, k), (i_u, j, k)))])
+                if i == self.Lx - 1:
+                    ind = ix["PBC", j, k]
+                else:
+                    i_u = (i + 1) % self.Lx
+                    ind = ix[frozenset(((i, j, k), (i_u, j, k)))]
+                inds.append(ind)
             if "r" in array_order:
-                j_r = (j + 1) % self.Ly
-                inds.append(ix[frozenset(((i, j, k), (i, j_r, k)))])
+                if j == self.Ly - 1:
+                    ind = ix[i, "PBC", k]
+                else:
+                    j_r = (j + 1) % self.Ly
+                    ind = ix[frozenset(((i, j, k), (i, j_r, k)))]
+                inds.append(ind)
             if "f" in array_order:
-                k_f = (k + 1) % self.Lz
-                inds.append(ix[frozenset(((i, j, k), (i, j, k_f)))])
+                if k == self.Lz - 1:
+                    ind = ix[i, j, "PBC"]
+                else:
+                    k_f = (k + 1) % self.Lz
+                    ind = ix[frozenset(((i, j, k), (i, j, k_f)))]
+                inds.append(ind)
             if "d" in array_order:
-                i_d = (i - 1) % self.Lx
-                inds.append(ix[frozenset(((i_d, j, k), (i, j, k)))])
+                if i == 0:
+                    ind = ix["PBC", j, k]
+                else:
+                    i_d = (i - 1) % self.Lx
+                    ind = ix[frozenset(((i_d, j, k), (i, j, k)))]
+                inds.append(ind)
             if "l" in array_order:
-                j_l = (j - 1) % self.Ly
-                inds.append(ix[frozenset(((i, j_l, k), (i, j, k)))])
+                if j == 0:
+                    ind = ix[i, "PBC", k]
+                else:
+                    j_l = (j - 1) % self.Ly
+                    ind = ix[frozenset(((i, j_l, k), (i, j, k)))]
+                inds.append(ind)
             if "b" in array_order:
-                k_b = (k - 1) % self.Lz
-                inds.append(ix[frozenset(((i, j, k_b), (i, j, k)))])
+                if k == 0:
+                    ind = ix[i, j, "PBC"]
+                else:
+                    k_b = (k - 1) % self.Lz
+                    ind = ix[frozenset(((i, j, k_b), (i, j, k)))]
+                inds.append(ind)
             inds.append(self.site_ind(i, j, k))
 
             # mix site, slice and global tags
@@ -3001,7 +3055,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
             arrays[i][j][k] = fill_fn(shp)
 
-        return cls(arrays, **peps3d_opts)
+        return cls(arrays, shape=shape, cyclic=cyclic, **peps3d_opts)
 
     @classmethod
     def empty(

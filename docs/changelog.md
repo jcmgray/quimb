@@ -3,6 +3,13 @@
 Release notes for `quimb`.
 
 
+## v1.14.1 (2026-05-12)
+
+**Bug fixes:**
+
+- [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
+
+
 ## v1.14.0 (2026-05-10)
 
 **Breaking Changes**

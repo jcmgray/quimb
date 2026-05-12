@@ -53,6 +53,27 @@ class TestPEPSConstruct:
         assert peps.is_cyclic_y()
         assert peps.num_indices == peps.num_tensors * 3
 
+    def test_cyclic_length_two_keeps_boundary_bonds(self):
+        peps = qtn.PEPS.rand(2, 3, bond_dim=1, cyclic=(True, False))
+        assert not peps.is_cyclic_y()
+        assert len(peps[0, 1].bonds(peps[1, 1])) == 2
+        assert peps.num_indices == 16
+
+    @pytest.mark.parametrize(
+        "Lx,Ly,cyclic,site,repeat",
+        [
+            (1, 3, (True, False), (0, 1), (0, 2)),
+            (3, 1, (False, True), (1, 0), (1, 3)),
+        ],
+    )
+    def test_cyclic_length_one_keeps_self_bond(
+        self, Lx, Ly, cyclic, site, repeat
+    ):
+        peps = qtn.PEPS.rand(Lx, Ly, bond_dim=1, cyclic=cyclic)
+        tensor = peps[site]
+        assert tensor.inds[repeat[0]] == tensor.inds[repeat[1]]
+        assert peps.num_indices == 8
+
     def test_zeros(self):
         peps = qtn.PEPS.zeros(3, 3, cyclic=True, bond_dim=1)
         assert peps.num_tensors == 9
@@ -662,6 +683,27 @@ class TestPEPO:
         X.show()
         assert f"Lx={Lx}" in X.__str__()
         assert f"Lx={Lx}" in X.__repr__()
+
+    def test_cyclic_length_two_keeps_boundary_bonds(self):
+        X = qtn.PEPO.rand(2, 3, bond_dim=1, cyclic=(True, False))
+        assert not X.is_cyclic_y()
+        assert len(X[0, 1].bonds(X[1, 1])) == 2
+        assert X.num_indices == 22
+
+    @pytest.mark.parametrize(
+        "Lx,Ly,cyclic,site,repeat",
+        [
+            (1, 3, (True, False), (0, 1), (0, 2)),
+            (3, 1, (False, True), (1, 0), (1, 3)),
+        ],
+    )
+    def test_cyclic_length_one_keeps_self_bond(
+        self, Lx, Ly, cyclic, site, repeat
+    ):
+        X = qtn.PEPO.rand(Lx, Ly, bond_dim=1, cyclic=cyclic)
+        tensor = X[site]
+        assert tensor.inds[repeat[0]] == tensor.inds[repeat[1]]
+        assert X.num_indices == 11
 
     def test_add_pepo(self):
         pa = qtn.PEPO.rand(3, 4, 2)

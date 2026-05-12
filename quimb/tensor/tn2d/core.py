@@ -4728,17 +4728,33 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                i_u = (i + 1) % self.Lx
-                inds.append(ix[frozenset(((i, j), (i_u, j)))])
+                if i == self.Lx - 1:
+                    ind = ix["PBC", j]
+                else:
+                    i_u = (i + 1) % self.Lx
+                    ind = ix[frozenset(((i, j), (i_u, j)))]
+                inds.append(ind)
             if "r" in array_order:
-                j_r = (j + 1) % self.Ly
-                inds.append(ix[frozenset(((i, j), (i, j_r)))])
+                if j == self.Ly - 1:
+                    ind = ix[i, "PBC"]
+                else:
+                    j_r = (j + 1) % self.Ly
+                    ind = ix[frozenset(((i, j), (i, j_r)))]
+                inds.append(ind)
             if "d" in array_order:
-                i_d = (i - 1) % self.Lx
-                inds.append(ix[frozenset(((i_d, j), (i, j)))])
+                if i == 0:
+                    ind = ix["PBC", j]
+                else:
+                    i_d = (i - 1) % self.Lx
+                    ind = ix[frozenset(((i_d, j), (i, j)))]
+                inds.append(ind)
             if "l" in array_order:
-                j_l = (j - 1) % self.Ly
-                inds.append(ix[frozenset(((i, j_l), (i, j)))])
+                if j == 0:
+                    ind = ix[i, "PBC"]
+                else:
+                    j_l = (j - 1) % self.Ly
+                    ind = ix[frozenset(((i, j_l), (i, j)))]
+                inds.append(ind)
             inds.append(self.site_ind(i, j))
 
             # mix site, row, column and global tags
@@ -5106,12 +5122,11 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
     y_tag_id : str, optional
         String specifier for naming convention of column ('y') tags.
     cyclic : None, bool, or tuple[bool, bool], optional
-        Whether the lattice is cyclic in the x and y directions. If
-        ``None`` (default), infer from the array shapes (requires any
-        non-singleton bond dimension). Pass an explicit ``bool`` or
-        ``(cyclic_x, cyclic_y)`` to override inference; this is needed
-        when bond dimensions are 1 (shape inference then cannot detect
-        cyclic boundaries).
+        Whether the lattice is cyclic in the x and y directions. If ``None``
+        (default), infer from the array shapes (requires any non-singleton bond
+        dimension). Pass an explicit ``bool`` or ``(cyclic_x, cyclic_y)`` to
+        override inference; this is needed when bond dimensions are 1 (shape
+        inference then cannot detect cyclic boundaries).
     """
 
     _EXTRA_PROPS = (
@@ -5159,8 +5174,21 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
 
         if cyclic is None:
             # infer boundary conditions from array shapes
-            cyclicx = sum(d > 1 for d in ar.shape(arrays[0][1])) == 6
-            cyclicy = sum(d > 1 for d in ar.shape(arrays[1][0])) == 6
+            shape_on_xmin_edge = ar.shape(arrays[0][self._Ly // 2])
+            shape_on_ymin_edge = ar.shape(arrays[self._Lx // 2][0])
+            ndim_xmin_edge = len(shape_on_xmin_edge)
+            ndim_ymin_edge = len(shape_on_ymin_edge)
+
+            cyclicx = (sum(d > 1 for d in shape_on_xmin_edge) == 6) or (
+                # handle D=1 PBC case
+                (ndim_xmin_edge == 6)
+                and (sum(d == 1 for d in shape_on_xmin_edge) == 4)
+            )
+            cyclicy = (sum(d > 1 for d in shape_on_ymin_edge) == 6) or (
+                # handle D=1 PBC case
+                (ndim_ymin_edge == 6)
+                and (sum(d == 1 for d in shape_on_ymin_edge) == 4)
+            )
         else:
             try:
                 cyclicx, cyclicy = cyclic
@@ -5195,17 +5223,33 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                i_u = (i + 1) % self.Lx
-                inds.append(ix[frozenset(((i, j), (i_u, j)))])
+                if i == self.Lx - 1:
+                    ind = ix["PBC", j]
+                else:
+                    i_u = (i + 1) % self.Lx
+                    ind = ix[frozenset(((i, j), (i_u, j)))]
+                inds.append(ind)
             if "r" in array_order:
-                j_r = (j + 1) % self.Ly
-                inds.append(ix[frozenset(((i, j), (i, j_r)))])
+                if j == self.Ly - 1:
+                    ind = ix[i, "PBC"]
+                else:
+                    j_r = (j + 1) % self.Ly
+                    ind = ix[frozenset(((i, j), (i, j_r)))]
+                inds.append(ind)
             if "d" in array_order:
-                i_d = (i - 1) % self.Lx
-                inds.append(ix[frozenset(((i_d, j), (i, j)))])
+                if i == 0:
+                    ind = ix["PBC", j]
+                else:
+                    i_d = (i - 1) % self.Lx
+                    ind = ix[frozenset(((i_d, j), (i, j)))]
+                inds.append(ind)
             if "l" in array_order:
-                j_l = (j - 1) % self.Ly
-                inds.append(ix[frozenset(((i, j_l), (i, j)))])
+                if j == 0:
+                    ind = ix[i, "PBC"]
+                else:
+                    j_l = (j - 1) % self.Ly
+                    ind = ix[frozenset(((i, j_l), (i, j)))]
+                inds.append(ind)
             inds.append(self.lower_ind(i, j))
             inds.append(self.upper_ind(i, j))
 
@@ -5277,7 +5321,7 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
 
             arrays[i][j] = fill_fn(shp)
 
-        return cls(arrays, shape=shape, **pepo_opts)
+        return cls(arrays, shape=shape, cyclic=cyclic, **pepo_opts)
 
     @classmethod
     def rand(
