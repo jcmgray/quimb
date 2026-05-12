@@ -10,85 +10,47 @@ If output.md is not given, prints to stdout.
 
 import re
 import sys
+from pathlib import Path
 
 BASE = "https://quimb.readthedocs.io/en/latest/autoapi"
 
-# Known autoapi module pages (update if new modules are added)
-KNOWN_MODULES = {
-    "quimb",
-    "quimb.calc",
-    "quimb.core",
-    "quimb.evo",
-    "quimb.gates",
-    "quimb.gen",
-    "quimb.gen.operators",
-    "quimb.gen.rand",
-    "quimb.gen.states",
-    "quimb.linalg",
-    "quimb.operator",
-    "quimb.operator.builder",
-    "quimb.operator.models",
-    "quimb.operator.pepobuilder",
-    "quimb.schematic",
-    "quimb.tensor",
-    "quimb.tensor.array_ops",
-    "quimb.tensor.belief_propagation",
-    "quimb.tensor.belief_propagation.bp_common",
-    "quimb.tensor.belief_propagation.d1bp",
-    "quimb.tensor.belief_propagation.d2bp",
-    "quimb.tensor.belief_propagation.diis",
-    "quimb.tensor.belief_propagation.hd1bp",
-    "quimb.tensor.belief_propagation.hv1bp",
-    "quimb.tensor.belief_propagation.l1bp",
-    "quimb.tensor.belief_propagation.l2bp",
-    "quimb.tensor.belief_propagation.regions",
-    "quimb.tensor.circuit",
-    "quimb.tensor.circuit_gen",
-    "quimb.tensor.contraction",
-    "quimb.tensor.decomp",
-    "quimb.tensor.drawing",
-    "quimb.tensor.fitting",
-    "quimb.tensor.gating",
-    "quimb.tensor.geometry",
-    "quimb.tensor.interface",
-    "quimb.tensor.networking",
-    "quimb.tensor.optimize",
-    "quimb.tensor.tensor_1d",
-    "quimb.tensor.tensor_1d_compress",
-    "quimb.tensor.tensor_1d_tebd",
-    "quimb.tensor.tensor_2d",
-    "quimb.tensor.tensor_2d_compress",
-    "quimb.tensor.tensor_2d_tebd",
-    "quimb.tensor.tensor_3d",
-    "quimb.tensor.tensor_3d_tebd",
-    "quimb.tensor.tensor_approx_spectral",
-    "quimb.tensor.tensor_arbgeom",
-    "quimb.tensor.tensor_arbgeom_compress",
-    "quimb.tensor.tensor_arbgeom_tebd",
-    "quimb.tensor.tensor_builder",
-    "quimb.tensor.tensor_core",
-    "quimb.tensor.tensor_dmrg",
-    "quimb.tensor.tensor_mera",
-    "quimb.tensor.tn1d",
-    "quimb.tensor.tn1d.compress",
-    "quimb.tensor.tn1d.core",
-    "quimb.tensor.tn1d.dmrg",
-    "quimb.tensor.tn1d.mera",
-    "quimb.tensor.tn1d.tebd",
-    "quimb.tensor.tn2d",
-    "quimb.tensor.tn2d.compress",
-    "quimb.tensor.tn2d.core",
-    "quimb.tensor.tn2d.tebd",
-    "quimb.tensor.tn3d",
-    "quimb.tensor.tn3d.core",
-    "quimb.tensor.tn3d.tebd",
-    "quimb.tensor.tnag",
-    "quimb.tensor.tnag.compress",
-    "quimb.tensor.tnag.core",
-    "quimb.tensor.tnag.tebd",
-    "quimb.utils",
-    "quimb.utils_plot",
-}
+
+def find_package_root():
+    """Find the local ``quimb`` source directory."""
+    candidates = (
+        Path(__file__).resolve().parents[2] / "quimb",
+        Path.cwd() / "quimb",
+    )
+    for candidate in candidates:
+        if (candidate / "__init__.py").is_file():
+            return candidate
+    raise FileNotFoundError("Could not find local quimb package directory.")
+
+
+def find_autoapi_modules(package_root=None):
+    """Find module pages that sphinx-autoapi should generate for ``quimb``.
+
+    This intentionally scans files rather than importing modules, since this
+    script is used as a release-note helper and should have no import side
+    effects.
+    """
+    if package_root is None:
+        package_root = find_package_root()
+    else:
+        package_root = Path(package_root)
+
+    modules = set()
+    for path in package_root.rglob("*.py"):
+        rel = path.relative_to(package_root).with_suffix("")
+        parts = rel.parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        modules.add(".".join(("quimb", *parts)))
+
+    return frozenset(modules)
+
+
+KNOWN_MODULES = find_autoapi_modules()
 
 
 def fqn_to_url(fqn):
