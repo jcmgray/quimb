@@ -210,6 +210,7 @@ from .tn3d.tebd import (
     LocalHam3D,
 )
 from .tnag.core import (
+    LatticeBondMap,
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
@@ -301,6 +302,7 @@ __all__ = (
     "LocalHam2D",
     "LocalHam3D",
     "LocalHamGen",
+    "LatticeBondMap",
     "MatrixProductOperator",
     "MatrixProductState",
     "MERA",

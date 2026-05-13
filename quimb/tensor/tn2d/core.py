@@ -28,6 +28,7 @@ from ..tensor_core import (
     tags_to_oset,
 )
 from ..tnag.core import (
+    LatticeBondMap,
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
@@ -4696,8 +4697,8 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             and (sum(d == 1 for d in shape_on_ymin_edge) == 4)
         )
 
-        # cache for both creating and retrieving indices
-        ix = defaultdict(rand_uuid)
+        # cache for both creating and retrieving bond indices
+        bond = LatticeBondMap(self.Lx, self.Ly)
         tensors = []
 
         for i, j in self.gen_site_coos():
@@ -4728,33 +4729,13 @@ class PEPS(TensorNetwork2DVector, TensorNetwork2DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                if i == self.Lx - 1:
-                    ind = ix["PBC", j]
-                else:
-                    i_u = (i + 1) % self.Lx
-                    ind = ix[frozenset(((i, j), (i_u, j)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i + 1, j)))
             if "r" in array_order:
-                if j == self.Ly - 1:
-                    ind = ix[i, "PBC"]
-                else:
-                    j_r = (j + 1) % self.Ly
-                    ind = ix[frozenset(((i, j), (i, j_r)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i, j + 1)))
             if "d" in array_order:
-                if i == 0:
-                    ind = ix["PBC", j]
-                else:
-                    i_d = (i - 1) % self.Lx
-                    ind = ix[frozenset(((i_d, j), (i, j)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i - 1, j)))
             if "l" in array_order:
-                if j == 0:
-                    ind = ix[i, "PBC"]
-                else:
-                    j_l = (j - 1) % self.Ly
-                    ind = ix[frozenset(((i, j_l), (i, j)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i, j - 1)))
             inds.append(self.site_ind(i, j))
 
             # mix site, row, column and global tags
@@ -5168,8 +5149,8 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
         self._Lx = len(arrays)
         self._Ly = len(arrays[0])
 
-        # cache for both creating and retrieving indices
-        ix = defaultdict(rand_uuid)
+        # cache for both creating and retrieving bond indices
+        bond = LatticeBondMap(self.Lx, self.Ly)
         tensors = []
 
         if cyclic is None:
@@ -5223,33 +5204,13 @@ class PEPO(TensorNetwork2DOperator, TensorNetwork2DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                if i == self.Lx - 1:
-                    ind = ix["PBC", j]
-                else:
-                    i_u = (i + 1) % self.Lx
-                    ind = ix[frozenset(((i, j), (i_u, j)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i + 1, j)))
             if "r" in array_order:
-                if j == self.Ly - 1:
-                    ind = ix[i, "PBC"]
-                else:
-                    j_r = (j + 1) % self.Ly
-                    ind = ix[frozenset(((i, j), (i, j_r)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i, j + 1)))
             if "d" in array_order:
-                if i == 0:
-                    ind = ix["PBC", j]
-                else:
-                    i_d = (i - 1) % self.Lx
-                    ind = ix[frozenset(((i_d, j), (i, j)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i - 1, j)))
             if "l" in array_order:
-                if j == 0:
-                    ind = ix[i, "PBC"]
-                else:
-                    j_l = (j - 1) % self.Ly
-                    ind = ix[frozenset(((i, j_l), (i, j)))]
-                inds.append(ind)
+                inds.append(bond((i, j), (i, j - 1)))
             inds.append(self.lower_ind(i, j))
             inds.append(self.upper_ind(i, j))
 

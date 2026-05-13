@@ -2,7 +2,6 @@
 
 import functools
 import itertools
-from collections import defaultdict
 from itertools import combinations, product
 from numbers import Integral
 from operator import add
@@ -22,6 +21,7 @@ from ..tensor_core import (
     tags_to_oset,
 )
 from ..tnag.core import (
+    LatticeBondMap,
     TensorNetworkGen,
     TensorNetworkGenVector,
 )
@@ -2858,8 +2858,8 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             except (TypeError, ValueError):
                 cyclicx = cyclicy = cyclicz = cyclic
 
-        # cache for both creating and retrieving indices
-        ix = defaultdict(rand_uuid)
+        # cache for both creating and retrieving bond indices
+        bond = LatticeBondMap(self.Lx, self.Ly, self.Lz)
         tensors = []
 
         for i, j, k in self.gen_site_coos():
@@ -2894,47 +2894,17 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             # get the relevant indices corresponding to neighbours
             inds = []
             if "u" in array_order:
-                if i == self.Lx - 1:
-                    ind = ix["PBC", j, k]
-                else:
-                    i_u = (i + 1) % self.Lx
-                    ind = ix[frozenset(((i, j, k), (i_u, j, k)))]
-                inds.append(ind)
+                inds.append(bond((i, j, k), (i + 1, j, k)))
             if "r" in array_order:
-                if j == self.Ly - 1:
-                    ind = ix[i, "PBC", k]
-                else:
-                    j_r = (j + 1) % self.Ly
-                    ind = ix[frozenset(((i, j, k), (i, j_r, k)))]
-                inds.append(ind)
+                inds.append(bond((i, j, k), (i, j + 1, k)))
             if "f" in array_order:
-                if k == self.Lz - 1:
-                    ind = ix[i, j, "PBC"]
-                else:
-                    k_f = (k + 1) % self.Lz
-                    ind = ix[frozenset(((i, j, k), (i, j, k_f)))]
-                inds.append(ind)
+                inds.append(bond((i, j, k), (i, j, k + 1)))
             if "d" in array_order:
-                if i == 0:
-                    ind = ix["PBC", j, k]
-                else:
-                    i_d = (i - 1) % self.Lx
-                    ind = ix[frozenset(((i_d, j, k), (i, j, k)))]
-                inds.append(ind)
+                inds.append(bond((i, j, k), (i - 1, j, k)))
             if "l" in array_order:
-                if j == 0:
-                    ind = ix[i, "PBC", k]
-                else:
-                    j_l = (j - 1) % self.Ly
-                    ind = ix[frozenset(((i, j_l, k), (i, j, k)))]
-                inds.append(ind)
+                inds.append(bond((i, j, k), (i, j - 1, k)))
             if "b" in array_order:
-                if k == 0:
-                    ind = ix[i, j, "PBC"]
-                else:
-                    k_b = (k - 1) % self.Lz
-                    ind = ix[frozenset(((i, j, k_b), (i, j, k)))]
-                inds.append(ind)
+                inds.append(bond((i, j, k), (i, j, k - 1)))
             inds.append(self.site_ind(i, j, k))
 
             # mix site, slice and global tags

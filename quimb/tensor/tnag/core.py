@@ -3,6 +3,7 @@
 import functools
 import itertools
 import warnings
+from collections import defaultdict
 from operator import add, mul
 
 from autoray import dag, do
@@ -25,6 +26,83 @@ def get_coordinate_formatter(ndims):
 def prod(xs):
     """Product of all elements in ``xs``."""
     return functools.reduce(mul, xs)
+
+
+class LatticeBondMap:
+    """Helper for creating consistent lattice bond indices.
+
+    Coordinates should be supplied without manually wrapping periodic
+    boundaries. Any coordinate just outside the lattice is interpreted as a
+    periodic bond, which keeps length-1 and length-2 periodic bonds distinct
+    from ordinary in-lattice nearest-neighbor bonds.
+
+    Call with ``return_seen=True`` to return ``(bond, seen)`` where ``seen``
+    indicates whether the same lattice bond had already been requested. Useful
+    if you only want to do something to one side of a bond.
+    """
+
+    def __init__(self, Lx, Ly, Lz=None):
+        self.shape = (Lx, Ly) if Lz is None else (Lx, Ly, Lz)
+        self.ndim = len(self.shape)
+        self._ix = defaultdict(rand_uuid)
+
+    def wrap(self, *coos):
+        wrapped_coos = []
+        for coo in coos:
+            coo = tuple(coo)
+
+            if len(coo) != self.ndim:
+                raise ValueError(
+                    "Coordinate must match the dimensionality of the lattice."
+                )
+
+            wrapped_coos.append(tuple(x % L for x, L in zip(coo, self.shape)))
+
+        if len(wrapped_coos) == 1:
+            return wrapped_coos[0]
+
+        return tuple(wrapped_coos)
+
+    def _key(self, cooa, coob):
+        cooa = tuple(cooa)
+        coob = tuple(coob)
+
+        if (len(cooa) != self.ndim) or (len(coob) != self.ndim):
+            raise ValueError(
+                "Coordinates must match the dimensionality of the lattice."
+            )
+
+        periodic_axis = None
+        cooa_wrapped = []
+        for axis, (a, b, L) in enumerate(zip(cooa, coob, self.shape)):
+            a_inbounds = 0 <= a < L
+            b_inbounds = 0 <= b < L
+
+            if not (a_inbounds and b_inbounds):
+                if periodic_axis is not None:
+                    raise ValueError(
+                        "Only one periodic boundary crossing is supported."
+                    )
+                periodic_axis = axis
+
+            cooa_wrapped.append(a % L)
+
+        if periodic_axis is None:
+            return frozenset((cooa, coob))
+
+        key = list(cooa_wrapped)
+        key[periodic_axis] = "PBC"
+        return tuple(key)
+
+    def __call__(self, cooa, coob, *, return_seen=False):
+        key = self._key(cooa, coob)
+        seen = key in self._ix
+        bond = self._ix[key]
+
+        if return_seen:
+            return bond, seen
+
+        return bond
 
 
 def tensor_network_align(

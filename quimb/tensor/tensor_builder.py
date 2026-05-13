@@ -43,6 +43,7 @@ from .tn2d.tebd import LocalHam2D
 from .tn3d.core import TensorNetwork3D, gen_3d_bonds, gen_3d_plaquettes
 from .tn3d.tebd import LocalHam3D
 from .tnag.core import (
+    LatticeBondMap,
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
@@ -1340,7 +1341,7 @@ def TN2D_from_fill_fn(
         y_tag_id=y_tag_id,
     )
 
-    bonds = collections.defaultdict(rand_uuid)
+    bonds = LatticeBondMap(Lx, Ly)
 
     for i, j in itertools.product(range(Lx), range(Ly)):
         directions = ""
@@ -1348,16 +1349,16 @@ def TN2D_from_fill_fn(
 
         if j > 0 or cyclic_y:
             directions += "l"
-            inds.append(bonds[(i, (j - 1) % Ly), (i, j)])
+            inds.append(bonds((i, j), (i, j - 1)))
         if j < Ly - 1 or cyclic_y:
             directions += "r"
-            inds.append(bonds[(i, j), (i, (j + 1) % Ly)])
+            inds.append(bonds((i, j), (i, j + 1)))
         if i < Lx - 1 or cyclic_x:
             directions += "u"
-            inds.append(bonds[(i, j), ((i + 1) % Lx, j)])
+            inds.append(bonds((i, j), (i + 1, j)))
         if i > 0 or cyclic_x:
             directions += "d"
-            inds.append(bonds[((i - 1) % Lx, j), (i, j)])
+            inds.append(bonds((i, j), (i - 1, j)))
 
         shape = (D,) * len(inds)
         data = fill_fn(shape)
@@ -1908,7 +1909,7 @@ def TN3D_from_fill_fn(
         y_tag_id=y_tag_id,
         z_tag_id=z_tag_id,
     )
-    bonds = collections.defaultdict(rand_uuid)
+    bonds = LatticeBondMap(Lx, Ly, Lz)
 
     for i, j, k in itertools.product(range(Lx), range(Ly), range(Lz)):
         directions = ""
@@ -1916,22 +1917,22 @@ def TN3D_from_fill_fn(
 
         if k > 0 or cyclic_z:
             directions += "b"
-            inds.append(bonds[(i, j, (k - 1) % Lz), (i, j, k)])
+            inds.append(bonds((i, j, k), (i, j, k - 1)))
         if k < Lz - 1 or cyclic_z:
             directions += "a"
-            inds.append(bonds[(i, j, k), (i, j, (k + 1) % Lz)])
+            inds.append(bonds((i, j, k), (i, j, k + 1)))
         if j > 0 or cyclic_y:
             directions += "l"
-            inds.append(bonds[(i, (j - 1) % Ly, k), (i, j, k)])
+            inds.append(bonds((i, j, k), (i, j - 1, k)))
         if j < Ly - 1 or cyclic_y:
             directions += "r"
-            inds.append(bonds[(i, j, k), (i, (j + 1) % Ly, k)])
+            inds.append(bonds((i, j, k), (i, j + 1, k)))
         if i < Lx - 1 or cyclic_x:
             directions += "u"
-            inds.append(bonds[(i, j, k), ((i + 1) % Lx, j, k)])
+            inds.append(bonds((i, j, k), (i + 1, j, k)))
         if i > 0 or cyclic_x:
             directions += "d"
-            inds.append(bonds[((i - 1) % Lx, j, k), (i, j, k)])
+            inds.append(bonds((i, j, k), (i - 1, j, k)))
 
         shape = (D,) * len(inds)
         data = fill_fn(shape)
@@ -2758,28 +2759,34 @@ def TN2D_classical_ising_partition_function(
         x_tag_id=x_tag_id,
         y_tag_id=y_tag_id,
     )
-    bonds = collections.defaultdict(rand_uuid)
+    bonds = LatticeBondMap(Lx, Ly)
 
     for ni, nj in itertools.product(range(Lx), range(Ly)):
+        site = (ni, nj)
         directions = ""
         inds = []
         js = ()
         asymms = ()
 
-        for inbounds, pair, direction in [
-            (nj > 0 or cyclic_y, ((ni, (nj - 1) % Ly), (ni, nj)), "l"),
-            (nj < Ly - 1 or cyclic_y, ((ni, nj), (ni, (nj + 1) % Ly)), "r"),
-            (ni < Lx - 1 or cyclic_x, ((ni, nj), ((ni + 1) % Lx, nj)), "u"),
-            (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj), (ni, nj)), "d"),
+        for inbounds, neighbor, direction in [
+            (nj > 0 or cyclic_y, (ni, nj - 1), "l"),
+            (nj < Ly - 1 or cyclic_y, (ni, nj + 1), "r"),
+            (ni < Lx - 1 or cyclic_x, (ni + 1, nj), "u"),
+            (ni > 0 or cyclic_x, (ni - 1, nj), "d"),
         ]:
             if inbounds:
-                js += (j_factory(*pair),)
+                bond, seen = bonds(site, neighbor, return_seen=True)
+                if direction in "ld":
+                    j_pair = bonds.wrap(neighbor, site)
+                else:
+                    j_pair = bonds.wrap(site, neighbor)
+                js += (j_factory(*j_pair),)
                 directions += direction
                 # this is logic for handling negative j without imag tensors
                 # i.e. add the left factor if the first instance of bond, right
                 # factor if second. If j > 0.0 this doesn't matter anyhow
-                asymms += ("l" if pair not in bonds else "r",)
-                inds.append(bonds[pair])
+                asymms += ("r" if seen else "l",)
+                inds.append(bond)
 
         site_is_output = (ni, nj) in outputs
         if site_is_output:
@@ -2887,42 +2894,36 @@ def TN3D_classical_ising_partition_function(
         y_tag_id=y_tag_id,
         z_tag_id=z_tag_id,
     )
-    bonds = collections.defaultdict(rand_uuid)
+    bonds = LatticeBondMap(Lx, Ly, Lz)
 
     for ni, nj, nk in itertools.product(range(Lx), range(Ly), range(Lz)):
+        site = (ni, nj, nk)
         directions = ""
         inds = []
         js = ()
         asymms = ()
 
-        for inbounds, pair, direction in [
-            (nk > 0 or cyclic_z, ((ni, nj, (nk - 1) % Lz), (ni, nj, nk)), "b"),
-            (
-                nk < Lz - 1 or cyclic_z,
-                ((ni, nj, nk), (ni, nj, (nk + 1) % Lz)),
-                "a",
-            ),
-            (nj > 0 or cyclic_y, ((ni, (nj - 1) % Ly, nk), (ni, nj, nk)), "l"),
-            (
-                nj < Ly - 1 or cyclic_y,
-                ((ni, nj, nk), (ni, (nj + 1) % Ly, nk)),
-                "r",
-            ),
-            (
-                ni < Lx - 1 or cyclic_x,
-                ((ni, nj, nk), ((ni + 1) % Lx, nj, nk)),
-                "u",
-            ),
-            (ni > 0 or cyclic_x, (((ni - 1) % Lx, nj, nk), (ni, nj, nk)), "d"),
+        for inbounds, neighbor, direction in [
+            (nk > 0 or cyclic_z, (ni, nj, nk - 1), "b"),
+            (nk < Lz - 1 or cyclic_z, (ni, nj, nk + 1), "a"),
+            (nj > 0 or cyclic_y, (ni, nj - 1, nk), "l"),
+            (nj < Ly - 1 or cyclic_y, (ni, nj + 1, nk), "r"),
+            (ni < Lx - 1 or cyclic_x, (ni + 1, nj, nk), "u"),
+            (ni > 0 or cyclic_x, (ni - 1, nj, nk), "d"),
         ]:
             if inbounds:
-                js += (j_factory(*pair),)
+                bond, seen = bonds(site, neighbor, return_seen=True)
+                if direction in "bld":
+                    j_pair = bonds.wrap(neighbor, site)
+                else:
+                    j_pair = bonds.wrap(site, neighbor)
+                js += (j_factory(*j_pair),)
                 directions += direction
                 # this is logic for handling negative j without imag tensors
                 # i.e. add the left factor if the first instance of bond, right
                 # factor if second. If j > 0.0 this doesn't matter anyhow
-                asymms += ("l" if pair not in bonds else "r",)
-                inds.append(bonds[pair])
+                asymms += ("r" if seen else "l",)
+                inds.append(bond)
 
         site_is_output = (ni, nj, nk) in outputs
         if site_is_output:

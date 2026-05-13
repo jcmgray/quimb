@@ -299,6 +299,12 @@ class TestGenericTN:
         tn = qtn.TN2D_with_value(1.0, Lx=2, Ly=3, D=4)
         assert tn ^ all == pytest.approx(qu.prod(tn.ind_sizes().values()))
 
+    def test_tn2d_cyclic_length_two_keeps_boundary_bonds(self):
+        tn = qtn.TN2D_empty(Lx=2, Ly=2, D=1, cyclic=True)
+        assert len(tn[0, 0].bonds(tn[1, 0])) == 2
+        assert len(tn[0, 0].bonds(tn[0, 1])) == 2
+        assert tn.num_indices == 8
+
     def test_tn3d_fillers(self):
         tn = qtn.TN3D_empty(Lx=2, Ly=2, Lz=2, D=2)
         assert isinstance(tn, qtn.TensorNetwork3D)
@@ -307,6 +313,13 @@ class TestGenericTN:
         ) == pytest.approx(qtn.TN3D_rand(Lx=2, Ly=2, Lz=2, D=2, seed=42) ^ all)
         tn = qtn.TN3D_with_value(1.0, Lx=2, Ly=3, Lz=2, D=2)
         assert tn ^ all == pytest.approx(qu.prod(tn.ind_sizes().values()))
+
+    def test_tn3d_cyclic_length_two_keeps_boundary_bonds(self):
+        tn = qtn.TN3D_empty(Lx=2, Ly=2, Lz=2, D=1, cyclic=True)
+        assert len(tn[0, 0, 0].bonds(tn[1, 0, 0])) == 2
+        assert len(tn[0, 0, 0].bonds(tn[0, 1, 0])) == 2
+        assert len(tn[0, 0, 0].bonds(tn[0, 0, 1])) == 2
+        assert tn.num_indices == 24
 
 
 @pytest.mark.parametrize("cyclic", [False, True, (False, True), (True, False)])
@@ -349,6 +362,61 @@ def test_tn2d_classical_ising_partition_function(cyclic):
     )
 
 
+def test_tn2d_classical_ising_length_two_cyclic_multibonds():
+    Lx = Ly = 2
+    coupling = {
+        (cooa, coob): n + 1.0
+        for n, (cooa, coob) in enumerate(qtn.gen_2d_bonds(Lx, Ly, cyclic=True))
+    }
+    coupling_default = {}
+    for edge, j in coupling.items():
+        if edge[::-1] not in coupling_default:
+            coupling_default[edge] = j
+
+    tn = qtn.TN2D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        beta=0.13,
+        j=coupling,
+        h=0.2,
+        cyclic=True,
+    )
+    assert len(tn[0, 0].bonds(tn[1, 0])) == 2
+    assert len(tn[0, 0].bonds(tn[0, 1])) == 2
+    assert tn.num_indices == 8
+
+    htn = qtn.HTN2D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        beta=0.13,
+        j=coupling,
+        h=0.2,
+        cyclic=True,
+    )
+    z = tn.contract()
+    assert_allclose(z, htn.contract(output_inds=()))
+
+    tn_default = qtn.TN2D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        beta=0.13,
+        j=coupling_default,
+        h=0.2,
+        cyclic=True,
+    )
+    htn_default = qtn.HTN2D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        beta=0.13,
+        j=coupling_default,
+        h=0.2,
+        cyclic=True,
+    )
+    z_default = tn_default.contract()
+    assert_allclose(z_default, htn_default.contract(output_inds=()))
+    assert z_default != pytest.approx(z)
+
+
 @pytest.mark.parametrize("cyclic", [False, (0, 1, 1), (0, 0, 1)])
 def test_tn3d_classical_ising_partition_function(cyclic):
     Lx, Ly, Lz = 2, 3, 3
@@ -388,6 +456,68 @@ def test_tn3d_classical_ising_partition_function(cyclic):
         tn.contract().data,
         htn.contract(output_inds=("s0,2,1", "s1,0,2")).data,
     )
+
+
+def test_tn3d_classical_ising_length_two_cyclic_multibonds():
+    Lx = Ly = Lz = 2
+    coupling = {
+        (cooa, coob): n + 1.0
+        for n, (cooa, coob) in enumerate(
+            qtn.gen_3d_bonds(Lx, Ly, Lz, cyclic=True)
+        )
+    }
+    coupling_default = {}
+    for edge, j in coupling.items():
+        if edge[::-1] not in coupling_default:
+            coupling_default[edge] = j
+
+    tn = qtn.TN3D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        Lz,
+        beta=0.13,
+        j=coupling,
+        h=0.2,
+        cyclic=True,
+    )
+    assert len(tn[0, 0, 0].bonds(tn[1, 0, 0])) == 2
+    assert len(tn[0, 0, 0].bonds(tn[0, 1, 0])) == 2
+    assert len(tn[0, 0, 0].bonds(tn[0, 0, 1])) == 2
+    assert tn.num_indices == 24
+
+    htn = qtn.HTN3D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        Lz,
+        beta=0.13,
+        j=coupling,
+        h=0.2,
+        cyclic=True,
+    )
+    z = tn.contract()
+    assert_allclose(z, htn.contract(output_inds=()))
+
+    tn_default = qtn.TN3D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        Lz,
+        beta=0.13,
+        j=coupling_default,
+        h=0.2,
+        cyclic=True,
+    )
+    htn_default = qtn.HTN3D_classical_ising_partition_function(
+        Lx,
+        Ly,
+        Lz,
+        beta=0.13,
+        j=coupling_default,
+        h=0.2,
+        cyclic=True,
+    )
+    z_default = tn_default.contract()
+    assert_allclose(z_default, htn_default.contract(output_inds=()))
+    assert z_default != pytest.approx(z)
 
 
 @pytest.mark.parametrize("sites_location", ["side", "diag"])
