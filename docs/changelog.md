@@ -14,6 +14,7 @@ Release notes for `quimb`.
 **Bug fixes:**
 
 - [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
+- [`TensorNetwork2DVector.compute_norm`](quimb.tensor.tn2d.core.TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
 
 
 ## v1.14.0 (2026-05-10)

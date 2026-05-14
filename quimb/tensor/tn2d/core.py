@@ -4161,7 +4161,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         progbar=None,
         **contract_opts,
     ):
-        """Compute the norm of this vector via boundary contraction.
+        """Compute the norm (squared) of this vector via boundary contraction.
 
         Parameters
         ----------
@@ -4195,7 +4195,8 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         progbar : bool, optional
             Whether to show a progress bar.
         contract_opts
-            Additional options to pass to :meth:`contract_boundary`.
+            Additional options to pass to
+            :meth:`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_boundary`.
 
         Returns
         -------
@@ -4394,8 +4395,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         inplace : bool, optional
             Whether to perform the normalization inplace or not.
         contract_boundary_opts
-            Supplied to :meth:`contract_boundary`, by default, two layer
-            contraction will be used.
+            Supplied to
+            :meth:`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_boundary`,
+            by default, two layer contraction will be used.
         """
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
