@@ -2493,11 +2493,9 @@ class TensorNetwork2D(TensorNetworkGen):
         if final_contract and (around is None):
             final_contract_opts = ensure_dict(final_contract_opts)
             final_contract_opts.setdefault("optimize", optimize)
-            return tn.contract(
-                strip_exponent=strip_exponent,
-                inplace=inplace,
-                **final_contract_opts,
-            )
+            final_contract_opts.setdefault("inplace", inplace)
+            final_contract_opts.setdefault("strip_exponent", strip_exponent)
+            return tn.contract(**final_contract_opts)
 
         return tn
 
@@ -4214,7 +4212,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             sequence=sequence,
             equalize_norms=equalize_norms,
             progbar=progbar,
+            # can perform boundary contraction inplace on new norm network
             inplace=True,
+            # but want to unwrap final value, not leave as tensor network
+            final_contract_opts=dict(inplace=False),
             **contract_opts,
         )
 
