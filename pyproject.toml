@@ -4,15 +4,19 @@ description = "Quantum information and many-body library."
 readme = { file = "README.md", content-type = "text/markdown" }
 dynamic = ["version"]
 authors = [{ name = "Johnnie Gray", email = "johnniemcgray@gmail.com" }]
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
 ]
 keywords = [
     "quantum",
@@ -166,6 +170,9 @@ coverage= "*"
 pytest= "*"
 pytest-cov= "*"
 
+[tool.pixi.feature.testing.pypi-dependencies]
+build = "*"
+
 [tool.pixi.feature.docs.dependencies]
 astroid = "*"
 doc2dash = "*"
@@ -232,6 +239,15 @@ pytest \
 """
 cwd = "."
 description = "Run just the tensor tests."
+
+[tool.pixi.tasks.build-test]
+cmd = """
+    rm -rf dist/build-test &&
+    python -m build --sdist --wheel --outdir dist/build-test
+"""
+cwd = "."
+description = "Build source and wheel distributions as a smoke test."
+default-environment = "testpymid"
 
 [tool.pixi.feature.docs.tasks.docs]
 cmd = "sphinx-build -b html docs docs/_build/html"
