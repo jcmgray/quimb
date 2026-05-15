@@ -9,6 +9,7 @@ Release notes for `quimb`.
 
 - [`TensorNetwork.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond).
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
+- [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
 
 
 **Bug fixes:**

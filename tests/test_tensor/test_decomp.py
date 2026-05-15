@@ -609,3 +609,44 @@ def test_batch_eigh(backend, max_bond, absorb):
     assert left is None or left.shape == (3, 6, k)
     assert s is None or s.shape == (3, k)
     assert right is None or right.shape == (3, k, 6)
+
+
+def test_eigh_shift():
+    x = np.diag([4.0, 1.0, 0.0])
+    trace = np.trace(x)
+
+    _, s0, _ = array_split(
+        x,
+        method="eigh",
+        absorb="s",
+        cutoff=0.0,
+        positive=1,
+    )
+    _, s_false, _ = array_split(
+        x,
+        method="eigh",
+        absorb="s",
+        cutoff=0.0,
+        positive=1,
+        shift=False,
+    )
+    _, s_float, _ = array_split(
+        x,
+        method="eigh",
+        absorb="s",
+        cutoff=0.0,
+        positive=1,
+        shift=0.1,
+    )
+    _, s_true, _ = array_split(
+        x,
+        method="eigh",
+        absorb="s",
+        cutoff=0.0,
+        positive=1,
+        shift=True,
+    )
+
+    assert_allclose(s_false, s0)
+    assert_allclose(s_float, s0 + 0.1 * trace)
+    assert_allclose(s_true, s0 + np.finfo(x.dtype).eps * trace)

@@ -1792,6 +1792,38 @@ def svd_rand_truncated(
 # ---------------------------------- eigh ----------------------------------- #
 
 
+def _with_diag_shift(x, xp, shift=0.0):
+    if shift < 0.0:
+        # compute machine-epsilon relative shift
+        shift = xp.finfo(x.dtype).eps
+
+    if shift > 0.0:
+        trace = xp.trace(x, axis1=-2, axis2=-1)[..., None, None]
+        try:
+            # if possible avoid accumulating regularization gradient
+            trace = xp.stop_gradient(trace)
+        except (ImportError, AttributeError):
+            pass
+        x = x + shift * trace * xp.eye(x.shape[-1])
+
+    return x
+
+
+@njit  # pragma: no cover
+def _with_diag_shift_numba(x, shift=0.0):
+    if shift < 0.0:
+        # compute machine-epsilon relative shift
+        shift = np.finfo(x.dtype).eps
+
+    if shift > 0.0:
+        shift = shift * np.trace(x)
+        x = x.copy()  # avoid modifying input in-place
+        for i in range(x.shape[0]):
+            x[i, i] += shift
+
+    return x
+
+
 @register_split_driver("eigh")
 @compose
 def eigh_truncated(
@@ -1802,9 +1834,22 @@ def eigh_truncated(
     absorb=get_Usq_sqVH,
     renorm=0,
     positive=0,
+    shift=False,
 ):
     """SVD-like decomposition using hermitian eigen-decomposition, only works
     if ``x`` is hermitian.
+
+    Parameters
+    ----------
+    shift : bool or float, optional
+        Whether to add a small shift to the diagonal of ``x`` for
+        regularization. The valid options are:
+
+        - ``True``: add ``trace(x) * eps`` to the diagonal of ``x``, where
+          ``eps`` is the machine epsilon for the dtype of ``x``.
+        - ``False``: never add a shift.
+        - float: use the provided value as a relative shift, i.e. add
+          ``shift * trace(x)`` to the diagonal of ``x``.
 
     Returns
     -------
@@ -1813,6 +1858,8 @@ def eigh_truncated(
     right : array_like or None
     """
     xp = get_namespace(x)
+    shift = {False: 0.0, True: -1.0}.get(shift, shift)
+    x = _with_diag_shift(x, xp, shift=shift)
     s, U = xp.linalg.eigh(x)
 
     # make sure largest singular value first
@@ -1859,10 +1906,12 @@ def eigh_truncated_numba(
     absorb=get_Usq_sqVH,
     renorm=0,
     positive=0,
+    shift=0.0,
 ):
     """SVD-decomposition, using hermitian eigen-decomposition, only works if
     ``x`` is hermitian.
     """
+    x = _with_diag_shift_numba(x, shift=shift)
     s, U = np.linalg.eigh(x)
 
     # make sure largest singular value first
@@ -1908,6 +1957,7 @@ def eigh_truncated_numpy(
     absorb=get_Usq_sqVH,
     renorm=0,
     positive=0,
+    shift=False,
 ):
     if x.ndim > 2:
         # XXX: batch truncation not implemented in numba version yet
@@ -1919,9 +1969,11 @@ def eigh_truncated_numpy(
             absorb=absorb,
             renorm=renorm,
             positive=positive,
+            shift=shift,
         )
+    shift = {False: 0.0, True: -1.0}.get(shift, shift)
     return eigh_truncated_numba(
-        x, cutoff, cutoff_mode, max_bond, absorb, renorm, positive
+        x, cutoff, cutoff_mode, max_bond, absorb, renorm, positive, shift
     )
 
 
@@ -2120,19 +2172,7 @@ def qr_stabilized_lazy(x, absorb=get_U_sVH, **kwargs):
 
 def _cholesky_maybe_with_diag_shift(x, absorb=get_Usq_sqVH, shift=0.0):
     xp = get_namespace(x)
-
-    if shift < 0.0:
-        # auto compute
-        shift = xp.finfo(x.dtype).eps
-
-    if shift > 0.0:
-        trace = xp.trace(x, axis1=-2, axis2=-1)[..., None, None]
-        try:
-            # if possible avoid accumulating regulization gradient
-            trace = xp.stop_gradient(trace)
-        except (ImportError, AttributeError):
-            pass
-        x = x + shift * trace * xp.eye(x.shape[-1])
+    x = _with_diag_shift(x, xp, shift=shift)
 
     if absorb == get_sqVH:
         # can compute the right factor directly using upper
@@ -2212,16 +2252,7 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift=True):
 
 @njit  # pragma: no cover
 def _cholesky_regularized_numba(x, absorb=get_Usq_sqVH, shift=-1.0):
-    if shift < 0.0:
-        # auto compute
-        shift = np.finfo(x.dtype).eps
-
-    if shift > 0.0:
-        shift = shift * np.trace(x)
-        x = x.copy()  # avoid modifying input in-place
-        for i in range(x.shape[0]):
-            x[i, i] += shift
-
+    x = _with_diag_shift_numba(x, shift=shift)
     L = np.linalg.cholesky(x)
 
     if absorb == get_Usq:
@@ -3010,7 +3041,7 @@ def squared_op_to_reduced_factor(
         The method to use for the decomposition.
     kwargs
         Additional keyword arguments to pass to the decomposition method.
-        For example ``shift`` for the ``cholesky`` method.
+        For example ``shift`` for the ``cholesky`` and ``eigh`` methods.
 
     Returns
     -------
