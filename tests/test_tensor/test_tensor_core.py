@@ -1100,6 +1100,14 @@ class TestTensorNetwork:
         assert tn.contraction_width() == 6
         assert tn.contraction_cost() == 2 * 8**3
 
+    def test_contract_ind_with_inplace_kwarg(self):
+        a = rand_tensor([2, 3], "ab")
+        b = rand_tensor([3, 4], "bc")
+        tn = a & b
+        # inplace=False should not raise a TypeError when passed to contract_ind
+        tn.contract_ind("b", inplace=False)
+        assert tn.num_indices == 2
+
     def test_contract_to_dense_reduced_factor(self):
         tn = qtn.PEPS.rand(2, 2, 2)
         left_inds = ["k0,0", "k0,1"]

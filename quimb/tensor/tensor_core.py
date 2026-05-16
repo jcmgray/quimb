@@ -5769,6 +5769,7 @@ class TensorNetwork:
         contract_opts
             Supplied to :func:`~quimb.tensor.tensor_core.tensor_contract`.
         """
+        contract_opts.pop("inplace", None)
         tids = tuple(self._get_tids_from_inds(ind))
         output_inds = self.compute_contracted_inds(
             *tids, output_inds=output_inds
