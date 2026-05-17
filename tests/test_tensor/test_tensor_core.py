@@ -1788,6 +1788,32 @@ class TestTensorNetwork:
         assert tn.num_tensors == 4
         assert tn.num_indices == 9
 
+    def test_gate_inds_with_tn_hyperinds(self):
+        # gating where the target index is a hyperindex (appears in 3+ tensors);
+        # the shared connection bond must not be mangled during the merge
+        # (regression test for github issue #319)
+
+        # build a TN where "k0" is a hyperindex (shared by 3 tensors)
+        t1 = rand_tensor([2, 2], ["k0", "a"])
+        t2 = rand_tensor([2, 2], ["k0", "b"])
+        t3 = rand_tensor([2, 2], ["k0", "c"])
+        tn = t1 | t2 | t3
+        assert "k0" in tn.get_hyperinds()
+
+        # gate has inner index "b0" shared across 2 tensors, making it inner
+        g1 = rand_tensor([2, 2], ["b0", "k0"])
+        g2 = rand_tensor([2, 2], ["b0", "d"])
+        gate = g1 | g2
+
+        tn.gate_inds_with_tn_(["k0"], gate, ["b0"], ["k0"])
+
+        # result must be connected: k0 preserved as outer, contraction works
+        assert tn.num_tensors == 5
+        assert "k0" in tn.outer_inds()
+        # contracting should produce a consistent tensor (not raise)
+        result = tn.contract(output_inds=["k0", "a", "b", "c", "d"])
+        assert result.shape == (2, 2, 2, 2, 2)
+
     def test_select_loop(self):
         tn = qtn.TN2D_rand(2, 3, 2)
         loop6 = next(
