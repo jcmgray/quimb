@@ -8,7 +8,7 @@ from autoray import (
     compose,
     do,
     get_dtype_name,
-    get_lib_fn,
+    get_namespace,
     infer_backend,
     reshape,
 )
@@ -165,25 +165,56 @@ def fuse(x, *axes_groups, backend=None):
         The axes to fuse. Each group of axes will be fused into a single
         axis.
     """
-    if backend is None:
-        backend = infer_backend(x)
+    xp = get_namespace(x if backend is None else backend)
 
     axes_groups = tuple(map(tuple, axes_groups))
     if not any(axes_groups):
         return x
 
-    _shape = get_lib_fn(backend, "shape")
-    shape = _shape(x)
+    shape = xp.shape(x)
     perm, new_shape = calc_fuse_perm_and_shape(shape, axes_groups)
 
     if perm is not None:
-        _transpose = get_lib_fn(backend, "transpose")
-        x = _transpose(x, perm)
+        x = xp.transpose(x, perm)
     if new_shape is not None:
-        _reshape = get_lib_fn(backend, "reshape")
-        x = _reshape(x, new_shape)
+        x = xp.reshape(x, new_shape)
 
     return x
+
+
+@compose
+def unfuse(x, axis, axis_dims, backend=None):
+    """Unfuse a single axis into the given axis_dims. The axis_dims should be
+    compatible with the size of the axis being unfused. If the array has its
+    own unfuse method, it will be used instead of relying on `axis_dims`.
+
+    Array libraries that store fusing information (such as symmray block-sparse
+    arrays) can provide .unfuse or register a custom `unfuse` impl to unfuse
+    directly without relying on `axis_dims` (which can be slightly off due to
+    charge alignment).
+
+    Parameters
+    ----------
+    axis : int
+        Which axis to unfuse.
+    axis_dims : sequence of int
+        The shape to unfuse into.
+    """
+    axis_dims = tuple(axis_dims)
+
+    if len(axis_dims) == 1:
+        # no-op
+        return x
+
+    if hasattr(x, "unfuse"):
+        # if the array has its own unfuse method (e.g. block-sparse), use it
+        return x.unfuse(axis)
+
+    xp = get_namespace(x if backend is None else backend)
+
+    shape = xp.shape(x)
+    new_shape = (*shape[:axis], *axis_dims, *shape[axis + 1 :])
+    return xp.reshape(x, new_shape)
 
 
 def ndim(array):

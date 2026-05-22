@@ -57,6 +57,7 @@ from .array_ops import (
     iscomplex,
     isfermionic,
     norm_fro,
+    unfuse,
 )
 from .contraction import (
     array_contract,
@@ -599,11 +600,11 @@ def tensor_split(
 
     if nleft != 1 and left is not None:
         # unfuse dangling left indices
-        left = do("reshape", left, (*left_dims, shape(left)[-1]))
+        left = unfuse(left, axis=0, axis_dims=left_dims)
 
     if nright != 1 and right is not None:
         # unfuse dangling right indices
-        right = do("reshape", right, (shape(right)[0], *right_dims))
+        right = unfuse(right, axis=1, axis_dims=right_dims)
 
     if get == "arrays":
         if absorb is None:
@@ -9599,9 +9600,9 @@ class TensorNetwork:
         else:
             raise ValueError(f"mode `{mode}` is invalid.")
 
-        # now we rewire the prjectors back into the network
-        Pl = do("reshape", Pl, (*bix_sizes, -1))
-        Pr = do("reshape", Pr, (-1, *bix_sizes))
+        # now we rewire the projectors back into the network
+        Pl = unfuse(Pl, axis=0, axis_dims=bix_sizes)
+        Pr = unfuse(Pr, axis=1, axis_dims=bix_sizes)
 
         if insert_into is not None:
             tn = insert_into
