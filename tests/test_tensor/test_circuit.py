@@ -7,7 +7,12 @@ from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
-from quimb.tensor.circuit import rx_gate_param_gen
+from quimb.tensor.circuit import (
+    parse_openqasm3_file,
+    parse_openqasm3_str,
+    parse_openqasm3_url,
+    rx_gate_param_gen,
+)
 
 
 def assert_warning_messages(record, messages):
@@ -339,6 +344,75 @@ class TestCircuit:
             """
         )
         assert circ.gates[0].params == (pytest.approx(math.pi / 2),)
+
+    def test_openqasm3_parse_file_and_url(self, tmp_path):
+        qasm_str = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[2] q;
+        rx(theta) q[0];
+        cx q[0], q[1];
+        """
+        qasm_file = tmp_path / "example.qasm"
+        qasm_file.write_text(qasm_str)
+
+        info_str = parse_openqasm3_str(qasm_str)
+        info_file = parse_openqasm3_file(qasm_file)
+        info_url = parse_openqasm3_url(qasm_file.as_uri())
+
+        assert info_file["n"] == info_str["n"] == info_url["n"]
+        assert (
+            info_file["n_gates"] == info_str["n_gates"] == info_url["n_gates"]
+        )
+        assert info_file["inputs"] == info_str["inputs"] == info_url["inputs"]
+        assert (
+            info_file["symbols"] == info_str["symbols"] == info_url["symbols"]
+        )
+        assert (
+            info_file["expressions"]
+            == info_str["expressions"]
+            == info_url["expressions"]
+        )
+        for parsed in (info_file, info_url):
+            assert_same_gates(
+                qtn.Circuit.from_gates(info_str["gates"], N=info_str["n"]),
+                qtn.Circuit.from_gates(parsed["gates"], N=parsed["n"]),
+            )
+
+    def test_openqasm3_circuit_from_file_and_url(self, tmp_path):
+        qasm_str = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[2] q;
+        rx(theta) q[0];
+        cx q[0], q[1];
+        """
+        qasm_file = tmp_path / "example.qasm"
+        qasm_file.write_text(qasm_str)
+
+        circ_str = qtn.Circuit.from_openqasm3_str(qasm_str)
+        circ_file = qtn.Circuit.from_openqasm3_file(qasm_file)
+        circ_url = qtn.Circuit.from_openqasm3_url(qasm_file.as_uri())
+
+        assert_same_gates(circ_str, circ_file)
+        assert_same_gates(circ_str, circ_url)
+        assert (
+            circ_file.qasm3_inputs
+            == circ_str.qasm3_inputs
+            == circ_url.qasm3_inputs
+        )
+        assert (
+            circ_file.qasm3_symbols
+            == circ_str.qasm3_symbols
+            == circ_url.qasm3_symbols
+        )
+        assert (
+            circ_file.qasm3_expressions
+            == circ_str.qasm3_expressions
+            == circ_url.qasm3_expressions
+        )
 
     def test_openqasm3_named_binding_requires_all_inputs(self):
         circ = qtn.Circuit.from_openqasm3_str(
