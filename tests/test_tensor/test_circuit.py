@@ -125,6 +125,36 @@ def example_openqasm2_qft():
     """
 
 
+def example_openqasm3_qft():
+    return """
+    // quantum Fourier transform
+
+    OPENQASM 3.0;
+    include "stdgates.inc";
+
+    qubit[4] q;
+    bit[4] c;
+    x q[0];
+    x q[2];
+    barrier q;
+    h q[0];
+    cu1(pi/2) q[1],q[0];
+    h q[1];
+    cu1(pi/4) q[2],q[0];
+    cu1(pi/2) q[2],q[1];
+    /*
+    This is a multi line comment.
+    */
+    h q[2];
+    cu1(pi/8) q[3],q[0];
+    cu1(pi/4) q[3],q[1];
+    cu1(pi/2) q[3],q[2];
+    h q[3];
+
+    c = measure q;
+    """
+
+
 class TestCircuit:
     def test_prepare_GHZ(self):
         qc = qtn.Circuit(3)
@@ -233,6 +263,92 @@ class TestCircuit:
         """
         circ = qtn.Circuit.from_openqasm2_str(qasm_str)
         assert len(circ.gates) == 2
+
+    def test_from_openqasm3(self):
+        qc = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
+        assert qc.N == 4
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_openqasm3_equivalent_to_openqasm2(self):
+        # the same circuit expressed in both formats must agree
+        qc2 = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
+        qc3 = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
+        assert [g.label for g in qc3.gates] == [g.label for g in qc2.gates]
+        fidelity = abs((qc2.psi.H & qc3.psi) ^ all) ** 2
+        assert fidelity == pytest.approx(1.0)
+
+    def test_openqasm3_single_qubit_declaration(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit a;
+        qubit b;
+        h a;
+        cx a, b;
+        """
+        )
+        assert circ.N == 2
+        assert [g.label for g in circ.gates] == ["H", "CX"]
+
+    def test_openqasm3_input_parameters(self):
+        contents = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float[64] theta;
+        qubit[1] q;
+        rz(theta) q[0];
+        """
+        circ = qtn.Circuit.from_openqasm3_str(contents, params={"theta": 0.3})
+        assert circ.gates[0].label == "RZ"
+        assert circ.gates[0].params[0] == pytest.approx(0.3)
+        # without binding the unbound parameter, a clear error is raised
+        with pytest.raises(ValueError):
+            qtn.Circuit.from_openqasm3_str(contents)
+
+    def test_openqasm3_const_parameter(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        const float half = pi / 2;
+        qubit[1] q;
+        rz(half) q[0];
+        """
+        )
+        assert circ.gates[0].params[0] == pytest.approx(math.pi / 2)
+
+    def test_openqasm3_custom_gates(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit[3] q;
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+        }
+
+        gate world(param1, theta) q
+        {
+            u2(theta / 2, param1) q;
+            u2(param1, theta / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "H",
+            "CX",
+            "U2",
+            "U2",
+            "H",
+            "CX",
+        ]
 
     @pytest.mark.parametrize(
         "Circ", [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]

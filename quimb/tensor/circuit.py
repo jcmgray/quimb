@@ -162,6 +162,58 @@ def get_openqasm2_regexes():
     }
 
 
+def _parse_openqasm_gate_definition(line, lines, rgxs):
+    """Parse a custom ``gate`` definition, consuming the relevant lines from
+    ``lines``. The syntax is shared by OpenQASM 2.0 and 3.0.
+
+    Returns
+    -------
+    label : str
+        The name of the custom gate.
+    definition : tuple[list[str], list[str], list[str]]
+        The signature parameters, signature qubits, and (templated) body lines
+        of the custom gate.
+    """
+    # first gather all lines involved in the gate definition
+    gate_lines = [line]
+    while True:
+        if "}" in line:
+            # finished -> break
+            break
+        # not finished -> need next line
+        line = lines.pop(0)
+        gate_lines.append(line)
+
+    # then combine this full gate definition, without newlines
+    gate_body = "".join(gate_lines)
+    # separate the signature and body
+    gate_sig, gate_body = re.match(r"(.*)\s*{(.*)}", gate_body).groups()
+
+    # parse the signature
+    match = rgxs["gate_sig"].match(gate_sig)
+    label = match[1]
+    sig_params = to_clean_list(match[3], ",")
+    sig_qubits = to_clean_list(match[4], ",")
+
+    # break body only back into individual lines, include semicolons
+    gate_body = to_clean_list(gate_body, ";")
+    # insert formatters, (using simple `replace` on the whole line will
+    # scramble the label if parameters or qubits are letters etc)
+    for i, gate_line in enumerate(gate_body):
+        gm = rgxs["gate"].match(gate_line + ";")
+        glabel = gm[1]
+        gqubits = multi_replace(gm[4], {q: f"{{{q}}}" for q in sig_qubits})
+        if gm[3]:
+            # sub gate line is parametrized gate
+            gparams = multi_replace(gm[3], {p: f"{{{p}}}" for p in sig_params})
+            gate_body[i] = f"{glabel}({gparams}) {gqubits};"
+        else:
+            # sub gate line is standard gate
+            gate_body[i] = f"{glabel} {gqubits};"
+
+    return label, (sig_params, sig_qubits, gate_body)
+
+
 def parse_openqasm2_str(contents):
     """Parse the string contents of an OpenQASM 2.0 file. This parser does not
     support classical control flow is not guaranteed to check the full openqasm
@@ -225,52 +277,11 @@ def parse_openqasm2_str(contents):
             )
 
         if rgxs["gate_def"].match(line):
-            # custom gate definition:
-            # first gather all lines involved in the gate definition
-            gate_lines = [line]
-            while True:
-                if "}" in line:
-                    # finished -> break
-                    break
-                else:
-                    # not finished -> need next line
-                    line = lines.pop(0)
-                    gate_lines.append(line)
-
-            # then combine this full gate definition, without newlines
-            gate_body = "".join(gate_lines)
-            # separate the signature and body
-            gate_sig, gate_body = re.match(
-                r"(.*)\s*{(.*)}", gate_body
-            ).groups()
-
-            # parse the signature
-            match = rgxs["gate_sig"].match(gate_sig)
-            label = match[1]
-            sig_params = to_clean_list(match[3], ",")
-            sig_qubits = to_clean_list(match[4], ",")
-
-            # break body only back into individual lines, include semicolons
-            gate_body = to_clean_list(gate_body, ";")
-            # insert formatters, (using simple `replace` on the whole line will
-            # scramble the label if parameters or qubits are letters etc)
-            for i, gate_line in enumerate(gate_body):
-                gm = rgxs["gate"].match(gate_line + ";")
-                glabel = gm[1]
-                gqubits = multi_replace(
-                    gm[4], {q: f"{{{q}}}" for q in sig_qubits}
-                )
-                if gm[3]:
-                    # sub gate line is parametrized gate
-                    gparams = multi_replace(
-                        gm[3], {p: f"{{{p}}}" for p in sig_params}
-                    )
-                    gate_body[i] = f"{glabel}({gparams}) {gqubits};"
-                else:
-                    # sub gate line is standard gate
-                    gate_body[i] = f"{glabel} {gqubits};"
-
-            custom_gates[label] = sig_params, sig_qubits, gate_body
+            # custom gate definition
+            label, definition = _parse_openqasm_gate_definition(
+                line, lines, rgxs
+            )
+            custom_gates[label] = definition
             continue
 
         match = rgxs["gate"].search(line)
@@ -333,6 +344,208 @@ def parse_openqasm2_url(url, **kwargs):
     from urllib import request
 
     return parse_openqasm2_str(request.urlopen(url).read().decode(), **kwargs)
+
+
+def get_openqasm3_regexes():
+    return {
+        "header": re.compile(r'(OPENQASM\s+3(\.0)?;)|(include\s+"[^"]+";)'),
+        "comment": re.compile(r"^//"),
+        "comment_start": re.compile(r"/\*"),
+        "comment_end": re.compile(r"\*/"),
+        # `qubit[n] name;` (register) or `qubit name;` (single qubit)
+        "qubit": re.compile(r"qubit\s*(?:\[(\d+)\])?\s+(\w+)\s*;"),
+        # numeric parameter declaration, e.g. `input float[64] theta;` or
+        # `const float x = pi / 2;`
+        "param": re.compile(
+            r"(?:input|output|const)?\s*"
+            r"(?:float|int|uint|angle|duration)(?:\[\d+\])?\s+"
+            r"(\w+)\s*(?:=\s*(.+?))?\s*;"
+        ),
+        "gate": re.compile(r"(\w+)\s*(\((.+)\))?\s*(.*);"),
+        "error": re.compile(r"^(if|for|while|def)\b"),
+        # classical declarations / measurements that we can safely ignore
+        "ignore": re.compile(r"^(bit|creg|barrier|reset)\b"),
+        "gate_def": re.compile(r"^gate\s+"),
+        "gate_sig": re.compile(r"^gate\s+(\w+)\s*(\((.+)\))?\s*(.*)"),
+    }
+
+
+def _eval_openqasm3_param(expr, namespace, declared_inputs):
+    """Evaluate an OpenQASM 3 parameter expression within ``namespace``,
+    raising an informative error for unbound ``input`` parameters."""
+    try:
+        return eval(expr, {"__builtins__": {}}, namespace)
+    except NameError as e:
+        name = str(e).split("'")[1] if "'" in str(e) else expr.strip()
+        if name in declared_inputs:
+            raise ValueError(
+                f"Unbound OpenQASM 3 parameter {name!r}: supply a value via "
+                f"the ``params`` argument, e.g. ``params={{{name!r}: 0.5}}``."
+            ) from e
+        raise
+
+
+def parse_openqasm3_str(contents, params=None):
+    """Parse the string contents of an OpenQASM 3.0 file.
+
+    This parser handles the structural subset of OpenQASM 3.0 (qubit
+    declarations, standard and custom gates, parameter declarations) that maps
+    onto a :class:`Circuit`; it does not support classical control flow and is
+    not guaranteed to check the full OpenQASM grammar. Unlike OpenQASM 2.0,
+    circuits may declare unbound ``input`` parameters; a value for each must be
+    supplied through ``params`` for the circuit to be instantiated.
+
+    Parameters
+    ----------
+    contents : str
+        The OpenQASM 3.0 source.
+    params : dict[str, float], optional
+        Values to bind to ``input`` parameters declared in the source, keyed by
+        parameter name.
+    """
+    rgxs = get_openqasm3_regexes()
+
+    sitemap = {}
+    gates = []
+    custom_gates = {}
+    warned = {}
+
+    # parameter namespace used to evaluate gate-angle expressions
+    namespace = {
+        "pi": math.pi,
+        "tau": 2 * math.pi,
+        "euler": math.e,
+    }
+    if params is not None:
+        namespace.update({str(k): v for k, v in params.items()})
+    declared_inputs = set()
+
+    in_comment = False
+    lines = contents.split("\n")
+    while lines:
+        line = lines.pop(0).strip()
+        if not line:
+            continue
+        if rgxs["comment"].match(line):
+            continue
+        if rgxs["comment_start"].match(line):
+            in_comment = True
+        if in_comment:
+            in_comment = not bool(rgxs["comment_end"].match(line))
+            continue
+        if rgxs["header"].match(line):
+            # ignore version and include lines
+            continue
+
+        match = rgxs["qubit"].match(line)
+        if match:
+            # quantum register or single qubit -> extend sites
+            nq, name = match.groups()
+            if nq is None:
+                sitemap[name] = len(sitemap)
+            else:
+                for i in range(int(nq)):
+                    sitemap[f"{name}[{i}]"] = len(sitemap)
+            continue
+
+        match = rgxs["param"].match(line)
+        if match:
+            # numeric parameter declaration
+            pname, pvalue = match.groups()
+            if pvalue is not None:
+                namespace[pname] = _eval_openqasm3_param(
+                    pvalue, namespace, declared_inputs
+                )
+            else:
+                # unbound `input` parameter -> resolved later from `params`
+                declared_inputs.add(pname)
+            continue
+
+        if "measure" in line or rgxs["ignore"].match(line):
+            # classical operations we can ignore and warn about
+            op = (
+                "measure"
+                if "measure" in line
+                else line.split("[")[0].split()[0]
+            )
+            if not warned.get(op, False):
+                warnings.warn(
+                    f"Unsupported operation ignored: {op}", SyntaxWarning
+                )
+                warned[op] = True
+            continue
+
+        if rgxs["error"].match(line):
+            raise NotImplementedError(
+                f"The following instruction is not supported: {line}"
+            )
+
+        if rgxs["gate_def"].match(line):
+            # custom gate definition
+            label, definition = _parse_openqasm_gate_definition(
+                line, lines, rgxs
+            )
+            custom_gates[label] = definition
+            continue
+
+        match = rgxs["gate"].search(line)
+        if match:
+            # apply a gate
+            label, gate_params, qubits = (
+                match.group(1),
+                match.group(3),
+                match.group(4),
+            )
+
+            if label in custom_gates:
+                # custom gate -> resolve parameters and qubits and prepend the
+                # constituent gate lines to the main list
+                sig_params, sig_qubits, gate_body = custom_gates[label]
+                replacer = {
+                    **dict(zip(sig_params, to_clean_list(gate_params, ","))),
+                    **dict(zip(sig_qubits, to_clean_list(qubits, ","))),
+                }
+                for gl in reversed(gate_body):
+                    lines.insert(0, gl.format(**replacer))
+                continue
+
+            # standard gate -> add to list directly
+            if gate_params:
+                params_tuple = tuple(
+                    _eval_openqasm3_param(p, namespace, declared_inputs)
+                    for p in gate_params.split(",")
+                )
+            else:
+                params_tuple = ()
+
+            qubits_tuple = tuple(
+                sitemap[qubit.strip()] for qubit in qubits.split(",")
+            )
+            gates.append(Gate(label, params_tuple, qubits_tuple))
+            continue
+
+        # if not covered by previous checks, simply raise
+        raise SyntaxError(f"{line}")
+
+    return {
+        "n": len(sitemap),
+        "sitemap": sitemap,
+        "gates": gates,
+        "n_gates": len(gates),
+    }
+
+
+def parse_openqasm3_file(fname, **kwargs):
+    """Parse an OpenQASM 3.0 file."""
+    with open(fname) as f:
+        return parse_openqasm3_str(f.read(), **kwargs)
+
+
+def parse_openqasm3_url(url, **kwargs):
+    """Parse an OpenQASM 3.0 url."""
+    from urllib import request
+
+    return parse_openqasm3_str(request.urlopen(url).read().decode(), **kwargs)
 
 
 # -------------------------- core gate functions ---------------------------- #
@@ -1890,6 +2103,44 @@ class Circuit:
     def from_openqasm2_url(cls, url, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 url."""
         info = parse_openqasm2_url(url)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_str(
+        cls, contents, params=None, progbar=False, **circuit_opts
+    ):
+        """Generate a ``Circuit`` instance from an OpenQASM 3.0 string.
+
+        Parameters
+        ----------
+        contents : str
+            The OpenQASM 3.0 source.
+        params : dict[str, float], optional
+            Values to bind to ``input`` parameters declared in the source.
+        """
+        info = parse_openqasm3_str(contents, params=params)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_file(
+        cls, fname, params=None, progbar=False, **circuit_opts
+    ):
+        """Generate a ``Circuit`` instance from an OpenQASM 3.0 file."""
+        info = parse_openqasm3_file(fname, params=params)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_url(
+        cls, url, params=None, progbar=False, **circuit_opts
+    ):
+        """Generate a ``Circuit`` instance from an OpenQASM 3.0 url."""
+        info = parse_openqasm3_url(url, params=params)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
         return qc
