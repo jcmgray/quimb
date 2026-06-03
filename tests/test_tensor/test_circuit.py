@@ -301,6 +301,13 @@ class TestCircuit:
         circ2.set_params({"theta": 0.6})
         assert circ2.gates[0].params == (pytest.approx(0.6),)
         assert circ2.gates[1].params == (pytest.approx(0.3),)
+        assert circ.gates[0].params == (pytest.approx(0.0),)
+        assert circ.gates[1].params == (pytest.approx(0.0),)
+        assert circ.qasm3_symbols == {"theta": "theta"}
+
+        circ2.set_params({"theta": 0.2})
+        assert circ2.gates[0].params == (pytest.approx(0.2),)
+        assert circ2.gates[1].params == (pytest.approx(0.1),)
 
     def test_openqasm3_broadcast_registers(self):
         circ = qtn.Circuit.from_openqasm3_str(
@@ -445,6 +452,23 @@ class TestCircuit:
                 "Unsupported operation ignored: bit",
                 "Unsupported operation ignored: measure",
             ),
+        )
+        assert [g.label for g in circ.gates] == ["X"]
+
+    def test_openqasm3_measure_decl_initializer_warns(self):
+        with pytest.warns(SyntaxWarning) as record:
+            circ = qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                include "stdgates.inc";
+                qubit[1] q;
+                bit c = measure q[0];
+                x q[0];
+                """
+            )
+        assert_warning_messages(
+            record,
+            ("Unsupported operation ignored: measure",),
         )
         assert [g.label for g in circ.gates] == ["X"]
 
