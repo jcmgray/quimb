@@ -335,6 +335,177 @@ def parse_openqasm2_url(url, **kwargs):
     return parse_openqasm2_str(request.urlopen(url).read().decode(), **kwargs)
 
 
+@functools.lru_cache(None)
+def get_openqasm3_regexes():
+    return {
+        "qubit": re.compile(r"^(?:qubit|qreg)(?:\[(\d+)\])?\s+(\w+)$"),
+        "bit": re.compile(r"^(?:bit|creg)(?:\[(\d+)\])?\s+(\w+)$"),
+        "const": re.compile(
+            r"^(?:const\s+)?(?:angle|float(?:\[\d+\])?)\s+(\w+)\s*=\s*(.+)$"
+        ),
+        "input": re.compile(r"^(?:input|output)\s+"),
+        "gate": re.compile(r"^(\w+)\s*(?:\((.*)\))?\s+(.+)$"),
+        "error": re.compile(
+            r"^(if|for|while|switch|def|extern|box|delay|reset|measure)\b"
+        ),
+        "ignore": re.compile(r"^barrier\b"),
+    }
+
+
+OPENQASM3_GATE_ALIASES = {
+    "id": "IDEN",
+    "u": "U3",
+    "p": "PHASE",
+    "phase": "PHASE",
+    "cp": "CPHASE",
+    "cnot": "CNOT",
+}
+
+
+def _strip_openqasm_comments(contents):
+    contents = re.sub(r"/\*.*?\*/", "", contents, flags=re.DOTALL)
+    return "\n".join(line.split("//", 1)[0] for line in contents.splitlines())
+
+
+def _eval_openqasm3_expr(expr, constants):
+    namespace = {
+        "pi": math.pi,
+        "tau": 2 * math.pi,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "exp": math.exp,
+        "sqrt": math.sqrt,
+        "log": math.log,
+        **constants,
+    }
+    try:
+        return eval(expr, {"__builtins__": {}}, namespace)
+    except NameError as exc:
+        raise NotImplementedError(
+            f"OpenQASM 3 unbound parameter is not supported: {expr}"
+        ) from exc
+
+
+def parse_openqasm3_str(contents):
+    """Parse the string contents of a basic OpenQASM 3 program.
+
+    This parser supports the same core circuit use case as the OpenQASM 2
+    parser: qubit declarations, standard gates, and numeric gate parameters.
+    Classical control, measurement, reset, custom gate definitions, and unbound
+    input parameters raise ``NotImplementedError`` rather than being silently
+    ignored.
+    """
+    rgxs = get_openqasm3_regexes()
+
+    sitemap = {}
+    gates = []
+    constants = {}
+    warned = {}
+
+    contents = _strip_openqasm_comments(contents)
+    for raw_statement in contents.split(";"):
+        line = raw_statement.strip()
+        if not line:
+            continue
+        if line.startswith("OPENQASM") or line.startswith("include "):
+            continue
+
+        match = rgxs["qubit"].match(line)
+        if match:
+            nq, name = match.groups()
+            nq = int(nq) if nq else 1
+            if nq <= 0:
+                raise ValueError(f"Invalid qubit register size: {nq}.")
+            for i in range(nq):
+                key = f"{name}[{i}]" if nq > 1 else name
+                sitemap[key] = len(sitemap)
+            continue
+
+        if rgxs["bit"].match(line):
+            continue
+
+        match = rgxs["const"].match(line)
+        if match:
+            name, expr = match.groups()
+            constants[name] = _eval_openqasm3_expr(expr, constants)
+            continue
+
+        if rgxs["input"].match(line):
+            raise NotImplementedError(
+                f"OpenQASM 3 input/output declarations are not supported: {line}"
+            )
+
+        match = rgxs["ignore"].match(line)
+        if match:
+            op = match.group(0)
+            if not warned.get(op, False):
+                warnings.warn(
+                    f"Unsupported operation ignored: {op}", SyntaxWarning
+                )
+                warned[op] = True
+            continue
+
+        if rgxs["error"].match(line):
+            raise NotImplementedError(
+                f"The following OpenQASM 3 instruction is not supported: {line}"
+            )
+
+        match = rgxs["gate"].match(line)
+        if match:
+            label, params, qubits = match.groups()
+            label = OPENQASM3_GATE_ALIASES.get(label.lower(), label.upper())
+
+            if label not in ALL_GATES:
+                raise ValueError(f"Unknown OpenQASM 3 gate: {label}.")
+
+            if params:
+                params = tuple(
+                    _eval_openqasm3_expr(param.strip(), constants)
+                    for param in params.split(",")
+                )
+            else:
+                params = ()
+
+            qubits = tuple(qubit.strip() for qubit in qubits.split(","))
+            if any(qubit not in sitemap for qubit in qubits):
+                missing = ", ".join(q for q in qubits if q not in sitemap)
+                raise ValueError(f"Unknown OpenQASM 3 qubit(s): {missing}.")
+
+            qubits = tuple(sitemap[qubit] for qubit in qubits)
+            expected = GATE_SIZE[label]
+            if len(qubits) != expected:
+                raise ValueError(
+                    f"Gate {label} expects {expected} qubits, "
+                    f"got {len(qubits)}."
+                )
+
+            gates.append(Gate(label, params, qubits))
+            continue
+
+        raise SyntaxError(f"{line}")
+
+    return {
+        "n": len(sitemap),
+        "sitemap": sitemap,
+        "gates": gates,
+        "n_gates": len(gates),
+    }
+
+
+def parse_openqasm3_file(fname, **kwargs):
+    """Parse an OpenQASM 3 file."""
+    with open(fname) as f:
+        return parse_openqasm3_str(f.read(), **kwargs)
+
+
+def parse_openqasm3_url(url, **kwargs):
+    """Parse an OpenQASM 3 url."""
+    from urllib import request
+
+    return parse_openqasm3_str(request.urlopen(url).read().decode(), **kwargs)
+
+
 # -------------------------- core gate functions ---------------------------- #
 
 
@@ -1890,6 +2061,30 @@ class Circuit:
     def from_openqasm2_url(cls, url, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 url."""
         info = parse_openqasm2_url(url)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_str(cls, contents, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3 string."""
+        info = parse_openqasm3_str(contents)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_file(cls, fname, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3 file."""
+        info = parse_openqasm3_file(fname)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_url(cls, url, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3 url."""
+        info = parse_openqasm3_url(url)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
         return qc

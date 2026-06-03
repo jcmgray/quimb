@@ -234,6 +234,69 @@ class TestCircuit:
         circ = qtn.Circuit.from_openqasm2_str(qasm_str)
         assert len(circ.gates) == 2
 
+    def test_from_openqasm3(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            // basic OpenQASM 3 circuit
+            OPENQASM 3;
+            include "stdgates.inc";
+            qubit[3] q;
+            const angle theta = pi / 2;
+
+            x q[0];
+            h q[1];
+            cx q[1], q[2];
+            rz(theta) q[2];
+            ccx q[0], q[1], q[2];
+            """
+        )
+
+        assert circ.N == 3
+        assert [g.label for g in circ.gates] == [
+            "X",
+            "H",
+            "CX",
+            "RZ",
+            "CCX",
+        ]
+        assert circ.gates[3].params[0] == pytest.approx(math.pi / 2)
+        assert (circ.psi.H & circ.psi) ^ all == pytest.approx(1.0)
+
+    def test_openqasm3_comments_barriers_and_scalar_qubits(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            /* block comment */
+            qubit q;
+            sx q;
+            barrier q;
+            """
+        )
+
+        assert circ.N == 1
+        assert [g.label for g in circ.gates] == ["SX"]
+
+    def test_openqasm3_unsupported_operations_error(self):
+        with pytest.raises(NotImplementedError):
+            qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3;
+                input angle theta;
+                qubit[1] q;
+                rx(theta) q[0];
+                """
+            )
+
+        with pytest.raises(NotImplementedError):
+            qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3;
+                qubit[1] q;
+                bit[1] c;
+                measure q[0] -> c[0];
+                """
+            )
+
     @pytest.mark.parametrize(
         "Circ", [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]
     )
