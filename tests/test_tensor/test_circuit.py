@@ -13,12 +13,6 @@ from quimb.tensor.circuit import (
     parse_openqasm3_url,
     rx_gate_param_gen,
 )
-
-
-def assert_warning_messages(record, messages):
-    assert [str(w.message) for w in record] == list(messages)
-
-
 def assert_same_gates(circ_a, circ_b):
     assert len(circ_a.gates) == len(circ_b.gates)
     for gate_a, gate_b in zip(circ_a.gates, circ_b.gates):
@@ -202,27 +196,21 @@ class TestCircuit:
     def test_from_openqasm2(self):
         with pytest.warns(SyntaxWarning) as record:
             qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
-        assert_warning_messages(
-            record,
-            (
-                "Unsupported operation ignored: creg",
-                "Unsupported operation ignored: barrier",
-                "Unsupported operation ignored: measure",
-            ),
-        )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: creg",
+            "Unsupported operation ignored: barrier",
+            "Unsupported operation ignored: measure",
+        ]
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
     def test_from_openqasm3(self):
         with pytest.warns(SyntaxWarning) as record:
             qc = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
-        assert_warning_messages(
-            record,
-            (
-                "Unsupported operation ignored: bit",
-                "Unsupported operation ignored: barrier",
-                "Unsupported operation ignored: measure",
-            ),
-        )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: bit",
+            "Unsupported operation ignored: barrier",
+            "Unsupported operation ignored: measure",
+        ]
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
     def test_openqasm2_openqasm3_shared_subset_match(self):
@@ -522,13 +510,10 @@ class TestCircuit:
                 x q[0];
                 """
             )
-        assert_warning_messages(
-            record,
-            (
-                "Unsupported operation ignored: bit",
-                "Unsupported operation ignored: measure",
-            ),
-        )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: bit",
+            "Unsupported operation ignored: measure",
+        ]
         assert [g.label for g in circ.gates] == ["X"]
 
     def test_openqasm3_measure_decl_initializer_warns(self):
@@ -542,10 +527,9 @@ class TestCircuit:
                 x q[0];
                 """
             )
-        assert_warning_messages(
-            record,
-            ("Unsupported operation ignored: measure",),
-        )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: measure"
+        ]
         assert [g.label for g in circ.gates] == ["X"]
 
     def test_openqasm3_custom_gates_overlapping_names(self):

@@ -304,22 +304,18 @@ def _openqasm_eval_expr(expr, env):
         "pow": pow,
     }
 
-    def _to_expr_str(x):
-        if isinstance(x, str):
-            return x
-        return repr(x)
-
     def _combine_symbolic(op, *xs):
+        fmt = lambda x: x if isinstance(x, str) else repr(x)
         if len(xs) == 1:
             (x,) = xs
             if op == "+":
-                return f"(+{_to_expr_str(x)})"
+                return f"(+{fmt(x)})"
             if op == "-":
-                return f"(-{_to_expr_str(x)})"
+                return f"(-{fmt(x)})"
             if op == "~":
-                return f"(~{_to_expr_str(x)})"
+                return f"(~{fmt(x)})"
             if op == "!":
-                return f"(!{_to_expr_str(x)})"
+                return f"(!{fmt(x)})"
         if op in {
             "sin",
             "cos",
@@ -333,11 +329,8 @@ def _openqasm_eval_expr(expr, env):
             "sqrt",
             "abs",
         }:
-            return f"{op}({', '.join(map(_to_expr_str, xs))})"
-        return f"({_to_expr_str(xs[0])} {op} {_to_expr_str(xs[1])})"
-
-    def _is_numeric(x):
-        return isinstance(x, numbers.Number)
+            return f"{op}({', '.join(map(fmt, xs))})"
+        return f"({fmt(xs[0])} {op} {fmt(xs[1])})"
 
     allowed_compare_ops = {
         ast.Eq: ("==", operator.eq),
@@ -368,7 +361,9 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 operator: {optype.__name__}"
                 )
             op, fn = allowed_binary_ops[optype]
-            if _is_numeric(lhs) and _is_numeric(rhs):
+            if isinstance(lhs, numbers.Number) and isinstance(
+                rhs, numbers.Number
+            ):
                 return fn(lhs, rhs)
             return _combine_symbolic(op, lhs, rhs)
         if isinstance(node, ast.UnaryOp):
@@ -379,7 +374,7 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 unary op: {optype.__name__}"
                 )
             op, fn = allowed_unary_ops[optype]
-            if _is_numeric(x):
+            if isinstance(x, numbers.Number):
                 return fn(x)
             return _combine_symbolic(op, x)
         if isinstance(node, ast.Call):
@@ -393,7 +388,7 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 function: {name}"
                 )
             args = [_eval_node(a) for a in node.args]
-            if all(_is_numeric(a) for a in args):
+            if all(isinstance(a, numbers.Number) for a in args):
                 return allowed_fns[name](*args)
             return _combine_symbolic(name, *args)
         if isinstance(node, ast.Compare):
@@ -409,7 +404,9 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 compare op: {optype.__name__}"
                 )
             op, fn = allowed_compare_ops[optype]
-            if _is_numeric(lhs) and _is_numeric(rhs):
+            if isinstance(lhs, numbers.Number) and isinstance(
+                rhs, numbers.Number
+            ):
                 return fn(lhs, rhs)
             return _combine_symbolic(op, lhs, rhs)
         if isinstance(node, ast.List):
@@ -420,7 +417,7 @@ def _openqasm_eval_expr(expr, env):
             if hasattr(ast, "Index") and isinstance(index_node, ast.Index):
                 index_node = index_node.value
             index = _eval_node(index_node)
-            if _is_numeric(index):
+            if isinstance(index, numbers.Number):
                 index = int(index)
             else:
                 raise NotImplementedError(
@@ -704,20 +701,6 @@ def parse_openqasm3_str(contents):
         "fredkin": "CSWAP",
     }
 
-    def _warn_once(name, message):
-        if not warned.get(name, False):
-            warnings.warn(message, SyntaxWarning)
-            warned[name] = True
-
-    def _warn_measure_ignored():
-        _warn_once("measure", "Unsupported operation ignored: measure")
-
-    def _is_symbolic(x):
-        return not isinstance(x, numbers.Number)
-
-    def _eval_expr(expr):
-        return _openqasm_eval_expr(expr, env)
-
     def _resolve_qubit_arg(token):
         token = token.strip()
         if token in env and isinstance(env[token], (tuple, list)):
@@ -729,8 +712,8 @@ def parse_openqasm3_str(contents):
         match = re.fullmatch(r"(\w+)\[(.+)\]", token)
         if match:
             base, idx_expr = match.groups()
-            idx = _eval_expr(idx_expr)
-            if _is_symbolic(idx):
+            idx = _openqasm_eval_expr(idx_expr, env)
+            if not isinstance(idx, numbers.Number):
                 raise NotImplementedError(
                     "Symbolic qubit indices are unsupported."
                 )
@@ -740,69 +723,6 @@ def parse_openqasm3_str(contents):
             return sitemap[f"{base}[{idx}]"]
 
         raise NotImplementedError(f"Unknown qubit identifier: {token}")
-
-    def _broadcast_qubits(qubits):
-        sizes = {len(q) for q in qubits if isinstance(q, (tuple, list))}
-        if not sizes:
-            return [tuple(qubits)]
-        if len(sizes) != 1:
-            raise NotImplementedError(
-                "Broadcasted gate args must use registers of equal length."
-            )
-        (size,) = sizes
-        return [
-            tuple(q[i] if isinstance(q, (tuple, list)) else q for q in qubits)
-            for i in range(size)
-        ]
-
-    def _broadcast_qubit_tokens(qubits):
-        resolved = [_resolve_qubit_arg(q) for q in qubits]
-        sizes = {len(q) for q in resolved if isinstance(q, (tuple, list))}
-        if not sizes:
-            return [tuple(qubits)]
-        if len(sizes) != 1:
-            raise NotImplementedError(
-                "Broadcasted gate args must use registers of equal length."
-            )
-        (size,) = sizes
-        calls = []
-        for i in range(size):
-            call = []
-            for token, value in zip(qubits, resolved):
-                if isinstance(value, (tuple, list)):
-                    call.append(f"{token}[{i}]")
-                else:
-                    call.append(token)
-            calls.append(tuple(call))
-        return calls
-
-    def _expand_custom_gate(label, params, qubits, lines):
-        if label not in custom_gates:
-            return False
-
-        sig_params, sig_qubits, gate_body = custom_gates[label]
-        if len(sig_params) != len(params):
-            raise NotImplementedError(
-                f"Custom gate {label} expected {len(sig_params)} parameters, "
-                f"got {len(params)}"
-            )
-
-        qubit_calls = _broadcast_qubit_tokens(qubits)
-        replacer_base = dict(zip(sig_params, params))
-
-        for call_qubits in reversed(qubit_calls):
-            if len(sig_qubits) != len(call_qubits):
-                raise NotImplementedError(
-                    f"Custom gate {label} expected {len(sig_qubits)} qubits, "
-                    f"got {len(call_qubits)}"
-                )
-            replacer = {
-                **replacer_base,
-                **dict(zip(sig_qubits, map(str, call_qubits))),
-            }
-            for gl in reversed(gate_body):
-                lines.insert(0, gl.format(**replacer))
-        return True
 
     in_comment = False
     lines = contents.split("\n")
@@ -823,7 +743,11 @@ def parse_openqasm3_str(contents):
         match = rgxs["qubit"].match(line)
         if match:
             size_expr, name = match.groups()
-            size = 1 if size_expr is None else int(_eval_expr(size_expr))
+            size = (
+                1
+                if size_expr is None
+                else int(_openqasm_eval_expr(size_expr, env))
+            )
             registers[name] = tuple(range(len(sitemap), len(sitemap) + size))
             for i, q in enumerate(registers[name]):
                 sitemap[f"{name}[{i}]"] = q
@@ -843,46 +767,64 @@ def parse_openqasm3_str(contents):
         match = rgxs["const"].match(line)
         if match:
             name, expr = match.groups()
-            env[name] = _eval_expr(expr)
+            env[name] = _openqasm_eval_expr(expr, env)
             continue
 
         match = rgxs["classical_decl"].match(line)
         if match:
             ctype, name, expr = match.groups()
             if ctype == "bit" and expr is None:
-                _warn_once("bit", "Unsupported operation ignored: bit")
+                if not warned.get("bit", False):
+                    warnings.warn(
+                        "Unsupported operation ignored: bit",
+                        SyntaxWarning,
+                    )
+                    warned["bit"] = True
                 continue
             if expr is not None:
                 if expr.lstrip().startswith("measure "):
-                    _warn_measure_ignored()
+                    if not warned.get("measure", False):
+                        warnings.warn(
+                            "Unsupported operation ignored: measure",
+                            SyntaxWarning,
+                        )
+                        warned["measure"] = True
                     continue
-                env[name] = _eval_expr(expr)
+                env[name] = _openqasm_eval_expr(expr, env)
             continue
 
         match = rgxs["array_decl"].match(line)
         if match:
             name, expr = match.groups()
-            env[name] = _eval_expr(expr.replace("{", "[").replace("}", "]"))
+            env[name] = _openqasm_eval_expr(
+                expr.replace("{", "[").replace("}", "]"), env
+            )
             continue
 
         match = rgxs["assign"].match(line)
         if match:
             name, expr = match.groups()
             if expr.lstrip().startswith("measure "):
-                _warn_measure_ignored()
+                if not warned.get("measure", False):
+                    warnings.warn(
+                        "Unsupported operation ignored: measure",
+                        SyntaxWarning,
+                    )
+                    warned["measure"] = True
                 continue
-            env[name] = _eval_expr(expr)
+            env[name] = _openqasm_eval_expr(expr, env)
             continue
 
         if rgxs["ignore"].match(line):
             op = rgxs["ignore"].match(line).group(1)
-            if op == "gphase":
-                _warn_once(
-                    "gphase",
-                    "Unsupported operation ignored: global phase",
+            if not warned.get(op, False):
+                warnings.warn(
+                    "Unsupported operation ignored: global phase"
+                    if op == "gphase"
+                    else f"Unsupported operation ignored: {op}",
+                    SyntaxWarning,
                 )
-            else:
-                _warn_once(op, f"Unsupported operation ignored: {op}")
+                warned[op] = True
             continue
 
         if rgxs["error"].match(line):
@@ -934,19 +876,83 @@ def parse_openqasm3_str(contents):
             params = _openqasm_split_top_level(match[2])
             qubits = _openqasm_split_top_level(match[3])
 
-            if _expand_custom_gate(label, params, qubits, lines):
+            if label in custom_gates:
+                sig_params, sig_qubits, gate_body = custom_gates[label]
+                if len(sig_params) != len(params):
+                    raise NotImplementedError(
+                        f"Custom gate {label} expected "
+                        f"{len(sig_params)} parameters, got {len(params)}"
+                    )
+
+                replacer_base = dict(zip(sig_params, params))
+                resolved = [_resolve_qubit_arg(q) for q in qubits]
+                sizes = {
+                    len(q) for q in resolved if isinstance(q, (tuple, list))
+                }
+                if not sizes:
+                    qubit_calls = [tuple(qubits)]
+                else:
+                    if len(sizes) != 1:
+                        raise NotImplementedError(
+                            "Broadcasted gate args must use registers of "
+                            "equal length."
+                        )
+                    (size,) = sizes
+                    qubit_calls = [
+                        tuple(
+                            f"{token}[{i}]"
+                            if isinstance(value, (tuple, list))
+                            else token
+                            for token, value in zip(qubits, resolved)
+                        )
+                        for i in range(size)
+                    ]
+
+                for call_qubits in reversed(qubit_calls):
+                    if len(sig_qubits) != len(call_qubits):
+                        raise NotImplementedError(
+                            f"Custom gate {label} expected "
+                            f"{len(sig_qubits)} qubits, "
+                            f"got {len(call_qubits)}"
+                        )
+                    replacer = {
+                        **replacer_base,
+                        **dict(zip(sig_qubits, map(str, call_qubits))),
+                    }
+                    for gl in reversed(gate_body):
+                        lines.insert(0, gl.format(**replacer))
                 continue
 
             label = aliases.get(label.lower(), label)
             if label not in ALL_GATES:
                 raise NotImplementedError(f"Unknown gate: {label}")
 
-            raw_params = tuple(_eval_expr(p) for p in params)
-            qubit_calls = _broadcast_qubits(
-                [_resolve_qubit_arg(q) for q in qubits]
+            raw_params = tuple(_openqasm_eval_expr(p, env) for p in params)
+            resolved = [_resolve_qubit_arg(q) for q in qubits]
+            sizes = {len(q) for q in resolved if isinstance(q, (tuple, list))}
+            if not sizes:
+                qubit_calls = [tuple(resolved)]
+            else:
+                if len(sizes) != 1:
+                    raise NotImplementedError(
+                        "Broadcasted gate args must use registers of equal "
+                        "length."
+                    )
+                (size,) = sizes
+                qubit_calls = [
+                    tuple(
+                        value[i] if isinstance(value, (tuple, list)) else value
+                        for value in resolved
+                    )
+                    for i in range(size)
+                ]
+            parametrize = any(
+                not isinstance(p, numbers.Number) for p in raw_params
             )
-            parametrize = any(_is_symbolic(p) for p in raw_params)
-            params = tuple(0.0 if _is_symbolic(p) else p for p in raw_params)
+            params = tuple(
+                0.0 if not isinstance(p, numbers.Number) else p
+                for p in raw_params
+            )
             for call_qubits in qubit_calls:
                 if parametrize:
                     expressions[len(gates)] = raw_params
@@ -2515,11 +2521,6 @@ class Circuit:
             for QASM 3 imported circuits a dictionary mapping input names to
             numeric values.
         """
-        if not params and getattr(self, "qasm3_inputs", ()):
-            self._set_qasm3_params({})
-            self.clear_storage()
-            return
-
         if params and not (
             all(isinstance(k, str) for k in params)
             or all(not isinstance(k, str) for k in params)
@@ -2529,58 +2530,51 @@ class Circuit:
                 "input names."
             )
 
-        if params and all(isinstance(k, str) for k in params):
-            self._set_qasm3_params(params)
-        else:
-            self._set_gate_params(params)
+        if hasattr(self, "qasm3_inputs") and (
+            not params or all(isinstance(k, str) for k in params)
+        ):
+            missing = set(self.qasm3_inputs) - set(params)
+            if missing:
+                raise ValueError(
+                    "Missing QASM 3 input values for: "
+                    + ", ".join(sorted(missing))
+                )
 
-        self.clear_storage()
+            extra = set(params) - set(self.qasm3_inputs)
+            if extra:
+                raise ValueError(
+                    "Unknown QASM 3 input values supplied for: "
+                    + ", ".join(sorted(extra))
+                )
 
-    def _set_gate_params(self, params):
-        for i, p in params.items():
-            self._psi[self.gate_tag(i)].params = p
-            self._gates[i] = self._gates[i].copy_with(params=ops.asarray(p))
+            symbol_env = dict(self.qasm3_symbols)
+            symbol_env.update(params)
 
-    def _set_qasm3_params(self, params):
-        if not hasattr(self, "qasm3_expressions"):
+            params = {}
+            for i, exprs in self.qasm3_expressions.items():
+                values = tuple(
+                    _openqasm_eval_expr(expr, symbol_env) for expr in exprs
+                )
+                if any(not isinstance(x, numbers.Number) for x in values):
+                    raise ValueError(
+                        "QASM 3 input binding left unresolved symbolic values "
+                        f"for gate {i}: {values!r}"
+                    )
+                params[i] = values
+
+            self.qasm3_symbols = {
+                name: symbol_env[name] for name in self.qasm3_inputs
+            }
+        elif params and all(isinstance(k, str) for k in params):
             raise TypeError(
                 "String-keyed parameters are only supported for QASM 3 "
                 "imported circuits."
             )
 
-        missing = set(self.qasm3_inputs) - set(params)
-        if missing:
-            raise ValueError(
-                "Missing QASM 3 input values for: "
-                + ", ".join(sorted(missing))
-            )
-
-        extra = set(params) - set(self.qasm3_inputs)
-        if extra:
-            raise ValueError(
-                "Unknown QASM 3 input values supplied for: "
-                + ", ".join(sorted(extra))
-            )
-
-        symbol_env = dict(self.qasm3_symbols)
-        symbol_env.update(params)
-
-        gate_params = {}
-        for i, exprs in self.qasm3_expressions.items():
-            values = tuple(
-                _openqasm_eval_expr(expr, symbol_env) for expr in exprs
-            )
-            if any(not isinstance(x, numbers.Number) for x in values):
-                raise ValueError(
-                    "QASM 3 input binding left unresolved symbolic values "
-                    f"for gate {i}: {values!r}"
-                )
-            gate_params[i] = values
-
-        self._set_gate_params(gate_params)
-        self.qasm3_symbols = {
-            name: symbol_env[name] for name in self.qasm3_inputs
-        }
+        for i, p in params.items():
+            self._psi[self.gate_tag(i)].params = p
+            self._gates[i] = self._gates[i].copy_with(params=ops.asarray(p))
+        self.clear_storage()
 
     @classmethod
     def from_qsim_str(cls, contents, progbar=False, **circuit_opts):
@@ -2687,13 +2681,10 @@ class Circuit:
         Circuit
             The parsed circuit instance.
         """
-        info = parse_openqasm3_file(fname)
-        qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"], progbar=progbar)
-        qc.qasm3_inputs = info["inputs"]
-        qc.qasm3_symbols = info["symbols"]
-        qc.qasm3_expressions = info["expressions"]
-        return qc
+        with open(fname) as f:
+            return cls.from_openqasm3_str(
+                f.read(), progbar=progbar, **circuit_opts
+            )
 
     @classmethod
     def from_openqasm3_url(cls, url, progbar=False, **circuit_opts):
@@ -2713,13 +2704,13 @@ class Circuit:
         Circuit
             The parsed circuit instance.
         """
-        info = parse_openqasm3_url(url)
-        qc = cls(info["n"], **circuit_opts)
-        qc.apply_gates(info["gates"], progbar=progbar)
-        qc.qasm3_inputs = info["inputs"]
-        qc.qasm3_symbols = info["symbols"]
-        qc.qasm3_expressions = info["expressions"]
-        return qc
+        from urllib import request
+
+        return cls.from_openqasm3_str(
+            request.urlopen(url).read().decode(),
+            progbar=progbar,
+            **circuit_opts,
+        )
 
     @classmethod
     def from_gates(cls, gates, N=None, progbar=False, **kwargs):
