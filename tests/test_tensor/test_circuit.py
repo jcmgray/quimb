@@ -411,7 +411,9 @@ class TestCircuit:
             rx(theta) q[0];
             """
         )
-        with pytest.raises(TypeError, match="all gate indices or all QASM 3 input names"):
+        with pytest.raises(
+            TypeError, match="all gate indices or all QASM 3 input names"
+        ):
             circ.set_params({"theta": 0.2, 0: (0.1,)})
 
     def test_openqasm3_output_decl_unsupported(self):

@@ -159,7 +159,9 @@ def _openqasm_replace_tokens(s, replacements):
     if not replacements:
         return s
 
-    pattern = "|".join(sorted(map(re.escape, replacements), key=len, reverse=True))
+    pattern = "|".join(
+        sorted(map(re.escape, replacements), key=len, reverse=True)
+    )
     return re.sub(
         rf"(?<!\w)({pattern})(?!\w)",
         lambda match: replacements[match.group(1)],
@@ -610,13 +612,43 @@ def parse_openqasm2_url(url, **kwargs):
 
 
 def parse_openqasm3_str(contents):
-    """Parse the string contents of an OpenQASM 3.0 file.
+    """Parse an OpenQASM 3.0 program from a string.
 
     This parser is dependency free and supports a practical subset of
-    OpenQASM 3 for circuit import: qubit declarations, input declarations,
-    gate applications, simple custom gates, register broadcast, and arithmetic
-    expressions. Unsupported control flow and calibration constructs raise
-    ``NotImplementedError`` explicitly.
+    OpenQASM 3 for circuit import, including qubit declarations, input
+    declarations, arithmetic expressions, custom gates, and register
+    broadcasting.
+
+    Parameters
+    ----------
+    contents : str
+        The OpenQASM 3 source code to parse.
+
+    Returns
+    -------
+    dict
+        A dictionary describing the circuit with the following entries:
+
+        - ``"n"``: total number of qubits.
+        - ``"sitemap"``: mapping from OpenQASM qubit names to qubit indices.
+        - ``"gates"``: parsed sequence of :class:`Gate` objects.
+        - ``"n_gates"``: total number of parsed gates.
+        - ``"inputs"``: tuple of symbolic input names declared with
+          ``input``.
+        - ``"symbols"``: mapping of symbolic names to their current values or
+          symbolic placeholders.
+        - ``"expressions"``: mapping from gate indices to symbolic parameter
+          expressions requiring later binding.
+
+    Raises
+    ------
+    NotImplementedError
+        If the program uses unsupported OpenQASM 3 features such as control
+        flow, calibration blocks, output declarations, or unsupported
+        operations.
+    SyntaxError
+        If the source contains an instruction that does not match the
+        supported grammar subset.
     """
     rgxs = get_openqasm3_regexes()
     sitemap = {}
@@ -942,13 +974,41 @@ def parse_openqasm3_str(contents):
 
 
 def parse_openqasm3_file(fname, **kwargs):
-    """Parse an OpenQASM 3.0 file."""
+    """Parse an OpenQASM 3.0 file.
+
+    Parameters
+    ----------
+    fname : str or path-like
+        Path to the OpenQASM 3 file.
+    **kwargs
+        Forwarded to :func:`parse_openqasm3_str`.
+
+    Returns
+    -------
+    dict
+        The parsed circuit information returned by
+        :func:`parse_openqasm3_str`.
+    """
     with open(fname) as f:
         return parse_openqasm3_str(f.read(), **kwargs)
 
 
 def parse_openqasm3_url(url, **kwargs):
-    """Parse an OpenQASM 3.0 url."""
+    """Parse an OpenQASM 3.0 program from a URL.
+
+    Parameters
+    ----------
+    url : str
+        URL pointing to an OpenQASM 3 source file.
+    **kwargs
+        Forwarded to :func:`parse_openqasm3_str`.
+
+    Returns
+    -------
+    dict
+        The parsed circuit information returned by
+        :func:`parse_openqasm3_str`.
+    """
     from urllib import request
 
     return parse_openqasm3_str(request.urlopen(url).read().decode(), **kwargs)
@@ -2582,7 +2642,25 @@ class Circuit:
 
     @classmethod
     def from_openqasm3_str(cls, contents, progbar=False, **circuit_opts):
-        """Generate a ``Circuit`` instance from an OpenQASM 3.0 string."""
+        """Construct a circuit from an OpenQASM 3.0 string.
+
+        Parameters
+        ----------
+        contents : str
+            The OpenQASM 3 source code to parse.
+        progbar : bool, optional
+            Whether to show a progress bar while applying the parsed gates.
+        **circuit_opts
+            Options forwarded to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+            A circuit populated with the parsed gates. If symbolic ``input``
+            declarations are present, the returned circuit tracks them via
+            ``qasm3_inputs``, ``qasm3_symbols``, and ``qasm3_expressions`` so
+            that :meth:`set_params` can bind named values later.
+        """
         info = parse_openqasm3_str(contents)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
@@ -2593,7 +2671,22 @@ class Circuit:
 
     @classmethod
     def from_openqasm3_file(cls, fname, progbar=False, **circuit_opts):
-        """Generate a ``Circuit`` instance from an OpenQASM 3.0 file."""
+        """Construct a circuit from an OpenQASM 3.0 file.
+
+        Parameters
+        ----------
+        fname : str or path-like
+            Path to the OpenQASM 3 file.
+        progbar : bool, optional
+            Whether to show a progress bar while applying the parsed gates.
+        **circuit_opts
+            Options forwarded to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+            The parsed circuit instance.
+        """
         info = parse_openqasm3_file(fname)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
@@ -2604,7 +2697,22 @@ class Circuit:
 
     @classmethod
     def from_openqasm3_url(cls, url, progbar=False, **circuit_opts):
-        """Generate a ``Circuit`` instance from an OpenQASM 3.0 url."""
+        """Construct a circuit from an OpenQASM 3.0 URL.
+
+        Parameters
+        ----------
+        url : str
+            URL pointing to an OpenQASM 3 source file.
+        progbar : bool, optional
+            Whether to show a progress bar while applying the parsed gates.
+        **circuit_opts
+            Options forwarded to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+            The parsed circuit instance.
+        """
         info = parse_openqasm3_url(url)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
