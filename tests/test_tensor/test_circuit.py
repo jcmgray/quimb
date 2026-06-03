@@ -14,6 +14,14 @@ def assert_warning_messages(record, messages):
     assert [str(w.message) for w in record] == list(messages)
 
 
+def assert_same_gates(circ_a, circ_b):
+    assert len(circ_a.gates) == len(circ_b.gates)
+    for gate_a, gate_b in zip(circ_a.gates, circ_b.gates):
+        assert gate_a.label == gate_b.label
+        assert tuple(gate_a.qubits) == tuple(gate_b.qubits)
+        assert tuple(gate_a.params) == pytest.approx(tuple(gate_b.params))
+
+
 def rand_reg_graph(reg, n, seed=None):
     import networkx as nx
 
@@ -205,11 +213,20 @@ class TestCircuit:
         assert_warning_messages(
             record,
             (
+                "Unsupported operation ignored: bit",
                 "Unsupported operation ignored: barrier",
                 "Unsupported operation ignored: measure",
             ),
         )
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_openqasm2_openqasm3_shared_subset_match(self):
+        with pytest.warns(SyntaxWarning):
+            circ2 = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
+        with pytest.warns(SyntaxWarning):
+            circ3 = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
+        assert_same_gates(circ2, circ3)
+        assert_allclose(circ2.psi.to_dense(), circ3.psi.to_dense())
 
     def test_openqasm3_symbolic_params(self):
         qasm_str = """
@@ -330,6 +347,66 @@ class TestCircuit:
         with pytest.raises(ValueError, match="Missing QASM 3 input values"):
             circ.set_params({"theta": 0.2})
 
+    def test_openqasm3_named_binding_empty_dict_requires_inputs(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta) q[0];
+            """
+        )
+        with pytest.raises(ValueError, match="Missing QASM 3 input values"):
+            circ.set_params({})
+
+    def test_openqasm3_array_index_symbolic_binding(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            array[float, 2] angles = {theta, theta / 2};
+            qubit[2] q;
+            rx(angles[0]) q[0];
+            ry(angles[1]) q[1];
+            """
+        )
+        assert circ.qasm3_expressions == {
+            0: ("theta",),
+            1: ("(theta / 2)",),
+        }
+
+        circ.set_params({"theta": 0.6})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
+        assert tuple(circ.gates[1].params) == pytest.approx((0.3,))
+
+    def test_openqasm3_named_binding_rejects_unknown_inputs(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta) q[0];
+            """
+        )
+        with pytest.raises(ValueError, match="Unknown QASM 3 input values"):
+            circ.set_params({"theta": 0.2, "phi": 0.3})
+
+    def test_openqasm3_named_binding_rejects_mixed_keys(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta) q[0];
+            """
+        )
+        with pytest.raises(TypeError, match="all gate indices or all QASM 3 input names"):
+            circ.set_params({"theta": 0.2, 0: (0.1,)})
+
     def test_openqasm3_output_decl_unsupported(self):
         with pytest.raises(NotImplementedError, match="Output declarations"):
             qtn.Circuit.from_openqasm3_str(
@@ -349,6 +426,163 @@ class TestCircuit:
                 reset q[0];
                 """
             )
+
+    def test_openqasm3_measure_assignment_warns(self):
+        with pytest.warns(SyntaxWarning) as record:
+            circ = qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                include "stdgates.inc";
+                qubit[1] q;
+                bit c;
+                c = measure q[0];
+                x q[0];
+                """
+            )
+        assert_warning_messages(
+            record,
+            (
+                "Unsupported operation ignored: bit",
+                "Unsupported operation ignored: measure",
+            ),
+        )
+        assert [g.label for g in circ.gates] == ["X"]
+
+    def test_openqasm3_custom_gates_overlapping_names(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float a;
+            qubit[1] q;
+
+            gate foo(a, aa) q {
+                u3(aa, a, aa) q;
+            }
+
+            foo(0.1, a) q[0];
+            """
+        )
+        assert circ.qasm3_expressions == {0: ("a", 0.1, "a")}
+        circ.set_params({"a": 0.2})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.2, 0.1, 0.2))
+
+    def test_openqasm3_custom_gates_match_openqasm2(self):
+        circ2 = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, theta) q {
+            u2(theta / 2, param1) q;
+            u2(param1, theta / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        circ3 = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit[3] q;
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, theta) q {
+            u2(theta / 2, param1) q;
+            u2(param1, theta / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        assert_same_gates(circ2, circ3)
+
+    def test_openqasm3_nested_custom_gates_match_openqasm2(self):
+        circ2 = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate cphase(theta) a, b {
+            U3(0, 0, theta / 2) a;
+            CX a, b;
+            U3(0, 0, -theta / 2) b;
+            CX a, b;
+            U3(0, 0, theta / 2) b;
+        }
+
+        gate doublecphase(theta) a, b, c {
+            cphase(theta) a, b;
+            cphase(theta) b, c;
+        }
+
+        doublecphase(0.1) q[0], q[1], q[2];
+        doublecphase(0.2) q[2], q[0], q[1];
+        """
+        )
+        circ3 = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit[3] q;
+
+        gate cphase(theta) a, b {
+            U3(0, 0, theta / 2) a;
+            CX a, b;
+            U3(0, 0, -theta / 2) b;
+            CX a, b;
+            U3(0, 0, theta / 2) b;
+        }
+
+        gate doublecphase(theta) a, b, c {
+            cphase(theta) a, b;
+            cphase(theta) b, c;
+        }
+
+        doublecphase(0.1) q[0], q[1], q[2];
+        doublecphase(0.2) q[2], q[0], q[1];
+        """
+        )
+        assert_same_gates(circ2, circ3)
+
+    def test_openqasm3_gate_name_match_openqasm2(self):
+        circ2 = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        gate gate_PauliEvolution(param0) q0,q1 { rz(0.2) q0; rz(-0.1) q1; }
+        qreg q[2];
+        gate_PauliEvolution(0.1) q[0],q[1];
+        """
+        )
+        circ3 = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        gate gate_PauliEvolution(param0) q0,q1 { rz(0.2) q0; rz(-0.1) q1; }
+        qubit[2] q;
+        gate_PauliEvolution(0.1) q[0],q[1];
+        """
+        )
+        assert_same_gates(circ2, circ3)
 
     def test_openqasm2_custom_gates(self):
         circ = qtn.Circuit.from_openqasm2_str(

@@ -154,6 +154,19 @@ def multi_replace(s, replacements):
     return s
 
 
+def _openqasm_replace_tokens(s, replacements):
+    """Replace whole identifier-like tokens in an OpenQASM fragment."""
+    if not replacements:
+        return s
+
+    pattern = "|".join(sorted(map(re.escape, replacements), key=len, reverse=True))
+    return re.sub(
+        rf"(?<!\w)({pattern})(?!\w)",
+        lambda match: replacements[match.group(1)],
+        s,
+    )
+
+
 @functools.lru_cache(None)
 def get_openqasm2_regexes():
     return {
@@ -245,6 +258,9 @@ def _openqasm_split_top_level(s, sep=","):
 
 
 def _openqasm_eval_expr(expr, env):
+    if not isinstance(expr, str):
+        return expr
+
     expr = expr.strip()
     if not expr:
         return None
@@ -396,6 +412,23 @@ def _openqasm_eval_expr(expr, env):
             return _combine_symbolic(op, lhs, rhs)
         if isinstance(node, ast.List):
             return [_eval_node(x) for x in node.elts]
+        if isinstance(node, ast.Subscript):
+            value = _eval_node(node.value)
+            index_node = node.slice
+            if hasattr(ast, "Index") and isinstance(index_node, ast.Index):
+                index_node = index_node.value
+            index = _eval_node(index_node)
+            if _is_numeric(index):
+                index = int(index)
+            else:
+                raise NotImplementedError(
+                    "Symbolic array indices are unsupported."
+                )
+            if not isinstance(value, (list, tuple)):
+                raise NotImplementedError(
+                    "Only OpenQASM 3 array-style values can be indexed."
+                )
+            return value[index]
         raise NotImplementedError(
             f"Unsupported OpenQASM 3 expression node: {type(node).__name__}"
         )
@@ -644,6 +677,9 @@ def parse_openqasm3_str(contents):
             warnings.warn(message, SyntaxWarning)
             warned[name] = True
 
+    def _warn_measure_ignored():
+        _warn_once("measure", "Unsupported operation ignored: measure")
+
     def _is_symbolic(x):
         return not isinstance(x, numbers.Number)
 
@@ -782,13 +818,11 @@ def parse_openqasm3_str(contents):
         if match:
             ctype, name, expr = match.groups()
             if ctype == "bit" and expr is None:
+                _warn_once("bit", "Unsupported operation ignored: bit")
                 continue
             if expr is not None:
-                if expr.startswith("measure "):
-                    _warn_once(
-                        "measure",
-                        "Unsupported operation ignored: measure",
-                    )
+                if expr.lstrip().startswith("measure "):
+                    _warn_measure_ignored()
                     continue
                 env[name] = _eval_expr(expr)
             continue
@@ -802,6 +836,9 @@ def parse_openqasm3_str(contents):
         match = rgxs["assign"].match(line)
         if match:
             name, expr = match.groups()
+            if expr.lstrip().startswith("measure "):
+                _warn_measure_ignored()
+                continue
             env[name] = _eval_expr(expr)
             continue
 
@@ -845,11 +882,11 @@ def parse_openqasm3_str(contents):
             for i, gate_line in enumerate(gate_body):
                 gm = rgxs["gate"].match(gate_line + ";")
                 glabel = gm[1]
-                gqubits = multi_replace(
+                gqubits = _openqasm_replace_tokens(
                     gm[3], {q: f"{{{q}}}" for q in sig_qubits}
                 )
                 if gm[2]:
-                    gparams = multi_replace(
+                    gparams = _openqasm_replace_tokens(
                         gm[2], {p: f"{{{p}}}" for p in sig_params}
                     )
                     gate_body[i] = f"{glabel}({gparams}) {gqubits};"
@@ -2413,11 +2450,25 @@ class Circuit:
 
         Parameters
         ----------
-        params : dict`
+        params : dict
             Either a dictionary mapping gate numbers to the new parameters, or
             for QASM 3 imported circuits a dictionary mapping input names to
             numeric values.
         """
+        if not params and getattr(self, "qasm3_inputs", ()):
+            self._set_qasm3_params({})
+            self.clear_storage()
+            return
+
+        if params and not (
+            all(isinstance(k, str) for k in params)
+            or all(not isinstance(k, str) for k in params)
+        ):
+            raise TypeError(
+                "Parameter keys must be all gate indices or all QASM 3 "
+                "input names."
+            )
+
         if params and all(isinstance(k, str) for k in params):
             self._set_qasm3_params(params)
         else:
@@ -2444,12 +2495,21 @@ class Circuit:
                 + ", ".join(sorted(missing))
             )
 
+        extra = set(params) - set(self.qasm3_inputs)
+        if extra:
+            raise ValueError(
+                "Unknown QASM 3 input values supplied for: "
+                + ", ".join(sorted(extra))
+            )
+
         symbol_env = dict(self.qasm3_symbols)
         symbol_env.update(params)
 
         gate_params = {}
         for i, exprs in self.qasm3_expressions.items():
-            values = tuple(_openqasm_eval_expr(expr, symbol_env) for expr in exprs)
+            values = tuple(
+                _openqasm_eval_expr(expr, symbol_env) for expr in exprs
+            )
             if any(not isinstance(x, numbers.Number) for x in values):
                 raise ValueError(
                     "QASM 3 input binding left unresolved symbolic values "
