@@ -2359,6 +2359,9 @@ class Circuit:
         new._sample_n_gates = self._sample_n_gates
         new._storage = self._storage.copy()
         new._sampled_conditionals = self._sampled_conditionals.copy()
+        for attr in ("qasm3_inputs", "qasm3_symbols", "qasm3_expressions"):
+            if hasattr(self, attr):
+                setattr(new, attr, copy.copy(getattr(self, attr)))
         return new
 
     def _maybe_convert(self, obj, dtype=None):
@@ -2411,13 +2414,53 @@ class Circuit:
         Parameters
         ----------
         params : dict`
-            A dictionary mapping gate numbers to the new parameters.
+            Either a dictionary mapping gate numbers to the new parameters, or
+            for QASM 3 imported circuits a dictionary mapping input names to
+            numeric values.
         """
+        if params and all(isinstance(k, str) for k in params):
+            self._set_qasm3_params(params)
+        else:
+            self._set_gate_params(params)
+
+        self.clear_storage()
+
+    def _set_gate_params(self, params):
         for i, p in params.items():
             self._psi[self.gate_tag(i)].params = p
             self._gates[i] = self._gates[i].copy_with(params=ops.asarray(p))
 
-        self.clear_storage()
+    def _set_qasm3_params(self, params):
+        if not hasattr(self, "qasm3_expressions"):
+            raise TypeError(
+                "String-keyed parameters are only supported for QASM 3 "
+                "imported circuits."
+            )
+
+        missing = set(self.qasm3_inputs) - set(params)
+        if missing:
+            raise ValueError(
+                "Missing QASM 3 input values for: "
+                + ", ".join(sorted(missing))
+            )
+
+        symbol_env = dict(self.qasm3_symbols)
+        symbol_env.update(params)
+
+        gate_params = {}
+        for i, exprs in self.qasm3_expressions.items():
+            values = tuple(_openqasm_eval_expr(expr, symbol_env) for expr in exprs)
+            if any(not isinstance(x, numbers.Number) for x in values):
+                raise ValueError(
+                    "QASM 3 input binding left unresolved symbolic values "
+                    f"for gate {i}: {values!r}"
+                )
+            gate_params[i] = values
+
+        self._set_gate_params(gate_params)
+        self.qasm3_symbols = {
+            name: symbol_env[name] for name in self.qasm3_inputs
+        }
 
     @classmethod
     def from_qsim_str(cls, contents, progbar=False, **circuit_opts):

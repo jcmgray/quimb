@@ -226,7 +226,8 @@ class TestCircuit:
         assert circ.gates[0].label == "RX"
         assert circ.gates[0].params[0] == pytest.approx(0.0)
 
-        circ.set_params({0: [0.3]})
+        circ.set_params({"theta": 0.3})
+        assert circ.qasm3_symbols == {"theta": 0.3}
         assert_allclose(
             np.asarray(circ.psi["GATE_0"].data),
             np.asarray(rx_gate_param_gen((0.3,))),
@@ -260,6 +261,30 @@ class TestCircuit:
         ]
         assert circ.qasm3_expressions[2][0] == "theta"
 
+    def test_openqasm3_named_param_binding_and_copy(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[2] q;
+        rx(theta) q[0];
+        ry(theta / 2) q[1];
+        """
+        )
+        circ2 = circ.copy()
+
+        assert circ2.qasm3_inputs == ("theta",)
+        assert circ2.qasm3_symbols == {"theta": "theta"}
+        assert circ2.qasm3_expressions == {
+            0: ("theta",),
+            1: ("(theta / 2)",),
+        }
+
+        circ2.set_params({"theta": 0.6})
+        assert circ2.gates[0].params == (pytest.approx(0.6),)
+        assert circ2.gates[1].params == (pytest.approx(0.3),)
+
     def test_openqasm3_broadcast_registers(self):
         circ = qtn.Circuit.from_openqasm3_str(
             """
@@ -290,6 +315,20 @@ class TestCircuit:
             """
         )
         assert circ.gates[0].params == (pytest.approx(math.pi / 2),)
+
+    def test_openqasm3_named_binding_requires_all_inputs(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            input float phi;
+            qubit[1] q;
+            u3(theta, phi, 0.0) q[0];
+            """
+        )
+        with pytest.raises(ValueError, match="Missing QASM 3 input values"):
+            circ.set_params({"theta": 0.2})
 
     def test_openqasm3_output_decl_unsupported(self):
         with pytest.raises(NotImplementedError, match="Output declarations"):
