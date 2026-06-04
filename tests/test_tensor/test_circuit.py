@@ -125,6 +125,36 @@ def example_openqasm2_qft():
     """
 
 
+def example_openqasm3_qft():
+    return """
+    // quantum Fourier transform
+
+    OPENQASM 3.0;
+    include "stdgates.inc";
+
+    qubit[4] q;
+    bit[4] c;
+    x q[0];
+    x q[2];
+    barrier q;
+    h q[0];
+    cp(pi / 2) q[1], q[0];
+    h q[1];
+    cp(pi / 4) q[2], q[0];
+    cp(pi / 2) q[2], q[1];
+    /*
+    This is a multi line comment.
+    */
+    h q[2];
+    cp(pi / 8) q[3], q[0];
+    cp(pi / 4) q[3], q[1];
+    cp(pi / 2) q[3], q[2];
+    h q[3];
+
+    c = measure q;
+    """
+
+
 class TestCircuit:
     def test_prepare_GHZ(self):
         qc = qtn.Circuit(3)
@@ -154,6 +184,43 @@ class TestCircuit:
     def test_from_openqasm2(self):
         qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_from_openqasm3(self):
+        qc = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+        assert [g.label for g in qc.gates] == [
+            "X",
+            "X",
+            "H",
+            "CPHASE",
+            "H",
+            "CPHASE",
+            "CPHASE",
+            "H",
+            "CPHASE",
+            "CPHASE",
+            "CPHASE",
+            "H",
+        ]
+
+    def test_openqasm3_stdgate_aliases_and_constants(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3;
+        include "stdgates.inc";
+        const float theta = pi / 3;
+        const int i = 0;
+        qubit[2] q;
+        let a = q[i];
+        U(theta, theta / 2, -theta) a;
+        p(pi / 7) q[1];
+        cp(theta) q[0], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == ["U3", "PHASE", "CPHASE"]
+        assert circ.gates[0].params[0] == pytest.approx(np.pi / 3)
+        assert circ.gates[0].qubits == (0,)
+        assert circ.gates[2].qubits == (0, 1)
 
     def test_openqasm2_custom_gates(self):
         circ = qtn.Circuit.from_openqasm2_str(
@@ -233,6 +300,127 @@ class TestCircuit:
         """
         circ = qtn.Circuit.from_openqasm2_str(qasm_str)
         assert len(circ.gates) == 2
+
+    def test_openqasm3_custom_gates(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3;
+        include "stdgates.inc";
+        qubit[3] q;
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            U(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, theta) q {
+            p(theta / 2) q;
+            p(param1) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "H",
+            "CX",
+            "U3",
+            "PHASE",
+            "PHASE",
+            "H",
+            "CX",
+            "U3",
+        ]
+
+    def test_openqasm3_from_file(self, tmp_path):
+        qasm_file = tmp_path / "test.qasm"
+        qasm_file.write_text(
+            """
+        OPENQASM 3;
+        include "stdgates.inc";
+        qubit[2] q;
+        h q[0];
+        cx q[0], q[1];
+        """
+        )
+        circ = qtn.Circuit.from_openqasm3_file(qasm_file)
+        assert [g.label for g in circ.gates] == ["H", "CX"]
+
+    def test_openqasm3_custom_gate_name_collisions(self):
+        # a formal parameter or qubit named like a gate must not clobber the
+        # gate labels used in the body of the custom gate definition
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3;
+        include "stdgates.inc";
+        qubit[2] q;
+        gate g1(h) a {
+            h a;
+            rx(h) a;
+        }
+        gate g2 x, cx {
+            cx x, cx;
+        }
+        g1(0.5) q[0];
+        g2 q[0], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == ["H", "RX", "CX"]
+        assert circ.gates[1].params[0] == pytest.approx(0.5)
+        assert circ.gates[2].qubits == (0, 1)
+
+    def test_openqasm3_gphase_ignored(self):
+        with pytest.warns(SyntaxWarning):
+            circ = qtn.Circuit.from_openqasm3_str(
+                """
+            OPENQASM 3;
+            include "stdgates.inc";
+            qubit[1] q;
+            gphase(pi / 2);
+            h q[0];
+            """
+            )
+        assert [g.label for g in circ.gates] == ["H"]
+
+    def test_openqasm3_unsupported_operations(self):
+        with pytest.raises(NotImplementedError):
+            qtn.Circuit.from_openqasm3_str(
+                """
+            OPENQASM 3;
+            input angle theta;
+            qubit q;
+            rz(theta) q;
+            """
+            )
+
+        with pytest.raises(NotImplementedError):
+            qtn.Circuit.from_openqasm3_str(
+                """
+            OPENQASM 3;
+            qubit q;
+            if (true) {
+                x q;
+            }
+            """
+            )
+
+    @pytest.mark.parametrize(
+        "modifier",
+        ["ctrl @", "ctrl(2) @", "negctrl @", "inv @", "pow(2) @"],
+    )
+    def test_openqasm3_gate_modifiers_unsupported(self, modifier):
+        with pytest.raises(NotImplementedError):
+            qtn.Circuit.from_openqasm3_str(
+                f"""
+            OPENQASM 3;
+            include "stdgates.inc";
+            qubit[3] q;
+            {modifier} x q[0], q[1], q[2];
+            """
+            )
 
     @pytest.mark.parametrize(
         "Circ", [qtn.Circuit, qtn.CircuitMPS, qtn.CircuitDense]

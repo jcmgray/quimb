@@ -335,6 +335,397 @@ def parse_openqasm2_url(url, **kwargs):
     return parse_openqasm2_str(request.urlopen(url).read().decode(), **kwargs)
 
 
+@functools.lru_cache(None)
+def get_openqasm3_regexes():
+    return {
+        "header": re.compile(r"OPENQASM\s+3(?:\.0)?$", re.IGNORECASE),
+        "include": re.compile(r'include\s+"[^"]+"$', re.IGNORECASE),
+        "qreg": re.compile(
+            r"qubit\s*(?:\[(\d+)\])?\s+([A-Za-z_]\w*)$",
+            re.IGNORECASE,
+        ),
+        "classical": re.compile(
+            r"(?:bit|bool|int|uint|float|angle|complex|array|creg)\b",
+            re.IGNORECASE,
+        ),
+        "const": re.compile(
+            r"const\s+(?:float|angle|int|uint)\s+([A-Za-z_]\w*)\s*=\s*(.+)$",
+            re.IGNORECASE,
+        ),
+        "let": re.compile(r"let\s+([A-Za-z_]\w*)\s*=\s*(.+)$"),
+        "gate": re.compile(
+            r"([A-Za-z_]\w*)\s*(?:\((.*)\))?\s+(.+)$",
+            re.IGNORECASE,
+        ),
+        "gate_sig": re.compile(
+            r"gate\s+([A-Za-z_]\w*)\s*(?:\((.*)\))?\s+(.+)$",
+            re.IGNORECASE,
+        ),
+        "ignore": re.compile(r"^(?:barrier|reset|gphase)\b", re.IGNORECASE),
+        "measure": re.compile(r"(?:^|\s)measure(?:\s|$)", re.IGNORECASE),
+        "error": re.compile(
+            r"^(?:if|for|while|switch|def|defcal|cal|box|delay|stretch|"
+            r"duration|extern|input|output)\b",
+            re.IGNORECASE,
+        ),
+        # gate modifiers (``ctrl @``, ``ctrl(2) @``, ``inv @``, ``pow(2) @`` ...)
+        # always prefix the gate, so detect the modifier keyword followed by the
+        # ``@`` token regardless of any intervening argument list
+        "modifier": re.compile(
+            r"^(?:ctrl|negctrl|inv|pow)\b[^@]*@",
+            re.IGNORECASE,
+        ),
+    }
+
+
+OPENQASM3_GATE_ALIASES = {
+    "p": "PHASE",
+    "phase": "PHASE",
+    "cp": "CPHASE",
+    "u": "U3",
+}
+
+
+def _split_openqasm_statements(contents):
+    """Split OpenQASM input into semicolon/braced statements, stripping
+    comments. This is intentionally small and not a full grammar lexer.
+    """
+    statements = []
+    chars = []
+    in_string = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+
+    while i < len(contents):
+        c = contents[i]
+        c_next = contents[i + 1] if i + 1 < len(contents) else ""
+
+        if in_line_comment:
+            if c == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if in_block_comment:
+            if (c == "*") and (c_next == "/"):
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        if not in_string and (c == "/") and (c_next == "/"):
+            in_line_comment = True
+            i += 2
+            continue
+
+        if not in_string and (c == "/") and (c_next == "*"):
+            in_block_comment = True
+            i += 2
+            continue
+
+        if c == '"':
+            in_string = not in_string
+            chars.append(c)
+            i += 1
+            continue
+
+        if (not in_string) and c in ";{}":
+            statement = "".join(chars).strip()
+            if statement:
+                statements.append(statement)
+            if c in "{}":
+                statements.append(c)
+            chars.clear()
+            i += 1
+            continue
+
+        chars.append(c)
+        i += 1
+
+    statement = "".join(chars).strip()
+    if statement:
+        statements.append(statement)
+
+    return statements
+
+
+def _eval_openqasm3_param(expr, env):
+    expr = expr.replace("^", "**")
+    eval_globals = {
+        "__builtins__": {},
+        "pi": math.pi,
+        "tau": math.tau,
+        "e": math.e,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "asin": math.asin,
+        "acos": math.acos,
+        "atan": math.atan,
+        "exp": math.exp,
+        "ln": math.log,
+        "sqrt": math.sqrt,
+    }
+    try:
+        return eval(expr, eval_globals, env)
+    except NameError as exc:
+        raise NotImplementedError(
+            "OpenQASM 3 unbound parameters are not currently supported: "
+            f"{expr}"
+        ) from exc
+    except Exception as exc:
+        raise SyntaxError(f"Could not parse OpenQASM 3 parameter: {expr}") from exc
+
+
+def _openqasm3_gate_label(label):
+    return OPENQASM3_GATE_ALIASES.get(label.lower(), label.upper())
+
+
+def _resolve_openqasm3_operand(operand, sitemap, aliases, constants):
+    operand = aliases.get(operand, operand)
+    if operand in sitemap:
+        return sitemap[operand]
+
+    match = re.match(r"([A-Za-z_]\w*)\[(.+)\]$", operand)
+    if match:
+        name, index = match.groups()
+        index = int(_eval_openqasm3_param(index, constants))
+        operand = f"{name}[{index}]"
+        if operand in sitemap:
+            return sitemap[operand]
+
+    raise SyntaxError(f"Unknown OpenQASM 3 qubit operand: {operand}")
+
+
+def _parse_openqasm3_operands(operands, sitemap, aliases, constants):
+    sites = []
+    for operand in to_clean_list(operands, ","):
+        sites.append(
+            _resolve_openqasm3_operand(operand, sitemap, aliases, constants)
+        )
+
+    return tuple(sites)
+
+
+def _substitute_openqasm3_gate_body(gate_line, param_repl, qubit_repl):
+    """Substitute formal parameters and qubits into a single custom-gate body
+    line. The line is first split into its ``label``, ``params`` and
+    ``operands`` so that substitution only ever happens inside the parameter and
+    operand regions - never the gate label. This prevents a formal name that
+    coincides with a gate label (e.g. a parameter called ``h``, or a qubit
+    called ``cx``) from being mistaken for, or clobbering, an instruction.
+    Word-boundary matching is used so that one formal name is not substituted
+    inside another (e.g. ``x`` inside ``cx``).
+    """
+    match = get_openqasm3_regexes()["gate"].match(gate_line)
+    if not match:
+        # not a recognisable gate application; leave untouched and let the main
+        # parsing loop raise an informative error when it is re-encountered
+        return gate_line
+
+    glabel, gparams, goperands = match.groups()
+
+    def _sub(text, replacements):
+        for name, value in replacements.items():
+            text = re.sub(rf"\b{re.escape(name)}\b", value, text)
+        return text
+
+    goperands = _sub(goperands, qubit_repl)
+    if gparams is not None:
+        gparams = _sub(gparams, param_repl)
+        return f"{glabel}({gparams}) {goperands}"
+    return f"{glabel} {goperands}"
+
+
+def _parse_openqasm3_gate_statement(statement, sitemap, aliases, constants):
+    match = get_openqasm3_regexes()["gate"].match(statement)
+    if not match:
+        raise SyntaxError(f"{statement}")
+
+    label, params, operands = match.groups()
+    label = _openqasm3_gate_label(label)
+
+    if params:
+        params = tuple(
+            _eval_openqasm3_param(param, constants)
+            for param in to_clean_list(params, ",")
+        )
+    else:
+        params = ()
+
+    qubits = _parse_openqasm3_operands(operands, sitemap, aliases, constants)
+    return Gate(label, params, qubits)
+
+
+def parse_openqasm3_str(contents):
+    """Parse the string contents of an OpenQASM 3 file.
+
+    This parser supports basic circuit/gate functionality comparable to the
+    OpenQASM 2 parser. It is not a full OpenQASM 3 grammar implementation:
+    unsupported operations, including control flow, calibration blocks, gate
+    modifiers, and unbound ``input`` parameters, raise clear errors.
+
+    Notable current limitations:
+
+    - gate broadcasting over a whole register (e.g. ``h q;`` for a multi-qubit
+      register ``q``) is not supported - index individual qubits instead
+      (``h q[0];``). Single-qubit registers may be referenced by name.
+    - ``input`` (unbound / symbolic) parameters are not supported because the
+      gate pipeline cannot yet carry symbolic parameters; supply concrete or
+      ``const``-evaluable values instead.
+    - global phase (``gphase``) is ignored with a warning as it does not affect
+      measurement outcomes.
+    """
+    rgxs = get_openqasm3_regexes()
+    statements = _split_openqasm_statements(contents)
+
+    sitemap = {}
+    aliases = {}
+    constants = {}
+    gates = []
+    custom_gates = {}
+    warned = {}
+
+    i = 0
+    while i < len(statements):
+        statement = statements[i].strip()
+        i += 1
+
+        if statement in "{}":
+            raise SyntaxError(f"Unexpected OpenQASM 3 block delimiter: {statement}")
+
+        if rgxs["header"].match(statement):
+            continue
+
+        if rgxs["include"].match(statement):
+            continue
+
+        match = rgxs["qreg"].match(statement)
+        if match:
+            nq, name = match.groups()
+            nq = int(nq) if nq is not None else 1
+            for j in range(nq):
+                sitemap[f"{name}[{j}]"] = len(sitemap)
+            if nq == 1:
+                aliases[name] = f"{name}[0]"
+            continue
+
+        match = rgxs["const"].match(statement)
+        if match:
+            name, expr = match.groups()
+            constants[name] = _eval_openqasm3_param(expr, constants)
+            continue
+
+        match = rgxs["let"].match(statement)
+        if match:
+            name, operand = match.groups()
+            aliases[name] = operand.strip()
+            continue
+
+        if statement.lower().startswith("gate "):
+            gate_sig = statement
+            if (i >= len(statements)) or (statements[i] != "{"):
+                raise SyntaxError(
+                    "OpenQASM 3 gate definitions must be followed by a block."
+                )
+            i += 1
+
+            gate_body = []
+            while i < len(statements):
+                statement = statements[i]
+                i += 1
+                if statement == "}":
+                    break
+                gate_body.append(statement)
+            else:
+                raise SyntaxError("Unterminated OpenQASM 3 gate definition.")
+
+            match = rgxs["gate_sig"].match(gate_sig)
+            if not match:
+                raise SyntaxError(f"{gate_sig}")
+
+            label, sig_params, sig_qubits = match.groups()
+            custom_gates[label] = (
+                to_clean_list(sig_params, ","),
+                to_clean_list(sig_qubits, ","),
+                gate_body,
+            )
+            continue
+
+        if rgxs["error"].match(statement) or rgxs["modifier"].match(statement):
+            raise NotImplementedError(
+                f"The following OpenQASM 3 instruction is not supported: "
+                f"{statement}"
+            )
+
+        if rgxs["ignore"].match(statement) or rgxs["measure"].search(statement):
+            op = "measure" if rgxs["measure"].search(statement) else statement.split()[0]
+            if not warned.get(op, False):
+                warnings.warn(
+                    f"Unsupported OpenQASM 3 operation ignored: {op}",
+                    SyntaxWarning,
+                )
+                warned[op] = True
+            continue
+
+        if rgxs["classical"].match(statement):
+            continue
+
+        match = rgxs["gate"].match(statement)
+        if match:
+            label, params, operands = match.groups()
+
+            if label in custom_gates:
+                sig_params, sig_qubits, gate_body = custom_gates[label]
+                param_repl = dict(
+                    zip(sig_params, to_clean_list(params, ","))
+                )
+                qubit_repl = dict(
+                    zip(sig_qubits, to_clean_list(operands, ","))
+                )
+                # recurse by prepending the translated gate body, substituting
+                # only within parameter/operand regions (never the gate label)
+                for gate_line in reversed(gate_body):
+                    statements.insert(
+                        i,
+                        _substitute_openqasm3_gate_body(
+                            gate_line, param_repl, qubit_repl
+                        ),
+                    )
+                continue
+
+            gates.append(
+                _parse_openqasm3_gate_statement(
+                    statement, sitemap, aliases, constants
+                )
+            )
+            continue
+
+        raise SyntaxError(f"{statement}")
+
+    return {
+        "n": len(sitemap),
+        "sitemap": sitemap,
+        "gates": gates,
+        "n_gates": len(gates),
+    }
+
+
+def parse_openqasm3_file(fname, **kwargs):
+    """Parse an OpenQASM 3 file."""
+    with open(fname) as f:
+        return parse_openqasm3_str(f.read(), **kwargs)
+
+
+def parse_openqasm3_url(url, **kwargs):
+    """Parse an OpenQASM 3 url."""
+    from urllib import request
+
+    return parse_openqasm3_str(request.urlopen(url).read().decode(), **kwargs)
+
+
 # -------------------------- core gate functions ---------------------------- #
 
 
@@ -1890,6 +2281,30 @@ class Circuit:
     def from_openqasm2_url(cls, url, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 url."""
         info = parse_openqasm2_url(url)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_str(cls, contents, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3 string."""
+        info = parse_openqasm3_str(contents)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_file(cls, fname, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3 file."""
+        info = parse_openqasm3_file(fname)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_url(cls, url, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3 url."""
+        info = parse_openqasm3_url(url)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
         return qc
