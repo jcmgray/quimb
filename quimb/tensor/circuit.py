@@ -335,6 +335,112 @@ def parse_openqasm2_url(url, **kwargs):
     return parse_openqasm2_str(request.urlopen(url).read().decode(), **kwargs)
 
 
+def parse_openqasm3_str(contents):
+    """Parse the string contents of an OpenQASM 3.0 file.
+
+    This function uses the openqasm3 package to parse OpenQASM 3.0 strings
+    and convert them to quimb's internal circuit format.
+
+    Parameters
+    ----------
+    contents : str
+        The full string of the OpenQASM 3.0 file.
+
+    Returns
+    -------
+    circuit_info : dict
+        Information about the circuit:
+
+        - circuit_info['n']: the number of qubits
+        - circuit_info['sitemap']: mapping from qubit names to indices
+        - circuit_info['gates']: list of Gate objects
+        - circuit_info['n_gates']: the number of gates in total
+    """
+    try:
+        import openqasm3
+    except ImportError:
+        raise ImportError(
+            "The openqasm3 package is required for OpenQASM 3.0 support. "
+            "Install it with: pip install openqasm3"
+        )
+
+    # Parse the OpenQASM 3.0 string into an AST
+    try:
+        program = openqasm3.loads(contents)
+    except Exception as e:
+        raise SyntaxError(f"Failed to parse OpenQASM 3.0: {e}")
+
+    # Build qubit sitemap
+    sitemap = {}
+    qubit_count = 0
+
+    # First pass: count qubits and build sitemap
+    for statement in program.statements:
+        if isinstance(statement, openqasm3.QubitDeclaration):
+            for i in range(statement.size):
+                sitemap[f"{statement.name}[{i}]"] = qubit_count
+                qubit_count += 1
+
+    # Second pass: extract gates
+    gates = []
+
+    for statement in program.statements:
+        # Skip non-gate statements
+        if not isinstance(statement, openqasm3.QuantumGate):
+            continue
+
+        # Extract gate name
+        gate_name = statement.name.name
+
+        # Extract parameters
+        params = ()
+        if statement.arguments:
+            params = tuple(
+                arg.value if hasattr(arg, 'value') else arg
+                for arg in statement.arguments
+            )
+
+        # Extract qubit indices
+        qubits = []
+        for qarg in statement.qubits:
+            if isinstance(qarg, openqasm3.Identifier):
+                # Single qubit reference
+                if qarg.name in sitemap:
+                    qubits.append(sitemap[qarg.name])
+            elif isinstance(qarg, openqasm3.IndexedIdentifier):
+                # Indexed qubit reference like q[0]
+                if qarg.name.name in sitemap:
+                    indices = [idx.value for idx in qarg.indices]
+                    if indices:
+                        qubits.append(sitemap[f"{qarg.name.name}[{indices[0]}]"])
+
+        qubits = tuple(qubits)
+
+        # Create Gate object
+        if qubits:
+            gates.append(Gate(gate_name, params, qubits))
+
+    return {
+        "n": qubit_count,
+        "sitemap": sitemap,
+        "gates": gates,
+        "n_gates": len(gates),
+    }
+
+
+def parse_openqasm3_file(fname, **kwargs):
+    """Parse an OpenQASM 3.0 file."""
+    with open(fname) as f:
+        return parse_openqasm3_str(f.read(), **kwargs)
+
+
+def parse_openqasm3_url(url, **kwargs):
+    """Parse an OpenQASM 3.0 url."""
+    from urllib import request
+
+    return parse_openqasm3_str(request.urlopen(url).read().decode(), **kwargs)
+
+
 # -------------------------- core gate functions ---------------------------- #
 
 
@@ -1890,6 +1996,72 @@ class Circuit:
     def from_openqasm2_url(cls, url, progbar=False, **circuit_opts):
         """Generate a ``Circuit`` instance from an OpenQASM 2.0 url."""
         info = parse_openqasm2_url(url)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_str(cls, contents, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3.0 string.
+
+        Parameters
+        ----------
+        contents : str
+            The OpenQASM 3.0 string.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        circuit_opts
+            Supplied to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+        """
+        info = parse_openqasm3_str(contents)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_file(cls, fname, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3.0 file.
+
+        Parameters
+        ----------
+        fname : str
+            The OpenQASM 3.0 file path.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        circuit_opts
+            Supplied to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+        """
+        info = parse_openqasm3_file(fname)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        return qc
+
+    @classmethod
+    def from_openqasm3_url(cls, url, progbar=False, **circuit_opts):
+        """Generate a ``Circuit`` instance from an OpenQASM 3.0 url.
+
+        Parameters
+        ----------
+        url : str
+            The OpenQASM 3.0 url.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        circuit_opts
+            Supplied to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+        """
+        info = parse_openqasm3_url(url)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
         return qc
