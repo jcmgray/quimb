@@ -3,6 +3,7 @@
 import ast
 import cmath
 import copy
+import collections.abc
 import functools
 import itertools
 import math
@@ -260,6 +261,9 @@ def _openqasm_split_top_level(s, sep=","):
 
 
 def _openqasm_eval_expr(expr, env):
+    if callable(expr):
+        return expr(env)
+
     if not isinstance(expr, str):
         return expr
 
@@ -290,19 +294,32 @@ def _openqasm_eval_expr(expr, env):
         ast.Not: ("!", operator.not_),
     }
     allowed_fns = {
-        "sin": math.sin,
-        "cos": math.cos,
-        "tan": math.tan,
-        "asin": math.asin,
-        "acos": math.acos,
-        "atan": math.atan,
-        "exp": math.exp,
-        "ln": math.log,
-        "log": math.log,
-        "sqrt": math.sqrt,
-        "abs": abs,
+        "sin": lambda x: do("sin", x),
+        "cos": lambda x: do("cos", x),
+        "tan": lambda x: do("tan", x),
+        "asin": lambda x: do("arcsin", x),
+        "acos": lambda x: do("arccos", x),
+        "atan": lambda x: do("arctan", x),
+        "exp": lambda x: do("exp", x),
+        "ln": lambda x: do("log", x),
+        "log": lambda x: do("log", x),
+        "sqrt": lambda x: do("sqrt", x),
+        "abs": lambda x: do("abs", x),
         "pow": pow,
     }
+
+    def _placeholder_passthrough(*xs):
+        for x in xs:
+            if _is_interface_placeholder(x):
+                return x
+        raise TypeError("No placeholder value supplied.")
+
+    def _is_symbolic(x):
+        if isinstance(x, str):
+            return True
+        if isinstance(x, (list, tuple)):
+            return any(_is_symbolic(xi) for xi in x)
+        return False
 
     def _combine_symbolic(op, *xs):
         fmt = lambda x: x if isinstance(x, str) else repr(x)
@@ -361,11 +378,13 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 operator: {optype.__name__}"
                 )
             op, fn = allowed_binary_ops[optype]
-            if isinstance(lhs, numbers.Number) and isinstance(
-                rhs, numbers.Number
+            if _is_symbolic(lhs) or _is_symbolic(rhs):
+                return _combine_symbolic(op, lhs, rhs)
+            if _is_interface_placeholder(lhs) or _is_interface_placeholder(
+                rhs
             ):
-                return fn(lhs, rhs)
-            return _combine_symbolic(op, lhs, rhs)
+                return _placeholder_passthrough(lhs, rhs)
+            return fn(lhs, rhs)
         if isinstance(node, ast.UnaryOp):
             x = _eval_node(node.operand)
             optype = type(node.op)
@@ -374,9 +393,11 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 unary op: {optype.__name__}"
                 )
             op, fn = allowed_unary_ops[optype]
-            if isinstance(x, numbers.Number):
-                return fn(x)
-            return _combine_symbolic(op, x)
+            if _is_symbolic(x):
+                return _combine_symbolic(op, x)
+            if _is_interface_placeholder(x):
+                return x
+            return fn(x)
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
                 raise NotImplementedError(
@@ -388,9 +409,11 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 function: {name}"
                 )
             args = [_eval_node(a) for a in node.args]
-            if all(isinstance(a, numbers.Number) for a in args):
-                return allowed_fns[name](*args)
-            return _combine_symbolic(name, *args)
+            if any(_is_symbolic(a) for a in args):
+                return _combine_symbolic(name, *args)
+            if any(_is_interface_placeholder(a) for a in args):
+                return _placeholder_passthrough(*args)
+            return allowed_fns[name](*args)
         if isinstance(node, ast.Compare):
             if len(node.ops) != 1 or len(node.comparators) != 1:
                 raise NotImplementedError(
@@ -404,11 +427,13 @@ def _openqasm_eval_expr(expr, env):
                     f"Unsupported OpenQASM 3 compare op: {optype.__name__}"
                 )
             op, fn = allowed_compare_ops[optype]
-            if isinstance(lhs, numbers.Number) and isinstance(
-                rhs, numbers.Number
+            if _is_symbolic(lhs) or _is_symbolic(rhs):
+                return _combine_symbolic(op, lhs, rhs)
+            if _is_interface_placeholder(lhs) or _is_interface_placeholder(
+                rhs
             ):
-                return fn(lhs, rhs)
-            return _combine_symbolic(op, lhs, rhs)
+                return _placeholder_passthrough(lhs, rhs)
+            return fn(lhs, rhs)
         if isinstance(node, ast.List):
             return [_eval_node(x) for x in node.elts]
         if isinstance(node, ast.Subscript):
@@ -433,6 +458,27 @@ def _openqasm_eval_expr(expr, env):
         )
 
     return _eval_node(tree.body)
+
+
+def _is_interface_placeholder(x):
+    try:
+        from .interface import Placeholder
+    except ImportError:
+        return False
+    return isinstance(x, Placeholder)
+
+
+def _placeholder_param_vector(values):
+    from .interface import Placeholder
+
+    for value in values:
+        if _is_interface_placeholder(value):
+            dtype = getattr(value, "dtype", "float64")
+            if dtype in (None, "unknown"):
+                dtype = "float64"
+            return Placeholder(np.empty((len(values),), dtype=dtype))
+
+    raise TypeError("No placeholder values supplied.")
 
 
 def parse_openqasm2_str(contents):
@@ -950,7 +996,7 @@ def parse_openqasm3_str(contents):
                 not isinstance(p, numbers.Number) for p in raw_params
             )
             params = tuple(
-                0.0 if not isinstance(p, numbers.Number) else p
+                float("nan") if not isinstance(p, numbers.Number) else p
                 for p in raw_params
             )
             for call_qubits in qubit_calls:
@@ -2440,6 +2486,8 @@ class Circuit:
         self._sample_n_gates = -1
         self._storage = dict()
         self._sampled_conditionals = dict()
+        self._named_params = {}
+        self._named_param_exprs = {}
 
     def copy(self):
         """Copy the circuit and its state."""
@@ -2462,9 +2510,8 @@ class Circuit:
         new._sample_n_gates = self._sample_n_gates
         new._storage = self._storage.copy()
         new._sampled_conditionals = self._sampled_conditionals.copy()
-        for attr in ("qasm3_inputs", "qasm3_symbols", "qasm3_expressions"):
-            if hasattr(self, attr):
-                setattr(new, attr, copy.copy(getattr(self, attr)))
+        new._named_params = copy.copy(self._named_params)
+        new._named_param_exprs = copy.copy(self._named_param_exprs)
         return new
 
     def _maybe_convert(self, obj, dtype=None):
@@ -2496,20 +2543,102 @@ class Circuit:
         """Apply a function to all the arrays in the circuit."""
         self._psi.apply_to_arrays(fn)
 
+    @staticmethod
+    def _normalize_named_param_value(value):
+        if _is_interface_placeholder(value):
+            return value
+        if isinstance(value, numbers.Number):
+            return ops.asarray(value)
+        return value
+
+    @property
+    def named_params(self):
+        """Named circuit parameters and their current values."""
+        return copy.copy(self._named_params)
+
+    @property
+    def named_param_names(self):
+        """Names of registered circuit parameters."""
+        return tuple(self._named_params)
+
+    @property
+    def param_expressions(self):
+        """Gate parameter expressions keyed by gate index."""
+        return copy.copy(self._named_param_exprs)
+
+    def register_named_params(self, named_params, gate_expressions=None):
+        """Register named circuit parameters and gate dependencies.
+
+        Parameters
+        ----------
+        named_params : sequence[str] or mapping[str, scalar]
+            Either names to register, which default to ``nan`` until bound,
+            or a mapping supplying initial values.
+        gate_expressions : mapping[int, tuple], optional
+            Mapping from gate index to the expressions used to generate that
+            gate's parameters. Each expression can be a constant, a string
+            expression referencing the named parameters, or a callable taking
+            the current named parameter mapping.
+        """
+        if isinstance(named_params, collections.abc.Mapping):
+            self._named_params = {
+                name: self._normalize_named_param_value(value)
+                for name, value in named_params.items()
+            }
+        else:
+            self._named_params = {
+                name: self._normalize_named_param_value(float("nan"))
+                for name in tuple(named_params)
+            }
+
+        if gate_expressions is None:
+            gate_expressions = {}
+        self._named_param_exprs = {
+            int(i): tuple(exprs) for i, exprs in gate_expressions.items()
+        }
+        self._apply_named_param_updates()
+        self.clear_storage()
+
+    def _set_gate_params(self, i, params):
+        self._psi[self.gate_tag(i)].params = params
+        self._gates[i] = self._gates[i].copy_with(params=ops.asarray(params))
+
+    def _apply_named_param_updates(self):
+        if not self._named_param_exprs:
+            return
+
+        env = dict(self._named_params)
+        for i, exprs in self._named_param_exprs.items():
+            values = tuple(_openqasm_eval_expr(expr, env) for expr in exprs)
+            if any(isinstance(x, str) for x in values):
+                raise ValueError(
+                    "Named parameter binding left unresolved symbolic values "
+                    f"for gate {i}: {values!r}"
+                )
+            if any(_is_interface_placeholder(x) for x in values):
+                values = _placeholder_param_vector(values)
+            self._set_gate_params(i, values)
+
     def get_params(self):
         """Get a pytree - in this case a dict - of all the parameters in the
         circuit.
 
         Returns
         -------
-        dict[int, tuple]
-            A dictionary mapping gate numbers to their parameters.
+        dict
+            Dictionary containing any named parameters plus any directly
+            parametrized gates not driven by named parameter expressions.
         """
-        return {
-            i: self._psi[self.gate_tag(i)].params
-            for i, gate in enumerate(self._gates)
-            if gate.parametrize
-        }
+        params = dict(self._named_params)
+        managed_gates = set(self._named_param_exprs)
+        params.update(
+            {
+                i: self._psi[self.gate_tag(i)].params
+                for i, gate in enumerate(self._gates)
+                if gate.parametrize and i not in managed_gates
+            }
+        )
+        return params
 
     def set_params(self, params):
         """Set the parameters of the circuit.
@@ -2517,63 +2646,49 @@ class Circuit:
         Parameters
         ----------
         params : dict
-            Either a dictionary mapping gate numbers to the new parameters, or
-            for QASM 3 imported circuits a dictionary mapping input names to
-            numeric values.
+            Dictionary mapping gate numbers and/or registered named parameter
+            names to new values.
         """
-        if params and not (
-            all(isinstance(k, str) for k in params)
-            or all(not isinstance(k, str) for k in params)
-        ):
-            raise TypeError(
-                "Parameter keys must be all gate indices or all QASM 3 "
-                "input names."
-            )
-
-        if hasattr(self, "qasm3_inputs") and (
-            not params or all(isinstance(k, str) for k in params)
-        ):
-            missing = set(self.qasm3_inputs) - set(params)
-            if missing:
-                raise ValueError(
-                    "Missing QASM 3 input values for: "
-                    + ", ".join(sorted(missing))
-                )
-
-            extra = set(params) - set(self.qasm3_inputs)
-            if extra:
-                raise ValueError(
-                    "Unknown QASM 3 input values supplied for: "
-                    + ", ".join(sorted(extra))
-                )
-
-            symbol_env = dict(self.qasm3_symbols)
-            symbol_env.update(params)
-
+        if params is None:
             params = {}
-            for i, exprs in self.qasm3_expressions.items():
-                values = tuple(
-                    _openqasm_eval_expr(expr, symbol_env) for expr in exprs
-                )
-                if any(not isinstance(x, numbers.Number) for x in values):
-                    raise ValueError(
-                        "QASM 3 input binding left unresolved symbolic values "
-                        f"for gate {i}: {values!r}"
-                    )
-                params[i] = values
 
-            self.qasm3_symbols = {
-                name: symbol_env[name] for name in self.qasm3_inputs
-            }
-        elif params and all(isinstance(k, str) for k in params):
+        named_updates = {k: v for k, v in params.items() if isinstance(k, str)}
+        gate_updates = {
+            k: v for k, v in params.items() if not isinstance(k, str)
+        }
+
+        if named_updates and not self._named_params:
             raise TypeError(
-                "String-keyed parameters are only supported for QASM 3 "
-                "imported circuits."
+                "String-keyed parameters require registered named "
+                "parameters."
             )
 
-        for i, p in params.items():
-            self._psi[self.gate_tag(i)].params = p
-            self._gates[i] = self._gates[i].copy_with(params=ops.asarray(p))
+        extra = set(named_updates) - set(self._named_params)
+        if extra:
+            raise ValueError(
+                "Unknown named parameter values supplied for: "
+                + ", ".join(sorted(extra))
+            )
+
+        overlap = set(gate_updates) & set(self._named_param_exprs)
+        if overlap:
+            raise ValueError(
+                "Cannot directly set gate parameters managed by named "
+                "parameter expressions: "
+                + ", ".join(map(str, sorted(overlap)))
+            )
+
+        if named_updates:
+            self._named_params.update(
+                {
+                    name: self._normalize_named_param_value(value)
+                    for name, value in named_updates.items()
+                }
+            )
+            self._apply_named_param_updates()
+
+        for i, p in gate_updates.items():
+            self._set_gate_params(i, p)
         self.clear_storage()
 
     @classmethod
@@ -2651,16 +2766,21 @@ class Circuit:
         -------
         Circuit
             A circuit populated with the parsed gates. If symbolic ``input``
-            declarations are present, the returned circuit tracks them via
-            ``qasm3_inputs``, ``qasm3_symbols``, and ``qasm3_expressions`` so
-            that :meth:`set_params` can bind named values later.
+            declarations are present, they are registered as generic named
+            circuit parameters so that :meth:`set_params` can bind them later.
         """
         info = parse_openqasm3_str(contents)
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
-        qc.qasm3_inputs = info["inputs"]
-        qc.qasm3_symbols = info["symbols"]
-        qc.qasm3_expressions = info["expressions"]
+        qc.register_named_params(
+            {
+                name: (
+                    value if not isinstance(value, str) else float("nan")
+                )
+                for name, value in info["symbols"].items()
+            },
+            info["expressions"],
+        )
         return qc
 
     @classmethod

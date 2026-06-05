@@ -13,12 +13,19 @@ from quimb.tensor.circuit import (
     parse_openqasm3_url,
     rx_gate_param_gen,
 )
+from quimb.tensor.interface import pack, unpack
+
+
 def assert_same_gates(circ_a, circ_b):
     assert len(circ_a.gates) == len(circ_b.gates)
     for gate_a, gate_b in zip(circ_a.gates, circ_b.gates):
         assert gate_a.label == gate_b.label
         assert tuple(gate_a.qubits) == tuple(gate_b.qubits)
-        assert tuple(gate_a.params) == pytest.approx(tuple(gate_b.params))
+        assert len(gate_a.params) == len(gate_b.params)
+        for pa, pb in zip(gate_a.params, gate_b.params):
+            if np.isnan(pa) and np.isnan(pb):
+                continue
+            assert pa == pytest.approx(pb)
 
 
 def rand_reg_graph(reg, n, seed=None):
@@ -230,14 +237,14 @@ class TestCircuit:
         rx(theta) q[0];
         """
         circ = qtn.Circuit.from_openqasm3_str(qasm_str)
-        assert circ.qasm3_inputs == ("theta",)
-        assert circ.qasm3_symbols == {"theta": "theta"}
-        assert circ.qasm3_expressions == {0: ("theta",)}
+        assert circ.named_param_names == ("theta",)
+        assert np.isnan(circ.named_params["theta"])
+        assert circ.param_expressions == {0: ("theta",)}
         assert circ.gates[0].label == "RX"
-        assert circ.gates[0].params[0] == pytest.approx(0.0)
+        assert math.isnan(circ.gates[0].params[0])
 
         circ.set_params({"theta": 0.3})
-        assert circ.qasm3_symbols == {"theta": 0.3}
+        assert circ.named_params["theta"] == pytest.approx(0.3)
         assert_allclose(
             np.asarray(circ.psi["GATE_0"].data),
             np.asarray(rx_gate_param_gen((0.3,))),
@@ -269,7 +276,7 @@ class TestCircuit:
             "CX",
             "U3",
         ]
-        assert circ.qasm3_expressions[2][0] == "theta"
+        assert circ.param_expressions[2][0] == "theta"
 
     def test_openqasm3_named_param_binding_and_copy(self):
         circ = qtn.Circuit.from_openqasm3_str(
@@ -284,9 +291,9 @@ class TestCircuit:
         )
         circ2 = circ.copy()
 
-        assert circ2.qasm3_inputs == ("theta",)
-        assert circ2.qasm3_symbols == {"theta": "theta"}
-        assert circ2.qasm3_expressions == {
+        assert circ2.named_param_names == ("theta",)
+        assert np.isnan(circ2.named_params["theta"])
+        assert circ2.param_expressions == {
             0: ("theta",),
             1: ("(theta / 2)",),
         }
@@ -294,9 +301,9 @@ class TestCircuit:
         circ2.set_params({"theta": 0.6})
         assert circ2.gates[0].params == (pytest.approx(0.6),)
         assert circ2.gates[1].params == (pytest.approx(0.3),)
-        assert circ.gates[0].params == (pytest.approx(0.0),)
-        assert circ.gates[1].params == (pytest.approx(0.0),)
-        assert circ.qasm3_symbols == {"theta": "theta"}
+        assert math.isnan(circ.gates[0].params[0])
+        assert math.isnan(circ.gates[1].params[0])
+        assert np.isnan(circ.named_params["theta"])
 
         circ2.set_params({"theta": 0.2})
         assert circ2.gates[0].params == (pytest.approx(0.2),)
@@ -387,22 +394,22 @@ class TestCircuit:
         assert_same_gates(circ_str, circ_file)
         assert_same_gates(circ_str, circ_url)
         assert (
-            circ_file.qasm3_inputs
-            == circ_str.qasm3_inputs
-            == circ_url.qasm3_inputs
+            circ_file.named_param_names
+            == circ_str.named_param_names
+            == circ_url.named_param_names
         )
         assert (
-            circ_file.qasm3_symbols
-            == circ_str.qasm3_symbols
-            == circ_url.qasm3_symbols
+            set(circ_file.named_params)
+            == set(circ_str.named_params)
+            == set(circ_url.named_params)
         )
         assert (
-            circ_file.qasm3_expressions
-            == circ_str.qasm3_expressions
-            == circ_url.qasm3_expressions
+            circ_file.param_expressions
+            == circ_str.param_expressions
+            == circ_url.param_expressions
         )
 
-    def test_openqasm3_named_binding_requires_all_inputs(self):
+    def test_openqasm3_named_binding_supports_partial_updates(self):
         circ = qtn.Circuit.from_openqasm3_str(
             """
             OPENQASM 3.0;
@@ -413,10 +420,15 @@ class TestCircuit:
             u3(theta, phi, 0.0) q[0];
             """
         )
-        with pytest.raises(ValueError, match="Missing QASM 3 input values"):
-            circ.set_params({"theta": 0.2})
+        circ.set_params({"theta": 0.2})
+        assert circ.gates[0].params[0] == pytest.approx(0.2)
+        assert math.isnan(circ.gates[0].params[1])
+        assert circ.gates[0].params[2] == pytest.approx(0.0)
 
-    def test_openqasm3_named_binding_empty_dict_requires_inputs(self):
+        circ.set_params({"phi": 0.4})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.2, 0.4, 0.0))
+
+    def test_openqasm3_named_binding_empty_dict_preserves_state(self):
         circ = qtn.Circuit.from_openqasm3_str(
             """
             OPENQASM 3.0;
@@ -426,8 +438,8 @@ class TestCircuit:
             rx(theta) q[0];
             """
         )
-        with pytest.raises(ValueError, match="Missing QASM 3 input values"):
-            circ.set_params({})
+        circ.set_params({})
+        assert math.isnan(circ.gates[0].params[0])
 
     def test_openqasm3_array_index_symbolic_binding(self):
         circ = qtn.Circuit.from_openqasm3_str(
@@ -441,7 +453,7 @@ class TestCircuit:
             ry(angles[1]) q[1];
             """
         )
-        assert circ.qasm3_expressions == {
+        assert circ.param_expressions == {
             0: ("theta",),
             1: ("(theta / 2)",),
         }
@@ -460,10 +472,67 @@ class TestCircuit:
             rx(theta) q[0];
             """
         )
-        with pytest.raises(ValueError, match="Unknown QASM 3 input values"):
+        with pytest.raises(ValueError, match="Unknown named parameter values"):
             circ.set_params({"theta": 0.2, "phi": 0.3})
 
-    def test_openqasm3_named_binding_rejects_mixed_keys(self):
+    def test_openqasm3_named_binding_accepts_mixed_keys(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[2] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.u3(0.1, 0.2, 0.3, 1, parametrize=True)
+        circ.set_params({"theta": 0.2, 1: (0.4, 0.5, 0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.2,))
+        assert tuple(circ.gates[1].params) == pytest.approx((0.4, 0.5, 0.6))
+
+    def test_openqasm3_get_set_params_roundtrip(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[2] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.u3(0.1, 0.2, 0.3, 1, parametrize=True)
+        circ.set_params({"theta": 0.2, 1: (0.4, 0.5, 0.6)})
+
+        params = circ.get_params()
+        assert params["theta"] == pytest.approx(0.2)
+        assert tuple(params[1]) == pytest.approx((0.4, 0.5, 0.6))
+
+        circ2 = circ.copy()
+        circ2.set_params(params)
+        assert tuple(circ2.gates[0].params) == pytest.approx((0.2,))
+        assert tuple(circ2.gates[1].params) == pytest.approx((0.4, 0.5, 0.6))
+
+    def test_openqasm3_named_params_pack_unpack_roundtrip(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(cos(theta / 2)) q[0];
+            """
+        )
+        circ.set_params({"theta": np.array(0.6)})
+
+        params, skeleton = pack(circ)
+        assert params["theta"] == pytest.approx(0.6)
+
+        circ2 = unpack({"theta": np.array(0.2)}, skeleton)
+        assert tuple(circ2.gates[0].params) == pytest.approx(
+            (math.cos(0.1),)
+        )
+
+    def test_openqasm3_named_binding_rejects_direct_managed_gate_override(self):
         circ = qtn.Circuit.from_openqasm3_str(
             """
             OPENQASM 3.0;
@@ -474,9 +543,27 @@ class TestCircuit:
             """
         )
         with pytest.raises(
-            TypeError, match="all gate indices or all QASM 3 input names"
+            ValueError, match="managed by named parameter expressions"
         ):
             circ.set_params({"theta": 0.2, 0: (0.1,)})
+
+    def test_circuit_register_named_params_generic(self):
+        circ = qtn.Circuit(2)
+        circ.rx(np.nan, 0, parametrize=True)
+        circ.ry(np.nan, 1, parametrize=True)
+        circ.register_named_params(
+            {"theta": np.nan},
+            {
+                0: ("theta",),
+                1: ("cos(theta / 2)",),
+            },
+        )
+
+        circ.set_params({"theta": np.array(0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
+        assert tuple(circ.gates[1].params) == pytest.approx(
+            (math.cos(0.3),)
+        )
 
     def test_openqasm3_output_decl_unsupported(self):
         with pytest.raises(NotImplementedError, match="Output declarations"):
@@ -547,7 +634,7 @@ class TestCircuit:
             foo(0.1, a) q[0];
             """
         )
-        assert circ.qasm3_expressions == {0: ("a", 0.1, "a")}
+        assert circ.param_expressions == {0: ("a", 0.1, "a")}
         circ.set_params({"a": 0.2})
         assert tuple(circ.gates[0].params) == pytest.approx((0.2, 0.1, 0.2))
 

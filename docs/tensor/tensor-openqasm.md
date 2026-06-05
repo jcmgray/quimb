@@ -58,8 +58,9 @@ Unsupported constructs raise `NotImplementedError`, including:
 
 ## Symbolic inputs and rebinding
 
-OpenQASM 3 `input` declarations are preserved on the returned circuit so that
-named values can be bound later with [`Circuit.set_params`](quimb.tensor.circuit.Circuit.set_params):
+OpenQASM 3 `input` declarations are registered as named circuit parameters so
+that values can be bound later with
+[`Circuit.set_params`](quimb.tensor.circuit.Circuit.set_params):
 
 ```python
 import quimb.tensor as qtn
@@ -77,14 +78,15 @@ circ = qtn.Circuit.from_openqasm3_str(qasm)
 circ.set_params({"theta": 0.3})
 ```
 
-The imported circuit tracks:
+The imported circuit exposes:
 
-- `circ.qasm3_inputs`: declared input names
-- `circ.qasm3_symbols`: current symbolic or numeric values
-- `circ.qasm3_expressions`: symbolic expressions attached to parameterized gates
+- `circ.named_params`: current named parameter values
+- `circ.named_param_names`: declared named parameter names
+- `circ.param_expressions`: symbolic expressions attached to parameterized gates
 
-All declared inputs must be supplied when binding by name, and unknown names
-raise an error.
+Named updates can be mixed with raw gate-index updates in the same
+`set_params(...)` call, for example `{"theta": 0.3, 5: (0.1, 0.2, 0.3)}`.
+Unknown names raise an error.
 
 ## OpenQASM 2 compatibility
 

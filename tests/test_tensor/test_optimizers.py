@@ -467,3 +467,34 @@ def test_optimize_circuit_directly(backend, simplify):
     assert circ_opt is not circ
     assert loss(circ_opt, H) < -0.74
     assert {t.backend for t in circ_opt.psi} == {"numpy"}
+
+
+@pytest.mark.parametrize("backend", [autograd_case])
+def test_optimize_named_param_circuit_directly(backend):
+    circ = qtn.Circuit.from_openqasm3_str(
+        """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[1] q;
+        rx(theta / 2) q[0];
+        """
+    )
+    circ.set_params({"theta": np.array(0.2)})
+    target = np.array(0.8)
+
+    def loss(circ, target):
+        theta = circ.get_params()["theta"]
+        return (theta - target) ** 2
+
+    tnopt = qtn.TNOptimizer(
+        circ,
+        loss,
+        loss_constants=dict(target=target),
+        autodiff_backend=backend,
+    )
+    circ_opt = tnopt.optimize(20)
+
+    assert circ_opt is not circ
+    assert circ_opt.get_params()["theta"] == pytest.approx(0.8, abs=1e-3)
+    assert tuple(circ_opt.gates[0].params) == pytest.approx((0.4,), abs=1e-3)
