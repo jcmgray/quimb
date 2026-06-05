@@ -607,6 +607,62 @@ class TestCircuit:
         ):
             circ.set_params({"theta": 0.2})
 
+    def test_circuit_register_named_params_rejects_unknown_gate_index(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+
+        with pytest.raises(ValueError, match="unknown gate index: 2"):
+            circ.register_named_params({"theta": np.nan}, {2: ("theta",)})
+
+    def test_circuit_register_named_params_rejects_non_parametrized_gate(self):
+        circ = qtn.Circuit(1)
+        circ.rx(0.1, 0)
+
+        with pytest.raises(
+            ValueError, match="got non-parametrized gate: 0"
+        ):
+            circ.register_named_params({"theta": np.nan}, {0: ("theta",)})
+
+    def test_circuit_register_named_params_rejects_wrong_arity(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+
+        with pytest.raises(
+            ValueError, match="expected 1, got 2"
+        ):
+            circ.register_named_params(
+                {"theta": np.nan},
+                {0: ("theta", "theta")},
+            )
+
+    def test_circuit_register_named_params_accepts_generator_expressions(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+        circ.register_named_params(
+            {"theta": np.nan},
+            {0: (expr for expr in ("theta",))},
+        )
+
+        circ.set_params({"theta": np.array(0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
+
+    def test_circuit_apply_to_arrays_updates_named_params(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta / 2) q[0];
+            """
+        )
+        circ.set_params({"theta": np.array(0.6, dtype=np.float64)})
+
+        circ.apply_to_arrays(lambda x: np.asarray(x, dtype=np.float32))
+
+        assert circ.get_params()["theta"].dtype == np.float32
+        assert circ.psi["GATE_0"].params.dtype == np.float32
+
     def test_openqasm3_output_decl_unsupported(self):
         with pytest.raises(NotImplementedError, match="Output declarations"):
             qtn.Circuit.from_openqasm3_str(

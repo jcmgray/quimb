@@ -2542,6 +2542,7 @@ class Circuit:
     def apply_to_arrays(self, fn):
         """Apply a function to all the arrays in the circuit."""
         self._psi.apply_to_arrays(fn)
+        self._named_params = tree_map(fn, self._named_params)
 
     @staticmethod
     def _normalize_named_param_value(value):
@@ -2593,9 +2594,34 @@ class Circuit:
 
         if gate_expressions is None:
             gate_expressions = {}
-        self._named_param_exprs = {
-            int(i): tuple(exprs) for i, exprs in gate_expressions.items()
-        }
+
+        normalized_gate_expressions = {}
+        for i, exprs in gate_expressions.items():
+            i = int(i)
+            exprs = tuple(exprs)
+
+            if not (0 <= int(i) < len(self._gates)):
+                raise ValueError(
+                    "Named parameter expressions reference unknown gate "
+                    f"index: {i}"
+                )
+
+            gate = self._gates[i]
+            if not gate.parametrize:
+                raise ValueError(
+                    "Named parameter expressions require parametrized gate "
+                    f"indices, got non-parametrized gate: {i}"
+                )
+
+            if len(exprs) != len(gate.params):
+                raise ValueError(
+                    "Named parameter expression arity does not match gate "
+                    f"{i}: expected {len(gate.params)}, got {len(exprs)}"
+                )
+
+            normalized_gate_expressions[i] = exprs
+
+        self._named_param_exprs = normalized_gate_expressions
         self._apply_named_param_updates()
         self.clear_storage()
 
