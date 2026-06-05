@@ -30,6 +30,7 @@ from .tensor_builder import (
     MPO_identity_like,
     MPS_computational_state,
     TN_from_sites_computational_state,
+    TN_from_sites_product_state,
 )
 from .tensor_core import (
     PTensor,
@@ -5104,3 +5105,278 @@ class CircuitDense(Circuit):
         the lightcone is not meaningful.
         """
         return self.psi
+
+
+class CircuitPEPSSimpleUpdate(Circuit):
+    """Quantum circuit simulation keeping the state as a generic tensor
+    network (a "PEPS" defined by an arbitrary graph of ``edges``) and applying
+    gates with the simple update rule. The state always keeps a single tensor
+    per site, with bonds only along the supplied edges; two-qubit gates are
+    only supported on those edges. Bond singular values are tracked as
+    Vidal-style gauges, which makes gate application and the computation of
+    local expectations cheap and approximate.
+
+    This is useful for circuits on lattices that build up more than 1D worth of
+    entanglement, where an exact or MPS simulation is intractable but a
+    truncated, gauged tensor network state is a good approximation.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits in the circuit. If not given it is inferred from
+        ``edges``.
+    edges : sequence[tuple[int, int]]
+        The edges defining the geometry of the PEPS. A bond is placed between
+        each pair of sites, and two-qubit gates are only supported on these
+        edges. Every site appearing in ``edges`` is included. Supply ``N`` as
+        well to pad the geometry up to that many sites, including any that have
+        no edges.
+    max_bond : int, optional
+        The maximum bond dimension to truncate to when applying gates.
+    cutoff : float, optional
+        The singular value cutoff to use when truncating after applying gates.
+    gate_opts : dict, optional
+        Default options to pass to ``gate_simple_`` such as ``max_bond`` and
+        ``cutoff``.
+
+    Attributes
+    ----------
+    gauges : dict[str, array]
+        The current Vidal-style bond gauges (singular values), keyed by bond
+        index, updated in place as gates are applied.
+
+    Notes
+    -----
+    The gates applied must address qubits using the same labels that appear in
+    ``edges``. Two-qubit gates are only supported along an existing edge.
+
+    Examples
+    --------
+
+        >>> import quimb.tensor as qtn
+        >>> edges = [(0, 1), (1, 2), (0, 3), (1, 4), (2, 5), (3, 4), (4, 5)]
+        >>> circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        >>> circ.apply_gates(gates)
+        >>> peps = circ.psi
+
+    See Also
+    --------
+    CircuitMPS, CircuitDense
+    """
+
+    def __init__(
+        self,
+        N=None,
+        *,
+        edges=None,
+        psi0=None,
+        max_bond=None,
+        cutoff=1e-10,
+        gate_opts=None,
+        dtype=None,
+        to_backend=None,
+        convert_eager=False,
+        **circuit_opts,
+    ):
+        if edges is None:
+            raise ValueError(
+                "You must supply `edges` defining the PEPS geometry."
+            )
+        self.edges = tuple((a, b) for a, b in edges)
+
+        # sites are everything appearing in edges, padded up to N if given
+        sites = set()
+        for a, b in self.edges:
+            sites.add(a)
+            sites.add(b)
+        if N is not None:
+            sites.update(range(N))
+        self._sites = tuple(sorted(sites))
+
+        # bond gauges tracked across gate applications
+        self.gauges = {}
+
+        gate_opts = ensure_dict(gate_opts)
+        gate_opts.setdefault("max_bond", max_bond)
+        gate_opts.setdefault("cutoff", cutoff)
+
+        circuit_opts.setdefault("tag_gate_numbers", False)
+        circuit_opts.setdefault("tag_gate_rounds", False)
+        circuit_opts.setdefault("tag_gate_labels", False)
+
+        circuit_opts.setdefault("dtype", dtype)
+        circuit_opts.setdefault("to_backend", to_backend)
+        circuit_opts.setdefault("convert_eager", convert_eager)
+
+        super().__init__(len(self._sites), psi0, gate_opts, **circuit_opts)
+
+    def _init_state(self, N, dtype="complex128"):
+        # |00...0> product state with bond dimension 1 bonds along the edges
+        zero = do("array", [1.0, 0.0], dtype=dtype)
+        psi = TN_from_sites_product_state({site: zero for site in self._sites})
+        for a, b in self.edges:
+            psi[a].new_bond(psi[b])
+        return psi
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        # route gate application through the simple update rule, threading the
+        # persistent bond gauges so they stay consistent between gates
+        if gate.controls:
+            raise ValueError(
+                "Controlled gates are not supported by "
+                "`CircuitPEPSSimpleUpdate`, since the simple update rule "
+                "applies a dense gate array to the sites. Supply the gate as "
+                "a full unitary on its qubits instead."
+            )
+        if gate.special:
+            raise ValueError(
+                f"The special gate {gate.label!r} is not supported by "
+                "`CircuitPEPSSimpleUpdate`. Supply a gate with an explicit "
+                "array acting on sites connected by an edge."
+            )
+
+        opts = {**self.gate_opts, **gate_opts}
+        opts.pop("contract", None)
+        opts.pop("propagate_tags", None)
+
+        G = gate.array
+        if self.convert_eager:
+            key = id(G)
+            if key not in self._backend_gate_cache:
+                self._backend_gate_cache[key] = self._maybe_convert(G)
+            G = self._backend_gate_cache[key]
+
+        self._psi.gate_simple_(G, gate.qubits, self.gauges, **opts)
+        self._gates.append(gate)
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+            gates.set_description(f"max_bond={self._psi.max_bond()}")
+
+        for gate in gates:
+            gate = parse_to_gate(gate)
+            self._apply_gate(gate, **gate_opts)
+
+            if progbar and (gate.total_qubit_count >= 2):
+                gates.set_description(f"max_bond={self._psi.max_bond()}")
+
+    def equilibrate(self, max_iterations=100, tol=1e-10, **gauge_opts):
+        """Re-gauge the whole state with the simple update rule, improving the
+        consistency of the tracked bond gauges. This does not change the state
+        represented, only the gauge, and can be called periodically between
+        rounds of gates to keep the simple update approximation well behaved.
+
+        Parameters
+        ----------
+        max_iterations : int, optional
+            The maximum number of gauging sweeps.
+        tol : float, optional
+            The convergence tolerance on the change in singular values.
+        gauge_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple_`.
+        """
+        self._psi.gauge_all_simple_(
+            max_iterations=max_iterations,
+            tol=tol,
+            gauges=self.gauges,
+            **gauge_opts,
+        )
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        *,
+        max_distance=1,
+        normalized=True,
+        **contract_opts,
+    ):
+        """Compute the local expectation value of operator ``G`` at the site(s)
+        ``where``, using the simple update bond gauges to approximate the
+        environment beyond ``max_distance``.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator.
+        where : int or tuple[int]
+            The site or sites to compute the expectation at.
+        max_distance : int, optional
+            How many graph hops of neighboring tensors to include in the local
+            cluster used to approximate the reduced density matrix.
+        normalized : bool, optional
+            Whether to normalize by the local norm.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.compute_local_expectation_cluster`.
+
+        Returns
+        -------
+        float
+        """
+        if isinstance(where, int):
+            where = (where,)
+        return self._psi.compute_local_expectation_cluster(
+            {tuple(where): G},
+            gauges=self.gauges,
+            max_distance=max_distance,
+            normalized=normalized,
+            **contract_opts,
+        )
+
+    @property
+    def psi(self):
+        """The PEPS tensor network state, with the simple update bond gauges
+        absorbed back in so that it represents the actual wavefunction (a
+        proper contraction of ``psi`` gives the state, up to the simple update
+        approximation). The internal gauged form is left untouched.
+        """
+        psi = self._psi.copy()
+        # absorb the Vidal-form bond gauges so the returned TN is the state
+        psi.gauge_simple_insert(self.gauges)
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+        return psi
+
+    @property
+    def psi_gauged(self):
+        """The raw internal tensor network, in Vidal (simple update) gauge.
+        The bond singular values are stored separately in ``self.gauges`` and
+        are *not* absorbed, so this is not directly the wavefunction. Use
+        :attr:`psi` for that.
+        """
+        psi = self._psi.copy()
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+        return psi
+
+    def calc_qubit_ordering(self, qubits=None):
+        if qubits is None:
+            return tuple(self._sites)
+        return tuple(sorted(qubits))
+
+    def _unsupported_exact(self, name):
+        raise NotImplementedError(
+            f"`{name}` is not supported by `CircuitPEPSSimpleUpdate`, which "
+            "only ever holds an approximate, gauged tensor network state. Use "
+            "`local_expectation` for observables, or `psi` to get the gauged "
+            "PEPS state and contract or sample it with the approximation you "
+            "want."
+        )
+
+    def to_dense(self, *args, **kwargs):
+        self._unsupported_exact("to_dense")
+
+    def amplitude(self, *args, **kwargs):
+        self._unsupported_exact("amplitude")
+
+    def sample(self, *args, **kwargs):
+        self._unsupported_exact("sample")
+
+    def sample_chaotic(self, *args, **kwargs):
+        self._unsupported_exact("sample_chaotic")

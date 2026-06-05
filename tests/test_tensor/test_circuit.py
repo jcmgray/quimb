@@ -837,6 +837,185 @@ class TestCircuitMPS:
         assert set(circ.sample(10, seed=42)) == {"0100"}
 
 
+class TestCircuitPEPSSimpleUpdate:
+    def test_requires_edges(self):
+        with pytest.raises(ValueError):
+            qtn.CircuitPEPSSimpleUpdate()
+
+    def test_construction_and_initial_state(self):
+        # 2x3 grid of integer-labelled sites
+        edges = [(0, 1), (1, 2), (3, 4), (4, 5), (0, 3), (1, 4), (2, 5)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        # one tensor per site, bonds only on the edges, all bond dim 1
+        assert circ.N == 6
+        assert circ._psi.max_bond() == 1
+        assert circ.psi.norm() == pytest.approx(1.0)
+
+    def test_target_api(self):
+        # the exact usage requested in the issue, on a 3x3 grid of integer sites
+        ncol = 3
+        edges = []
+        for r in range(3):
+            for c in range(3):
+                s = r * ncol + c
+                if c + 1 < 3:
+                    edges.append((s, s + 1))
+                if r + 1 < 3:
+                    edges.append((s, s + ncol))
+        rng = np.random.default_rng(42)
+        gates = [
+            qtn.Gate(
+                "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+            )
+            for i in range(9)
+        ]
+        gates += [
+            qtn.Gate("CZ", params=(), qubits=list(edge)) for edge in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(gates)
+        peps = circ.psi
+        assert peps.max_bond() <= 8
+        assert peps.num_tensors == 9
+
+    def test_matches_exact_on_a_chain(self):
+        # on a chain, simple update at large bond is exact, so local
+        # expectations should match a dense Circuit to high precision
+        N = 5
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(0)
+
+        gates = []
+        for i in range(N):
+            gates.append(
+                qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            )
+        for i, j in edges:
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+            gates.append(
+                qtn.Gate("RZ", params=[rng.uniform(0, np.pi)], qubits=[j])
+            )
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+
+        circ_su = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges, max_bond=32, cutoff=1e-12
+        )
+        circ_su.apply_gates(gates)
+        circ_su.equilibrate()
+
+        circ_exact = qtn.Circuit(N=N)
+        circ_exact.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(N):
+            x_su = circ_su.local_expectation(Z, i, max_distance=N)
+            x_ex = circ_exact.local_expectation(Z, i)
+            assert float(np.real(x_su)) == pytest.approx(
+                float(np.real(x_ex)), abs=1e-8
+            )
+
+    def test_equilibrate_preserves_expectations(self):
+        N = 4
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(7)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(N)
+        ]
+        for i, j in edges:
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=32)
+        circ.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        before = [
+            float(np.real(circ.local_expectation(Z, i, max_distance=N)))
+            for i in range(N)
+        ]
+        circ.equilibrate()
+        after = [
+            float(np.real(circ.local_expectation(Z, i, max_distance=N)))
+            for i in range(N)
+        ]
+        for b, a in zip(before, after):
+            assert b == pytest.approx(a, abs=1e-8)
+
+    def test_matches_exact_on_2x2_plaquette(self):
+        # a 2x2 grid has a 4-cycle, so simple update is genuinely approximate,
+        # but a shallow circuit still matches exact closely. checks both
+        # local_expectation and the gauge-absorbed psi.
+        edges = [(0, 1), (2, 3), (0, 2), (1, 3)]
+        rng = np.random.default_rng(3)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(4)
+        ]
+        for i, j in edges:
+            gates.append(qtn.Gate("CZ", params=(), qubits=[i, j]))
+
+        circ = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges, max_bond=16, cutoff=1e-12
+        )
+        circ.apply_gates(gates)
+
+        circ_exact = qtn.Circuit(N=4)
+        circ_exact.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        # gauge-absorbed psi should be a normalized state
+        psi = circ.psi
+        assert ((psi.H & psi) ^ all) == pytest.approx(1.0, abs=1e-6)
+
+        for i in range(4):
+            x_su = circ.local_expectation(Z, i, max_distance=4)
+            # measure the same way directly on the returned psi
+            x_psi = psi.compute_local_expectation_cluster(
+                {(i,): Z}, max_distance=4, normalized=True
+            )
+            x_ex = circ_exact.local_expectation(Z, i)
+            assert float(np.real(x_su)) == pytest.approx(
+                float(np.real(x_ex)), abs=1e-6
+            )
+            assert float(np.real(x_psi)) == pytest.approx(
+                float(np.real(x_ex)), abs=1e-6
+            )
+
+    def test_psi_access_does_not_mutate_gauges(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(
+            [
+                qtn.Gate("H", params=(), qubits=[0]),
+                qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+                qtn.Gate("CNOT", params=(), qubits=[1, 2]),
+            ]
+        )
+        before = {k: np.asarray(v).copy() for k, v in circ.gauges.items()}
+        _ = circ.psi
+        _ = circ.psi
+        assert set(circ.gauges) == set(before)
+        for k in before:
+            assert_allclose(np.asarray(circ.gauges[k]), before[k])
+
+    def test_controlled_and_exact_methods_raise(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        # controlled gates can't be expressed by the simple update rule
+        with pytest.raises(ValueError):
+            circ.apply_gates(
+                [qtn.Gate("X", params=(), qubits=[2], controls=[0])]
+            )
+        # exact-state methods are not meaningful for a gauged approximate state
+        circ.apply_gates([qtn.Gate("H", params=(), qubits=[0])])
+        with pytest.raises(NotImplementedError):
+            circ.to_dense()
+        with pytest.raises(NotImplementedError):
+            circ.amplitude("000")
+        with pytest.raises(NotImplementedError):
+            list(circ.sample(2))
+
+
 class TestCircuitGen:
     @pytest.mark.parametrize(
         "ansatz,cyclic",
