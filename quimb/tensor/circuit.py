@@ -2,8 +2,8 @@
 
 import ast
 import cmath
-import copy
 import collections.abc
+import copy
 import functools
 import itertools
 import math

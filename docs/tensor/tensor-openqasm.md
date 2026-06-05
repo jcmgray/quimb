@@ -89,15 +89,20 @@ depend on them are likewise initialized to `nan` until values are supplied.
 
 Named updates can be mixed with raw gate-index updates in the same
 `set_params(...)` call, for example `{"theta": 0.3, 5: (0.1, 0.2, 0.3)}`.
-Any expressions that still depend on
-unbound names remain `nan` until those names are set. Unknown names raise an
-error, and gate parameters managed by named expressions cannot be overridden
-directly via their integer gate indices.
+This round-trips with `get_params()`, which returns named parameters plus only
+those integer-indexed parametrized gates not managed by named expressions, and
+works with generic parameter-handling tools such as
+[`TNOptimizer`](quimb.tensor.optimize.TNOptimizer). Partial named updates are
+allowed: expressions that still depend on unbound names remain `nan` until
+those names are set. Unknown names raise an error, and expression-managed gates
+cannot be overridden directly via their integer gate indices.
 
 The same named-parameter mechanism can also be used outside OpenQASM import via
 [`Circuit.register_named_params`](quimb.tensor.circuit.Circuit.register_named_params),
-with expressions such as `cos(theta / 2)` attached to arbitrary parametrized
-gates.
+either by supplying a sequence of names or a mapping of initial values, with
+string expressions such as `cos(theta / 2)` or callables attached to arbitrary
+parametrized gates. String-keyed `set_params(...)` updates require such named
+parameters to have been registered first.
 
 ## OpenQASM 2 compatibility
 

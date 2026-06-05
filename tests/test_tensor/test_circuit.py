@@ -512,6 +512,24 @@ class TestCircuit:
         assert tuple(circ2.gates[0].params) == pytest.approx((0.2,))
         assert tuple(circ2.gates[1].params) == pytest.approx((0.4, 0.5, 0.6))
 
+    def test_get_params_excludes_named_expression_managed_gate_indices(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[2] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.u3(0.1, 0.2, 0.3, 1, parametrize=True)
+
+        params = circ.get_params()
+        assert set(params) == {"theta", 1}
+        assert 0 not in params
+        assert np.isnan(params["theta"])
+        assert tuple(params[1]) == pytest.approx((0.1, 0.2, 0.3))
+
     def test_openqasm3_named_params_pack_unpack_roundtrip(self):
         circ = qtn.Circuit.from_openqasm3_str(
             """
@@ -564,6 +582,30 @@ class TestCircuit:
         assert tuple(circ.gates[1].params) == pytest.approx(
             (math.cos(0.3),)
         )
+
+    def test_circuit_register_named_params_sequence_and_callable(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+        circ.register_named_params(
+            ["theta"],
+            {0: (lambda env: env["theta"] / 2,)},
+        )
+
+        assert circ.named_param_names == ("theta",)
+        assert np.isnan(circ.named_params["theta"])
+        assert math.isnan(circ.gates[0].params[0])
+
+        circ.set_params({"theta": np.array(0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.3,))
+
+    def test_circuit_set_params_string_keys_require_registration(self):
+        circ = qtn.Circuit(1)
+        circ.rx(0.1, 0, parametrize=True)
+
+        with pytest.raises(
+            TypeError, match="require registered named parameters"
+        ):
+            circ.set_params({"theta": 0.2})
 
     def test_openqasm3_output_decl_unsupported(self):
         with pytest.raises(NotImplementedError, match="Output declarations"):
