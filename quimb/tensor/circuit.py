@@ -4945,6 +4945,204 @@ class CircuitMPS(Circuit):
         )
 
 
+class CircuitMPSLazy(CircuitMPS):
+    r"""Quantum circuit simulation that keeps the state in MPS form, but applies
+    gates *lazily* as spatially split sub-MPOs, only periodically performing a
+    single global compression of the accumulated gates and state back into an
+    MPS using
+    :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
+
+    Unlike the eager, TEBD style :class:`CircuitMPS`, which compresses the state
+    after every gate, gates here are stacked without contraction until a new
+    gate would act on a site that already carries an uncompressed gate, at which
+    point a global compression is triggered first. Batching gates into layers
+    before a single global compression can be more accurate, and scale better,
+    than compressing pair by pair, particularly for long range gates. It also
+    allows switching out the underlying compression algorithm, including newer
+    ones such as ``"src"`` (successive randomized compression).
+
+    The state is flushed (a final compression is performed if any gates are
+    pending) whenever :attr:`psi`, :meth:`sample`, :meth:`local_expectation` or
+    :meth:`fidelity_estimate` are requested, so the returned state is always a
+    genuine MPS. Note that, unlike :class:`CircuitMPS`, per-gate options are not
+    forwarded to the lazily stacked gates; the compression is controlled by
+    ``max_bond``, ``cutoff``, ``method`` and ``compress_opts`` instead.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits in the circuit.
+    psi0 : TensorNetwork1DVector, optional
+        The initial state, assumed to be ``|00000....0>`` if not given.
+    max_bond : int, optional
+        The maximum bond dimension to compress to at each compression.
+    cutoff : float, optional
+        The singular value cutoff to use when compressing.
+    method : str, optional
+        The compression method to use, passed to
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`. Common
+        options are ``"dm"`` (default), ``"direct"``, ``"zipup"``, ``"fit"``
+        and ``"src"``.
+    compress_opts : dict, optional
+        Supplied to
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress` at each
+        compression.
+    dtype : str, optional
+        The data type to use for the state tensor.
+    to_backend : callable, optional
+        A function to convert tensor data to a particular backend.
+    convert_eager : bool, optional
+        Whether to eagerly perform dtype casting and application of
+        ``to_backend`` as gates are supplied.
+    circuit_opts
+        Supplied to :class:`~quimb.tensor.circuit.Circuit`.
+
+    Attributes
+    ----------
+    psi : MatrixProductState
+        The current state of the circuit, flushed to MPS form on access.
+
+    Examples
+    --------
+
+    Simulate a circuit, compressing accumulated gates with the successive
+    randomized compression method::
+
+        circ = qtn.CircuitMPSLazy(N=56, max_bond=512, method="src")
+        circ.apply_gates(gates)
+        mps = circ.psi
+
+    See Also
+    --------
+    CircuitMPS
+    """
+
+    def __init__(
+        self,
+        N=None,
+        *,
+        psi0=None,
+        max_bond=None,
+        cutoff=1e-10,
+        method="dm",
+        compress_opts=None,
+        dtype=None,
+        to_backend=None,
+        convert_eager=True,
+        **circuit_opts,
+    ):
+        self._method = method
+        self._max_bond = max_bond
+        self._cutoff = cutoff
+        self._compress_opts = ensure_dict(compress_opts)
+        # whether any gates have been stacked since the last compression
+        self._pending = False
+        # sites carrying uncompressed multi-qubit gates, used to decide when
+        # the next gate should force a compression
+        self._uncompressed = set()
+        super().__init__(
+            N,
+            psi0=psi0,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            dtype=dtype,
+            to_backend=to_backend,
+            convert_eager=convert_eager,
+            **circuit_opts,
+        )
+
+    def _compress(self):
+        """Globally compress the accumulated lazy gates and the state back into
+        a single MPS, then reset the pending gate tracking. Does nothing if no
+        gates are currently pending.
+        """
+        if not self._pending:
+            return
+
+        from .tn1d.compress import tensor_network_1d_compress
+
+        # the 'src' family ignores cutoff and warns if it is nonzero
+        cutoff = 0.0 if "src" in self._method else self._cutoff
+
+        self._psi = tensor_network_1d_compress(
+            self._psi,
+            max_bond=self._max_bond,
+            cutoff=cutoff,
+            method=self._method,
+            inplace=True,
+            **self._compress_opts,
+        )
+        # the compression moves the orthogonality center, so any position
+        # recorded by an earlier eager fallback gate is now stale
+        self.gate_opts["info"]["cur_orthog"] = None
+        self._pending = False
+        self._uncompressed.clear()
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        if gate.special or gate.controls:
+            # not a plain dense gate (e.g. function-based or controlled): flush
+            # any pending gates then fall back to eager MPS application
+            self._compress()
+            return super()._apply_gate(gate, tags=tags, **gate_opts)
+
+        where = gate.qubits
+        multi = len(where) >= 2
+
+        if multi:
+            span = set(range(min(where), max(where) + 1))
+            # compress first if this gate would stack onto a site that already
+            # carries an uncompressed multi-qubit gate
+            if not self._uncompressed.isdisjoint(span):
+                self._compress()
+
+        G = gate.array
+        if self.convert_eager:
+            key = id(G)
+            if key not in self._backend_gate_cache:
+                self._backend_gate_cache[key] = self._maybe_convert(G)
+            G = self._backend_gate_cache[key]
+
+        # stack the gate as a split sub-MPO without any compression
+        self._psi.gate_nonlocal_(G, where, method="lazy")
+        self._pending = True
+
+        if multi:
+            self._uncompressed |= span
+
+        self._gates.append(gate)
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+
+        for gate in gates:
+            self._apply_gate(parse_to_gate(gate), **gate_opts)
+
+            if progbar:
+                gates.set_description(f"max_bond={self._psi.max_bond()}")
+
+    @property
+    def psi(self):
+        # flush any pending lazy gates so the returned state is a genuine MPS
+        self._compress()
+        return super().psi
+
+    def sample(self, C, *args, **kwargs):
+        self._compress()
+        yield from super().sample(C, *args, **kwargs)
+
+    def local_expectation(self, G, where, *args, **kwargs):
+        self._compress()
+        return super().local_expectation(G, where, *args, **kwargs)
+
+    def fidelity_estimate(self):
+        self._compress()
+        return super().fidelity_estimate()
+
+
 class CircuitPermMPS(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
     lazily tracking the qubit ordering rather than 'swapping back' qubits after

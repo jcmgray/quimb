@@ -837,6 +837,274 @@ class TestCircuitMPS:
         assert set(circ.sample(10, seed=42)) == {"0100"}
 
 
+class TestCircuitMPSLazy:
+    @staticmethod
+    def _random_circuit_gates(N, depth, seed, long_range=False):
+        """A brickwork circuit of U3 and SU4 gates, optionally with an extra
+        long range two-qubit gate per layer."""
+        rng = np.random.default_rng(seed)
+        gates = []
+        for d in range(depth):
+            for i in range(N):
+                gates.append(
+                    qtn.Gate(
+                        "U3", params=rng.uniform(0, 2 * np.pi, 3), qubits=[i]
+                    )
+                )
+            for i in range(d % 2, N - 1, 2):
+                gates.append(
+                    qtn.Gate(
+                        "SU4",
+                        params=rng.uniform(0, 2 * np.pi, 15),
+                        qubits=[i, i + 1],
+                    )
+                )
+            if long_range:
+                a, b = sorted(
+                    map(int, rng.choice(N, size=2, replace=False))
+                )
+                gates.append(
+                    qtn.Gate.from_raw(
+                        qu.rand_uni(4, seed=int(rng.integers(1 << 30))),
+                        qubits=[a, b],
+                    )
+                )
+        return gates
+
+    @pytest.mark.parametrize("method", ["dm", "direct", "zipup", "fit"])
+    def test_matches_dense_with_long_range(self, method):
+        N = 8
+        gates = self._random_circuit_gates(
+            N, depth=3, seed=42, long_range=True
+        )
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(
+            N, max_bond=2**N, cutoff=1e-12, method=method
+        )
+        circ.apply_gates(gates)
+        mps = circ.psi
+
+        assert isinstance(mps, qtn.MatrixProductState)
+        assert mps.distance_normalized(ref.psi) < 1e-6
+        assert circ.fidelity_estimate() == pytest.approx(1.0, abs=1e-6)
+
+    def test_matches_eager_circuitmps(self):
+        N = 7
+        gates = self._random_circuit_gates(N, depth=3, seed=10)
+
+        eager = qtn.CircuitMPS(N, max_bond=2**N, cutoff=1e-12)
+        eager.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12)
+        lazy.apply_gates(gates)
+
+        assert lazy.psi.distance_normalized(eager.psi) < 1e-6
+
+    def test_src_method_on_local_circuit(self):
+        # the 'src' compression method supports local (non system-spanning)
+        # circuits, which is the main use case for lazy compression
+        N = 8
+        gates = self._random_circuit_gates(N, depth=4, seed=7)
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, method="src")
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+    def test_explicit_long_range_gate(self):
+        N = 6
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate.from_raw(qu.rand_uni(4, seed=3), qubits=[0, N - 1]),
+            qtn.Gate("CX", params=(), qubits=[N - 1, 2]),
+        ]
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N)
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+    def test_single_qubit_gates_only(self):
+        N = 5
+        rng = np.random.default_rng(0)
+        gates = [
+            qtn.Gate("U3", params=rng.uniform(0, 2 * np.pi, 3), qubits=[i])
+            for _ in range(3)
+            for i in range(N)
+        ]
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=8)
+        circ.apply_gates(gates)
+        mps = circ.psi
+
+        assert isinstance(mps, qtn.MatrixProductState)
+        # single qubit gates never grow the bond dimension
+        assert mps.max_bond() == 1
+        assert mps.distance_normalized(ref.psi) < 1e-6
+
+    def test_psi_is_bounded_mps(self):
+        N = 10
+        max_bond = 8
+        gates = self._random_circuit_gates(N, depth=6, seed=99)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=max_bond, method="dm")
+        circ.apply_gates(gates)
+        mps = circ.psi
+
+        assert isinstance(mps, qtn.MatrixProductState)
+        assert mps.max_bond() <= max_bond
+
+    def test_truncation_fidelity_increases_with_bond(self):
+        N = 10
+        gates = self._random_circuit_gates(N, depth=8, seed=5)
+
+        fids = []
+        for max_bond in [2, 4, 8, 16]:
+            circ = qtn.CircuitMPSLazy(N, max_bond=max_bond, method="dm")
+            circ.apply_gates(gates)
+            f = circ.fidelity_estimate()
+            assert 0.0 < f <= 1.0 + 1e-9
+            assert circ.error_estimate() == pytest.approx(1 - f)
+            fids.append(f)
+
+        # raising the bond dimension should never reduce the fidelity
+        for lo, hi in zip(fids, fids[1:]):
+            assert hi >= lo - 1e-9
+        assert fids[-1] > fids[0]
+
+    def test_controlled_gate_then_lazy_keeps_fidelity_valid(self):
+        # a controlled gate takes the eager fallback path and records an
+        # orthogonality center; later lazy gates trigger a compression that
+        # moves the center, so the recorded position must be cleared, else
+        # fidelity_estimate and local_expectation read the wrong canonical form
+        N = 6
+        rng = np.random.default_rng(3)
+        gates = [
+            qtn.Gate("U3", params=rng.uniform(0, 2 * np.pi, 3), qubits=[i])
+            for i in range(N)
+        ]
+        # controlled gate -> eager fallback path, records cur_orthog
+        gates.append(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, 15),
+                qubits=[2, 4],
+                controls=[0],
+            )
+        )
+        # then lazily stacked two-qubit gates -> a compression on flush
+        for i in range(0, N - 1, 2):
+            gates.append(
+                qtn.Gate(
+                    "SU4",
+                    params=rng.uniform(0, 2 * np.pi, 15),
+                    qubits=[i, i + 1],
+                )
+            )
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+        psi_dense = ref.to_dense()
+
+        circ = qtn.CircuitMPSLazy(
+            N, max_bond=2**N, cutoff=1e-12, method="direct"
+        )
+        circ.apply_gates(gates)
+
+        # no truncation, so the state is essentially exact
+        assert circ.fidelity_estimate() == pytest.approx(1.0, abs=1e-6)
+        assert circ.error_estimate() == pytest.approx(0.0, abs=1e-6)
+
+        # local expectations must match the dense reference; a stale center
+        # would silently shift these
+        Z = qu.pauli("Z")
+        for q in range(N):
+            ref_z = qu.expec(qu.ikron(Z, [2] * N, q), psi_dense).real
+            assert circ.local_expectation(Z, q).real == pytest.approx(
+                ref_z, abs=1e-6
+            )
+
+    def test_lazy_defers_compression(self):
+        # a single layer of disjoint two-qubit gates should be stacked and only
+        # compressed once, on flush, rather than once per gate
+        N = 8
+        rng = np.random.default_rng(1)
+        circ = qtn.CircuitMPSLazy(N, max_bond=16, method="dm")
+
+        n_compress = 0
+        real_compress = circ._compress
+
+        def counting_compress():
+            nonlocal n_compress
+            if circ._pending:
+                n_compress += 1
+            real_compress()
+
+        circ._compress = counting_compress
+
+        for i in range(0, N - 1, 2):
+            circ.apply_gates(
+                [
+                    qtn.Gate(
+                        "SU4",
+                        params=rng.uniform(0, 2 * np.pi, 15),
+                        qubits=[i, i + 1],
+                    )
+                ]
+            )
+        # nothing compressed while the disjoint layer is being stacked
+        assert n_compress == 0
+
+        _ = circ.psi
+        # exactly one global compression performed on flush
+        assert n_compress == 1
+
+    def test_2d_ising_dynamics(self):
+        # small 2D transverse-field Ising Trotter dynamics mapped onto a 1D MPS;
+        # the vertical couplings are long range in the 1D ordering
+        Lx, Ly = 2, 3
+        N = Lx * Ly
+
+        def site(x, y):
+            return x * Ly + y
+
+        bonds = []
+        for x in range(Lx):
+            for y in range(Ly):
+                if y + 1 < Ly:
+                    bonds.append((site(x, y), site(x, y + 1)))
+                if x + 1 < Lx:
+                    bonds.append((site(x, y), site(x + 1, y)))
+
+        dt = 0.1
+        zz = qu.pauli("Z") & qu.pauli("Z")
+        rzz = qu.expm(-1j * dt * zz)
+        rx = qu.expm(-1j * dt * qu.pauli("X"))
+
+        gates = []
+        for _ in range(3):
+            for i in range(N):
+                gates.append(qtn.Gate.from_raw(rx, qubits=[i]))
+            for a, b in bonds:
+                gates.append(qtn.Gate.from_raw(rzz, qubits=[a, b]))
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method="dm")
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+
 class TestCircuitGen:
     @pytest.mark.parametrize(
         "ansatz,cyclic",
