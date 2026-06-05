@@ -10,6 +10,7 @@ Release notes for `quimb`.
 - [`TensorNetwork.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond).
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
+- add [`CircuitMPSLazy`](quimb.tensor.circuit.CircuitMPSLazy): a matrix product state circuit simulator that applies gates lazily as split sub-MPOs and only periodically performs a global compression with [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress).
 
 
 **Bug fixes:**
