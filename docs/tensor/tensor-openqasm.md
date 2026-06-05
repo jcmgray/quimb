@@ -84,9 +84,20 @@ The imported circuit exposes:
 - `circ.named_param_names`: declared named parameter names
 - `circ.param_expressions`: symbolic expressions attached to parameterized gates
 
+Unbound named parameters are initialized to `nan`, and any gate parameters that
+depend on them are likewise initialized to `nan` until values are supplied.
+
 Named updates can be mixed with raw gate-index updates in the same
 `set_params(...)` call, for example `{"theta": 0.3, 5: (0.1, 0.2, 0.3)}`.
-Unknown names raise an error.
+Any expressions that still depend on
+unbound names remain `nan` until those names are set. Unknown names raise an
+error, and gate parameters managed by named expressions cannot be overridden
+directly via their integer gate indices.
+
+The same named-parameter mechanism can also be used outside OpenQASM import via
+[`Circuit.register_named_params`](quimb.tensor.circuit.Circuit.register_named_params),
+with expressions such as `cos(theta / 2)` attached to arbitrary parametrized
+gates.
 
 ## OpenQASM 2 compatibility
 
