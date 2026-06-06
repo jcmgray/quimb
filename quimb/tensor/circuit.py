@@ -30,6 +30,8 @@ from .tensor_builder import (
     MPO_identity_like,
     MPS_computational_state,
     TN_from_sites_computational_state,
+    TN_from_sites_product_state,
+    gen_unique_edges,
 )
 from .tensor_core import (
     PTensor,
@@ -5102,5 +5104,325 @@ class CircuitDense(Circuit):
     def get_psi_reverse_lightcone(self, where, keep_psi0=False):
         """Override ``get_psi_reverse_lightcone`` as for a dense wavefunction
         the lightcone is not meaningful.
+        """
+        return self.psi
+
+
+class CircuitPEPSSimpleUpdate(Circuit):
+    """Quantum circuit simulation keeping the state as a PEPS (projected
+    entangled pair state) of arbitrary geometry, applying gates with 'simple
+    update' style gauging. The geometry is fixed by a set of ``edges`` and only
+    nearest neighbor (i.e. on-edge) two site gates are allowed. Gauges living on
+    the bonds are maintained separately and can be periodically re-equilibrated
+    with :meth:`equilibrate`. This is an approximate but scalable simulation
+    method - the accuracy is controlled by ``max_bond``.
+
+    Parameters
+    ----------
+    edges : sequence[tuple[hashable, hashable]], optional
+        The edges defining the PEPS geometry, i.e. which pairs of sites are
+        connected by a bond and thus where two site gates can be applied. Each
+        site can be any hashable label. If not given, ``gates`` or ``psi0``
+        must be supplied instead.
+    gates : sequence, optional
+        If ``edges`` is not given, infer the geometry from the two site gates in
+        this sequence (the gates are *not* applied, just inspected). This is a
+        convenience for circuits where the geometry is implied by the gates.
+    max_bond : int, optional
+        The maximum bond dimension to allow when applying gates. ``None`` means
+        no limit (the bonds can grow without bound), which is only tractable for
+        small or shallow circuits.
+    cutoff : float, optional
+        The singular value cutoff to use when compressing bonds after applying a
+        gate.
+    gauge_smudge : float, optional
+        A small value added to the gauges before they are multiplied in and
+        inverted, to avoid numerical issues with very small singular values.
+    renorm : bool, optional
+        Whether to renormalize the singular values of a bond after each gate,
+        before reinserting them into the gauges. The default ``True`` keeps the
+        state normalized, which is numerically stable for deep circuits of
+        non-near-identity gates (expectation values computed with
+        ``normalized=True`` are unaffected). Set to ``False`` to instead track
+        the norm of the state, e.g. for near-identity (time evolution) gates.
+    equilibrate_every : int, optional
+        If given, call :meth:`equilibrate` automatically after every this many
+        gates have been applied.
+    equilibrate_opts : dict, optional
+        Default options to supply to :meth:`equilibrate`, and thus
+        :meth:`~quimb.tensor.tnag.core.TensorNetworkGen.gauge_all_simple_`.
+    dtype : str, optional
+        The data type of the initial product state.
+    psi0 : TensorNetworkGenVector, optional
+        Supply the initial state directly instead of building a product state
+        from ``edges``. The geometry is then read from this state.
+
+    Attributes
+    ----------
+    edges : tuple[tuple[hashable, hashable]]
+        The unique edges defining the geometry.
+    sites : tuple[hashable]
+        The sites of the PEPS.
+    gauges : dict[str, array_like]
+        The simple update bond gauges, keyed by bond index.
+    psi : TensorNetworkGenVector
+        The current state, with the gauges absorbed.
+
+    See Also
+    --------
+    CircuitMPS, SimpleUpdateGen
+    """
+
+    def __init__(
+        self,
+        edges=None,
+        *,
+        gates=None,
+        max_bond=None,
+        cutoff=1e-10,
+        gauge_smudge=1e-6,
+        renorm=True,
+        equilibrate_every=None,
+        equilibrate_opts=None,
+        dtype="complex128",
+        psi0=None,
+        **circuit_opts,
+    ):
+        if psi0 is None:
+            if edges is None:
+                if gates is None:
+                    raise ValueError(
+                        "You must supply one of `edges`, `gates` or `psi0` to "
+                        "define the PEPS geometry."
+                    )
+                # infer geometry from the two site gates
+                edges = [
+                    g.qubits
+                    for g in map(parse_to_gate, gates)
+                    if len(g.qubits) == 2
+                ]
+            edges = tuple(gen_unique_edges(edges))
+            sites = tuple(sorted({s for e in edges for s in e}))
+            # |00...0> product state with size 1 bonds on the edges
+            psi0 = TN_from_sites_product_state(
+                {site: np.array([1.0, 0.0], dtype=dtype) for site in sites}
+            )
+            for cooa, coob in edges:
+                psi0[cooa].new_bond(psi0[coob])
+        else:
+            edges = tuple(gen_unique_edges(psi0.gen_bond_coos()))
+            sites = tuple(psi0.sites)
+
+        self.edges = edges
+        self.sites = sites
+        self._edge_set = {frozenset(e) for e in edges}
+        self._site_set = set(sites)
+
+        # simple update gate / gauge options
+        self._su_opts = {
+            "max_bond": max_bond,
+            "cutoff": cutoff,
+            "smudge": gauge_smudge,
+            "renorm": renorm,
+        }
+        self._equilibrate_every = equilibrate_every
+        self._equilibrate_opts = ensure_dict(equilibrate_opts)
+
+        # don't tag gates - not needed for simple update
+        circuit_opts.setdefault("tag_gate_numbers", False)
+        circuit_opts.setdefault("tag_gate_rounds", False)
+        circuit_opts.setdefault("tag_gate_labels", False)
+
+        super().__init__(psi0=psi0, **circuit_opts)
+
+        # set up the simple update bond gauges
+        self._gauges = {}
+        self._psi.gauge_all_simple_(gauges=self._gauges, max_iterations=1)
+
+    def copy(self):
+        """Copy the circuit, its state and gauges."""
+        new = super().copy()
+        new.edges = self.edges
+        new.sites = self.sites
+        new._edge_set = self._edge_set
+        new._site_set = self._site_set
+        new._su_opts = dict(self._su_opts)
+        new._equilibrate_every = self._equilibrate_every
+        new._equilibrate_opts = dict(self._equilibrate_opts)
+        new._gauges = dict(self._gauges)
+        return new
+
+    @property
+    def gauges(self):
+        """A copy of the current simple update bond gauges."""
+        return dict(self._gauges)
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        if gate.controls:
+            raise NotImplementedError(
+                "Controlled gates are not supported by "
+                "`CircuitPEPSSimpleUpdate`."
+            )
+        if gate.special:
+            raise NotImplementedError(
+                f"The special gate {gate.label!r} is not supported by "
+                "`CircuitPEPSSimpleUpdate`, supply it as a raw array instead."
+            )
+
+        where = gate.qubits
+
+        if len(where) > 2:
+            raise ValueError(
+                "`CircuitPEPSSimpleUpdate` only supports one and two site "
+                f"gates, but got {len(where)} sites: {where}."
+            )
+        if (len(where) == 2) and (frozenset(where) not in self._edge_set):
+            raise ValueError(
+                f"The gate acts on sites {where} which are not a declared "
+                "edge of the PEPS - only nearest neighbor gates are allowed."
+            )
+
+        opts = {**self._su_opts, **gate_opts}
+        self._psi.gate_simple_(gate.array, where, gauges=self._gauges, **opts)
+
+        self._gates.append(gate)
+
+        if self._equilibrate_every and (
+            len(self._gates) % self._equilibrate_every == 0
+        ):
+            self.equilibrate()
+
+    def equilibrate(self, **kwargs):
+        """Re-equilibrate the bond gauges with the current state, i.e. iterate
+        the simple update gauging to self consistency (like evolving with a zero
+        time step). This can improve the accuracy of subsequent gates and
+        expectation values.
+
+        Parameters
+        ----------
+        kwargs
+            Supplied to
+            :meth:`~quimb.tensor.tnag.core.TensorNetworkGen.gauge_all_simple_`,
+            overriding any defaults in ``equilibrate_opts``.
+        """
+        opts = {**self._equilibrate_opts, **kwargs}
+        self._psi.gauge_all_simple_(gauges=self._gauges, **opts)
+
+    def get_state(self, absorb_gauges=True):
+        """Return the current state, optionally absorbing the gauges.
+
+        Parameters
+        ----------
+        absorb_gauges : bool, optional
+            If ``True`` (default), return a plain PEPS with the gauges absorbed
+            into the tensors. If ``False``, the gauges are left as separate,
+            uncontracted tensors on the bonds.
+
+        Returns
+        -------
+        TensorNetworkGenVector
+        """
+        psi = self._psi.copy()
+        if absorb_gauges:
+            psi.gauge_simple_insert(self._gauges)
+        else:
+            for ix, g in self._gauges.items():
+                psi |= Tensor(g, inds=[ix])
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+        return psi
+
+    @property
+    def psi(self):
+        return self.get_state(absorb_gauges=True)
+
+    @property
+    def psi_gauged(self):
+        """The raw internal PEPS, in Vidal-like gauge: the simple update bond
+        gauges are stored separately (in :attr:`gauges`) and *not* absorbed.
+        Use :attr:`psi` to get the state with the gauges absorbed back in.
+        """
+        return self._psi.copy()
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        *,
+        normalized=True,
+        max_distance=1,
+        **contract_opts,
+    ):
+        """Compute the local expectation value of operator ``G`` at ``where``,
+        using the simple update gauges and a cluster approximation of the
+        environment.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator to compute the expectation of.
+        where : hashable or sequence[hashable]
+            The site or sites the operator acts on.
+        normalized : bool, optional
+            Whether to normalize the expectation value by the local norm.
+        max_distance : int, optional
+            How many neighboring shells of tensors to include in the cluster
+            environment beyond the operator's sites. Larger is more accurate but
+            more expensive.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.compute_local_expectation_cluster`.
+
+        Returns
+        -------
+        float
+        """
+        if where in self._site_set:
+            where = (where,)
+        else:
+            where = tuple(where)
+
+        return self._psi.compute_local_expectation_cluster(
+            {where: G},
+            gauges=self._gauges,
+            normalized=normalized,
+            max_distance=max_distance,
+            **contract_opts,
+        )
+
+    @property
+    def uni(self):
+        raise ValueError(
+            "You can't extract the circuit unitary TN from a "
+            "``CircuitPEPSSimpleUpdate``."
+        )
+
+    def _unsupported_exact(self, *_, **__):
+        raise NotImplementedError(
+            f"{type(self).__name__!r} represents the state as an approximate, "
+            "compressed PEPS, so methods that require exactly contracting the "
+            "full state are not supported. Use `local_expectation` (which uses "
+            "the cluster approximation) or work with the `psi` tensor network "
+            "directly instead."
+        )
+
+    # exact-contraction methods would silently be intractable / wrong for a
+    # large PEPS, so explicitly disable them rather than return bad values
+    to_dense = _unsupported_exact
+    amplitude = _unsupported_exact
+    partial_trace = _unsupported_exact
+    sample = _unsupported_exact
+    sample_chaotic = _unsupported_exact
+    sample_chaotic_rehearse = _unsupported_exact
+
+    def calc_qubit_ordering(self, qubits=None):
+        """A PEPS has no inherent linear ordering; just return the sites."""
+        if qubits is None:
+            return tuple(self.sites)
+        return tuple(qubits)
+
+    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
+        """The reverse lightcone is not meaningful for a PEPS simple update
+        state, so just return the full state.
         """
         return self.psi

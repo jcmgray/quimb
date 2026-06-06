@@ -7,6 +7,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- add [`CircuitPEPSSimpleUpdate`](quimb.tensor.circuit.CircuitPEPSSimpleUpdate): a high level quantum circuit simulator that keeps the state as an arbitrary geometry PEPS, applying nearest-neighbor gates with 'simple update' style gauging. The geometry is given by a set of ``edges`` (or inferred from the gates), the accuracy is controlled by ``max_bond``, and gauges can be periodically re-equilibrated with ``equilibrate``. Local expectations are computed via the cluster approximation.
 - [`TensorNetwork.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond).
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
