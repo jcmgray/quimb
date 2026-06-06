@@ -5,6 +5,7 @@ from .circuit import (
     CircuitDense,
     CircuitMPS,
     CircuitPermMPS,
+    CircuitLazyMPS,
     Gate,
 )
 from .circuit_gen import (
@@ -242,6 +243,7 @@ __all__ = (
     "CircuitDense",
     "CircuitMPS",
     "CircuitPermMPS",
+    "CircuitLazyMPS",
     "cnf_file_parse",
     "connect",
     "contract_backend",

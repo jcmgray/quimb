@@ -836,6 +836,57 @@ class TestCircuitMPS:
         assert circ.qubits == [0, 3, 1, 2]
         assert set(circ.sample(10, seed=42)) == {"0100"}
 
+    def test_lazymps_sampling(self):
+        N = 6
+        circ = qtn.CircuitLazyMPS(N)
+        circ.h(3)
+        circ.cx(3, 2)
+        circ.cx(2, 1)
+        circ.cx(1, 0)
+        circ.cx(0, 5)
+        circ.cx(5, 4)
+        circ.x(4)
+        for x in circ.sample(10, seed=42):
+            assert x in {"000010", "111101"}
+
+    def test_lazymps_sampling_seed(self):
+        N = 1
+        circ = qtn.CircuitLazyMPS(N)
+        circ.h(0)
+        samples = list(circ.sample(10, seed=1234))
+        assert len(set(samples)) == 2
+
+    def test_performance_lazymps_long_range(self):
+        import timeit
+
+        N = 10
+
+        circ = qtn.CircuitLazyMPS(N)
+
+        start_time = timeit.default_timer()
+
+        circ.h(0)
+        for _ in range(100):
+            for i in range(N - 1):
+                circ.cx(0, i + 1)
+
+        elapsed_lazymps = timeit.default_timer() - start_time
+        lazy_state = circ.psi
+
+        circ = qtn.CircuitMPS(N)
+
+        start_time = timeit.default_timer()
+        circ.h(0)
+        for _ in range(100):
+            for i in range(N - 1):
+                circ.cx(0, i + 1)
+
+        elapsed_mps = timeit.default_timer() - start_time
+        mps_state = circ.psi
+
+        assert elapsed_lazymps < elapsed_mps
+        assert lazy_state @ mps_state == pytest.approx(1.0)
+
 
 class TestCircuitGen:
     @pytest.mark.parametrize(

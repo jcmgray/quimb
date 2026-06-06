@@ -41,7 +41,7 @@ from .tensor_core import (
     tags_to_oset,
     tensor_contract,
 )
-from .tn1d.core import Dense1D, MatrixProductOperator
+from .tn1d.core import Dense1D, MatrixProductOperator, MatrixProductState
 from .tnag.core import TensorNetworkGenOperator, TensorNetworkGenVector
 
 
@@ -5104,3 +5104,67 @@ class CircuitDense(Circuit):
         the lightcone is not meaningful.
         """
         return self.psi
+
+
+class CircuitLazyMPS(CircuitMPS):
+    """Quantum circuit simulation keeping the state always in an MPS form, but
+    lazily applying gates (via sub-MPO representation) and regularly contracting
+    and compressing the gates with the state. This improves the runtime scaling
+    compared to ``CircuitMPS`` especially for long range gates.
+    """
+    def __init__(
+        self,
+        N=None,
+        psi0=None,
+        gate_opts=None,
+        compress_every=10,
+        **circuit_opts,
+    ):
+        gate_opts = ensure_dict(gate_opts)
+        # this is used to pass around the canonical form
+        gate_opts.setdefault("info", {})
+        super().__init__(N, psi0=psi0, gate_opts=gate_opts, **circuit_opts)
+        self.compress_every = compress_every
+        self._gates_since_compress = 0
+
+    def _compress(self):
+        """Contract all gates in the MPS and compress via creating a new MPS
+        from the dense representation of the current state.
+
+        This is faster and more accurate compared to `tensor_network_1d_compress`
+        method for this purpose.
+        """
+        self._psi = MatrixProductState.from_dense(
+            self._psi.to_dense().flatten()
+        )
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        self._gates_since_compress += 1
+
+        if self._gates_since_compress % self.compress_every == 0:
+            self._compress()
+
+        if gate.special or gate.controls:
+            return super()._apply_gate(gate, tags=tags, **gate_opts)
+
+        # Gates are applied lazily as sub-MPOs, however, the MPS must be compressed
+        # regularly to prevent the state tensor from blowing up in size and causing
+        # memory issues.
+        self._psi.gate_nonlocal_(gate.array, gate.qubits, method="lazy")  # type: ignore
+
+    @property
+    def psi(self):
+        self._compress()
+        return super().psi
+
+    def sample(self, C, *args, **kwargs):
+        self._compress()
+        yield from super().sample(C, *args, **kwargs)
+
+    def local_expectation(self, G, where, *args, **kwargs):
+        self._compress()
+        return super().local_expectation(G, where, *args, **kwargs)
+
+    def fidelity_estimate(self):
+        self._compress()
+        return super().fidelity_estimate()
