@@ -1109,6 +1109,23 @@ class TestCircuitPEPSSimpleUpdate:
             xe = complex(ref.local_expectation(Z, qmap[s]))
             assert complex(x) == pytest.approx(xe, abs=1e-6)
 
+    def test_local_expectation_accepts_list_where(self):
+        # a multi-site `where` given as a list must not crash on the set
+        # membership check, and should match the tuple form
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(
+            [
+                qtn.Gate("H", params=(), qubits=[0]),
+                qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            ]
+        )
+        Z = qu.pauli("Z").astype(complex)
+        ZZ = qu.kron(Z, Z)
+        x_list = circ.local_expectation(ZZ, [0, 1], max_distance=2)
+        x_tuple = circ.local_expectation(ZZ, (0, 1), max_distance=2)
+        assert complex(x_list) == pytest.approx(complex(x_tuple))
+
     def test_copy_is_independent(self):
         edges = qtn.edges_2d_square(2, 2)
         circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)

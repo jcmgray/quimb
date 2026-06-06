@@ -5212,7 +5212,7 @@ class CircuitPEPSSimpleUpdate(Circuit):
         **circuit_opts,
     ):
         # geometry can come from explicit `edges`, be inferred from the two
-        # site `gates` (only inspected here, not applied), or be read from the
+        # site `gates` (only inspected here, not applied) or be read from the
         # bonds of an existing `psi0`
         extra_sites = ()
         if edges is None:
@@ -5420,6 +5420,8 @@ class CircuitPEPSSimpleUpdate(Circuit):
         -------
         float
         """
+        if isinstance(where, list):
+            where = tuple(where)
         if where in self._site_set:
             where = (where,)
         else:
@@ -5467,7 +5469,7 @@ class CircuitPEPSSimpleUpdate(Circuit):
         raise NotImplementedError(
             f"`{name}` is not supported by `CircuitPEPSSimpleUpdate`, which "
             "only ever holds an approximate, gauged tensor network state. Use "
-            "`local_expectation` for observables, or `psi` to get the gauged "
+            "`local_expectation` for observables or `psi` to get the gauged "
             "PEPS state and contract or sample it with the approximation you "
             "want."
         )
