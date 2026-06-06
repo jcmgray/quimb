@@ -31,6 +31,7 @@ from .tensor_builder import (
     MPS_computational_state,
     TN_from_sites_computational_state,
     TN_from_sites_product_state,
+    gen_unique_edges,
 )
 from .tensor_core import (
     PTensor,
@@ -5124,13 +5125,22 @@ class CircuitPEPSSimpleUpdate(Circuit):
     ----------
     N : int, optional
         The number of qubits in the circuit. If not given it is inferred from
-        ``edges``.
-    edges : sequence[tuple[int, int]]
+        the geometry. Supply it to pad the geometry up to ``N`` sites,
+        including any that have no edges.
+    edges : sequence[tuple[int, int]], optional
         The edges defining the geometry of the PEPS. A bond is placed between
         each pair of sites, and two-qubit gates are only supported on these
-        edges. Every site appearing in ``edges`` is included. Supply ``N`` as
-        well to pad the geometry up to that many sites, including any that have
-        no edges.
+        edges. Every site appearing in ``edges`` is included. If not given the
+        geometry is taken from ``gates`` or ``psi0`` instead.
+    gates : sequence, optional
+        If ``edges`` is not given, infer the geometry from the two-qubit gates
+        in this sequence. The gates are only inspected here, not applied, so
+        you still pass them to :meth:`apply_gates` afterwards.
+    psi0 : TensorNetworkGenVector, optional
+        Supply the initial state directly instead of starting from the
+        ``|00...0>`` product state. If ``edges`` is not given the geometry is
+        read from the bonds of this state, and the bond gauges are seeded from
+        it.
     max_bond : int, optional
         The maximum bond dimension to truncate to when applying gates.
     cutoff : float, optional
@@ -5169,6 +5179,7 @@ class CircuitPEPSSimpleUpdate(Circuit):
         N=None,
         *,
         edges=None,
+        gates=None,
         psi0=None,
         max_bond=None,
         cutoff=1e-10,
@@ -5178,17 +5189,33 @@ class CircuitPEPSSimpleUpdate(Circuit):
         convert_eager=False,
         **circuit_opts,
     ):
+        # geometry can come from explicit `edges`, be inferred from the two
+        # site `gates` (only inspected here, not applied), or be read from the
+        # bonds of an existing `psi0`
+        extra_sites = ()
         if edges is None:
-            raise ValueError(
-                "You must supply `edges` defining the PEPS geometry."
-            )
-        self.edges = tuple((a, b) for a, b in edges)
+            if psi0 is not None:
+                edges = tuple(psi0.gen_bond_coos())
+            elif gates is not None:
+                parsed = [parse_to_gate(g) for g in gates]
+                edges = [g.qubits for g in parsed if len(g.qubits) == 2]
+                extra_sites = tuple(q for g in parsed for q in g.qubits)
+            else:
+                raise ValueError(
+                    "You must supply one of `edges`, `gates` or `psi0` to "
+                    "define the PEPS geometry."
+                )
+        self.edges = tuple(gen_unique_edges(edges))
 
-        # sites are everything appearing in edges, padded up to N if given
+        # sites are everything appearing in the edges, plus any extra sites
+        # touched by single qubit gates or present in psi0, padded up to N
         sites = set()
         for a, b in self.edges:
             sites.add(a)
             sites.add(b)
+        sites.update(extra_sites)
+        if psi0 is not None:
+            sites.update(psi0.sites)
         if N is not None:
             sites.update(range(N))
         self._sites = tuple(sorted(sites))
@@ -5209,6 +5236,10 @@ class CircuitPEPSSimpleUpdate(Circuit):
         circuit_opts.setdefault("convert_eager", convert_eager)
 
         super().__init__(len(self._sites), psi0, gate_opts, **circuit_opts)
+
+        if psi0 is not None:
+            # seed the bond gauges from the supplied state
+            self._psi.gauge_all_simple_(gauges=self.gauges, max_iterations=1)
 
     def _init_state(self, N, dtype="complex128"):
         # |00...0> product state with bond dimension 1 bonds along the edges

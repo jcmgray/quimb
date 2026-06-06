@@ -838,9 +838,66 @@ class TestCircuitMPS:
 
 
 class TestCircuitPEPSSimpleUpdate:
-    def test_requires_edges(self):
+    def test_requires_geometry(self):
+        # none of edges, gates or psi0 given -> cannot define the geometry
         with pytest.raises(ValueError):
             qtn.CircuitPEPSSimpleUpdate()
+
+    def test_geometry_inferred_from_gates(self):
+        # passing the two-qubit gates instead of edges should reconstruct the
+        # same geometry, and give the same state as the explicit-edges path
+        edges = [(0, 1), (1, 2), (0, 2)]
+        rng = np.random.default_rng(5)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(3)
+        ]
+        gates += [qtn.Gate("CZ", params=(), qubits=list(e)) for e in edges]
+
+        circ_edges = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ_gates = qtn.CircuitPEPSSimpleUpdate(gates=gates, max_bond=16)
+        # geometry matches (as undirected edges) and the gates are not applied
+        assert {frozenset(e) for e in circ_gates.edges} == {
+            frozenset(e) for e in circ_edges.edges
+        }
+        assert circ_gates.num_gates == 0
+
+        circ_edges.apply_gates(gates)
+        circ_gates.apply_gates(gates)
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(3):
+            xe = circ_edges.local_expectation(Z, i, max_distance=3)
+            xg = circ_gates.local_expectation(Z, i, max_distance=3)
+            assert float(np.real(xg)) == pytest.approx(
+                float(np.real(xe)), abs=1e-10
+            )
+
+    def test_geometry_inferred_from_psi0(self):
+        # build a state, hand it back as psi0, and check the geometry is read
+        # from its bonds and expectations are preserved
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        rng = np.random.default_rng(11)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(4)
+        ]
+        gates += [qtn.Gate("CZ", params=(), qubits=list(e)) for e in edges]
+
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        psi = circ.psi
+
+        circ2 = qtn.CircuitPEPSSimpleUpdate(psi0=psi, max_bond=16)
+        assert {frozenset(e) for e in circ2.edges} == {
+            frozenset(e) for e in edges
+        }
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(4):
+            x1 = circ.local_expectation(Z, i, max_distance=4)
+            x2 = circ2.local_expectation(Z, i, max_distance=4)
+            assert float(np.real(x2)) == pytest.approx(
+                float(np.real(x1)), abs=1e-6
+            )
 
     def test_construction_and_initial_state(self):
         # 2x3 grid of integer-labelled sites
