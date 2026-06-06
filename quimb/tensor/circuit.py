@@ -5145,12 +5145,30 @@ class CircuitPEPSSimpleUpdate(Circuit):
         The maximum bond dimension to truncate to when applying gates.
     cutoff : float, optional
         The singular value cutoff to use when truncating after applying gates.
+    renorm : bool, optional
+        Whether to renormalize the singular values of a bond after each gate.
+        The default ``True`` keeps the state normalized, which is stable for
+        deep circuits of generic gates. Set ``False`` to instead track the norm
+        of the state, e.g. for the near-identity gates of (imaginary) time
+        evolution.
+    gauge_smudge : float, optional
+        Small value added to the gauges before they are multiplied in and
+        inverted, for numerical stability with very small singular values.
+    equilibrate_every : int, optional
+        If given, automatically call :meth:`equilibrate` after every this many
+        gates have been applied.
+    equilibrate_opts : dict, optional
+        Default options forwarded to :meth:`equilibrate`.
     gate_opts : dict, optional
         Default options to pass to ``gate_simple_`` such as ``max_bond`` and
         ``cutoff``.
 
     Attributes
     ----------
+    edges : tuple[tuple[hashable, hashable]]
+        The unique edges defining the PEPS geometry.
+    sites : tuple[hashable]
+        The sites (qubit labels) of the PEPS.
     gauges : dict[str, array]
         The current Vidal-style bond gauges (singular values), keyed by bond
         index, updated in place as gates are applied.
@@ -5183,6 +5201,10 @@ class CircuitPEPSSimpleUpdate(Circuit):
         psi0=None,
         max_bond=None,
         cutoff=1e-10,
+        renorm=True,
+        gauge_smudge=1e-12,
+        equilibrate_every=None,
+        equilibrate_opts=None,
         gate_opts=None,
         dtype=None,
         to_backend=None,
@@ -5219,13 +5241,21 @@ class CircuitPEPSSimpleUpdate(Circuit):
         if N is not None:
             sites.update(range(N))
         self._sites = tuple(sorted(sites))
+        self._site_set = set(self._sites)
+        self._edge_set = {frozenset(e) for e in self.edges}
 
         # bond gauges tracked across gate applications
         self.gauges = {}
 
+        # auto re-gauge every this many gates, if given
+        self._equilibrate_every = equilibrate_every
+        self._equilibrate_opts = ensure_dict(equilibrate_opts)
+
         gate_opts = ensure_dict(gate_opts)
         gate_opts.setdefault("max_bond", max_bond)
         gate_opts.setdefault("cutoff", cutoff)
+        gate_opts.setdefault("renorm", renorm)
+        gate_opts.setdefault("smudge", gauge_smudge)
 
         circuit_opts.setdefault("tag_gate_numbers", False)
         circuit_opts.setdefault("tag_gate_rounds", False)
@@ -5240,6 +5270,27 @@ class CircuitPEPSSimpleUpdate(Circuit):
         if psi0 is not None:
             # seed the bond gauges from the supplied state
             self._psi.gauge_all_simple_(gauges=self.gauges, max_iterations=1)
+
+    def copy(self):
+        """Copy the circuit, including its state, gauges and geometry. The
+        base :class:`Circuit` copy does not know about the extra simple update
+        attributes, so they are carried over here (the gauges are copied so the
+        two circuits can be evolved independently).
+        """
+        new = super().copy()
+        new.edges = self.edges
+        new._sites = self._sites
+        new._site_set = self._site_set
+        new._edge_set = self._edge_set
+        new.gauges = dict(self.gauges)
+        new._equilibrate_every = self._equilibrate_every
+        new._equilibrate_opts = dict(self._equilibrate_opts)
+        return new
+
+    @property
+    def sites(self):
+        """The sites (qubit labels) of the PEPS."""
+        return self._sites
 
     def _init_state(self, N, dtype="complex128"):
         # |00...0> product state with bond dimension 1 bonds along the edges
@@ -5266,6 +5317,18 @@ class CircuitPEPSSimpleUpdate(Circuit):
                 "array acting on sites connected by an edge."
             )
 
+        where = gate.qubits
+        if len(where) > 2:
+            raise ValueError(
+                "`CircuitPEPSSimpleUpdate` only supports one and two site "
+                f"gates, but got {len(where)} sites: {where}."
+            )
+        if (len(where) == 2) and (frozenset(where) not in self._edge_set):
+            raise ValueError(
+                f"The gate acts on sites {where} which are not a declared "
+                "edge of the PEPS, only nearest neighbor gates are allowed."
+            )
+
         opts = {**self.gate_opts, **gate_opts}
         opts.pop("contract", None)
         opts.pop("propagate_tags", None)
@@ -5277,8 +5340,13 @@ class CircuitPEPSSimpleUpdate(Circuit):
                 self._backend_gate_cache[key] = self._maybe_convert(G)
             G = self._backend_gate_cache[key]
 
-        self._psi.gate_simple_(G, gate.qubits, self.gauges, **opts)
+        self._psi.gate_simple_(G, where, self.gauges, **opts)
         self._gates.append(gate)
+
+        if self._equilibrate_every and (
+            len(self._gates) % self._equilibrate_every == 0
+        ):
+            self.equilibrate(**self._equilibrate_opts)
 
     def apply_gates(self, gates, progbar=False, **gate_opts):
         if progbar:
@@ -5335,8 +5403,10 @@ class CircuitPEPSSimpleUpdate(Circuit):
         ----------
         G : array_like
             The local operator.
-        where : int or tuple[int]
-            The site or sites to compute the expectation at.
+        where : hashable or sequence[hashable]
+            The site or sites to compute the expectation at. A single site
+            label (which may itself be a tuple, e.g. a 2D coordinate) is
+            detected by membership in the set of sites.
         max_distance : int, optional
             How many graph hops of neighboring tensors to include in the local
             cluster used to approximate the reduced density matrix.
@@ -5350,10 +5420,12 @@ class CircuitPEPSSimpleUpdate(Circuit):
         -------
         float
         """
-        if isinstance(where, int):
+        if where in self._site_set:
             where = (where,)
+        else:
+            where = tuple(where)
         return self._psi.compute_local_expectation_cluster(
-            {tuple(where): G},
+            {where: G},
             gauges=self.gauges,
             max_distance=max_distance,
             normalized=normalized,
@@ -5411,3 +5483,22 @@ class CircuitPEPSSimpleUpdate(Circuit):
 
     def sample_chaotic(self, *args, **kwargs):
         self._unsupported_exact("sample_chaotic")
+
+    def sample_chaotic_rehearse(self, *args, **kwargs):
+        self._unsupported_exact("sample_chaotic_rehearse")
+
+    def partial_trace(self, *args, **kwargs):
+        self._unsupported_exact("partial_trace")
+
+    @property
+    def uni(self):
+        raise NotImplementedError(
+            "`uni` (the dense circuit unitary) is not available for "
+            "`CircuitPEPSSimpleUpdate`, which never forms the full unitary. "
+            "Apply gates to a state and use `psi` or `local_expectation`."
+        )
+
+    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
+        # the reverse lightcone is not meaningful for a simple update PEPS,
+        # which always keeps the whole state, so just return it
+        return self.psi

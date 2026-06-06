@@ -1071,6 +1071,149 @@ class TestCircuitPEPSSimpleUpdate:
             circ.amplitude("000")
         with pytest.raises(NotImplementedError):
             list(circ.sample(2))
+        with pytest.raises(NotImplementedError):
+            circ.partial_trace([0])
+        with pytest.raises(NotImplementedError):
+            circ.sample_chaotic_rehearse()
+        with pytest.raises(NotImplementedError):
+            circ.uni
+        # a two-qubit gate off any declared edge is rejected
+        with pytest.raises(ValueError):
+            circ.apply_gates([qtn.Gate("CZ", params=(), qubits=[0, 2])])
+
+    def test_local_expectation_on_grid_coordinate_sites(self):
+        # sites are 2D coordinate tuples; a single-site `where` must not be
+        # misread as a two-site operator (regression for the site handling)
+        edges = qtn.edges_2d_square(2, 2)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(0)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) for s in sites
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        circ.equilibrate(max_iterations=300, tol=1e-12)
+
+        qmap = {s: i for i, s in enumerate(sites)}
+        ref = qtn.Circuit(N=len(sites))
+        for G, *where in gates:
+            ref.apply_gate(G, *(qmap[s] for s in where))
+
+        Z = qu.pauli("Z").astype(complex)
+        for s in sites:
+            x = circ.local_expectation(Z, s, max_distance=2)
+            xe = complex(ref.local_expectation(Z, qmap[s]))
+            assert complex(x) == pytest.approx(xe, abs=1e-6)
+
+    def test_copy_is_independent(self):
+        edges = qtn.edges_2d_square(2, 2)
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        rng = np.random.default_rng(3)
+        circ.apply_gates(
+            [
+                (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+                for a, b in edges
+            ]
+        )
+        other = circ.copy()
+        n_before = circ.num_gates
+        # the copy carries the geometry and gauges and is independently usable
+        assert set(other.edges) == set(circ.edges)
+        assert other.gauges is not circ.gauges
+        assert len(other.gauges) == len(circ.gauges)
+        a, b = circ.edges[0]
+        other.apply_gates([(qu.rand_uni(4), a, b)])
+        # mutating the copy must not touch the original
+        assert circ.num_gates == n_before
+        assert other.num_gates == n_before + 1
+
+    def test_renorm_and_equilibrate_every(self):
+        # the renorm and equilibrate_every options should be accepted and keep
+        # normalized expectations correct on a chain (where SU is exact)
+        N = 5
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(1)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), i)
+            for i in range(N)
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges,
+            max_bond=32,
+            cutoff=1e-12,
+            renorm=True,
+            equilibrate_every=3,
+        )
+        circ.apply_gates(gates)
+        circ.equilibrate()
+
+        exact = qtn.Circuit(N=N)
+        exact.apply_gates(gates)
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(N):
+            x = circ.local_expectation(Z, i, max_distance=N)
+            xe = complex(exact.local_expectation(Z, i))
+            assert complex(x) == pytest.approx(xe, abs=1e-8)
+
+    def test_cluster_error_decreases_with_distance(self):
+        # on a loopy lattice with an essentially exact (large max_bond) state,
+        # a larger cluster must give a more accurate local expectation
+        edges = qtn.edges_2d_square(3, 3)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(11)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) for s in sites
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        qmap = {s: i for i, s in enumerate(sites)}
+        ref = qtn.Circuit(N=len(sites))
+        for G, *where in gates:
+            ref.apply_gate(G, *(qmap[s] for s in where))
+        Z = qu.pauli("Z").astype(complex)
+        exact = {s: complex(ref.local_expectation(Z, qmap[s])) for s in sites}
+
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        circ.equilibrate(max_iterations=200, tol=1e-10)
+
+        def err(md):
+            return max(
+                abs(circ.local_expectation(Z, s, max_distance=md) - exact[s])
+                for s in sites
+            )
+
+        assert err(3) < err(0)
+
+    def test_scales_to_a_larger_lattice(self):
+        # the point of a PEPS simulator: run a circuit on a lattice far too
+        # large to simulate exactly, with the bond dimension capped
+        edges = qtn.edges_2d_square(6, 6)
+        max_bond = 8
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=max_bond)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(2)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) for s in sites
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ.apply_gates(gates)
+        psi = circ.psi
+        assert psi.num_tensors == len(sites)
+        assert psi.max_bond() <= max_bond
 
 
 class TestCircuitGen:
