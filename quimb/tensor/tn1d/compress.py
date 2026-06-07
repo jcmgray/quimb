@@ -2258,6 +2258,7 @@ def tensor_network_1d_compress_fit(
     inplace_fit=False,
     inplace=False,
     progbar=False,
+    info=None,
     **kwargs,
 ):
     """Compress any 1D-like (can have multiple tensors per site) tensor network
@@ -2355,6 +2356,11 @@ def tensor_network_1d_compress_fit(
         Whether to show a progress bar. Note the progress bar shows the maximum
         change of any single tensor norm, *not* the global change in norm or
         truncation error.
+    info : dict, optional
+        Store fit diagnostics in this dict. Currently records the number of
+        sweeps performed, whether the tolerance criterion was met, the final
+        maximum local tensor change, and for a single target TN the normalized
+        overlap with the compressed result.
     kwargs
         Extra keyword arguments are combined into `compress_opts`, though
         existing items in `compress_opts` take precedence over `kwargs`.
@@ -2501,6 +2507,8 @@ def tensor_network_1d_compress_fit(
 
     # whether to compute the maximum change in tensor norm
     compute_tdiff = (tol != 0.0) or progbar
+    max_tdiff = None
+    converged = False
 
     try:
         for i in its:
@@ -2532,6 +2540,7 @@ def tensor_network_1d_compress_fit(
                 its.set_description(f"max_tdiff={max_tdiff:.2e}")
             if tol != 0.0 and max_tdiff < tol:
                 # converged
+                converged = True
                 break
 
             old_direction = next_direction
@@ -2540,6 +2549,17 @@ def tensor_network_1d_compress_fit(
     finally:
         if progbar:
             its.close()
+
+    if info is not None:
+        info["iterations"] = 0 if max_tdiff is None else i + 1
+        info["max_tdiff"] = max_tdiff
+        info["converged"] = converged
+        if len(tns) == 1:
+            overlap = tn_fit.conj().overlap(tns[0], optimize=optimize)
+            norm_fit = tn_fit.norm(optimize=optimize)
+            norm_target = tns[0].norm(optimize=optimize)
+            if norm_fit and norm_target:
+                info["overlap"] = overlap / (norm_fit * norm_target)
 
     tn_fit.drop_tags("__FIT__")
     tn_fit.conj_()

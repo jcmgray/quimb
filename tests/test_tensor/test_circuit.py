@@ -901,3 +901,300 @@ class TestCircuitGen:
 
         energy2 = sum(circ2.local_expectation(ZZ, edge) for edge in terms)
         assert energy2 > 4
+
+
+class TestCircuitMPSLazy:
+    @staticmethod
+    def _random_long_range_gates(N, depth, seed=1):
+        rng = np.random.default_rng(seed)
+        gates = []
+        for _ in range(depth):
+            for i in range(N):
+                gates.append(
+                    qtn.Gate(
+                        "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                    )
+                )
+            for i in range(0, N - 1, 2):
+                gates.append(
+                    qtn.Gate(
+                        "SU4",
+                        params=rng.uniform(0, 2 * np.pi, size=15),
+                        qubits=[i, i + 1],
+                    )
+                )
+            a, b = sorted(map(int, rng.choice(N, size=2, replace=False)))
+            gates.append(
+                qtn.Gate.from_raw(
+                    qu.rand_uni(4, seed=int(rng.integers(1 << 30))),
+                    qubits=[a, b],
+                )
+            )
+        return gates
+
+    def test_matches_dense_long_range(self):
+        N = 8
+        gates = self._random_long_range_gates(N, depth=3, seed=42)
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method="dm")
+        circ.apply_gates(gates)
+
+        psi = circ.psi
+        assert isinstance(psi, qtn.MatrixProductState)
+        assert psi.distance_normalized(ref.psi) < 1e-6
+
+    def test_defers_flush_until_overlap_or_access(self):
+        N = 8
+        rng = np.random.default_rng(7)
+        circ = qtn.CircuitMPSLazy(N, max_bond=8, method="dm")
+
+        circ.apply_gate(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[0, 1],
+            )
+        )
+        assert circ._pending
+
+        circ.apply_gate(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[4, 5],
+            )
+        )
+        assert circ._pending
+
+        circ.apply_gate(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[1, 2],
+            )
+        )
+        assert circ._pending
+
+        psi = circ.psi
+        assert isinstance(psi, qtn.MatrixProductState)
+        assert not circ._pending
+
+    def test_controlled_gate_falls_back_then_recovers(self):
+        N = 6
+        rng = np.random.default_rng(3)
+        gates = [
+            qtn.Gate(
+                "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+            )
+            for i in range(N)
+        ]
+        gates.append(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[2, 4],
+                controls=[0],
+            )
+        )
+        gates.append(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[1, 2],
+            )
+        )
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method="direct")
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+    @pytest.mark.parametrize("method", ["direct", "zipup"])
+    def test_other_compression_methods_on_small_circuit(self, method):
+        N = 6
+        gates = self._random_long_range_gates(N, depth=2, seed=11)
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method=method)
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+    def test_sample_flushes_pending_state(self):
+        circ = qtn.CircuitMPSLazy(2, max_bond=4, method="dm")
+        circ.h(0)
+        circ.cx(0, 1)
+        assert circ._pending
+
+        samples = set(circ.sample(32, seed=42))
+
+        assert samples <= {"00", "11"}
+        assert not circ._pending
+
+    def test_local_expectation_flushes_pending_state(self):
+        circ = qtn.CircuitMPSLazy(2, max_bond=4, method="dm")
+        circ.h(0)
+        circ.cx(0, 1)
+        assert circ._pending
+
+        z0 = circ.local_expectation(qu.pauli("Z"), 0)
+        z1 = circ.local_expectation(qu.pauli("Z"), 1)
+
+        assert z0.real == pytest.approx(0.0, abs=1e-6)
+        assert z1.real == pytest.approx(0.0, abs=1e-6)
+        assert not circ._pending
+
+    def test_pending_lazy_gates_keep_gate_tags_before_flush(self):
+        circ = qtn.CircuitMPSLazy(
+            4,
+            max_bond=4,
+            method="dm",
+            tag_gate_numbers=True,
+            tag_gate_rounds=True,
+            tag_gate_labels=True,
+        )
+
+        circ.apply_gate("H", 0, gate_round=3)
+        circ.apply_gate("CX", 0, 2, gate_round=7)
+
+        assert circ._pending
+        assert circ._psi["GATE_0"] is not None
+        assert circ._psi["GATE_1"] is not None
+        assert circ._psi["ROUND_3"] is not None
+        assert circ._psi["ROUND_7"] is not None
+        assert circ._psi["H"] is not None
+        assert circ._psi["CX"] is not None
+
+    def test_2d_ising_trotter_mapping(self):
+        Lx, Ly = 2, 3
+        N = Lx * Ly
+
+        def site(x, y):
+            return x * Ly + y
+
+        bonds = []
+        for x in range(Lx):
+            for y in range(Ly):
+                if y + 1 < Ly:
+                    bonds.append((site(x, y), site(x, y + 1)))
+                if x + 1 < Lx:
+                    bonds.append((site(x, y), site(x + 1, y)))
+
+        dt = 0.1
+        zz = qu.pauli("Z") & qu.pauli("Z")
+        rx = qu.expm(-1j * dt * qu.pauli("X"))
+        rzz = qu.expm(-1j * dt * zz)
+
+        gates = []
+        for _ in range(3):
+            for i in range(N):
+                gates.append(qtn.Gate.from_raw(rx, qubits=[i]))
+            for a, b in bonds:
+                gates.append(qtn.Gate.from_raw(rzz, qubits=[a, b]))
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method="dm")
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+    def test_fit_method_tracks_generic_error_estimate(self):
+        N = 6
+        gates = self._random_long_range_gates(N, depth=2, seed=21)
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(
+            N,
+            max_bond=4,
+            cutoff=0.0,
+            method="fit",
+            compress_opts={"max_iterations": 2, "tol": 0.0, "optimize": "greedy"},
+        )
+        circ.apply_gates(gates)
+
+        f_est = circ.fidelity_estimate()
+        e_est = circ.error_estimate()
+
+        assert 0.0 <= f_est <= 1.0 + 1e-9
+        assert 0.0 <= e_est <= 1.0 + 1e-9
+        assert e_est == pytest.approx(1 - f_est)
+
+        psi = circ.psi.to_dense().reshape(-1)
+        psi_ref = ref.psi.to_dense().reshape(-1)
+        overlap = abs(np.vdot(psi_ref, psi)) ** 2
+        overlap /= np.vdot(psi_ref, psi_ref).real * np.vdot(psi, psi).real
+
+        # The generic estimate is norm-based rather than a fit-specific overlap,
+        # but it should still be consistent with the actual compressed-state fidelity.
+        assert f_est == pytest.approx(overlap, rel=5e-2, abs=5e-2)
+
+    def test_src_method_on_local_circuit(self):
+        N = 8
+        rng = np.random.default_rng(12)
+        gates = []
+        for _ in range(3):
+            for i in range(N):
+                gates.append(
+                    qtn.Gate(
+                        "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                    )
+                )
+            for i in range(0, N - 1, 2):
+                gates.append(
+                    qtn.Gate(
+                        "SU4",
+                        params=rng.uniform(0, 2 * np.pi, size=15),
+                        qubits=[i, i + 1],
+                    )
+                )
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        circ = qtn.CircuitMPSLazy(
+            N,
+            max_bond=2**N,
+            cutoff=0.0,
+            method="src",
+        )
+        circ.apply_gates(gates)
+
+        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+    def test_fit_method_reports_last_compress_info(self):
+        N = 6
+        gates = self._random_long_range_gates(N, depth=2, seed=21)
+
+        circ = qtn.CircuitMPSLazy(
+            N,
+            max_bond=4,
+            cutoff=0.0,
+            method="fit",
+            compress_opts={
+                "max_iterations": 2,
+                "tol": 0.0,
+                "optimize": "greedy",
+            },
+        )
+        circ.apply_gates(gates)
+        _ = circ.psi
+
+        info = circ.last_compress_info
+        assert info is not None
+        assert "iterations" in info
+        assert "max_tdiff" in info
+        assert "converged" in info
+        assert "overlap" in info
+        assert 0.0 <= abs(info["overlap"]) <= 1.0 + 1e-9

@@ -4945,6 +4945,234 @@ class CircuitMPS(Circuit):
         )
 
 
+def _lazy_mps_gate_tags(circ, gate, tags=None):
+    """Build the full tag set for a lazily stacked gate using the same
+    numbering / round / label conventions as ``Circuit._apply_gate``.
+    """
+    tags = tags_to_oset(tags)
+    if circ.tag_gate_numbers:
+        tags.add(circ.gate_tag(circ.num_gates))
+    if circ.tag_gate_rounds and (gate.round is not None):
+        tags.add(circ.round_tag(gate.round))
+    if circ.tag_gate_labels and (gate.tag is not None):
+        tags.add(gate.tag)
+    return tags
+
+
+def _lazy_mps_gate_span(gate):
+    """Return both the acted-on sites and the contiguous support they span.
+
+    The span is used to decide when a pending lazy batch must be flushed
+    before stacking another gate.
+    """
+    where = tuple(gate.qubits)
+    return where, set(range(min(where), max(where) + 1))
+
+
+def _lazy_mps_convert_gate(circ, G):
+    """Convert and cache a dense gate array if eager backend conversion is
+    enabled for this circuit.
+    """
+    if circ.convert_eager:
+        key = id(G)
+        if key not in circ._backend_gate_cache:
+            circ._backend_gate_cache[key] = circ._maybe_convert(G)
+        return circ._backend_gate_cache[key]
+    return G
+
+
+def _lazy_mps_should_flush(circ, gate_span):
+    """Decide whether a new gate should trigger a flush of pending lazy
+    structure before it is stacked.
+    """
+    return not circ._pending_sites.isdisjoint(gate_span)
+
+
+def _lazy_mps_flush(circ):
+    """Compress the accumulated 1D-like tensor network back into a proper MPS
+    and reset the lazy bookkeeping.
+    """
+    if not circ._pending:
+        return
+
+    from .tn1d.compress import tensor_network_1d_compress
+
+    kwargs = dict(circ._compress_opts)
+    info = None
+    if circ._compress_method.startswith("fit"):
+        info = kwargs.get("info")
+        if info is None:
+            info = {}
+            kwargs["info"] = info
+
+    circ._psi = tensor_network_1d_compress(
+        circ._psi,
+        max_bond=circ.gate_opts.get("max_bond"),
+        cutoff=circ.gate_opts.get("cutoff", 1e-10),
+        method=circ._compress_method,
+        inplace=True,
+        **kwargs,
+    )
+    circ._last_compress_info = None if info is None else dict(info)
+    circ.gate_opts["info"]["cur_orthog"] = None
+    circ._pending = False
+    circ._pending_sites.clear()
+
+
+def _lazy_mps_stack_gate(circ, gate, tags=None, info=None):
+    """Turn a dense gate into a supported sub-MPO and stack it onto the
+    current MPS lazily, without contracting or compressing yet.
+    """
+    where, gate_span = _lazy_mps_gate_span(gate)
+    G = _lazy_mps_convert_gate(circ, gate.array)
+
+    mpo = MatrixProductOperator.from_dense(
+        G,
+        dims=tuple(circ._psi.phys_dim(i) for i in where),
+        sites=where,
+        L=circ.N,
+    )
+    for tag in _lazy_mps_gate_tags(circ, gate, tags=tags):
+        mpo.add_tag(tag)
+
+    circ._psi.gate_with_submpo_(
+        mpo,
+        where=where,
+        method="lazy",
+        inplace_mpo=True,
+        info=info,
+    )
+    circ._pending = True
+    circ._pending_sites |= gate_span
+
+
+class CircuitMPSLazy(CircuitMPS):
+    """Quantum circuit simulation that stacks gates lazily as sub-MPOs and
+    only periodically compresses the accumulated network back into a true MPS
+    using :func:`quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
+
+    Ordinary gates are buffered as non-overlapping lazy layers when possible.
+    Accessors such as :attr:`psi`, :meth:`sample`, and
+    :meth:`local_expectation` first flush the pending structure so callers
+    always observe a genuine MPS.
+    """
+
+    def __init__(
+        self,
+        N=None,
+        *,
+        psi0=None,
+        max_bond=None,
+        cutoff=1e-10,
+        method="dm",
+        compress_opts=None,
+        gate_opts=None,
+        dtype=None,
+        to_backend=None,
+        convert_eager=True,
+        **circuit_opts,
+    ):
+        self._compress_method = method
+        self._compress_opts = ensure_dict(compress_opts)
+        self._last_compress_info = None
+        self._pending = False
+        self._pending_sites = set()
+        super().__init__(
+            N=N,
+            psi0=psi0,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            gate_opts=gate_opts,
+            dtype=dtype,
+            to_backend=to_backend,
+            convert_eager=convert_eager,
+            **circuit_opts,
+        )
+
+    def _compress(self):
+        """Flush any pending lazy gates through the configured 1D compression
+        backend.
+        """
+        _lazy_mps_flush(self)
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        """Apply a gate using lazy stacking for ordinary gates and the eager
+        ``CircuitMPS`` path for controlled / special cases.
+        """
+        opts = {**self.gate_opts, **gate_opts}
+
+        if gate.special or gate.controls:
+            self._compress()
+            super()._apply_gate(
+                gate,
+                tags=_lazy_mps_gate_tags(self, gate, tags=tags),
+                **gate_opts,
+            )
+            return
+
+        _, gate_span = _lazy_mps_gate_span(gate)
+        if _lazy_mps_should_flush(self, gate_span):
+            self._compress()
+
+        _lazy_mps_stack_gate(
+            self,
+            gate,
+            tags=tags,
+            info=opts.get("info"),
+        )
+        self._gates.append(gate)
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        """Apply a sequence of gates while preserving the lazy batching
+        behavior of :meth:`_apply_gate`.
+        """
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+
+        for gate in gates:
+            gate = parse_to_gate(gate)
+            self._apply_gate(gate, **gate_opts)
+
+    @property
+    def psi(self):
+        """Return the current state as a proper MPS, flushing pending lazy
+        structure first if needed.
+        """
+        self._compress()
+        return super().psi
+
+    def sample(self, C, *args, **kwargs):
+        """Sample from the current state after materializing any pending lazy
+        gates into the MPS.
+        """
+        self._compress()
+        yield from super().sample(C, *args, **kwargs)
+
+    def local_expectation(self, G, where, *args, **kwargs):
+        """Compute a local expectation value after flushing pending lazy
+        structure into the MPS.
+        """
+        self._compress()
+        return super().local_expectation(G, where, *args, **kwargs)
+
+    def fidelity_estimate(self):
+        """Estimate fidelity using the compressed MPS after any pending lazy
+        gates have been flushed.
+        """
+        self._compress()
+        return super().fidelity_estimate()
+
+    @property
+    def last_compress_info(self):
+        """Diagnostics from the most recent global lazy compression, if the
+        selected compression backend reported any.
+        """
+        return self._last_compress_info
+
+
 class CircuitPermMPS(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
     lazily tracking the qubit ordering rather than 'swapping back' qubits after
