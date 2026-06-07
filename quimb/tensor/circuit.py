@@ -4998,6 +4998,8 @@ def _lazy_mps_flush(circ):
     from .tn1d.compress import tensor_network_1d_compress
 
     kwargs = dict(circ._compress_opts)
+    if circ._compress_method in {"dm", "zipup"}:
+        kwargs.setdefault("check_1d", False)
     info = None
     if circ._compress_method.startswith("fit"):
         info = kwargs.get("info")

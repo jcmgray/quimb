@@ -1028,6 +1028,23 @@ class TestCircuitMPSLazy:
 
         assert circ.psi.distance_normalized(ref.psi) < 1e-6
 
+    def test_flush_skips_rechecking_1d_structure(self, monkeypatch):
+        import quimb.tensor.tn1d.compress as tn1dc
+
+        def fail_enforce(*args, **kwargs):
+            raise AssertionError("lazy flush should skip enforce_1d_like")
+
+        monkeypatch.setattr(tn1dc, "enforce_1d_like", fail_enforce)
+
+        circ = qtn.CircuitMPSLazy(4, max_bond=16, cutoff=1e-12, method="dm")
+        circ.apply_gate("H", 0)
+        circ.apply_gate("CX", 0, 2)
+
+        psi = circ.psi
+
+        assert isinstance(psi, qtn.MatrixProductState)
+        assert not circ._pending
+
     def test_sample_flushes_pending_state(self):
         circ = qtn.CircuitMPSLazy(2, max_bond=4, method="dm")
         circ.h(0)

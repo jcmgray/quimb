@@ -387,6 +387,7 @@ def tensor_network_1d_compress_dm(
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
+    check_1d=True,
     normalize=False,
     cutoff_mode="rsum1",
     permute_arrays=True,
@@ -421,6 +422,9 @@ def tensor_network_1d_compress_dm(
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
         tensor per site, in the order given by ``site_tags``.
+    check_1d : bool, optional
+        Whether to validate and, if necessary, fix the 1D-like bond structure
+        before compressing.
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
@@ -484,7 +488,10 @@ def tensor_network_1d_compress_dm(
         site_tags = tuple(reversed(site_tags))
     N = len(site_tags)
 
-    ket = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    if check_1d:
+        ket = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    else:
+        ket = tn if inplace else tn.copy()
 
     # partition outer indices, and create conjugate bra indices
     ket_site_inds = []
@@ -672,6 +679,7 @@ def tensor_network_1d_compress_zipup(
     max_bond=None,
     cutoff=1e-10,
     site_tags=None,
+    check_1d=True,
     canonize=True,
     normalize=False,
     cutoff_mode="rsum2",
@@ -711,6 +719,9 @@ def tensor_network_1d_compress_zipup(
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
         tensor per site, in the order given by ``site_tags``.
+    check_1d : bool, optional
+        Whether to validate and, if necessary, fix the 1D-like bond structure
+        before compressing.
     canonize : bool, optional
         Whether to pseudo canonicalize the initial tensor network.
     normalize : bool, optional
@@ -772,12 +783,10 @@ def tensor_network_1d_compress_zipup(
         site_tags = tuple(reversed(site_tags))
     N = len(site_tags)
 
-    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
-
-    # calculate the local site (outer) indices
-    site_inds = [
-        tuple(tn.select(tag)._outer_inds & tn._outer_inds) for tag in site_tags
-    ]
+    if check_1d:
+        tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    else:
+        tn = tn if inplace else tn.copy()
 
     if canonize:
         # put in 'pseudo' left canonical form:
@@ -789,6 +798,11 @@ def tensor_network_1d_compress_zipup(
         #     ▶─▶─▶─▶─▶─▶─▶─▶─▶─○  MPS
         #
         tn = tn.canonize_around_(site_tags[-1], **canonize_opts)
+
+    # calculate the local site (outer) indices
+    site_inds = [
+        tuple(tn.select(tag)._outer_inds & tn._outer_inds) for tag in site_tags
+    ]
 
     # zip along the bonds
     ts = [None] * N
