@@ -912,7 +912,9 @@ class TestCircuitMPSLazy:
             for i in range(N):
                 gates.append(
                     qtn.Gate(
-                        "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                        "U3",
+                        params=rng.uniform(0, 2 * np.pi, size=3),
+                        qubits=[i],
                     )
                 )
             for i in range(0, N - 1, 2):
@@ -946,41 +948,15 @@ class TestCircuitMPSLazy:
         assert isinstance(psi, qtn.MatrixProductState)
         assert psi.distance_normalized(ref.psi) < 1e-6
 
-    def test_defers_flush_until_overlap_or_access(self):
-        N = 8
-        rng = np.random.default_rng(7)
-        circ = qtn.CircuitMPSLazy(N, max_bond=8, method="dm")
+    def test_disjoint_nonlocal_gates_do_not_accumulate_unbounded_span(self):
+        circ = qtn.CircuitMPSLazy(10, max_bond=8, method="zipup")
 
-        circ.apply_gate(
-            qtn.Gate(
-                "SU4",
-                params=rng.uniform(0, 2 * np.pi, size=15),
-                qubits=[0, 1],
-            )
-        )
-        assert circ._pending
+        circ.apply_gate("CX", 0, 5)
+        circ.apply_gate("CX", 1, 6)
+        assert circ._pending_sites == {0, 1, 2, 3, 4, 5, 6}
 
-        circ.apply_gate(
-            qtn.Gate(
-                "SU4",
-                params=rng.uniform(0, 2 * np.pi, size=15),
-                qubits=[4, 5],
-            )
-        )
-        assert circ._pending
-
-        circ.apply_gate(
-            qtn.Gate(
-                "SU4",
-                params=rng.uniform(0, 2 * np.pi, size=15),
-                qubits=[1, 2],
-            )
-        )
-        assert circ._pending
-
-        psi = circ.psi
-        assert isinstance(psi, qtn.MatrixProductState)
-        assert not circ._pending
+        circ.apply_gate("CX", 2, 7)
+        assert circ._pending_sites == {2, 3, 4, 5, 6, 7}
 
     def test_controlled_gate_falls_back_then_recovers(self):
         N = 6
@@ -1010,7 +986,9 @@ class TestCircuitMPSLazy:
         ref = qtn.Circuit(N)
         ref.apply_gates(gates)
 
-        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method="direct")
+        circ = qtn.CircuitMPSLazy(
+            N, max_bond=2**N, cutoff=1e-12, method="direct"
+        )
         circ.apply_gates(gates)
 
         assert circ.psi.distance_normalized(ref.psi) < 1e-6
@@ -1023,7 +1001,9 @@ class TestCircuitMPSLazy:
         ref = qtn.Circuit(N)
         ref.apply_gates(gates)
 
-        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, cutoff=1e-12, method=method)
+        circ = qtn.CircuitMPSLazy(
+            N, max_bond=2**N, cutoff=1e-12, method=method
+        )
         circ.apply_gates(gates)
 
         assert circ.psi.distance_normalized(ref.psi) < 1e-6
@@ -1045,28 +1025,52 @@ class TestCircuitMPSLazy:
         assert isinstance(psi, qtn.MatrixProductState)
         assert not circ._pending
 
+    @pytest.mark.parametrize("method", ["dm", "zipup"])
+    def test_windowed_flush_compresses_strict_subwindow(
+        self, monkeypatch, method
+    ):
+        import quimb.tensor.tn1d.compress as tn1dc
+
+        calls = []
+        real_compress = tn1dc.tensor_network_1d_compress
+
+        def wrapped_compress(*args, **kwargs):
+            calls.append(tuple(kwargs.get("site_tags", ())))
+            return real_compress(*args, **kwargs)
+
+        monkeypatch.setattr(
+            tn1dc, "tensor_network_1d_compress", wrapped_compress
+        )
+
+        circ = qtn.CircuitMPSLazy(8, max_bond=16, cutoff=1e-12, method=method)
+        circ.apply_gate("CX", 2, 4)
+        _ = circ.psi
+
+        assert calls
+        assert calls[-1] == ("I2", "I3", "I4")
+
     def test_sample_flushes_pending_state(self):
-        circ = qtn.CircuitMPSLazy(2, max_bond=4, method="dm")
+        circ = qtn.CircuitMPSLazy(3, max_bond=4, method="dm")
         circ.h(0)
-        circ.cx(0, 1)
+        circ.cx(0, 2)
         assert circ._pending
 
         samples = set(circ.sample(32, seed=42))
 
-        assert samples <= {"00", "11"}
+        assert samples <= {"000", "101"}
         assert not circ._pending
 
     def test_local_expectation_flushes_pending_state(self):
-        circ = qtn.CircuitMPSLazy(2, max_bond=4, method="dm")
+        circ = qtn.CircuitMPSLazy(3, max_bond=4, method="dm")
         circ.h(0)
-        circ.cx(0, 1)
+        circ.cx(0, 2)
         assert circ._pending
 
         z0 = circ.local_expectation(qu.pauli("Z"), 0)
-        z1 = circ.local_expectation(qu.pauli("Z"), 1)
+        z2 = circ.local_expectation(qu.pauli("Z"), 2)
 
         assert z0.real == pytest.approx(0.0, abs=1e-6)
-        assert z1.real == pytest.approx(0.0, abs=1e-6)
+        assert z2.real == pytest.approx(0.0, abs=1e-6)
         assert not circ._pending
 
     def test_pending_lazy_gates_keep_gate_tags_before_flush(self):
@@ -1089,6 +1093,18 @@ class TestCircuitMPSLazy:
         assert circ._psi["ROUND_7"] is not None
         assert circ._psi["H"] is not None
         assert circ._psi["CX"] is not None
+
+    def test_repeated_single_gate_overlap_can_fall_back_to_eager(self):
+        circ = qtn.CircuitMPSLazy(6, max_bond=16, cutoff=1e-12, method="zipup")
+
+        circ.apply_gate("CX", 0, 2)
+        assert circ._pending
+
+        circ.apply_gate("CX", 0, 3)
+        assert circ._pending
+
+        circ.apply_gate("CX", 0, 4)
+        assert not circ._pending
 
     def test_2d_ising_trotter_mapping(self):
         Lx, Ly = 2, 3
@@ -1137,7 +1153,11 @@ class TestCircuitMPSLazy:
             max_bond=4,
             cutoff=0.0,
             method="fit",
-            compress_opts={"max_iterations": 2, "tol": 0.0, "optimize": "greedy"},
+            compress_opts={
+                "max_iterations": 2,
+                "tol": 0.0,
+                "optimize": "greedy",
+            },
         )
         circ.apply_gates(gates)
 
@@ -1165,7 +1185,9 @@ class TestCircuitMPSLazy:
             for i in range(N):
                 gates.append(
                     qtn.Gate(
-                        "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+                        "U3",
+                        params=rng.uniform(0, 2 * np.pi, size=3),
+                        qubits=[i],
                     )
                 )
             for i in range(0, N - 1, 2):

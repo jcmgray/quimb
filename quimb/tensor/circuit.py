@@ -4969,6 +4969,12 @@ def _lazy_mps_gate_span(gate):
     return where, set(range(min(where), max(where) + 1))
 
 
+def _lazy_mps_gate_is_nonlocal(gate):
+    """Whether a gate skips over intermediate sites in the current ordering."""
+    where, gate_span = _lazy_mps_gate_span(gate)
+    return len(gate_span) > len(where)
+
+
 def _lazy_mps_convert_gate(circ, G):
     """Convert and cache a dense gate array if eager backend conversion is
     enabled for this circuit.
@@ -4981,11 +4987,127 @@ def _lazy_mps_convert_gate(circ, G):
     return G
 
 
-def _lazy_mps_should_flush(circ, gate_span):
+def _lazy_mps_should_flush(circ, gate_sites, gate_span):
     """Decide whether a new gate should trigger a flush of pending lazy
     structure before it is stacked.
     """
-    return not circ._pending_sites.isdisjoint(gate_span)
+    if not circ._pending_gate_sites.isdisjoint(gate_sites):
+        return True
+
+    # Allow a small amount of span-sharing for zipup, but don't let disjoint
+    # long-range gates accumulate into a near-full-chain window.
+    return (
+        circ._compress_method == "zipup"
+        and circ._pending_lazy_gate_count >= 2
+        and not circ._pending_sites.isdisjoint(gate_span)
+    )
+
+
+def _lazy_mps_overlap_sites(circ, where, gate_span):
+    """Return the site set used to detect lazy overlap for this method."""
+    if circ._compress_method == "zipup":
+        return set(where)
+    return gate_span
+
+
+def _lazy_mps_should_force_eager(circ, gate_sites):
+    """Whether a nonlocal gate should bypass lazy stacking and use the eager
+    path based on the recent overlap pattern.
+    """
+    return (
+        circ._force_eager_nonlocal_sites is not None
+        and not circ._force_eager_nonlocal_sites.isdisjoint(gate_sites)
+    )
+
+
+def _lazy_mps_would_span_full_chain(circ, gate_span):
+    """Whether stacking ``gate_span`` would expand the pending lazy support to
+    cover the entire chain.
+    """
+    if not circ._pending_sites:
+        return False
+
+    pending_min = min(circ._pending_sites)
+    pending_max = max(circ._pending_sites)
+    gate_min = min(gate_span)
+    gate_max = max(gate_span)
+    return (min(pending_min, gate_min) == 0) and (
+        max(pending_max, gate_max) == circ.N - 1
+    )
+
+
+def _lazy_mps_window(circ):
+    """Return the minimal contiguous window covering the pending lazy support."""
+    if not circ._pending_sites:
+        return None
+
+    a = min(circ._pending_sites)
+    b = max(circ._pending_sites)
+    return a, b
+
+
+def _lazy_mps_uses_window_flush(circ):
+    """Whether the compression method supports local subwindow flushing."""
+    return circ._compress_method in {"dm", "zipup"}
+
+
+def _lazy_mps_window_flush(circ):
+    """Attempt to flush only the local window touched by pending lazy support.
+
+    Returns
+    -------
+    bool
+        Whether a local windowed flush was performed.
+    """
+    if not _lazy_mps_uses_window_flush(circ):
+        return False
+
+    window = _lazy_mps_window(circ)
+    if window is None:
+        return False
+
+    wa, wb = window
+    if wa == wb:
+        return False
+    if (wa == 0) and (wb == circ.N - 1):
+        return False
+
+    from .tn1d.compress import tensor_network_1d_compress
+
+    site_tags = [circ._psi.site_tag(i) for i in range(wa, wb + 1)]
+    _, subpsi = circ._psi.partition(site_tags, which="any", inplace=True)
+
+    kwargs = dict(circ._compress_opts)
+    kwargs.setdefault("check_1d", False)
+
+    tensor_network_1d_compress(
+        subpsi,
+        max_bond=circ.gate_opts.get("max_bond"),
+        cutoff=circ.gate_opts.get("cutoff", 1e-10),
+        method=circ._compress_method,
+        site_tags=site_tags,
+        permute_arrays=False,
+        inplace=True,
+        **kwargs,
+    )
+
+    circ._psi |= subpsi
+    return True
+
+
+def _lazy_mps_reset_pending_state(circ):
+    """Clear bookkeeping for any pending lazy gate structure."""
+    circ.gate_opts["info"]["cur_orthog"] = None
+    circ._pending = False
+    circ._pending_lazy_gate_count = 0
+    circ._force_eager_nonlocal_sites = None
+    circ._pending_gate_sites.clear()
+    circ._pending_sites.clear()
+
+
+def _lazy_mps_apply_eager(circ, gate, lazy_tags, **gate_opts):
+    """Apply ``gate`` directly through the eager ``CircuitMPS`` path."""
+    CircuitMPS._apply_gate(circ, gate, tags=lazy_tags, **gate_opts)
 
 
 def _lazy_mps_flush(circ):
@@ -4995,10 +5117,14 @@ def _lazy_mps_flush(circ):
     if not circ._pending:
         return
 
+    if _lazy_mps_window_flush(circ):
+        _lazy_mps_reset_pending_state(circ)
+        return
+
     from .tn1d.compress import tensor_network_1d_compress
 
     kwargs = dict(circ._compress_opts)
-    if circ._compress_method in {"dm", "zipup"}:
+    if _lazy_mps_uses_window_flush(circ):
         kwargs.setdefault("check_1d", False)
     info = None
     if circ._compress_method.startswith("fit"):
@@ -5016,9 +5142,7 @@ def _lazy_mps_flush(circ):
         **kwargs,
     )
     circ._last_compress_info = None if info is None else dict(info)
-    circ.gate_opts["info"]["cur_orthog"] = None
-    circ._pending = False
-    circ._pending_sites.clear()
+    _lazy_mps_reset_pending_state(circ)
 
 
 def _lazy_mps_stack_gate(circ, gate, tags=None, info=None):
@@ -5028,12 +5152,17 @@ def _lazy_mps_stack_gate(circ, gate, tags=None, info=None):
     where, gate_span = _lazy_mps_gate_span(gate)
     G = _lazy_mps_convert_gate(circ, gate.array)
 
-    mpo = MatrixProductOperator.from_dense(
-        G,
-        dims=tuple(circ._psi.phys_dim(i) for i in where),
-        sites=where,
-        L=circ.N,
-    )
+    mpo_key = (id(G), where)
+    mpo = circ._lazy_mpo_cache.get(mpo_key)
+    if mpo is None:
+        mpo = MatrixProductOperator.from_dense(
+            G,
+            dims=tuple(circ._psi.phys_dim(i) for i in where),
+            sites=where,
+            L=circ.N,
+        )
+        circ._lazy_mpo_cache[mpo_key] = mpo
+    mpo = mpo.copy()
     for tag in _lazy_mps_gate_tags(circ, gate, tags=tags):
         mpo.add_tag(tag)
 
@@ -5045,6 +5174,13 @@ def _lazy_mps_stack_gate(circ, gate, tags=None, info=None):
         info=info,
     )
     circ._pending = True
+    circ._pending_lazy_gate_count += 1
+    if circ._pending_lazy_gate_count > 1:
+        circ._single_gate_lazy_flush_streak = 0
+    circ._force_eager_nonlocal_sites = None
+    circ._pending_gate_sites |= _lazy_mps_overlap_sites(
+        circ, where, gate_span
+    )
     circ._pending_sites |= gate_span
 
 
@@ -5077,7 +5213,12 @@ class CircuitMPSLazy(CircuitMPS):
         self._compress_method = method
         self._compress_opts = ensure_dict(compress_opts)
         self._last_compress_info = None
+        self._lazy_mpo_cache = {}
         self._pending = False
+        self._pending_lazy_gate_count = 0
+        self._single_gate_lazy_flush_streak = 0
+        self._force_eager_nonlocal_sites = None
+        self._pending_gate_sites = set()
         self._pending_sites = set()
         super().__init__(
             N=N,
@@ -5097,24 +5238,62 @@ class CircuitMPSLazy(CircuitMPS):
         """
         _lazy_mps_flush(self)
 
+    def _flush_for_access(self):
+        """Materialize pending lazy structure before state access."""
+        self._compress()
+        self._force_eager_nonlocal_sites = None
+
     def _apply_gate(self, gate, tags=None, **gate_opts):
         """Apply a gate using lazy stacking for ordinary gates and the eager
         ``CircuitMPS`` path for controlled / special cases.
         """
         opts = {**self.gate_opts, **gate_opts}
+        lazy_tags = _lazy_mps_gate_tags(self, gate, tags=tags)
 
         if gate.special or gate.controls:
             self._compress()
-            super()._apply_gate(
-                gate,
-                tags=_lazy_mps_gate_tags(self, gate, tags=tags),
-                **gate_opts,
-            )
+            _lazy_mps_apply_eager(self, gate, lazy_tags, **gate_opts)
             return
 
-        _, gate_span = _lazy_mps_gate_span(gate)
-        if _lazy_mps_should_flush(self, gate_span):
+        if not _lazy_mps_gate_is_nonlocal(gate):
+            if self._pending:
+                self._compress()
+            _lazy_mps_apply_eager(self, gate, lazy_tags, **gate_opts)
+            return
+
+        where, gate_span = _lazy_mps_gate_span(gate)
+        gate_sites = set(where)
+        if _lazy_mps_should_force_eager(self, gate_sites):
+            _lazy_mps_apply_eager(self, gate, lazy_tags, **gate_opts)
+            self._force_eager_nonlocal_sites |= gate_sites
+            return
+
+        flush_sites = _lazy_mps_overlap_sites(self, where, gate_span)
+
+        if (
+            self._compress_method == "zipup"
+            and _lazy_mps_would_span_full_chain(self, gate_span)
+        ):
             self._compress()
+
+        if _lazy_mps_should_flush(self, flush_sites, gate_span):
+            if self._pending_lazy_gate_count == 1:
+                self._single_gate_lazy_flush_streak += 1
+            else:
+                self._single_gate_lazy_flush_streak = 0
+            self._compress()
+            if (
+                self._single_gate_lazy_flush_streak >= 2
+                and self._compress_method == "zipup"
+            ):
+                self._force_eager_nonlocal_sites = set(gate_sites)
+                _lazy_mps_apply_eager(
+                    self,
+                    gate,
+                    lazy_tags,
+                    **gate_opts,
+                )
+                return
 
         _lazy_mps_stack_gate(
             self,
@@ -5143,28 +5322,28 @@ class CircuitMPSLazy(CircuitMPS):
         """Return the current state as a proper MPS, flushing pending lazy
         structure first if needed.
         """
-        self._compress()
+        self._flush_for_access()
         return super().psi
 
     def sample(self, C, *args, **kwargs):
         """Sample from the current state after materializing any pending lazy
         gates into the MPS.
         """
-        self._compress()
+        self._flush_for_access()
         yield from super().sample(C, *args, **kwargs)
 
     def local_expectation(self, G, where, *args, **kwargs):
         """Compute a local expectation value after flushing pending lazy
         structure into the MPS.
         """
-        self._compress()
+        self._flush_for_access()
         return super().local_expectation(G, where, *args, **kwargs)
 
     def fidelity_estimate(self):
         """Estimate fidelity using the compressed MPS after any pending lazy
         gates have been flushed.
         """
-        self._compress()
+        self._flush_for_access()
         return super().fidelity_estimate()
 
     @property
