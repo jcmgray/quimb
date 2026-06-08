@@ -4991,14 +4991,14 @@ def _lazy_mps_should_flush(circ, gate_sites, gate_span):
     """Decide whether a new gate should trigger a flush of pending lazy
     structure before it is stacked.
     """
-    if not circ._pending_gate_sites.isdisjoint(gate_sites):
+    if _lazy_mps_has_gate_overlap(circ, gate_sites):
         return True
 
-    # Allow a small amount of span-sharing for zipup, but don't let disjoint
-    # long-range gates accumulate into a near-full-chain window.
+    # Allow one layer of span-sharing for zipup, but don't let disjoint
+    # long-range gates keep expanding the pending window unchecked.
     return (
         circ._compress_method == "zipup"
-        and circ._pending_lazy_gate_count >= 2
+        and circ._pending_lazy_gate_count >= 1
         and not circ._pending_sites.isdisjoint(gate_span)
     )
 
@@ -5008,6 +5008,11 @@ def _lazy_mps_overlap_sites(circ, where, gate_span):
     if circ._compress_method == "zipup":
         return set(where)
     return gate_span
+
+
+def _lazy_mps_has_gate_overlap(circ, gate_sites):
+    """Whether pending lazy structure overlaps directly on gate sites."""
+    return not circ._pending_gate_sites.isdisjoint(gate_sites)
 
 
 def _lazy_mps_should_force_eager(circ, gate_sites):
@@ -5277,7 +5282,10 @@ class CircuitMPSLazy(CircuitMPS):
             self._compress()
 
         if _lazy_mps_should_flush(self, flush_sites, gate_span):
-            if self._pending_lazy_gate_count == 1:
+            if (
+                self._pending_lazy_gate_count == 1
+                and _lazy_mps_has_gate_overlap(self, gate_sites)
+            ):
                 self._single_gate_lazy_flush_streak += 1
             else:
                 self._single_gate_lazy_flush_streak = 0

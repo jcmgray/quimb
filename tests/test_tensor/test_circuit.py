@@ -953,7 +953,7 @@ class TestCircuitMPSLazy:
 
         circ.apply_gate("CX", 0, 5)
         circ.apply_gate("CX", 1, 6)
-        assert circ._pending_sites == {0, 1, 2, 3, 4, 5, 6}
+        assert circ._pending_sites == {1, 2, 3, 4, 5, 6}
 
         circ.apply_gate("CX", 2, 7)
         assert circ._pending_sites == {2, 3, 4, 5, 6, 7}
