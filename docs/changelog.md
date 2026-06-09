@@ -233,9 +233,9 @@ Other enhancements:
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): add 'cautious' ADAM
 - [`TensorNetwork.pop_tensor`](quimb.tensor.tensor_core.TensorNetwork.pop_tensor): allow `tid` or tags to be specified.
 - add an example notebook for converting hyper tensor networks to normal tensor networks, for approximate contraction - {ref}`example-htn-to-2d`
-- add "SX" and "SXDG" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#277`)
-- add "XXPLUSYY" and "XXPLUSYY" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#279`)
-- add progress bar to various `Circuit` methods ({pull}`#288`)
+- add "SX" and "SXDG" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`277`)
+- add "XXPLUSYY" and "XXPLUSYY" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`279`)
+- add progress bar to various `Circuit` methods ({pull}`288`)
 - [`quimb.operator`](quimb.operator): fix MPO building for congested operators ({issue}`296` and {issue}`301`), allow arbitrary dtype ({issue}`289`). Fix building of sparse and matrix representations for non-translationally symmetric operators and operators with trivial (all identity) terms.
 
 **Bug fixes:**
@@ -331,7 +331,7 @@ Other enhancements:
 - Update generic TN optimizer docs.
 - add [`tn.gen_paths_loops`](quimb.tensor.tensor_core.TensorNetwork.gen_paths_loops) for generating all loops of indices in a TN.
 - add [`tn.gen_inds_connected`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_connected) for generating all connected sets of indices in a TN.
-- make SVD fallback error catching more generic ({pull}`#238`)
+- make SVD fallback error catching more generic ({pull}`238`)
 - fix some windows + numba CI issues.
 - [`approx_spectral_function`](quimb.linalg.approx_spectral.approx_spectral_function) add plotting and tracking
 - add dispatching to various tensor primitives to allow overriding
