@@ -5109,48 +5109,44 @@ class CircuitDense(Circuit):
 class CircuitLazyMPS(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
     lazily applying gates (via sub-MPO representation) and regularly contracting
-    and compressing the gates with the state. This improves the runtime scaling
-    compared to ``CircuitMPS`` especially for long range gates.
+    and compressing the gates with the state.
     """
     def __init__(
         self,
         N=None,
         psi0=None,
         gate_opts=None,
-        compress_every=10,
         **circuit_opts,
     ):
         gate_opts = ensure_dict(gate_opts)
         # this is used to pass around the canonical form
         gate_opts.setdefault("info", {})
+        gate_opts.setdefault("method", "direct")
         super().__init__(N, psi0=psi0, gate_opts=gate_opts, **circuit_opts)
-        self.compress_every = compress_every
-        self._gates_since_compress = 0
+        self._uncompressed_sites = set()
 
     def _compress(self):
-        """Contract all gates in the MPS and compress via creating a new MPS
-        from the dense representation of the current state.
-
-        This is faster and more accurate compared to `tensor_network_1d_compress`
-        method for this purpose.
+        """Compress the current state by contracting in all gates and then applying
+        the specified compression method.
         """
-        self._psi = MatrixProductState.from_dense(
-            self._psi.to_dense().flatten()
+        from ..tensor.tn1d.compress import tensor_network_1d_compress
+
+        self._psi = tensor_network_1d_compress(
+            self._psi,
+            method=self.gate_opts["method"],
+            max_bond=self.gate_opts["max_bond"],
+            cutoff=self.gate_opts["cutoff"],
+            permute_arrays=False,
         )
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
-        self._gates_since_compress += 1
-
-        if self._gates_since_compress % self.compress_every == 0:
+        if any(site in self._uncompressed_sites for site in gate.qubits):
             self._compress()
-
-        if gate.special or gate.controls:
-            return super()._apply_gate(gate, tags=tags, **gate_opts)
-
-        # Gates are applied lazily as sub-MPOs, however, the MPS must be compressed
-        # regularly to prevent the state tensor from blowing up in size and causing
-        # memory issues.
-        self._psi.gate_nonlocal_(gate.array, gate.qubits, method="lazy")  # type: ignore
+            self._uncompressed_sites.clear()
+        else:
+            min_site, max_site = min(gate.qubits), max(gate.qubits)
+            self._uncompressed_sites.update(range(min_site, max_site + 1))
+        super()._apply_gate(gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts)
 
     @property
     def psi(self):
