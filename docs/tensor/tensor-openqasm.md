@@ -1,0 +1,116 @@
+# Importing OpenQASM Circuits
+
+`quimb` supports importing both OpenQASM 2 and a practical subset of
+OpenQASM 3 into [`Circuit`](quimb.tensor.circuit.Circuit) objects.
+
+## OpenQASM 3 entry points
+
+Use the classmethods on [`Circuit`](quimb.tensor.circuit.Circuit):
+
+- [`Circuit.from_openqasm3_str`](quimb.tensor.circuit.Circuit.from_openqasm3_str)
+- [`Circuit.from_openqasm3_file`](quimb.tensor.circuit.Circuit.from_openqasm3_file)
+- [`Circuit.from_openqasm3_url`](quimb.tensor.circuit.Circuit.from_openqasm3_url)
+
+These parse the source and immediately build a circuit with the imported
+gates:
+
+```python
+import quimb.tensor as qtn
+
+qasm = """
+OPENQASM 3.0;
+include "stdgates.inc";
+
+qubit[2] q;
+h q[0];
+cx q[0], q[1];
+"""
+
+circ = qtn.Circuit.from_openqasm3_str(qasm)
+print(circ)
+```
+
+## Supported OpenQASM 3 subset
+
+The parser focuses on circuit input. It currently does not support the full QASM 3.0 language. Supported features include:
+
+- `qubit` declarations
+- `input` declarations for symbolic gate parameters
+- arithmetic expressions such as `pi / 2` or `theta / 2`
+- `const`, scalar classical declarations, and array declarations used in
+  parameter expressions
+- custom gate definitions, including nested custom gates
+- register broadcasting such as `h q;` or `cx q, r;`
+
+Ignored with warnings:
+
+- `measure`
+- `barrier`
+- `gphase`
+- plain `bit` declarations used only for classical measurement targets
+
+Unsupported constructs raise `NotImplementedError`, including:
+
+- `output` declarations
+- control flow such as `if`, `for`, and `while`
+- `reset`
+- calibration-related constructs
+
+## Symbolic inputs and rebinding
+
+OpenQASM 3 `input` declarations are registered as named circuit parameters so
+that values can be bound later with
+[`Circuit.set_params`](quimb.tensor.circuit.Circuit.set_params):
+
+```python
+import quimb.tensor as qtn
+
+qasm = """
+OPENQASM 3.0;
+include "stdgates.inc";
+
+input float theta;
+qubit[1] q;
+rx(theta) q[0];
+"""
+
+circ = qtn.Circuit.from_openqasm3_str(qasm)
+circ.set_params({"theta": 0.3})
+```
+
+The imported circuit exposes:
+
+- `circ.named_params`: current named parameter values
+- `circ.named_param_names`: declared named parameter names
+- `circ.param_expressions`: symbolic expressions attached to parameterized gates
+
+Unbound named parameters are initialized to `nan`, and any gate parameters that
+depend on them are likewise initialized to `nan` until values are supplied.
+
+Named updates can be mixed with raw gate-index updates in the same
+`set_params(...)` call, for example `{"theta": 0.3, 5: (0.1, 0.2, 0.3)}`.
+This round-trips with `get_params()`, which returns named parameters plus only
+those integer-indexed parametrized gates not managed by named expressions, and
+works with generic parameter-handling tools such as
+[`TNOptimizer`](quimb.tensor.optimize.TNOptimizer). Partial named updates are
+allowed: expressions that still depend on unbound names remain `nan` until
+those names are set. Unknown names raise an error, and expression-managed gates
+cannot be overridden directly via their integer gate indices.
+
+The same named-parameter mechanism can also be used outside OpenQASM import via
+[`Circuit.register_named_params`](quimb.tensor.circuit.Circuit.register_named_params),
+either by supplying a sequence of names or a mapping of initial values, with
+string expressions such as `cos(theta / 2)` or callables attached to arbitrary
+parametrized gates. String-keyed `set_params(...)` updates require such named
+parameters to have been registered first.
+
+## OpenQASM 2 compatibility
+
+Equivalent OpenQASM 2 import helpers remain available:
+
+- [`Circuit.from_openqasm2_str`](quimb.tensor.circuit.Circuit.from_openqasm2_str)
+- [`Circuit.from_openqasm2_file`](quimb.tensor.circuit.Circuit.from_openqasm2_file)
+- [`Circuit.from_openqasm2_url`](quimb.tensor.circuit.Circuit.from_openqasm2_url)
+
+Where the same gate subset is used, the OpenQASM 2 and OpenQASM 3 import paths
+produce matching circuits.
