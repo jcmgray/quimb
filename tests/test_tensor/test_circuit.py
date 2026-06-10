@@ -546,11 +546,11 @@ class TestCircuit:
         assert params["theta"] == pytest.approx(0.6)
 
         circ2 = unpack({"theta": np.array(0.2)}, skeleton)
-        assert tuple(circ2.gates[0].params) == pytest.approx(
-            (math.cos(0.1),)
-        )
+        assert tuple(circ2.gates[0].params) == pytest.approx((math.cos(0.1),))
 
-    def test_openqasm3_named_binding_rejects_direct_managed_gate_override(self):
+    def test_openqasm3_named_binding_rejects_direct_managed_gate_override(
+        self,
+    ):
         circ = qtn.Circuit.from_openqasm3_str(
             """
             OPENQASM 3.0;
@@ -579,9 +579,7 @@ class TestCircuit:
 
         circ.set_params({"theta": np.array(0.6)})
         assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
-        assert tuple(circ.gates[1].params) == pytest.approx(
-            (math.cos(0.3),)
-        )
+        assert tuple(circ.gates[1].params) == pytest.approx((math.cos(0.3),))
 
     def test_circuit_register_named_params_sequence_and_callable(self):
         circ = qtn.Circuit(1)
@@ -618,18 +616,14 @@ class TestCircuit:
         circ = qtn.Circuit(1)
         circ.rx(0.1, 0)
 
-        with pytest.raises(
-            ValueError, match="got non-parametrized gate: 0"
-        ):
+        with pytest.raises(ValueError, match="got non-parametrized gate: 0"):
             circ.register_named_params({"theta": np.nan}, {0: ("theta",)})
 
     def test_circuit_register_named_params_rejects_wrong_arity(self):
         circ = qtn.Circuit(1)
         circ.rx(np.nan, 0, parametrize=True)
 
-        with pytest.raises(
-            ValueError, match="expected 1, got 2"
-        ):
+        with pytest.raises(ValueError, match="expected 1, got 2"):
             circ.register_named_params(
                 {"theta": np.nan},
                 {0: ("theta", "theta")},
@@ -1599,3 +1593,312 @@ class TestCircuitGen:
 
         energy2 = sum(circ2.local_expectation(ZZ, edge) for edge in terms)
         assert energy2 > 4
+
+
+class TestCircuitPEPOSimpleUpdate:
+    @staticmethod
+    def _grid_edges(Lx, Ly):
+        edges = []
+        for x in range(Lx):
+            for y in range(Ly):
+                if x + 1 < Lx:
+                    edges.append(((x, y), (x + 1, y)))
+                if y + 1 < Ly:
+                    edges.append(((x, y), (x, y + 1)))
+        return edges
+
+    @staticmethod
+    def _random_gates(sites, edges, depth, seed):
+        rng = np.random.default_rng(seed)
+        gates = []
+        for _ in range(depth):
+            for s in sites:
+                gates.append(
+                    qtn.Gate.from_raw(
+                        qu.rand_uni(2, seed=int(rng.integers(1 << 30))),
+                        qubits=[s],
+                    )
+                )
+            for a, b in edges:
+                gates.append(
+                    qtn.Gate.from_raw(
+                        qu.rand_uni(4, seed=int(rng.integers(1 << 30))),
+                        qubits=[a, b],
+                    )
+                )
+        return gates
+
+    @staticmethod
+    def _exact(N, where, obs, gates, qmap=None):
+        """Independent dense reference ``<0| U^dag G U |0>``."""
+        qmap = qmap or {}
+
+        def q(s):
+            return qmap.get(s, s)
+
+        U = np.eye(2**N, dtype=complex)
+        for g in gates:
+            k = len(g.qubits)
+            U = (
+                qu.pkron(
+                    np.asarray(g.array, dtype=complex).reshape(2**k, 2**k),
+                    [2] * N,
+                    [q(s) for s in g.qubits],
+                )
+                @ U
+            )
+        m = len(where)
+        Of = qu.pkron(
+            np.asarray(obs, dtype=complex).reshape(2**m, 2**m),
+            [2] * N,
+            [q(s) for s in where],
+        )
+        p = qu.basis_vec(0, 2**N)
+        return complex((p.conj().T @ (U.conj().T @ Of @ U) @ p)[0, 0])
+
+    @pytest.mark.parametrize("obs", ["X", "Y", "Z"])
+    def test_matches_dense_chain(self, obs):
+        N = 4
+        edges = [(i, i + 1) for i in range(N - 1)]
+        gates = self._random_gates(range(N), edges, depth=3, seed=42)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=2**N)
+        circ.apply_gates(gates)
+
+        v = circ.local_expectation(qu.pauli(obs), 1)
+        r = self._exact(N, (1,), qu.pauli(obs), gates)
+        assert complex(v) == pytest.approx(r, abs=1e-8)
+
+    def test_two_site_observable(self):
+        N = 4
+        edges = [(i, i + 1) for i in range(N - 1)]
+        gates = self._random_gates(range(N), edges, depth=3, seed=11)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=2**N)
+        circ.apply_gates(gates)
+
+        zz = qu.pauli("Z") & qu.pauli("Z")
+        v = circ.local_expectation(zz, (1, 2))
+        r = self._exact(N, (1, 2), zz, gates)
+        assert complex(v) == pytest.approx(r, abs=1e-8)
+
+    def test_matches_dense_loop(self):
+        # simple update is exact when no bond is truncated; a 4-cycle needs a
+        # larger bond than a chain to avoid truncation and recover the exact
+        # value
+        edges = [(0, 1), (1, 2), (2, 3), (0, 3)]
+        gates = self._random_gates([], edges, depth=2, seed=0)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=64)
+        circ.apply_gates(gates)
+
+        v = circ.local_expectation(qu.pauli("X"), 2)
+        r = self._exact(4, (2,), qu.pauli("X"), gates)
+        assert complex(v) == pytest.approx(r, abs=1e-8)
+
+    def test_matches_dense_2d_grid(self):
+        # vertical bonds of a 2x3 grid are long range in any 1D ordering
+        edges = self._grid_edges(2, 3)
+        sites = sorted({s for e in edges for s in e})
+        qmap = {s: i for i, s in enumerate(sites)}
+        N = len(sites)
+        gates = self._random_gates(sites, edges, depth=2, seed=7)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=2**N)
+        circ.apply_gates(gates)
+
+        v = circ.local_expectation(qu.pauli("Z"), (0, 1))
+        r = self._exact(N, ((0, 1),), qu.pauli("Z"), gates, qmap=qmap)
+        assert complex(v) == pytest.approx(r, abs=1e-7)
+
+    def test_apply_gates_is_lazy(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+        assert circ.num_gates == 0
+
+        gates = self._random_gates(range(3), edges, depth=2, seed=1)
+        circ.apply_gates(gates)
+        assert circ.num_gates == len(gates)
+        assert circ.gates == tuple(gates)
+
+    def test_empty_circuit(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+        assert complex(
+            circ.local_expectation(qu.pauli("Z"), 0)
+        ) == pytest.approx(1.0, abs=1e-12)
+        assert complex(
+            circ.local_expectation(qu.pauli("X"), 0)
+        ) == pytest.approx(0.0, abs=1e-12)
+
+    def test_lightcone_pruning(self):
+        # observable on site 0, all gates act on the far end of the chain, so
+        # they lie outside the reverse lightcone and must not change <0|Z|0>=1
+        edges = [(i, i + 1) for i in range(5)]
+        gates = self._random_gates([3, 4, 5], [(3, 4), (4, 5)], 3, seed=9)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+        circ.apply_gates(gates)
+        v = circ.local_expectation(qu.pauli("Z"), 0)
+        assert complex(v) == pytest.approx(1.0, abs=1e-12)
+
+    def test_single_site_gates_only(self):
+        # single site gates take the single-tensor path and never gauge a bond
+        N = 3
+        edges = [(0, 1), (1, 2)]
+        rng = np.random.default_rng(4)
+        gates = [
+            qtn.Gate.from_raw(
+                qu.rand_uni(2, seed=int(rng.integers(1 << 30))), qubits=[i]
+            )
+            for _ in range(3)
+            for i in range(N)
+        ]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=4)
+        circ.apply_gates(gates)
+        v = circ.local_expectation(qu.pauli("Y"), 1)
+        r = self._exact(N, (1,), qu.pauli("Y"), gates)
+        assert complex(v) == pytest.approx(r, abs=1e-9)
+
+    def test_truncation_and_exactness(self):
+        N = 5
+        edges = [(i, i + 1) for i in range(N - 1)]
+        gates = self._random_gates(range(N), edges, depth=4, seed=7)
+        ref = self._exact(N, (2,), qu.pauli("Z"), gates)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges)
+        circ.apply_gates(gates)
+
+        # a small bond truncates the operator and is only approximate
+        err_small = abs(
+            complex(circ.local_expectation(qu.pauli("Z"), 2, max_bond=2)) - ref
+        )
+        assert err_small > 1e-6
+
+        # a chain is a tree, so a large enough bond recovers the exact value
+        err_large = abs(
+            complex(circ.local_expectation(qu.pauli("Z"), 2, max_bond=2**N))
+            - ref
+        )
+        assert err_large < 1e-8
+
+    def test_geometry_inferred_from_gates(self):
+        gates = [
+            qtn.Gate.from_raw(qu.rand_uni(2), qubits=[0]),
+            qtn.Gate.from_raw(qu.rand_uni(4), qubits=[0, 1]),
+            qtn.Gate.from_raw(qu.rand_uni(4), qubits=[1, 2]),
+        ]
+        circ = qtn.CircuitPEPOSimpleUpdate(gates=gates, max_bond=8)
+        assert set(circ.sites) == {0, 1, 2}
+        assert set(circ.edges) == {(0, 1), (1, 2)}
+        circ.apply_gates(gates)
+        assert circ.num_gates == 3
+
+    def test_reversed_edge_ordering(self):
+        # edges given as (v, u) should accept gates specified as (u, v)
+        N = 4
+        edges = [(i + 1, i) for i in range(N - 1)]
+        rng = np.random.default_rng(2)
+        gates = [
+            qtn.Gate.from_raw(
+                qu.rand_uni(4, seed=int(rng.integers(1 << 30))),
+                qubits=[i, i + 1],
+            )
+            for i in range(N - 1)
+        ]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=2**N)
+        circ.apply_gates(gates)
+        v = circ.local_expectation(qu.pauli("Z"), 0)
+        r = self._exact(N, (0,), qu.pauli("Z"), gates)
+        assert complex(v) == pytest.approx(r, abs=1e-8)
+
+    def test_compute_local_expectation(self):
+        N = 4
+        edges = [(i, i + 1) for i in range(N - 1)]
+        gates = self._random_gates(range(N), edges, depth=2, seed=5)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=2**N)
+        circ.apply_gates(gates)
+
+        terms = {i: qu.pauli("Z") for i in range(N)}
+        all_expecs = circ.compute_local_expectation(terms, return_all=True)
+        assert set(all_expecs) == set(range(N))
+        total = circ.compute_local_expectation(terms)
+        assert complex(total) == pytest.approx(
+            sum(complex(v) for v in all_expecs.values()), abs=1e-10
+        )
+        for i in range(N):
+            r = self._exact(N, (i,), qu.pauli("Z"), gates)
+            assert complex(all_expecs[i]) == pytest.approx(r, abs=1e-8)
+
+    def test_copy_is_independent(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+        circ.apply_gates(self._random_gates(range(3), edges, 1, seed=2))
+
+        other = circ.copy()
+        n_before = circ.num_gates
+        other.apply_gate(qtn.Gate.from_raw(qu.rand_uni(4), qubits=[0, 1]))
+
+        assert circ.num_gates == n_before
+        assert other.num_gates == n_before + 1
+        assert other.edges == circ.edges
+
+    def test_validation(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+
+        with pytest.raises(ValueError):
+            # neither edges nor gates supplied
+            qtn.CircuitPEPOSimpleUpdate()
+        with pytest.raises(ValueError):
+            # single site gate off the geometry
+            circ.apply_gate(qtn.Gate.from_raw(qu.rand_uni(2), qubits=[7]))
+        with pytest.raises(ValueError):
+            # two site gate not on an edge
+            circ.apply_gate(qtn.Gate.from_raw(qu.rand_uni(4), qubits=[0, 2]))
+        with pytest.raises(ValueError):
+            # three site gate
+            circ.apply_gate(
+                qtn.Gate.from_raw(qu.rand_uni(8), qubits=[0, 1, 2])
+            )
+        with pytest.raises(NotImplementedError):
+            # controlled gate
+            circ.apply_gate(
+                qtn.Gate.from_raw(qu.rand_uni(2), qubits=[1], controls=[0])
+            )
+        with pytest.raises(ValueError):
+            # observable off the geometry
+            circ.local_expectation(qu.pauli("Z"), 5)
+        with pytest.raises(ValueError):
+            # two site observable not on an edge
+            circ.local_expectation(qu.pauli("Z") & qu.pauli("Z"), (0, 2))
+        with pytest.raises(ValueError):
+            # observable on more than two sites
+            circ.local_expectation(qu.eye(8), (0, 1, 2))
+
+    def test_unsupported_forward_state_methods(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+        with pytest.raises(NotImplementedError):
+            circ.psi
+        with pytest.raises(ValueError):
+            circ.uni
+        for method in ("to_dense", "amplitude", "sample"):
+            with pytest.raises(NotImplementedError):
+                getattr(circ, method)()
+
+    def test_large_lattice_local_observable_is_cheap(self):
+        # reverse-lightcone pruning and support-restricted contraction keep a
+        # local observable of a shallow circuit tractable beyond exact sizes
+        L = 10
+        edges = self._grid_edges(L, L)
+        sites = sorted({s for e in edges for s in e})
+        gates = self._random_gates(sites, edges, depth=2, seed=2)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
+        circ.apply_gates(gates)
+        v = complex(circ.local_expectation(qu.pauli("Z"), (L // 2, L // 2)))
+        assert np.isfinite(v.real)
+        assert abs(v.imag) < 1e-8
+        assert abs(v.real) <= 1.0 + 1e-8

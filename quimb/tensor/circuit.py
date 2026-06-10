@@ -38,7 +38,10 @@ from .tensor_builder import (
     HTN_CP_operator_from_products,
     MPO_identity_like,
     MPS_computational_state,
+    TN_from_edges_and_fill_fn,
     TN_from_sites_computational_state,
+    TN_from_sites_product_state,
+    gen_unique_edges,
 )
 from .tensor_core import (
     PTensor,
@@ -2685,8 +2688,7 @@ class Circuit:
 
         if named_updates and not self._named_params:
             raise TypeError(
-                "String-keyed parameters require registered named "
-                "parameters."
+                "String-keyed parameters require registered named parameters."
             )
 
         extra = set(named_updates) - set(self._named_params)
@@ -2800,9 +2802,7 @@ class Circuit:
         qc.apply_gates(info["gates"], progbar=progbar)
         qc.register_named_params(
             {
-                name: (
-                    value if not isinstance(value, str) else float("nan")
-                )
+                name: (value if not isinstance(value, str) else float("nan"))
                 for name, value in info["symbols"].items()
             },
             info["expressions"],
@@ -6068,3 +6068,397 @@ class CircuitDense(Circuit):
         the lightcone is not meaningful.
         """
         return self.psi
+
+
+class CircuitPEPOSimpleUpdate(Circuit):
+    r"""Simulate a circuit in the Heisenberg picture by evolving an observable
+    *backwards* in time as an arbitrary geometry PEPO (projected entangled pair
+    operator), rather than evolving a state forwards.
+
+    Gates are only *recorded* as they are applied - no contraction takes place.
+    The work is deferred until :meth:`local_expectation` is called, at which
+    point the observable is initialized as a bond dimension 1 PEPO on the
+    geometry given by ``edges``, and each recorded gate ``g`` is absorbed in
+    reverse order as the sandwich :math:`O \rightarrow g^\dagger O g` using
+    :func:`~quimb.tensor.tnag.core.tensor_network_ag_gate_simple`, which gauges
+    the local tensors, applies the gate and compresses the affected bond. The
+    evolved operator is then contracted with the initial computational state to
+    give :math:`\langle 0 | U^\dagger G U | 0 \rangle`.
+
+    Because the observable spreads only through its reverse 'lightcone', gates
+    acting entirely outside the operator's current support are skipped - they
+    would contribute :math:`g^\dagger I g = I` - and only the support region is
+    contracted at the end. Local observables of shallow circuits are therefore
+    cheap even on very large geometries.
+
+    Parameters
+    ----------
+    edges : sequence[tuple[hashable, hashable]], optional
+        The nearest neighbor geometry: which pairs of sites are bonded, and so
+        where two site gates may act. ``(u, v)`` and ``(v, u)`` denote the same
+        edge. If not given, ``gates`` must be supplied to infer it.
+    gates : sequence, optional
+        If ``edges`` is not given, infer the geometry from the two site gates in
+        this sequence. The gates are only inspected here, not recorded.
+    max_bond : int, optional
+        The maximum bond dimension to compress the operator to. ``None`` means
+        no limit.
+    cutoff : float, optional
+        The singular value cutoff to use when compressing the operator.
+    gauge_smudge : float, optional
+        Added to the gauges before they are multiplied in and inverted, to
+        avoid numerical issues.
+    gauge_power : float, optional
+        The power to raise the singular values to before gauging.
+    phys_dim : int, optional
+        The physical dimension of each site, 2 by default.
+    dtype : str, optional
+        The data type of the operator tensors.
+    circuit_opts
+        Supplied to :class:`~quimb.tensor.circuit.Circuit`.
+
+    Attributes
+    ----------
+    edges : tuple[tuple[hashable, hashable]]
+        The unique geometry edges.
+    sites : tuple[hashable]
+        The sorted sites appearing in ``edges``.
+
+    Examples
+    --------
+
+    Measure a local observable in the state prepared by a circuit, without
+    ever forming that state::
+
+        edges = [(0, 1), (1, 2), (2, 3)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=16)
+        circ.apply_gates(gates)  # recorded, nothing computed yet
+        circ.local_expectation(qu.pauli("Z"), 1)  # evolved and contracted
+
+    See Also
+    --------
+    CircuitMPS, tensor_network_ag_gate_simple
+    """
+
+    def __init__(
+        self,
+        edges=None,
+        *,
+        gates=None,
+        max_bond=None,
+        cutoff=1e-10,
+        gauge_smudge=1e-6,
+        gauge_power=1.0,
+        phys_dim=2,
+        dtype="complex128",
+        **circuit_opts,
+    ):
+        if edges is None:
+            if gates is None:
+                raise ValueError(
+                    "Supply one of `edges` or `gates` to fix the geometry."
+                )
+            # infer the geometry from the two site gates only
+            edges = (
+                g.qubits
+                for g in map(parse_to_gate, gates)
+                if len(g.qubits) == 2
+            )
+        self.edges = tuple(gen_unique_edges(edges))
+        self.sites = tuple(sorted({s for e in self.edges for s in e}))
+        self._edge_set = {frozenset(e) for e in self.edges}
+        self._site_set = set(self.sites)
+        self.phys_dim = phys_dim
+        self._op_dtype = dtype
+        self._su_opts = {
+            "max_bond": max_bond,
+            "cutoff": cutoff,
+            "smudge": gauge_smudge,
+            "power": gauge_power,
+        }
+
+        # gates are recorded not applied, so per-gate tagging is unnecessary
+        circuit_opts.setdefault("tag_gate_numbers", False)
+        circuit_opts.setdefault("tag_gate_rounds", False)
+        circuit_opts.setdefault("tag_gate_labels", False)
+
+        super().__init__(N=len(self.sites), **circuit_opts)
+
+    def _init_state(self, N, dtype="complex128"):
+        # the base class expects a state tensor network; it is never evolved,
+        # but supplies the site structure used to close the operator at the end
+        zero = np.zeros(self.phys_dim, dtype=self._op_dtype)
+        zero[0] = 1.0
+        return TN_from_sites_product_state({site: zero for site in self.sites})
+
+    def copy(self):
+        """Copy the circuit, including its geometry and recorded gates."""
+        new = super().copy()
+        new.edges = self.edges
+        new.sites = self.sites
+        new._edge_set = self._edge_set
+        new._site_set = self._site_set
+        new.phys_dim = self.phys_dim
+        new._op_dtype = self._op_dtype
+        new._su_opts = dict(self._su_opts)
+        return new
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        # Heisenberg picture: just record the gate, deferring all computation
+        if gate.controls:
+            raise NotImplementedError(
+                "Controlled gates are not supported by "
+                "`CircuitPEPOSimpleUpdate`."
+            )
+        if gate.special:
+            raise NotImplementedError(
+                f"The special gate {gate.label!r} has no array form; supply "
+                "it as a raw array instead."
+            )
+
+        where = gate.qubits
+        if len(where) == 1:
+            if where[0] not in self._site_set:
+                raise ValueError(
+                    f"Gate site {where[0]} is not in the geometry."
+                )
+        elif len(where) == 2:
+            if frozenset(where) not in self._edge_set:
+                raise ValueError(
+                    f"Gate on {where} is not a declared nearest neighbor edge."
+                )
+        else:
+            raise ValueError(
+                "Only one and two site gates are supported, but got "
+                f"{len(where)} sites: {where}."
+            )
+
+        self._gates.append(gate)
+
+    def _identity_pepo(self):
+        """Build the identity operator as a bond dimension 1 PEPO on the
+        circuit geometry.
+        """
+        d = self.phys_dim
+        eye = np.eye(d, dtype=self._op_dtype)
+
+        def fill_fn(shape):
+            # shape is (*bond_dims, d, d), every bond dimension being 1
+            return eye.reshape((1,) * (len(shape) - 2) + (d, d))
+
+        return TN_from_edges_and_fill_fn(
+            fill_fn,
+            self.edges,
+            D=1,
+            phys_dim=d,
+            site_ind_id=("k{}", "b{}"),
+        )
+
+    def _parse_where(self, where):
+        try:
+            single = where in self._site_set
+        except TypeError:
+            single = False
+        if single:
+            return (where,)
+
+        if not isinstance(where, (tuple, list)):
+            # a single hashable that is not a known site
+            raise ValueError(
+                f"Observable site {where} is not in the geometry."
+            )
+
+        where = tuple(where)
+        for site in where:
+            if site not in self._site_set:
+                raise ValueError(
+                    f"Observable site {site} is not in the geometry."
+                )
+        if len(where) > 2:
+            raise ValueError(
+                "Observables on more than two sites are not supported."
+            )
+        if (len(where) == 2) and (frozenset(where) not in self._edge_set):
+            raise ValueError(
+                f"Observable on {where} is not a nearest neighbor edge."
+            )
+        return where
+
+    def _evolve_operator(self, G, where):
+        """Build the observable ``G`` at ``where`` and evolve it backwards
+        through all recorded gates, returning the compressed operator, its
+        separately held bond gauges, an overall scale, and the support.
+        """
+        d = self.phys_dim
+        op = self._identity_pepo()
+
+        # seed the operator: G on the upper (ket) indices of the identity
+        op.gate_upper_(
+            np.asarray(G),
+            where,
+            contract=True if len(where) == 1 else "reduce-split",
+        )
+
+        gauges = {}
+        scale = 1.0
+        support = set(where)
+        for gate in reversed(self._gates):
+            qubits = gate.qubits
+            if support.isdisjoint(qubits):
+                # outside the reverse lightcone, g^dagger I g = I
+                continue
+
+            k = len(qubits)
+            gdag = np.asarray(gate.array).reshape(d**k, d**k).conj().T
+
+            # ``info`` exposes the single updated bond's unnormalized singular
+            # values; with ``renorm=False`` these are kept, then the norm is
+            # factored out into ``scale`` to keep the gauges and tensors O(1)
+            info = {}
+            op.gate_simple_(
+                gdag,
+                qubits,
+                gauges,
+                renorm=False,
+                info=info,
+                **self._su_opts,
+            )
+            if info:
+                (_, ix), s = next(iter(info.items()))
+                norm = float(do("linalg.norm", s))
+                if norm > 0.0:
+                    gauges[ix] = s / norm
+                    scale = scale * norm
+
+            support.update(qubits)
+
+        return op, gauges, scale, support
+
+    def local_expectation(self, G, where, *, optimize="auto", **contract_opts):
+        r"""Compute :math:`\langle 0 | U^\dagger G U | 0 \rangle`, the
+        expectation of the observable ``G`` at ``where`` in the state prepared
+        by the recorded circuit ``U``, by evolving the operator backwards and
+        contracting it with the initial all zeros state.
+
+        Parameters
+        ----------
+        G : array_like
+            The local observable, acting on the site(s) in ``where``.
+        where : hashable or sequence[hashable]
+            The site or sites the observable acts on. Each must be in the
+            geometry, and a pair must be a declared edge.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer for the final contraction.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        scalar
+        """
+        where = self._parse_where(where)
+        op, gauges, scale, support = self._evolve_operator(G, where)
+        op.gauge_simple_insert(gauges)
+
+        # only the reverse lightcone is non-identity; every other site gives
+        # <0|I|0> = 1, so restrict the contraction to the support region
+        tn = op.select(
+            [op.site_tag(site) for site in support], which="any"
+        ).copy()
+
+        zero = np.zeros(self.phys_dim, dtype=self._op_dtype)
+        zero[0] = 1.0
+        for site in support:
+            tn |= Tensor(zero, inds=(op.upper_ind(site),))
+            tn |= Tensor(zero, inds=(op.lower_ind(site),))
+
+        # close the remaining size 1 bonds to the dropped identity region
+        tn.isel_({ix: 0 for ix in tn.outer_inds()})
+
+        return scale * tn.contract(all, optimize=optimize, **contract_opts)
+
+    def compute_local_expectation(
+        self,
+        terms,
+        *,
+        optimize="auto",
+        return_all=False,
+        progbar=False,
+        **contract_opts,
+    ):
+        """Compute many local expectations, each evolved backwards
+        independently.
+
+        Parameters
+        ----------
+        terms : dict[hashable or sequence[hashable], array_like]
+            Mapping of site(s) to the local observable acting there.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer for the final contractions.
+        return_all : bool, optional
+            Whether to return all results keyed by location, or just their sum.
+        progbar : bool, optional
+            Whether to show a progress bar over the terms.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        scalar or dict[hashable or sequence[hashable], scalar]
+        """
+        terms = dict(terms)
+        keys = tuple(terms)
+        if progbar:
+            keys = _progbar(keys)
+
+        expecs = {
+            where: self.local_expectation(
+                terms[where], where, optimize=optimize, **contract_opts
+            )
+            for where in keys
+        }
+        if return_all:
+            return expecs
+        return sum(expecs.values())
+
+    @property
+    def psi(self):
+        raise NotImplementedError(
+            "`CircuitPEPOSimpleUpdate` works in the Heisenberg picture and "
+            "keeps no explicit forward state; use `local_expectation`."
+        )
+
+    @property
+    def uni(self):
+        raise ValueError(
+            "You can't extract the circuit unitary TN from a "
+            "``CircuitPEPOSimpleUpdate``."
+        )
+
+    def _requires_forward_state(self, *_, **__):
+        raise NotImplementedError(
+            f"`{type(self).__name__}` does not form the explicit forward "
+            "evolved state; use `local_expectation` instead."
+        )
+
+    to_dense = _requires_forward_state
+    amplitude = _requires_forward_state
+    partial_trace = _requires_forward_state
+    sample = _requires_forward_state
+    sample_chaotic = _requires_forward_state
+
+    def calc_qubit_ordering(self, qubits=None):
+        """The PEPO geometry has no inherent linear qubit ordering."""
+        if qubits is None:
+            return tuple(self.sites)
+        return tuple(qubits)
+
+    def __repr__(self):
+        return (
+            f"<CircuitPEPOSimpleUpdate("
+            f"N={self.N}, "
+            f"num_gates={self.num_gates}, "
+            f"max_bond={self._su_opts['max_bond']})>"
+        )

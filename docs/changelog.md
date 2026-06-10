@@ -11,6 +11,7 @@ Release notes for `quimb`.
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
 - [`Circuit.from_openqasm3_str`](quimb.tensor.circuit.Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](quimb.tensor.circuit.Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](quimb.tensor.circuit.Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
+- add [`CircuitPEPOSimpleUpdate`](quimb.tensor.circuit.CircuitPEPOSimpleUpdate): a Heisenberg picture circuit simulator that lazily records gates then evolves an observable backwards in time as an arbitrary geometry PEPO, applying each gate with simple update style gauging and compression via [`tensor_network_ag_gate_simple`](quimb.tensor.tnag.core.tensor_network_ag_gate_simple) and pruning to the reverse lightcone.
 
 
 **Bug fixes:**
