@@ -1066,8 +1066,6 @@ class TestCircuitPEPSSimpleUpdate:
         # exact-state methods are not meaningful for a gauged approximate state
         circ.apply_gates([qtn.Gate("H", params=(), qubits=[0])])
         with pytest.raises(NotImplementedError):
-            circ.to_dense()
-        with pytest.raises(NotImplementedError):
             circ.amplitude("000")
         with pytest.raises(NotImplementedError):
             list(circ.sample(2))
@@ -1080,6 +1078,62 @@ class TestCircuitPEPSSimpleUpdate:
         # a two-qubit gate off any declared edge is rejected
         with pytest.raises(ValueError):
             circ.apply_gates([qtn.Gate("CZ", params=(), qubits=[0, 2])])
+
+    def test_to_dense_matches_exact_on_a_chain(self):
+        # on a chain at large bond simple update is exact, so the gauged dense
+        # contraction should match a dense Circuit up to a global phase
+        N = 5
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(2)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), i)
+            for i in range(N)
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges, max_bond=32, cutoff=1e-12
+        )
+        circ.apply_gates(gates)
+
+        exact = qtn.Circuit(N=N)
+        exact.apply_gates(gates)
+
+        k_su = circ.to_dense()
+        k_ex = exact.to_dense()
+        # column vector of the full state, matching Circuit.to_dense
+        assert k_su.shape == k_ex.shape == (2**N, 1)
+        assert qu.fidelity(k_su, k_ex) == pytest.approx(1.0, abs=1e-8)
+
+    def test_get_state_absorb_gauges(self):
+        # the three absorb_gauges modes should all describe the same state
+        edges = [(0, 1), (1, 2), (0, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(
+            [
+                qtn.Gate("H", params=(), qubits=[0]),
+                qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+                qtn.Gate("CZ", params=(), qubits=[1, 2]),
+            ]
+        )
+        # absorbed network is exactly the `psi` property
+        psi_absorbed = circ.get_state(absorb_gauges=True)
+        assert_allclose(psi_absorbed.to_dense(), circ.psi.to_dense())
+        # gauges added but uncontracted should give the same dense state
+        psi_uncontracted = circ.get_state(absorb_gauges=False)
+        assert qu.fidelity(
+            psi_uncontracted.to_dense(), psi_absorbed.to_dense()
+        ) == pytest.approx(1.0, abs=1e-10)
+        # "return" hands back the raw network plus a copy of the gauges
+        raw, gauges = circ.get_state(absorb_gauges="return")
+        assert set(gauges) == set(circ.gauges)
+        assert gauges is not circ.gauges
+        raw.gauge_simple_insert(gauges)
+        assert qu.fidelity(
+            raw.to_dense(), psi_absorbed.to_dense()
+        ) == pytest.approx(1.0, abs=1e-10)
 
     def test_local_expectation_on_grid_coordinate_sites(self):
         # sites are 2D coordinate tuples; a single-site `where` must not be

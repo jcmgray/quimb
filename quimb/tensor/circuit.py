@@ -5140,16 +5140,20 @@ class CircuitPEPSSimpleUpdate(Circuit):
         Supply the initial state directly instead of starting from the
         ``|00...0>`` product state. If ``edges`` is not given the geometry is
         read from the bonds of this state, and the bond gauges are seeded from
-        it.
+        it. Only a single seeding sweep is performed; unlike imaginary time
+        simple update the gauge matters immediately, so for an arbitrary
+        ``psi0`` you may want to call :meth:`equilibrate` once before applying
+        gates.
     max_bond : int, optional
         The maximum bond dimension to truncate to when applying gates.
     cutoff : float, optional
         The singular value cutoff to use when truncating after applying gates.
     renorm : bool, optional
         Whether to renormalize the singular values of a bond after each gate.
-        The default ``True`` keeps the state normalized, which is stable for
-        deep circuits of generic gates. Set ``False`` to instead track the norm
-        of the state, e.g. for the near-identity gates of (imaginary) time
+        The default ``False`` tracks the norm of the state rather than forcing
+        it to one, which is the sensible choice for real time and general
+        circuit dynamics. Set ``True`` to instead keep the state normalized
+        after every gate, e.g. for the near-identity gates of imaginary time
         evolution.
     gauge_smudge : float, optional
         Small value added to the gauges before they are multiplied in and
@@ -5162,6 +5166,17 @@ class CircuitPEPSSimpleUpdate(Circuit):
     gate_opts : dict, optional
         Default options to pass to ``gate_simple_`` such as ``max_bond`` and
         ``cutoff``.
+    dtype : str, optional
+        If given, ensure the state tensors are cast to this data type.
+    to_backend : callable, optional
+        If given, apply this function to the state tensors to convert them to a
+        particular array backend.
+    convert_eager : bool, optional
+        Whether to apply the ``dtype`` and ``to_backend`` conversions eagerly
+        as each gate is applied. The default ``True`` matches the other running
+        simulators (e.g. :class:`CircuitMPS`), since the simple update rule
+        contracts each gate into the state immediately rather than building a
+        lazy network to contract later.
 
     Attributes
     ----------
@@ -5201,14 +5216,14 @@ class CircuitPEPSSimpleUpdate(Circuit):
         psi0=None,
         max_bond=None,
         cutoff=1e-10,
-        renorm=True,
+        renorm=False,
         gauge_smudge=1e-12,
         equilibrate_every=None,
         equilibrate_opts=None,
         gate_opts=None,
         dtype=None,
         to_backend=None,
-        convert_eager=False,
+        convert_eager=True,
         **circuit_opts,
     ):
         # geometry can come from explicit `edges`, be inferred from the two
@@ -5227,12 +5242,12 @@ class CircuitPEPSSimpleUpdate(Circuit):
                     "You must supply one of `edges`, `gates` or `psi0` to "
                     "define the PEPS geometry."
                 )
-        self.edges = tuple(gen_unique_edges(edges))
+        self._edges = tuple(gen_unique_edges(edges))
 
         # sites are everything appearing in the edges, plus any extra sites
         # touched by single qubit gates or present in psi0, padded up to N
         sites = set()
-        for a, b in self.edges:
+        for a, b in self._edges:
             sites.add(a)
             sites.add(b)
         sites.update(extra_sites)
@@ -5242,7 +5257,7 @@ class CircuitPEPSSimpleUpdate(Circuit):
             sites.update(range(N))
         self._sites = tuple(sorted(sites))
         self._site_set = set(self._sites)
-        self._edge_set = {frozenset(e) for e in self.edges}
+        self._edge_set = {frozenset(e) for e in self._edges}
 
         # bond gauges tracked across gate applications
         self.gauges = {}
@@ -5278,7 +5293,7 @@ class CircuitPEPSSimpleUpdate(Circuit):
         two circuits can be evolved independently).
         """
         new = super().copy()
-        new.edges = self.edges
+        new._edges = self._edges
         new._sites = self._sites
         new._site_set = self._site_set
         new._edge_set = self._edge_set
@@ -5286,6 +5301,11 @@ class CircuitPEPSSimpleUpdate(Circuit):
         new._equilibrate_every = self._equilibrate_every
         new._equilibrate_opts = dict(self._equilibrate_opts)
         return new
+
+    @property
+    def edges(self):
+        """The unique edges defining the PEPS geometry."""
+        return self._edges
 
     @property
     def sites(self):
@@ -5346,7 +5366,7 @@ class CircuitPEPSSimpleUpdate(Circuit):
         if self._equilibrate_every and (
             len(self._gates) % self._equilibrate_every == 0
         ):
-            self.equilibrate(**self._equilibrate_opts)
+            self.equilibrate()
 
     def apply_gates(self, gates, progbar=False, **gate_opts):
         if progbar:
@@ -5363,35 +5383,33 @@ class CircuitPEPSSimpleUpdate(Circuit):
             if progbar and (gate.total_qubit_count >= 2):
                 gates.set_description(f"max_bond={self._psi.max_bond()}")
 
-    def equilibrate(self, max_iterations=100, tol=1e-10, **gauge_opts):
+    def equilibrate(self, **gauge_opts):
         """Re-gauge the whole state with the simple update rule, improving the
         consistency of the tracked bond gauges. This does not change the state
         represented, only the gauge, and can be called periodically between
         rounds of gates to keep the simple update approximation well behaved.
 
+        The default options given at construction via ``equilibrate_opts`` are
+        applied first, with any keyword arguments here taking precedence.
+
         Parameters
         ----------
-        max_iterations : int, optional
-            The maximum number of gauging sweeps.
-        tol : float, optional
-            The convergence tolerance on the change in singular values.
         gauge_opts
             Supplied to
-            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple_`.
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple_`,
+            for example ``max_iterations`` and ``tol``.
         """
-        self._psi.gauge_all_simple_(
-            max_iterations=max_iterations,
-            tol=tol,
-            gauges=self.gauges,
-            **gauge_opts,
-        )
+        opts = {**self._equilibrate_opts, **gauge_opts}
+        opts.setdefault("max_iterations", 100)
+        opts.setdefault("tol", 1e-10)
+        self._psi.gauge_all_simple_(gauges=self.gauges, **opts)
 
     def local_expectation(
         self,
         G,
         where,
         *,
-        max_distance=1,
+        max_distance=0,
         normalized=True,
         **contract_opts,
     ):
@@ -5409,7 +5427,9 @@ class CircuitPEPSSimpleUpdate(Circuit):
             detected by membership in the set of sites.
         max_distance : int, optional
             How many graph hops of neighboring tensors to include in the local
-            cluster used to approximate the reduced density matrix.
+            cluster used to approximate the reduced density matrix. The default
+            ``0`` uses only the target site(s) and their gauges, matching
+            :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.compute_local_expectation_cluster`.
         normalized : bool, optional
             Whether to normalize by the local norm.
         contract_opts
@@ -5434,31 +5454,56 @@ class CircuitPEPSSimpleUpdate(Circuit):
             **contract_opts,
         )
 
-    @property
-    def psi(self):
-        """The PEPS tensor network state, with the simple update bond gauges
-        absorbed back in so that it represents the actual wavefunction (a
-        proper contraction of ``psi`` gives the state, up to the simple update
-        approximation). The internal gauged form is left untouched.
+    def get_state(self, absorb_gauges=True):
+        """Return the current PEPS state, optionally absorbing the bond gauges.
+
+        Parameters
+        ----------
+        absorb_gauges : bool or "return", optional
+            How to handle the tracked Vidal-style bond gauges. If ``True`` (the
+            default) the gauges are absorbed, so the returned tensor network is
+            the actual wavefunction (up to the simple update approximation). If
+            ``False`` the gauges are added to the network as uncontracted
+            diagonal tensors. If ``"return"`` the raw gauged network and a copy
+            of the gauges are returned separately. The internal state is left
+            untouched in every case.
+
+        Returns
+        -------
+        psi : TensorNetwork
+            The current state.
+        gauges : dict
+            The current gauges, only if ``absorb_gauges == "return"``.
         """
         psi = self._psi.copy()
-        # absorb the Vidal-form bond gauges so the returned TN is the state
-        psi.gauge_simple_insert(self.gauges)
+
+        if absorb_gauges == "return":
+            gauges = dict(self.gauges)
+            if not self.convert_eager:
+                self._maybe_convert(psi)
+            return psi, gauges
+
+        if absorb_gauges:
+            # absorb the Vidal-form bond gauges so the returned TN is the state
+            psi.gauge_simple_insert(self.gauges)
+        else:
+            # add the gauges as uncontracted diagonal tensors on their bonds
+            for ix, g in self.gauges.items():
+                psi |= Tensor(g, inds=[ix])
+
         if not self.convert_eager:
             self._maybe_convert(psi)
         return psi
 
     @property
-    def psi_gauged(self):
-        """The raw internal tensor network, in Vidal (simple update) gauge.
-        The bond singular values are stored separately in ``self.gauges`` and
-        are *not* absorbed, so this is not directly the wavefunction. Use
-        :attr:`psi` for that.
+    def psi(self):
+        """The PEPS tensor network state, with the simple update bond gauges
+        absorbed back in so that it represents the actual wavefunction (a
+        proper contraction of ``psi`` gives the state, up to the simple update
+        approximation). The internal gauged form is left untouched. Shorthand
+        for ``get_state(absorb_gauges=True)``.
         """
-        psi = self._psi.copy()
-        if not self.convert_eager:
-            self._maybe_convert(psi)
-        return psi
+        return self.get_state(absorb_gauges=True)
 
     def calc_qubit_ordering(self, qubits=None):
         if qubits is None:
@@ -5475,7 +5520,15 @@ class CircuitPEPSSimpleUpdate(Circuit):
         )
 
     def to_dense(self, *args, **kwargs):
-        self._unsupported_exact("to_dense")
+        """Contract the gauged PEPS into a dense wavefunction, a column-vector
+        ``qarray`` of length ``2**N`` ordered like :attr:`sites`, matching the
+        output of :meth:`Circuit.to_dense`. This is the actual (approximate)
+        state, so the cost grows exponentially with the number of qubits.
+
+        Arguments are forwarded to
+        :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.to_dense`.
+        """
+        return self.psi.to_dense(*args, **kwargs)
 
     def amplitude(self, *args, **kwargs):
         self._unsupported_exact("amplitude")
