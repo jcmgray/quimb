@@ -15,6 +15,8 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
+- [`tensor_network_1d_compress_src`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_src) and [`tensor_network_1d_compress_srcmps`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_srcmps): call [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like) like the other 1D compression methods, fixing compression of tensor networks with long range (site skipping) bonds, e.g. from lazily applied long range gates.
+- [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
 - [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
 - [`TensorNetwork2DVector.compute_norm`](quimb.tensor.tn2d.core.TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
 
