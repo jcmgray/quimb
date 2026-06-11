@@ -6078,7 +6078,7 @@ class CircuitPEPOSimpleUpdate(Circuit):
     Gates are only *recorded* as they are applied - no contraction takes place.
     The work is deferred until :meth:`local_expectation` is called, at which
     point the observable is initialized as a bond dimension 1 PEPO on the
-    geometry given by ``edges``, and each recorded gate ``g`` is absorbed in
+    circuit geometry, and each recorded gate ``g`` is absorbed in
     reverse order as the sandwich :math:`O \rightarrow g^\dagger O g` using
     :func:`~quimb.tensor.tnag.core.tensor_network_ag_gate_simple`, which gauges
     the local tensors, applies the gate and compresses the affected bond. The
@@ -6096,9 +6096,11 @@ class CircuitPEPOSimpleUpdate(Circuit):
     edges : sequence[tuple[hashable, hashable]], optional
         The nearest neighbor geometry: which pairs of sites are bonded, and so
         where two site gates may act. ``(u, v)`` and ``(v, u)`` denote the same
-        edge. If not given, ``gates`` must be supplied to infer it.
+        edge. If neither ``edges`` nor ``gates`` is given, the geometry is built
+        up dynamically from the two site gates as they are applied. Supplying
+        ``edges`` fixes the geometry up front and restricts gates to it.
     gates : sequence, optional
-        If ``edges`` is not given, infer the geometry from the two site gates in
+        Optionally infer a fixed geometry up front from the two site gates in
         this sequence. The gates are only inspected here, not recorded.
     max_bond : int, optional
         The maximum bond dimension to compress the operator to. ``None`` means
@@ -6135,6 +6137,12 @@ class CircuitPEPOSimpleUpdate(Circuit):
         circ.apply_gates(gates)  # recorded, nothing computed yet
         circ.local_expectation(qu.pauli("Z"), 1)  # evolved and contracted
 
+    The geometry can also be left implicit and built up from the gates::
+
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        circ.apply_gates(gates)  # records the gates and defines the geometry
+        circ.local_expectation(qu.pauli("Z"), 1)
+
     See Also
     --------
     CircuitMPS, tensor_network_ag_gate_simple
@@ -6153,21 +6161,22 @@ class CircuitPEPOSimpleUpdate(Circuit):
         dtype="complex128",
         **circuit_opts,
     ):
-        if edges is None:
-            if gates is None:
-                raise ValueError(
-                    "Supply one of `edges` or `gates` to fix the geometry."
-                )
-            # infer the geometry from the two site gates only
+        if (edges is None) and (gates is not None):
+            # infer a fixed geometry from the two site gates
             edges = (
                 g.qubits
                 for g in map(parse_to_gate, gates)
                 if len(g.qubits) == 2
             )
-        self.edges = tuple(gen_unique_edges(edges))
-        self.sites = tuple(sorted({s for e in self.edges for s in e}))
-        self._edge_set = {frozenset(e) for e in self.edges}
-        self._site_set = set(self.sites)
+
+        # if neither was given the geometry is grown lazily from the gates
+        self._fixed_geometry = edges is not None
+        edges = () if edges is None else tuple(gen_unique_edges(edges))
+
+        self.edges = edges
+        self._edge_set = {frozenset(e) for e in edges}
+        self._site_set = {s for e in edges for s in e}
+        self.sites = self._sorted_sites()
         self.phys_dim = phys_dim
         self._op_dtype = dtype
         self._su_opts = {
@@ -6184,6 +6193,26 @@ class CircuitPEPOSimpleUpdate(Circuit):
 
         super().__init__(N=len(self.sites), **circuit_opts)
 
+    def _sorted_sites(self):
+        try:
+            return tuple(sorted(self._site_set))
+        except TypeError:
+            # sites not mutually comparable, keep an arbitrary stable order
+            return tuple(self._site_set)
+
+    def _register_sites(self, sites):
+        if not self._site_set.issuperset(sites):
+            self._site_set.update(sites)
+            self.sites = self._sorted_sites()
+            self.N = len(self.sites)
+
+    def _register_edge(self, edge):
+        self._register_sites(edge)
+        key = frozenset(edge)
+        if key not in self._edge_set:
+            self._edge_set.add(key)
+            self.edges = (*self.edges, tuple(edge))
+
     def _init_state(self, N, dtype="complex128"):
         # the base class expects a state tensor network; it is never evolved,
         # but supplies the site structure used to close the operator at the end
@@ -6194,10 +6223,11 @@ class CircuitPEPOSimpleUpdate(Circuit):
     def copy(self):
         """Copy the circuit, including its geometry and recorded gates."""
         new = super().copy()
+        new._fixed_geometry = self._fixed_geometry
         new.edges = self.edges
         new.sites = self.sites
-        new._edge_set = self._edge_set
-        new._site_set = self._site_set
+        new._edge_set = set(self._edge_set)
+        new._site_set = set(self._site_set)
         new.phys_dim = self.phys_dim
         new._op_dtype = self._op_dtype
         new._su_opts = dict(self._su_opts)
@@ -6218,15 +6248,22 @@ class CircuitPEPOSimpleUpdate(Circuit):
 
         where = gate.qubits
         if len(where) == 1:
-            if where[0] not in self._site_set:
-                raise ValueError(
-                    f"Gate site {where[0]} is not in the geometry."
-                )
+            if self._fixed_geometry:
+                if where[0] not in self._site_set:
+                    raise ValueError(
+                        f"Gate site {where[0]} is not in the geometry."
+                    )
+            else:
+                self._register_sites(where)
         elif len(where) == 2:
-            if frozenset(where) not in self._edge_set:
-                raise ValueError(
-                    f"Gate on {where} is not a declared nearest neighbor edge."
-                )
+            if self._fixed_geometry:
+                if frozenset(where) not in self._edge_set:
+                    raise ValueError(
+                        f"Gate on {where} is not a declared nearest neighbor "
+                        "edge."
+                    )
+            else:
+                self._register_edge(where)
         else:
             raise ValueError(
                 "Only one and two site gates are supported, but got "
@@ -6235,9 +6272,10 @@ class CircuitPEPOSimpleUpdate(Circuit):
 
         self._gates.append(gate)
 
-    def _identity_pepo(self):
+    def _identity_pepo(self, extra_sites=()):
         """Build the identity operator as a bond dimension 1 PEPO on the
-        circuit geometry.
+        circuit geometry. Any sites not connected by an edge (including those in
+        ``extra_sites``) are added as lone identity tensors.
         """
         d = self.phys_dim
         eye = np.eye(d, dtype=self._op_dtype)
@@ -6246,13 +6284,31 @@ class CircuitPEPOSimpleUpdate(Circuit):
             # shape is (*bond_dims, d, d), every bond dimension being 1
             return eye.reshape((1,) * (len(shape) - 2) + (d, d))
 
-        return TN_from_edges_and_fill_fn(
-            fill_fn,
-            self.edges,
-            D=1,
-            phys_dim=d,
-            site_ind_id=("k{}", "b{}"),
-        )
+        if self.edges:
+            op = TN_from_edges_and_fill_fn(
+                fill_fn,
+                self.edges,
+                D=1,
+                phys_dim=d,
+                site_ind_id=("k{}", "b{}"),
+            )
+        else:
+            op = TensorNetworkGenOperator.new(
+                sites=(),
+                site_tag_id="I{}",
+                upper_ind_id="k{}",
+                lower_ind_id="b{}",
+            )
+
+        edge_sites = {s for e in self.edges for s in e}
+        for site in (self._site_set | set(extra_sites)) - edge_sites:
+            op |= Tensor(
+                eye,
+                inds=(op.upper_ind(site), op.lower_ind(site)),
+                tags=(op.site_tag(site),),
+            )
+
+        return op
 
     def _parse_where(self, where):
         try:
@@ -6263,22 +6319,23 @@ class CircuitPEPOSimpleUpdate(Circuit):
             return (where,)
 
         if not isinstance(where, (tuple, list)):
-            # a single hashable that is not a known site
-            raise ValueError(
-                f"Observable site {where} is not in the geometry."
-            )
+            # a single hashable site not currently in the geometry
+            if self._fixed_geometry:
+                raise ValueError(
+                    f"Observable site {where} is not in the geometry."
+                )
+            # with dynamic geometry an untouched site is allowed
+            return (where,)
 
         where = tuple(where)
-        for site in where:
-            if site not in self._site_set:
-                raise ValueError(
-                    f"Observable site {site} is not in the geometry."
-                )
+        if len(where) == 1:
+            return self._parse_where(where[0])
         if len(where) > 2:
             raise ValueError(
                 "Observables on more than two sites are not supported."
             )
-        if (len(where) == 2) and (frozenset(where) not in self._edge_set):
+        # a two site observable must lie on an existing edge
+        if frozenset(where) not in self._edge_set:
             raise ValueError(
                 f"Observable on {where} is not a nearest neighbor edge."
             )
@@ -6290,7 +6347,7 @@ class CircuitPEPOSimpleUpdate(Circuit):
         separately held bond gauges, an overall scale, and the support.
         """
         d = self.phys_dim
-        op = self._identity_pepo()
+        op = self._identity_pepo(extra_sites=where)
 
         # seed the operator: G on the upper (ket) indices of the identity
         op.gate_upper_(

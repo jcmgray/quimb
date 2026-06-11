@@ -1794,6 +1794,36 @@ class TestCircuitPEPOSimpleUpdate:
         circ.apply_gates(gates)
         assert circ.num_gates == 3
 
+    def test_dynamic_geometry_no_edges(self):
+        # the issue's headline API: no edges, geometry grows from the gates
+        N = 4
+        edges = [(i, i + 1) for i in range(N - 1)]
+        gates = self._random_gates(range(N), edges, depth=2, seed=3)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=2**N)
+        assert circ.num_gates == 0
+        assert circ.sites == ()
+        circ.apply_gates(gates)
+        # the geometry was built up from the gates
+        assert set(circ.sites) == set(range(N))
+        assert {frozenset(e) for e in circ.edges} == {
+            frozenset(e) for e in edges
+        }
+
+        v = circ.local_expectation(qu.pauli("Z"), 1)
+        r = self._exact(N, (1,), qu.pauli("Z"), gates)
+        assert complex(v) == pytest.approx(r, abs=1e-8)
+
+    def test_empty_dynamic_circuit(self):
+        # no gates and no edges: an untouched site gives <0|Z|0>=1, <0|X|0>=0
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=8)
+        assert complex(
+            circ.local_expectation(qu.pauli("Z"), 0)
+        ) == pytest.approx(1.0, abs=1e-12)
+        assert complex(
+            circ.local_expectation(qu.pauli("X"), 0)
+        ) == pytest.approx(0.0, abs=1e-12)
+
     def test_reversed_edge_ordering(self):
         # edges given as (v, u) should accept gates specified as (u, v)
         N = 4
@@ -1849,10 +1879,7 @@ class TestCircuitPEPOSimpleUpdate:
         circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8)
 
         with pytest.raises(ValueError):
-            # neither edges nor gates supplied
-            qtn.CircuitPEPOSimpleUpdate()
-        with pytest.raises(ValueError):
-            # single site gate off the geometry
+            # single site gate off a fixed geometry
             circ.apply_gate(qtn.Gate.from_raw(qu.rand_uni(2), qubits=[7]))
         with pytest.raises(ValueError):
             # two site gate not on an edge
