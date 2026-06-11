@@ -2687,8 +2687,7 @@ class Circuit:
 
         if named_updates and not self._named_params:
             raise TypeError(
-                "String-keyed parameters require registered named "
-                "parameters."
+                "String-keyed parameters require registered named parameters."
             )
 
         extra = set(named_updates) - set(self._named_params)
@@ -2802,9 +2801,7 @@ class Circuit:
         qc.apply_gates(info["gates"], progbar=progbar)
         qc.register_named_params(
             {
-                name: (
-                    value if not isinstance(value, str) else float("nan")
-                )
+                name: (value if not isinstance(value, str) else float("nan"))
                 for name, value in info["symbols"].items()
             },
             info["expressions"],

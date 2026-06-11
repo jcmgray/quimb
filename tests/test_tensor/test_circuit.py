@@ -546,11 +546,11 @@ class TestCircuit:
         assert params["theta"] == pytest.approx(0.6)
 
         circ2 = unpack({"theta": np.array(0.2)}, skeleton)
-        assert tuple(circ2.gates[0].params) == pytest.approx(
-            (math.cos(0.1),)
-        )
+        assert tuple(circ2.gates[0].params) == pytest.approx((math.cos(0.1),))
 
-    def test_openqasm3_named_binding_rejects_direct_managed_gate_override(self):
+    def test_openqasm3_named_binding_rejects_direct_managed_gate_override(
+        self,
+    ):
         circ = qtn.Circuit.from_openqasm3_str(
             """
             OPENQASM 3.0;
@@ -579,9 +579,7 @@ class TestCircuit:
 
         circ.set_params({"theta": np.array(0.6)})
         assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
-        assert tuple(circ.gates[1].params) == pytest.approx(
-            (math.cos(0.3),)
-        )
+        assert tuple(circ.gates[1].params) == pytest.approx((math.cos(0.3),))
 
     def test_circuit_register_named_params_sequence_and_callable(self):
         circ = qtn.Circuit(1)
@@ -618,18 +616,14 @@ class TestCircuit:
         circ = qtn.Circuit(1)
         circ.rx(0.1, 0)
 
-        with pytest.raises(
-            ValueError, match="got non-parametrized gate: 0"
-        ):
+        with pytest.raises(ValueError, match="got non-parametrized gate: 0"):
             circ.register_named_params({"theta": np.nan}, {0: ("theta",)})
 
     def test_circuit_register_named_params_rejects_wrong_arity(self):
         circ = qtn.Circuit(1)
         circ.rx(np.nan, 0, parametrize=True)
 
-        with pytest.raises(
-            ValueError, match="expected 1, got 2"
-        ):
+        with pytest.raises(ValueError, match="expected 1, got 2"):
             circ.register_named_params(
                 {"theta": np.nan},
                 {0: ("theta", "theta")},
