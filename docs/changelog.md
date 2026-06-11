@@ -7,6 +7,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- add [`CircuitPEPSSimpleUpdate`](quimb.tensor.circuit.CircuitPEPSSimpleUpdate): a high level quantum circuit simulator that keeps the state as an arbitrary geometry PEPS and applies nearest-neighbor gates with 'simple update' style gauging. The geometry is given by a set of ``edges``, inferred from the ``gates`` or read from a ``psi0``; the accuracy is set by ``max_bond``; gauges can be periodically re-equilibrated with ``equilibrate``; local expectations are computed with the cluster approximation.
 - [`TensorNetwork.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond).
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
@@ -16,6 +17,8 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
+- [`tensor_network_1d_compress_src`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_src) and [`tensor_network_1d_compress_srcmps`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_srcmps): call [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like) like the other 1D compression methods, fixing compression of tensor networks with long range (site skipping) bonds, e.g. from lazily applied long range gates.
+- [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
 - [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
 - [`TensorNetwork2DVector.compute_norm`](quimb.tensor.tn2d.core.TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
 

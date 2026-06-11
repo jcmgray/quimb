@@ -5,6 +5,7 @@ from .circuit import (
     CircuitDense,
     CircuitMPS,
     CircuitPEPOSimpleUpdate,
+    CircuitPEPSSimpleUpdate,
     CircuitPermMPS,
     Gate,
 )
@@ -243,6 +244,7 @@ __all__ = (
     "CircuitDense",
     "CircuitMPS",
     "CircuitPEPOSimpleUpdate",
+    "CircuitPEPSSimpleUpdate",
     "CircuitPermMPS",
     "cnf_file_parse",
     "connect",
