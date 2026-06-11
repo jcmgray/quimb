@@ -100,6 +100,7 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
         sb = _check_tensor_site(tidb, tb)
         if sa > sb:
             sa, sb = sb, sa
+            ta, tb = tb, ta
 
         if sb - sa > 1:
             if not fix_bonds:
@@ -115,11 +116,7 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
             ixl = ix
             for i in range(sa + 1, sb):
                 ixr = rand_uuid()
-                tn |= Tensor(
-                    data=data,
-                    inds=[ixl, ixr],
-                    tags=site_tags[i],
-                )
+                tn |= Tensor(data=data, inds=[ixl, ixr], tags=site_tags[i])
                 ixl = ixr
 
             tb.reindex_({ix: ixl})
@@ -1382,6 +1379,8 @@ def tensor_network_1d_compress_src(
         site_tags = tuple(reversed(site_tags))
     L = len(site_tags)
 
+    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+
     # first we segment the tensor network into local sites
     local_tns = []
     local_inds = []
@@ -1703,6 +1702,8 @@ def tensor_network_1d_compress_srcmps(
     if sweep_reverse:
         site_tags = tuple(reversed(site_tags))
     L = len(site_tags)
+
+    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
 
     local_tns = []
     for i in range(L):

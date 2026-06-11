@@ -1,6 +1,9 @@
 """Tools for quantum circuit simulation using tensor networks."""
 
+import ast
 import cmath
+import collections.abc
+import copy
 import functools
 import itertools
 import math
@@ -10,7 +13,13 @@ import re
 import warnings
 
 import numpy as np
-from autoray import astype, backend_like, do, get_dtype_name, reshape
+from autoray import (
+    astype,
+    backend_like,
+    do,
+    get_dtype_name,
+    reshape,
+)
 
 import quimb as qu
 
@@ -30,6 +39,8 @@ from .tensor_builder import (
     MPO_identity_like,
     MPS_computational_state,
     TN_from_sites_computational_state,
+    TN_from_sites_product_state,
+    gen_unique_edges,
 )
 from .tensor_core import (
     PTensor,
@@ -146,6 +157,21 @@ def multi_replace(s, replacements):
     return s
 
 
+def _openqasm_replace_tokens(s, replacements):
+    """Replace whole identifier-like tokens in an OpenQASM fragment."""
+    if not replacements:
+        return s
+
+    pattern = "|".join(
+        sorted(map(re.escape, replacements), key=len, reverse=True)
+    )
+    return re.sub(
+        rf"(?<!\w)({pattern})(?!\w)",
+        lambda match: replacements[match.group(1)],
+        s,
+    )
+
+
 @functools.lru_cache(None)
 def get_openqasm2_regexes():
     return {
@@ -160,6 +186,301 @@ def get_openqasm2_regexes():
         "gate_def": re.compile(r"^gate\s+"),
         "gate_sig": re.compile(r"^gate\s+(\w+)\s*(\((.+)\))?\s*(.*)"),
     }
+
+
+@functools.lru_cache(None)
+def get_openqasm3_regexes():
+    return {
+        "header": re.compile(
+            r"(OPENQASM\s+3(?:\.\d+)?;)"
+            r"|(include\s+\"(?:stdgates|qelib1)\.inc\";)"
+        ),
+        "comment": re.compile(r"^//"),
+        "comment_start": re.compile(r"/\*"),
+        "comment_end": re.compile(r"\*/"),
+        "qubit": re.compile(r"qubit(?:\s*\[(.+)\])?\s+(\w+);"),
+        "input": re.compile(r"input\s+\w+(?:\s*\[[^\]]+\])?\s+(\w+);"),
+        "output": re.compile(r"output\s+\w+(?:\s*\[[^\]]+\])?\s+(\w+);"),
+        "const": re.compile(
+            r"const\s+\w+(?:\s*\[[^\]]+\])?\s+(\w+)\s*=\s*(.+);"
+        ),
+        "classical_decl": re.compile(
+            r"(bit|bool|int|uint|float|angle|complex)(?:\s*\[[^\]]+\])?\s+"
+            r"(\w+)(?:\s*=\s*(.+))?;"
+        ),
+        "array_decl": re.compile(r"array\s*\[.*\]\s+(\w+)\s*=\s*(.+);"),
+        "assign": re.compile(r"(\w+)\s*=\s*(.+);"),
+        "ignore": re.compile(r"^(measure|barrier|gphase)\b"),
+        "error": re.compile(
+            r"^(reset|if|for|while|switch|box|delay|defcal|cal|extern|pragma"
+            r"|alias|return)\b"
+        ),
+        "gate_def": re.compile(r"^gate\s+"),
+        "gate_sig": re.compile(r"^gate\s+(\w+)\s*(?:\((.*?)\))?\s*(.*?)\s*$"),
+        "gate": re.compile(r"(\w+)\s*(?:\((.*)\))?\s*(.*);"),
+    }
+
+
+def _openqasm_split_top_level(s, sep=","):
+    if not s:
+        return []
+
+    parts = []
+    cur = []
+    depth_paren = 0
+    depth_brack = 0
+    depth_brace = 0
+
+    for c in s:
+        if c == "(":
+            depth_paren += 1
+        elif c == ")":
+            depth_paren -= 1
+        elif c == "[":
+            depth_brack += 1
+        elif c == "]":
+            depth_brack -= 1
+        elif c == "{":
+            depth_brace += 1
+        elif c == "}":
+            depth_brace -= 1
+
+        if (
+            c == sep
+            and depth_paren == 0
+            and depth_brack == 0
+            and depth_brace == 0
+        ):
+            parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(c)
+
+    if cur:
+        parts.append("".join(cur).strip())
+
+    return [p for p in parts if p]
+
+
+def _openqasm_eval_expr(expr, env):
+    if callable(expr):
+        return expr(env)
+
+    if not isinstance(expr, str):
+        return expr
+
+    expr = expr.strip()
+    if not expr:
+        return None
+
+    tree = ast.parse(expr, mode="eval")
+
+    allowed_binary_ops = {
+        ast.Add: ("+", operator.add),
+        ast.Sub: ("-", operator.sub),
+        ast.Mult: ("*", operator.mul),
+        ast.Div: ("/", operator.truediv),
+        ast.FloorDiv: ("//", operator.floordiv),
+        ast.Mod: ("%", operator.mod),
+        ast.Pow: ("**", operator.pow),
+        ast.LShift: ("<<", operator.lshift),
+        ast.RShift: (">>", operator.rshift),
+        ast.BitAnd: ("&", operator.and_),
+        ast.BitXor: ("^", operator.xor),
+        ast.BitOr: ("|", operator.or_),
+    }
+    allowed_unary_ops = {
+        ast.USub: ("-", operator.neg),
+        ast.UAdd: ("+", operator.pos),
+        ast.Invert: ("~", operator.invert),
+        ast.Not: ("!", operator.not_),
+    }
+    allowed_fns = {
+        "sin": lambda x: do("sin", x),
+        "cos": lambda x: do("cos", x),
+        "tan": lambda x: do("tan", x),
+        "asin": lambda x: do("arcsin", x),
+        "acos": lambda x: do("arccos", x),
+        "atan": lambda x: do("arctan", x),
+        "exp": lambda x: do("exp", x),
+        "ln": lambda x: do("log", x),
+        "log": lambda x: do("log", x),
+        "sqrt": lambda x: do("sqrt", x),
+        "abs": lambda x: do("abs", x),
+        "pow": pow,
+    }
+
+    def _placeholder_passthrough(*xs):
+        for x in xs:
+            if _is_interface_placeholder(x):
+                return x
+        raise TypeError("No placeholder value supplied.")
+
+    def _is_symbolic(x):
+        if isinstance(x, str):
+            return True
+        if isinstance(x, (list, tuple)):
+            return any(_is_symbolic(xi) for xi in x)
+        return False
+
+    def _combine_symbolic(op, *xs):
+        fmt = lambda x: x if isinstance(x, str) else repr(x)
+        if len(xs) == 1:
+            (x,) = xs
+            if op == "+":
+                return f"(+{fmt(x)})"
+            if op == "-":
+                return f"(-{fmt(x)})"
+            if op == "~":
+                return f"(~{fmt(x)})"
+            if op == "!":
+                return f"(!{fmt(x)})"
+        if op in {
+            "sin",
+            "cos",
+            "tan",
+            "asin",
+            "acos",
+            "atan",
+            "exp",
+            "ln",
+            "log",
+            "sqrt",
+            "abs",
+        }:
+            return f"{op}({', '.join(map(fmt, xs))})"
+        return f"({fmt(xs[0])} {op} {fmt(xs[1])})"
+
+    allowed_compare_ops = {
+        ast.Eq: ("==", operator.eq),
+        ast.NotEq: ("!=", operator.ne),
+        ast.Lt: ("<", operator.lt),
+        ast.LtE: ("<=", operator.le),
+        ast.Gt: (">", operator.gt),
+        ast.GtE: (">=", operator.ge),
+    }
+
+    def _eval_node(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id == "pi":
+                return math.pi
+            if node.id in env:
+                return env[node.id]
+            raise NotImplementedError(
+                f"Unknown OpenQASM 3 identifier: {node.id}"
+            )
+        if isinstance(node, ast.BinOp):
+            lhs = _eval_node(node.left)
+            rhs = _eval_node(node.right)
+            optype = type(node.op)
+            if optype not in allowed_binary_ops:
+                raise NotImplementedError(
+                    f"Unsupported OpenQASM 3 operator: {optype.__name__}"
+                )
+            op, fn = allowed_binary_ops[optype]
+            if _is_symbolic(lhs) or _is_symbolic(rhs):
+                return _combine_symbolic(op, lhs, rhs)
+            if _is_interface_placeholder(lhs) or _is_interface_placeholder(
+                rhs
+            ):
+                return _placeholder_passthrough(lhs, rhs)
+            return fn(lhs, rhs)
+        if isinstance(node, ast.UnaryOp):
+            x = _eval_node(node.operand)
+            optype = type(node.op)
+            if optype not in allowed_unary_ops:
+                raise NotImplementedError(
+                    f"Unsupported OpenQASM 3 unary op: {optype.__name__}"
+                )
+            op, fn = allowed_unary_ops[optype]
+            if _is_symbolic(x):
+                return _combine_symbolic(op, x)
+            if _is_interface_placeholder(x):
+                return x
+            return fn(x)
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                raise NotImplementedError(
+                    "Unsupported OpenQASM 3 callable expression."
+                )
+            name = node.func.id
+            if name not in allowed_fns:
+                raise NotImplementedError(
+                    f"Unsupported OpenQASM 3 function: {name}"
+                )
+            args = [_eval_node(a) for a in node.args]
+            if any(_is_symbolic(a) for a in args):
+                return _combine_symbolic(name, *args)
+            if any(_is_interface_placeholder(a) for a in args):
+                return _placeholder_passthrough(*args)
+            return allowed_fns[name](*args)
+        if isinstance(node, ast.Compare):
+            if len(node.ops) != 1 or len(node.comparators) != 1:
+                raise NotImplementedError(
+                    "Chained comparisons not supported in OpenQASM 3."
+                )
+            lhs = _eval_node(node.left)
+            rhs = _eval_node(node.comparators[0])
+            optype = type(node.ops[0])
+            if optype not in allowed_compare_ops:
+                raise NotImplementedError(
+                    f"Unsupported OpenQASM 3 compare op: {optype.__name__}"
+                )
+            op, fn = allowed_compare_ops[optype]
+            if _is_symbolic(lhs) or _is_symbolic(rhs):
+                return _combine_symbolic(op, lhs, rhs)
+            if _is_interface_placeholder(lhs) or _is_interface_placeholder(
+                rhs
+            ):
+                return _placeholder_passthrough(lhs, rhs)
+            return fn(lhs, rhs)
+        if isinstance(node, ast.List):
+            return [_eval_node(x) for x in node.elts]
+        if isinstance(node, ast.Subscript):
+            value = _eval_node(node.value)
+            index_node = node.slice
+            if hasattr(ast, "Index") and isinstance(index_node, ast.Index):
+                index_node = index_node.value
+            index = _eval_node(index_node)
+            if isinstance(index, numbers.Number):
+                index = int(index)
+            else:
+                raise NotImplementedError(
+                    "Symbolic array indices are unsupported."
+                )
+            if not isinstance(value, (list, tuple)):
+                raise NotImplementedError(
+                    "Only OpenQASM 3 array-style values can be indexed."
+                )
+            return value[index]
+        raise NotImplementedError(
+            f"Unsupported OpenQASM 3 expression node: {type(node).__name__}"
+        )
+
+    return _eval_node(tree.body)
+
+
+def _is_interface_placeholder(x):
+    try:
+        from .interface import Placeholder
+    except ImportError:
+        return False
+    return isinstance(x, Placeholder)
+
+
+def _placeholder_param_vector(values):
+    from .interface import Placeholder
+
+    for value in values:
+        if _is_interface_placeholder(value):
+            dtype = getattr(value, "dtype", "float64")
+            if dtype in (None, "unknown"):
+                dtype = "float64"
+            return Placeholder(np.empty((len(values),), dtype=dtype))
+
+    raise TypeError("No placeholder values supplied.")
 
 
 def parse_openqasm2_str(contents):
@@ -333,6 +654,418 @@ def parse_openqasm2_url(url, **kwargs):
     from urllib import request
 
     return parse_openqasm2_str(request.urlopen(url).read().decode(), **kwargs)
+
+
+def parse_openqasm3_str(contents):
+    """Parse an OpenQASM 3.0 program from a string.
+
+    This parser is dependency free and supports a practical subset of
+    OpenQASM 3 for circuit import, including qubit declarations, input
+    declarations, arithmetic expressions, custom gates, and register
+    broadcasting.
+
+    Parameters
+    ----------
+    contents : str
+        The OpenQASM 3 source code to parse.
+
+    Returns
+    -------
+    dict
+        A dictionary describing the circuit with the following entries:
+
+        - ``"n"``: total number of qubits.
+        - ``"sitemap"``: mapping from OpenQASM qubit names to qubit indices.
+        - ``"gates"``: parsed sequence of :class:`Gate` objects.
+        - ``"n_gates"``: total number of parsed gates.
+        - ``"inputs"``: tuple of symbolic input names declared with
+          ``input``.
+        - ``"symbols"``: mapping of symbolic names to their current values or
+          symbolic placeholders.
+        - ``"expressions"``: mapping from gate indices to symbolic parameter
+          expressions requiring later binding.
+
+    Raises
+    ------
+    NotImplementedError
+        If the program uses unsupported OpenQASM 3 features such as control
+        flow, calibration blocks, output declarations, or unsupported
+        operations.
+    SyntaxError
+        If the source contains an instruction that does not match the
+        supported grammar subset.
+    """
+    rgxs = get_openqasm3_regexes()
+    sitemap = {}
+    registers = {}
+    gates = []
+    custom_gates = {}
+    env = {}
+    inputs = []
+    symbols = {}
+    expressions = {}
+    warned = {}
+
+    aliases = {
+        "u": "U3",
+        "u1": "U1",
+        "u2": "U2",
+        "u3": "U3",
+        "p": "PHASE",
+        "phase": "PHASE",
+        "id": "IDEN",
+        "i": "IDEN",
+        "cnot": "CNOT",
+        "cx": "CX",
+        "cy": "CY",
+        "cz": "CZ",
+        "h": "H",
+        "x": "X",
+        "y": "Y",
+        "z": "Z",
+        "s": "S",
+        "sdg": "SDG",
+        "t": "T",
+        "tdg": "TDG",
+        "sx": "SX",
+        "sxdg": "SXDG",
+        "swap": "SWAP",
+        "iswap": "ISWAP",
+        "rx": "RX",
+        "ry": "RY",
+        "rz": "RZ",
+        "crx": "CRX",
+        "cry": "CRY",
+        "crz": "CRZ",
+        "cu1": "CU1",
+        "cu2": "CU2",
+        "cu3": "CU3",
+        "cphase": "CPHASE",
+        "cp": "CPHASE",
+        "ccx": "CCX",
+        "ccnot": "CCX",
+        "toffoli": "CCX",
+        "cswap": "CSWAP",
+        "fredkin": "CSWAP",
+    }
+
+    def _resolve_qubit_arg(token):
+        token = token.strip()
+        if token in env and isinstance(env[token], (tuple, list)):
+            return tuple(env[token])
+        if token in registers:
+            reg = registers[token]
+            return reg if len(reg) > 1 else reg[0]
+
+        match = re.fullmatch(r"(\w+)\[(.+)\]", token)
+        if match:
+            base, idx_expr = match.groups()
+            idx = _openqasm_eval_expr(idx_expr, env)
+            if not isinstance(idx, numbers.Number):
+                raise NotImplementedError(
+                    "Symbolic qubit indices are unsupported."
+                )
+            idx = int(idx)
+            if base in env and isinstance(env[base], (tuple, list)):
+                return env[base][idx]
+            return sitemap[f"{base}[{idx}]"]
+
+        raise NotImplementedError(f"Unknown qubit identifier: {token}")
+
+    in_comment = False
+    lines = contents.split("\n")
+    while lines:
+        line = lines.pop(0).strip()
+        if not line:
+            continue
+        if rgxs["comment"].match(line):
+            continue
+        if rgxs["comment_start"].match(line):
+            in_comment = True
+        if in_comment:
+            in_comment = not bool(rgxs["comment_end"].search(line))
+            continue
+        if rgxs["header"].match(line):
+            continue
+
+        match = rgxs["qubit"].match(line)
+        if match:
+            size_expr, name = match.groups()
+            size = (
+                1
+                if size_expr is None
+                else int(_openqasm_eval_expr(size_expr, env))
+            )
+            registers[name] = tuple(range(len(sitemap), len(sitemap) + size))
+            for i, q in enumerate(registers[name]):
+                sitemap[f"{name}[{i}]"] = q
+            continue
+
+        match = rgxs["input"].match(line)
+        if match:
+            (name,) = match.groups()
+            inputs.append(name)
+            env[name] = name
+            symbols[name] = name
+            continue
+
+        if rgxs["output"].match(line):
+            raise NotImplementedError("Output declarations are unsupported.")
+
+        match = rgxs["const"].match(line)
+        if match:
+            name, expr = match.groups()
+            env[name] = _openqasm_eval_expr(expr, env)
+            continue
+
+        match = rgxs["classical_decl"].match(line)
+        if match:
+            ctype, name, expr = match.groups()
+            if ctype == "bit" and expr is None:
+                if not warned.get("bit", False):
+                    warnings.warn(
+                        "Unsupported operation ignored: bit",
+                        SyntaxWarning,
+                    )
+                    warned["bit"] = True
+                continue
+            if expr is not None:
+                if expr.lstrip().startswith("measure "):
+                    if not warned.get("measure", False):
+                        warnings.warn(
+                            "Unsupported operation ignored: measure",
+                            SyntaxWarning,
+                        )
+                        warned["measure"] = True
+                    continue
+                env[name] = _openqasm_eval_expr(expr, env)
+            continue
+
+        match = rgxs["array_decl"].match(line)
+        if match:
+            name, expr = match.groups()
+            env[name] = _openqasm_eval_expr(
+                expr.replace("{", "[").replace("}", "]"), env
+            )
+            continue
+
+        match = rgxs["assign"].match(line)
+        if match:
+            name, expr = match.groups()
+            if expr.lstrip().startswith("measure "):
+                if not warned.get("measure", False):
+                    warnings.warn(
+                        "Unsupported operation ignored: measure",
+                        SyntaxWarning,
+                    )
+                    warned["measure"] = True
+                continue
+            env[name] = _openqasm_eval_expr(expr, env)
+            continue
+
+        if rgxs["ignore"].match(line):
+            op = rgxs["ignore"].match(line).group(1)
+            if not warned.get(op, False):
+                warnings.warn(
+                    "Unsupported operation ignored: global phase"
+                    if op == "gphase"
+                    else f"Unsupported operation ignored: {op}",
+                    SyntaxWarning,
+                )
+                warned[op] = True
+            continue
+
+        if rgxs["error"].match(line):
+            raise NotImplementedError(
+                f"The following instruction is not supported: {line}"
+            )
+
+        if "@" in line:
+            raise NotImplementedError(
+                f"The following instruction is not supported: {line}"
+            )
+
+        if rgxs["gate_def"].match(line):
+            gate_lines = [line]
+            brace_count = line.count("{") - line.count("}")
+            while brace_count > 0:
+                line = lines.pop(0)
+                gate_lines.append(line)
+                brace_count += line.count("{") - line.count("}")
+
+            gate_def = " ".join(gl.strip() for gl in gate_lines)
+            gate_sig, gate_body = re.match(r"(.*)\s*{(.*)}", gate_def).groups()
+            match = rgxs["gate_sig"].match(gate_sig)
+            label = match[1]
+            sig_params = _openqasm_split_top_level(match[2])
+            sig_qubits = _openqasm_split_top_level(match[3])
+            gate_body = _openqasm_split_top_level(gate_body, ";")
+
+            for i, gate_line in enumerate(gate_body):
+                gm = rgxs["gate"].match(gate_line + ";")
+                glabel = gm[1]
+                gqubits = _openqasm_replace_tokens(
+                    gm[3], {q: f"{{{q}}}" for q in sig_qubits}
+                )
+                if gm[2]:
+                    gparams = _openqasm_replace_tokens(
+                        gm[2], {p: f"{{{p}}}" for p in sig_params}
+                    )
+                    gate_body[i] = f"{glabel}({gparams}) {gqubits};"
+                else:
+                    gate_body[i] = f"{glabel} {gqubits};"
+
+            custom_gates[label] = (sig_params, sig_qubits, gate_body)
+            continue
+
+        match = rgxs["gate"].match(line)
+        if match:
+            label = match[1]
+            params = _openqasm_split_top_level(match[2])
+            qubits = _openqasm_split_top_level(match[3])
+
+            if label in custom_gates:
+                sig_params, sig_qubits, gate_body = custom_gates[label]
+                if len(sig_params) != len(params):
+                    raise NotImplementedError(
+                        f"Custom gate {label} expected "
+                        f"{len(sig_params)} parameters, got {len(params)}"
+                    )
+
+                replacer_base = dict(zip(sig_params, params))
+                resolved = [_resolve_qubit_arg(q) for q in qubits]
+                sizes = {
+                    len(q) for q in resolved if isinstance(q, (tuple, list))
+                }
+                if not sizes:
+                    qubit_calls = [tuple(qubits)]
+                else:
+                    if len(sizes) != 1:
+                        raise NotImplementedError(
+                            "Broadcasted gate args must use registers of "
+                            "equal length."
+                        )
+                    (size,) = sizes
+                    qubit_calls = [
+                        tuple(
+                            f"{token}[{i}]"
+                            if isinstance(value, (tuple, list))
+                            else token
+                            for token, value in zip(qubits, resolved)
+                        )
+                        for i in range(size)
+                    ]
+
+                for call_qubits in reversed(qubit_calls):
+                    if len(sig_qubits) != len(call_qubits):
+                        raise NotImplementedError(
+                            f"Custom gate {label} expected "
+                            f"{len(sig_qubits)} qubits, "
+                            f"got {len(call_qubits)}"
+                        )
+                    replacer = {
+                        **replacer_base,
+                        **dict(zip(sig_qubits, map(str, call_qubits))),
+                    }
+                    for gl in reversed(gate_body):
+                        lines.insert(0, gl.format(**replacer))
+                continue
+
+            label = aliases.get(label.lower(), label)
+            if label not in ALL_GATES:
+                raise NotImplementedError(f"Unknown gate: {label}")
+
+            raw_params = tuple(_openqasm_eval_expr(p, env) for p in params)
+            resolved = [_resolve_qubit_arg(q) for q in qubits]
+            sizes = {len(q) for q in resolved if isinstance(q, (tuple, list))}
+            if not sizes:
+                qubit_calls = [tuple(resolved)]
+            else:
+                if len(sizes) != 1:
+                    raise NotImplementedError(
+                        "Broadcasted gate args must use registers of equal "
+                        "length."
+                    )
+                (size,) = sizes
+                qubit_calls = [
+                    tuple(
+                        value[i] if isinstance(value, (tuple, list)) else value
+                        for value in resolved
+                    )
+                    for i in range(size)
+                ]
+            parametrize = any(
+                not isinstance(p, numbers.Number) for p in raw_params
+            )
+            params = tuple(
+                float("nan") if not isinstance(p, numbers.Number) else p
+                for p in raw_params
+            )
+            for call_qubits in qubit_calls:
+                if parametrize:
+                    expressions[len(gates)] = raw_params
+                gates.append(
+                    Gate(
+                        label=label,
+                        params=params,
+                        qubits=call_qubits,
+                        parametrize=parametrize,
+                    )
+                )
+            continue
+
+        raise SyntaxError(f"{line}")
+
+    return {
+        "n": len(sitemap),
+        "sitemap": sitemap,
+        "gates": gates,
+        "n_gates": len(gates),
+        "inputs": tuple(inputs),
+        "symbols": copy.copy(symbols),
+        "expressions": copy.copy(expressions),
+    }
+
+
+def parse_openqasm3_file(fname, **kwargs):
+    """Parse an OpenQASM 3.0 file.
+
+    Parameters
+    ----------
+    fname : str or path-like
+        Path to the OpenQASM 3 file.
+    **kwargs
+        Forwarded to :func:`parse_openqasm3_str`.
+
+    Returns
+    -------
+    dict
+        The parsed circuit information returned by
+        :func:`parse_openqasm3_str`.
+    """
+    with open(fname) as f:
+        return parse_openqasm3_str(f.read(), **kwargs)
+
+
+def parse_openqasm3_url(url, **kwargs):
+    """Parse an OpenQASM 3.0 program from a URL.
+
+    Parameters
+    ----------
+    url : str
+        URL pointing to an OpenQASM 3 source file.
+    **kwargs
+        Forwarded to :func:`parse_openqasm3_str`.
+
+    Returns
+    -------
+    dict
+        The parsed circuit information returned by
+        :func:`parse_openqasm3_str`.
+    """
+    from urllib import request
+
+    return parse_openqasm3_str(request.urlopen(url).read().decode(), **kwargs)
 
 
 # -------------------------- core gate functions ---------------------------- #
@@ -1375,7 +2108,8 @@ class Gate:
         param_fn = PARAM_GATES[self._label]
         if self._parametrize:
             # either lazily, as tensor will be parametrized
-            return ops.PArray(param_fn, self._params)
+            shape = (2,) * (2 * len(self._qubits))
+            return ops.PArray(param_fn, self._params, shape=shape)
 
         # or cached directly into array
         try:
@@ -1754,6 +2488,8 @@ class Circuit:
         self._sample_n_gates = -1
         self._storage = dict()
         self._sampled_conditionals = dict()
+        self._named_params = {}
+        self._named_param_exprs = {}
 
     def copy(self):
         """Copy the circuit and its state."""
@@ -1776,6 +2512,8 @@ class Circuit:
         new._sample_n_gates = self._sample_n_gates
         new._storage = self._storage.copy()
         new._sampled_conditionals = self._sampled_conditionals.copy()
+        new._named_params = copy.copy(self._named_params)
+        new._named_param_exprs = copy.copy(self._named_param_exprs)
         return new
 
     def _maybe_convert(self, obj, dtype=None):
@@ -1806,6 +2544,108 @@ class Circuit:
     def apply_to_arrays(self, fn):
         """Apply a function to all the arrays in the circuit."""
         self._psi.apply_to_arrays(fn)
+        self._named_params = tree_map(fn, self._named_params)
+
+    @staticmethod
+    def _normalize_named_param_value(value):
+        if _is_interface_placeholder(value):
+            return value
+        if isinstance(value, numbers.Number):
+            return ops.asarray(value)
+        return value
+
+    @property
+    def named_params(self):
+        """Named circuit parameters and their current values."""
+        return copy.copy(self._named_params)
+
+    @property
+    def named_param_names(self):
+        """Names of registered circuit parameters."""
+        return tuple(self._named_params)
+
+    @property
+    def param_expressions(self):
+        """Gate parameter expressions keyed by gate index."""
+        return copy.copy(self._named_param_exprs)
+
+    def register_named_params(self, named_params, gate_expressions=None):
+        """Register named circuit parameters and gate dependencies.
+
+        Parameters
+        ----------
+        named_params : sequence[str] or mapping[str, scalar]
+            Either names to register, which default to ``nan`` until bound,
+            or a mapping supplying initial values.
+        gate_expressions : mapping[int, tuple], optional
+            Mapping from gate index to the expressions used to generate that
+            gate's parameters. Each expression can be a constant, a string
+            expression referencing the named parameters, or a callable taking
+            the current named parameter mapping.
+        """
+        if isinstance(named_params, collections.abc.Mapping):
+            self._named_params = {
+                name: self._normalize_named_param_value(value)
+                for name, value in named_params.items()
+            }
+        else:
+            self._named_params = {
+                name: self._normalize_named_param_value(float("nan"))
+                for name in tuple(named_params)
+            }
+
+        if gate_expressions is None:
+            gate_expressions = {}
+
+        normalized_gate_expressions = {}
+        for i, exprs in gate_expressions.items():
+            i = int(i)
+            exprs = tuple(exprs)
+
+            if not (0 <= int(i) < len(self._gates)):
+                raise ValueError(
+                    "Named parameter expressions reference unknown gate "
+                    f"index: {i}"
+                )
+
+            gate = self._gates[i]
+            if not gate.parametrize:
+                raise ValueError(
+                    "Named parameter expressions require parametrized gate "
+                    f"indices, got non-parametrized gate: {i}"
+                )
+
+            if len(exprs) != len(gate.params):
+                raise ValueError(
+                    "Named parameter expression arity does not match gate "
+                    f"{i}: expected {len(gate.params)}, got {len(exprs)}"
+                )
+
+            normalized_gate_expressions[i] = exprs
+
+        self._named_param_exprs = normalized_gate_expressions
+        self._apply_named_param_updates()
+        self.clear_storage()
+
+    def _set_gate_params(self, i, params):
+        self._psi[self.gate_tag(i)].params = params
+        self._gates[i] = self._gates[i].copy_with(params=ops.asarray(params))
+
+    def _apply_named_param_updates(self):
+        if not self._named_param_exprs:
+            return
+
+        env = dict(self._named_params)
+        for i, exprs in self._named_param_exprs.items():
+            values = tuple(_openqasm_eval_expr(expr, env) for expr in exprs)
+            if any(isinstance(x, str) for x in values):
+                raise ValueError(
+                    "Named parameter binding left unresolved symbolic values "
+                    f"for gate {i}: {values!r}"
+                )
+            if any(_is_interface_placeholder(x) for x in values):
+                values = _placeholder_param_vector(values)
+            self._set_gate_params(i, values)
 
     def get_params(self):
         """Get a pytree - in this case a dict - of all the parameters in the
@@ -1813,27 +2653,69 @@ class Circuit:
 
         Returns
         -------
-        dict[int, tuple]
-            A dictionary mapping gate numbers to their parameters.
+        dict
+            Dictionary containing any named parameters plus any directly
+            parametrized gates not driven by named parameter expressions.
         """
-        return {
-            i: self._psi[self.gate_tag(i)].params
-            for i, gate in enumerate(self._gates)
-            if gate.parametrize
-        }
+        params = dict(self._named_params)
+        managed_gates = set(self._named_param_exprs)
+        params.update(
+            {
+                i: self._psi[self.gate_tag(i)].params
+                for i, gate in enumerate(self._gates)
+                if gate.parametrize and i not in managed_gates
+            }
+        )
+        return params
 
     def set_params(self, params):
         """Set the parameters of the circuit.
 
         Parameters
         ----------
-        params : dict`
-            A dictionary mapping gate numbers to the new parameters.
+        params : dict
+            Dictionary mapping gate numbers and/or registered named parameter
+            names to new values.
         """
-        for i, p in params.items():
-            self._psi[self.gate_tag(i)].params = p
-            self._gates[i] = self._gates[i].copy_with(params=ops.asarray(p))
+        if params is None:
+            params = {}
 
+        named_updates = {k: v for k, v in params.items() if isinstance(k, str)}
+        gate_updates = {
+            k: v for k, v in params.items() if not isinstance(k, str)
+        }
+
+        if named_updates and not self._named_params:
+            raise TypeError(
+                "String-keyed parameters require registered named parameters."
+            )
+
+        extra = set(named_updates) - set(self._named_params)
+        if extra:
+            raise ValueError(
+                "Unknown named parameter values supplied for: "
+                + ", ".join(sorted(extra))
+            )
+
+        overlap = set(gate_updates) & set(self._named_param_exprs)
+        if overlap:
+            raise ValueError(
+                "Cannot directly set gate parameters managed by named "
+                "parameter expressions: "
+                + ", ".join(map(str, sorted(overlap)))
+            )
+
+        if named_updates:
+            self._named_params.update(
+                {
+                    name: self._normalize_named_param_value(value)
+                    for name, value in named_updates.items()
+                }
+            )
+            self._apply_named_param_updates()
+
+        for i, p in gate_updates.items():
+            self._set_gate_params(i, p)
         self.clear_storage()
 
     @classmethod
@@ -1893,6 +2775,87 @@ class Circuit:
         qc = cls(info["n"], **circuit_opts)
         qc.apply_gates(info["gates"], progbar=progbar)
         return qc
+
+    @classmethod
+    def from_openqasm3_str(cls, contents, progbar=False, **circuit_opts):
+        """Construct a circuit from an OpenQASM 3.0 string.
+
+        Parameters
+        ----------
+        contents : str
+            The OpenQASM 3 source code to parse.
+        progbar : bool, optional
+            Whether to show a progress bar while applying the parsed gates.
+        **circuit_opts
+            Options forwarded to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+            A circuit populated with the parsed gates. If symbolic ``input``
+            declarations are present, they are registered as generic named
+            circuit parameters so that :meth:`set_params` can bind them later.
+        """
+        info = parse_openqasm3_str(contents)
+        qc = cls(info["n"], **circuit_opts)
+        qc.apply_gates(info["gates"], progbar=progbar)
+        qc.register_named_params(
+            {
+                name: (value if not isinstance(value, str) else float("nan"))
+                for name, value in info["symbols"].items()
+            },
+            info["expressions"],
+        )
+        return qc
+
+    @classmethod
+    def from_openqasm3_file(cls, fname, progbar=False, **circuit_opts):
+        """Construct a circuit from an OpenQASM 3.0 file.
+
+        Parameters
+        ----------
+        fname : str or path-like
+            Path to the OpenQASM 3 file.
+        progbar : bool, optional
+            Whether to show a progress bar while applying the parsed gates.
+        **circuit_opts
+            Options forwarded to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+            The parsed circuit instance.
+        """
+        with open(fname) as f:
+            return cls.from_openqasm3_str(
+                f.read(), progbar=progbar, **circuit_opts
+            )
+
+    @classmethod
+    def from_openqasm3_url(cls, url, progbar=False, **circuit_opts):
+        """Construct a circuit from an OpenQASM 3.0 URL.
+
+        Parameters
+        ----------
+        url : str
+            URL pointing to an OpenQASM 3 source file.
+        progbar : bool, optional
+            Whether to show a progress bar while applying the parsed gates.
+        **circuit_opts
+            Options forwarded to the ``Circuit`` constructor.
+
+        Returns
+        -------
+        Circuit
+            The parsed circuit instance.
+        """
+        from urllib import request
+
+        return cls.from_openqasm3_str(
+            request.urlopen(url).read().decode(),
+            progbar=progbar,
+            **circuit_opts,
+        )
 
     @classmethod
     def from_gates(cls, gates, N=None, progbar=False, **kwargs):
@@ -5164,3 +6127,454 @@ class CircuitLazyMPS(CircuitMPS):
     def fidelity_estimate(self):
         self._compress()
         return super().fidelity_estimate()
+
+
+class CircuitPEPSSimpleUpdate(Circuit):
+    """Quantum circuit simulation keeping the state as a generic tensor
+    network (a "PEPS" defined by an arbitrary graph of ``edges``) and applying
+    gates with the simple update rule. The state always keeps a single tensor
+    per site, with bonds only along the supplied edges; two-qubit gates are
+    only supported on those edges. Bond singular values are tracked as
+    Vidal-style gauges, which makes gate application and the computation of
+    local expectations cheap and approximate.
+
+    This is useful for circuits on lattices that build up more than 1D worth of
+    entanglement, where an exact or MPS simulation is intractable but a
+    truncated, gauged tensor network state is a good approximation.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits in the circuit. If not given it is inferred from
+        the geometry. Supply it to pad the geometry up to ``N`` sites,
+        including any that have no edges.
+    edges : sequence[tuple[int, int]], optional
+        The edges defining the geometry of the PEPS. A bond is placed between
+        each pair of sites, and two-qubit gates are only supported on these
+        edges. Every site appearing in ``edges`` is included. If not given the
+        geometry is taken from ``gates`` or ``psi0`` instead.
+    gates : sequence, optional
+        If ``edges`` is not given, infer the geometry from the two-qubit gates
+        in this sequence. The gates are only inspected here, not applied, so
+        you still pass them to :meth:`apply_gates` afterwards.
+    psi0 : TensorNetworkGenVector, optional
+        Supply the initial state directly instead of starting from the
+        ``|00...0>`` product state. If ``edges`` is not given the geometry is
+        read from the bonds of this state, and the bond gauges are seeded from
+        it. Only a single seeding sweep is performed; unlike imaginary time
+        simple update the gauge matters immediately, so for an arbitrary
+        ``psi0`` you may want to call :meth:`equilibrate` once before applying
+        gates.
+    max_bond : int, optional
+        The maximum bond dimension to truncate to when applying gates.
+    cutoff : float, optional
+        The singular value cutoff to use when truncating after applying gates.
+    renorm : bool, optional
+        Whether to renormalize the singular values of a bond after each gate.
+        The default ``False`` tracks the norm of the state rather than forcing
+        it to one, which is the sensible choice for real time and general
+        circuit dynamics. Set ``True`` to instead keep the state normalized
+        after every gate, e.g. for the near-identity gates of imaginary time
+        evolution.
+    gauge_smudge : float, optional
+        Small value added to the gauges before they are multiplied in and
+        inverted, for numerical stability with very small singular values.
+    equilibrate_every : int, optional
+        If given, automatically call :meth:`equilibrate` after every this many
+        gates have been applied.
+    equilibrate_opts : dict, optional
+        Default options forwarded to :meth:`equilibrate`.
+    gate_opts : dict, optional
+        Default options to pass to ``gate_simple_`` such as ``max_bond`` and
+        ``cutoff``.
+    dtype : str, optional
+        If given, ensure the state tensors are cast to this data type.
+    to_backend : callable, optional
+        If given, apply this function to the state tensors to convert them to a
+        particular array backend.
+    convert_eager : bool, optional
+        Whether to apply the ``dtype`` and ``to_backend`` conversions eagerly
+        as each gate is applied. The default ``True`` matches the other running
+        simulators (e.g. :class:`CircuitMPS`), since the simple update rule
+        contracts each gate into the state immediately rather than building a
+        lazy network to contract later.
+
+    Attributes
+    ----------
+    edges : tuple[tuple[hashable, hashable]]
+        The unique edges defining the PEPS geometry.
+    sites : tuple[hashable]
+        The sites (qubit labels) of the PEPS.
+    gauges : dict[str, array]
+        The current Vidal-style bond gauges (singular values), keyed by bond
+        index, updated in place as gates are applied.
+
+    Notes
+    -----
+    The gates applied must address qubits using the same labels that appear in
+    ``edges``. Two-qubit gates are only supported along an existing edge.
+
+    Examples
+    --------
+
+        >>> import quimb.tensor as qtn
+        >>> edges = [(0, 1), (1, 2), (0, 3), (1, 4), (2, 5), (3, 4), (4, 5)]
+        >>> circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        >>> circ.apply_gates(gates)
+        >>> peps = circ.psi
+
+    See Also
+    --------
+    CircuitMPS, CircuitDense
+    """
+
+    def __init__(
+        self,
+        N=None,
+        *,
+        edges=None,
+        gates=None,
+        psi0=None,
+        max_bond=None,
+        cutoff=1e-10,
+        renorm=False,
+        gauge_smudge=1e-12,
+        equilibrate_every=None,
+        equilibrate_opts=None,
+        gate_opts=None,
+        dtype=None,
+        to_backend=None,
+        convert_eager=True,
+        **circuit_opts,
+    ):
+        # geometry can come from explicit `edges`, be inferred from the two
+        # site `gates` (only inspected here, not applied) or be read from the
+        # bonds of an existing `psi0`
+        extra_sites = ()
+        if edges is None:
+            if psi0 is not None:
+                edges = tuple(psi0.gen_bond_coos())
+            elif gates is not None:
+                parsed = [parse_to_gate(g) for g in gates]
+                edges = [g.qubits for g in parsed if len(g.qubits) == 2]
+                extra_sites = tuple(q for g in parsed for q in g.qubits)
+            else:
+                raise ValueError(
+                    "You must supply one of `edges`, `gates` or `psi0` to "
+                    "define the PEPS geometry."
+                )
+        self._edges = tuple(gen_unique_edges(edges))
+
+        # sites are everything appearing in the edges, plus any extra sites
+        # touched by single qubit gates or present in psi0, padded up to N
+        sites = set()
+        for a, b in self._edges:
+            sites.add(a)
+            sites.add(b)
+        sites.update(extra_sites)
+        if psi0 is not None:
+            sites.update(psi0.sites)
+        if N is not None:
+            sites.update(range(N))
+        self._sites = tuple(sorted(sites))
+        self._site_set = set(self._sites)
+        self._edge_set = {frozenset(e) for e in self._edges}
+
+        # bond gauges tracked across gate applications
+        self.gauges = {}
+
+        # auto re-gauge every this many gates, if given
+        self._equilibrate_every = equilibrate_every
+        self._equilibrate_opts = ensure_dict(equilibrate_opts)
+
+        gate_opts = ensure_dict(gate_opts)
+        gate_opts.setdefault("max_bond", max_bond)
+        gate_opts.setdefault("cutoff", cutoff)
+        gate_opts.setdefault("renorm", renorm)
+        gate_opts.setdefault("smudge", gauge_smudge)
+
+        circuit_opts.setdefault("tag_gate_numbers", False)
+        circuit_opts.setdefault("tag_gate_rounds", False)
+        circuit_opts.setdefault("tag_gate_labels", False)
+
+        circuit_opts.setdefault("dtype", dtype)
+        circuit_opts.setdefault("to_backend", to_backend)
+        circuit_opts.setdefault("convert_eager", convert_eager)
+
+        super().__init__(len(self._sites), psi0, gate_opts, **circuit_opts)
+
+        if psi0 is not None:
+            # seed the bond gauges from the supplied state
+            self._psi.gauge_all_simple_(gauges=self.gauges, max_iterations=1)
+
+    def copy(self):
+        """Copy the circuit, including its state, gauges and geometry. The
+        base :class:`Circuit` copy does not know about the extra simple update
+        attributes, so they are carried over here (the gauges are copied so the
+        two circuits can be evolved independently).
+        """
+        new = super().copy()
+        new._edges = self._edges
+        new._sites = self._sites
+        new._site_set = self._site_set
+        new._edge_set = self._edge_set
+        new.gauges = dict(self.gauges)
+        new._equilibrate_every = self._equilibrate_every
+        new._equilibrate_opts = dict(self._equilibrate_opts)
+        return new
+
+    @property
+    def edges(self):
+        """The unique edges defining the PEPS geometry."""
+        return self._edges
+
+    @property
+    def sites(self):
+        """The sites (qubit labels) of the PEPS."""
+        return self._sites
+
+    def _init_state(self, N, dtype="complex128"):
+        # |00...0> product state with bond dimension 1 bonds along the edges
+        zero = do("array", [1.0, 0.0], dtype=dtype)
+        psi = TN_from_sites_product_state({site: zero for site in self._sites})
+        for a, b in self.edges:
+            psi[a].new_bond(psi[b])
+        return psi
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        # route gate application through the simple update rule, threading the
+        # persistent bond gauges so they stay consistent between gates
+        if gate.controls:
+            raise ValueError(
+                "Controlled gates are not supported by "
+                "`CircuitPEPSSimpleUpdate`, since the simple update rule "
+                "applies a dense gate array to the sites. Supply the gate as "
+                "a full unitary on its qubits instead."
+            )
+        if gate.special:
+            raise ValueError(
+                f"The special gate {gate.label!r} is not supported by "
+                "`CircuitPEPSSimpleUpdate`. Supply a gate with an explicit "
+                "array acting on sites connected by an edge."
+            )
+
+        where = gate.qubits
+        if len(where) > 2:
+            raise ValueError(
+                "`CircuitPEPSSimpleUpdate` only supports one and two site "
+                f"gates, but got {len(where)} sites: {where}."
+            )
+        if (len(where) == 2) and (frozenset(where) not in self._edge_set):
+            raise ValueError(
+                f"The gate acts on sites {where} which are not a declared "
+                "edge of the PEPS, only nearest neighbor gates are allowed."
+            )
+
+        opts = {**self.gate_opts, **gate_opts}
+        opts.pop("contract", None)
+        opts.pop("propagate_tags", None)
+
+        G = gate.array
+        if self.convert_eager:
+            key = id(G)
+            if key not in self._backend_gate_cache:
+                self._backend_gate_cache[key] = self._maybe_convert(G)
+            G = self._backend_gate_cache[key]
+
+        self._psi.gate_simple_(G, where, self.gauges, **opts)
+        self._gates.append(gate)
+
+        if self._equilibrate_every and (
+            len(self._gates) % self._equilibrate_every == 0
+        ):
+            self.equilibrate()
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+            gates.set_description(f"max_bond={self._psi.max_bond()}")
+
+        for gate in gates:
+            gate = parse_to_gate(gate)
+            self._apply_gate(gate, **gate_opts)
+
+            if progbar and (gate.total_qubit_count >= 2):
+                gates.set_description(f"max_bond={self._psi.max_bond()}")
+
+    def equilibrate(self, **gauge_opts):
+        """Re-gauge the whole state with the simple update rule, improving the
+        consistency of the tracked bond gauges. This does not change the state
+        represented, only the gauge, and can be called periodically between
+        rounds of gates to keep the simple update approximation well behaved.
+
+        The default options given at construction via ``equilibrate_opts`` are
+        applied first, with any keyword arguments here taking precedence.
+
+        Parameters
+        ----------
+        gauge_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple_`,
+            for example ``max_iterations`` and ``tol``.
+        """
+        opts = {**self._equilibrate_opts, **gauge_opts}
+        opts.setdefault("max_iterations", 100)
+        opts.setdefault("tol", 1e-10)
+        self._psi.gauge_all_simple_(gauges=self.gauges, **opts)
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        *,
+        max_distance=0,
+        normalized=True,
+        **contract_opts,
+    ):
+        """Compute the local expectation value of operator ``G`` at the site(s)
+        ``where``, using the simple update bond gauges to approximate the
+        environment beyond ``max_distance``.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator.
+        where : hashable or sequence[hashable]
+            The site or sites to compute the expectation at. A single site
+            label (which may itself be a tuple, e.g. a 2D coordinate) is
+            detected by membership in the set of sites.
+        max_distance : int, optional
+            How many graph hops of neighboring tensors to include in the local
+            cluster used to approximate the reduced density matrix. The default
+            ``0`` uses only the target site(s) and their gauges, matching
+            :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.compute_local_expectation_cluster`.
+        normalized : bool, optional
+            Whether to normalize by the local norm.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.compute_local_expectation_cluster`.
+
+        Returns
+        -------
+        float
+        """
+        if isinstance(where, list):
+            where = tuple(where)
+        if where in self._site_set:
+            where = (where,)
+        else:
+            where = tuple(where)
+        return self._psi.compute_local_expectation_cluster(
+            {where: G},
+            gauges=self.gauges,
+            max_distance=max_distance,
+            normalized=normalized,
+            **contract_opts,
+        )
+
+    def get_state(self, absorb_gauges=True):
+        """Return the current PEPS state, optionally absorbing the bond gauges.
+
+        Parameters
+        ----------
+        absorb_gauges : bool or "return", optional
+            How to handle the tracked Vidal-style bond gauges. If ``True`` (the
+            default) the gauges are absorbed, so the returned tensor network is
+            the actual wavefunction (up to the simple update approximation). If
+            ``False`` the gauges are added to the network as uncontracted
+            diagonal tensors. If ``"return"`` the raw gauged network and a copy
+            of the gauges are returned separately. The internal state is left
+            untouched in every case.
+
+        Returns
+        -------
+        psi : TensorNetwork
+            The current state.
+        gauges : dict
+            The current gauges, only if ``absorb_gauges == "return"``.
+        """
+        psi = self._psi.copy()
+
+        if absorb_gauges == "return":
+            gauges = dict(self.gauges)
+            if not self.convert_eager:
+                self._maybe_convert(psi)
+            return psi, gauges
+
+        if absorb_gauges:
+            # absorb the Vidal-form bond gauges so the returned TN is the state
+            psi.gauge_simple_insert(self.gauges)
+        else:
+            # add the gauges as uncontracted diagonal tensors on their bonds
+            for ix, g in self.gauges.items():
+                psi |= Tensor(g, inds=[ix])
+
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+        return psi
+
+    @property
+    def psi(self):
+        """The PEPS tensor network state, with the simple update bond gauges
+        absorbed back in so that it represents the actual wavefunction (a
+        proper contraction of ``psi`` gives the state, up to the simple update
+        approximation). The internal gauged form is left untouched. Shorthand
+        for ``get_state(absorb_gauges=True)``.
+        """
+        return self.get_state(absorb_gauges=True)
+
+    def calc_qubit_ordering(self, qubits=None):
+        if qubits is None:
+            return tuple(self._sites)
+        return tuple(sorted(qubits))
+
+    def _unsupported_exact(self, name):
+        raise NotImplementedError(
+            f"`{name}` is not supported by `CircuitPEPSSimpleUpdate`, which "
+            "only ever holds an approximate, gauged tensor network state. Use "
+            "`local_expectation` for observables or `psi` to get the gauged "
+            "PEPS state and contract or sample it with the approximation you "
+            "want."
+        )
+
+    def to_dense(self, *args, **kwargs):
+        """Contract the gauged PEPS into a dense wavefunction, a column-vector
+        ``qarray`` of length ``2**N`` ordered like :attr:`sites`, matching the
+        output of :meth:`Circuit.to_dense`. This is the actual (approximate)
+        state, so the cost grows exponentially with the number of qubits.
+
+        Arguments are forwarded to
+        :meth:`~quimb.tensor.tnag.core.TensorNetworkGenVector.to_dense`.
+        """
+        return self.psi.to_dense(*args, **kwargs)
+
+    def amplitude(self, *args, **kwargs):
+        self._unsupported_exact("amplitude")
+
+    def sample(self, *args, **kwargs):
+        self._unsupported_exact("sample")
+
+    def sample_chaotic(self, *args, **kwargs):
+        self._unsupported_exact("sample_chaotic")
+
+    def sample_chaotic_rehearse(self, *args, **kwargs):
+        self._unsupported_exact("sample_chaotic_rehearse")
+
+    def partial_trace(self, *args, **kwargs):
+        self._unsupported_exact("partial_trace")
+
+    @property
+    def uni(self):
+        raise NotImplementedError(
+            "`uni` (the dense circuit unitary) is not available for "
+            "`CircuitPEPSSimpleUpdate`, which never forms the full unitary. "
+            "Apply gates to a state and use `psi` or `local_expectation`."
+        )
+
+    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
+        # the reverse lightcone is not meaningful for a simple update PEPS,
+        # which always keeps the whole state, so just return it
+        return self.psi

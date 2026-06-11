@@ -7,13 +7,18 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- add [`CircuitPEPSSimpleUpdate`](quimb.tensor.circuit.CircuitPEPSSimpleUpdate): a high level quantum circuit simulator that keeps the state as an arbitrary geometry PEPS and applies nearest-neighbor gates with 'simple update' style gauging. The geometry is given by a set of ``edges``, inferred from the ``gates`` or read from a ``psi0``; the accuracy is set by ``max_bond``; gauges can be periodically re-equilibrated with ``equilibrate``; local expectations are computed with the cluster approximation.
 - [`TensorNetwork.gauge_all_simple`](quimb.tensor.tensor_core.TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](quimb.tensor.tensor_core.tensor_compress_bond).
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
 - [`CircuitLazyMPS`](quimb.tensor.circuit.CircuitMPSLazy): add a MPS-based circuit simulator using lazily evaluated gates and periodic automated compression, performing better compared to `CircuitMPS` for long-range gates.
+- [`Circuit.from_openqasm3_str`](quimb.tensor.circuit.Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](quimb.tensor.circuit.Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](quimb.tensor.circuit.Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
+
 
 **Bug fixes:**
 
+- [`tensor_network_1d_compress_src`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_src) and [`tensor_network_1d_compress_srcmps`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_srcmps): call [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like) like the other 1D compression methods, fixing compression of tensor networks with long range (site skipping) bonds, e.g. from lazily applied long range gates.
+- [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
 - [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
 - [`TensorNetwork2DVector.compute_norm`](quimb.tensor.tn2d.core.TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
 
@@ -232,9 +237,9 @@ Other enhancements:
 - [`TNOptimizer`](quimb.tensor.optimize.TNOptimizer): add 'cautious' ADAM
 - [`TensorNetwork.pop_tensor`](quimb.tensor.tensor_core.TensorNetwork.pop_tensor): allow `tid` or tags to be specified.
 - add an example notebook for converting hyper tensor networks to normal tensor networks, for approximate contraction - {ref}`example-htn-to-2d`
-- add "SX" and "SXDG" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#277`)
-- add "XXPLUSYY" and "XXPLUSYY" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`#279`)
-- add progress bar to various `Circuit` methods ({pull}`#288`)
+- add "SX" and "SXDG" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`277`)
+- add "XXPLUSYY" and "XXPLUSYY" gates to [`Circuit`](quimb.tensor.circuit.Circuit) ({pull}`279`)
+- add progress bar to various `Circuit` methods ({pull}`288`)
 - [`quimb.operator`](quimb.operator): fix MPO building for congested operators ({issue}`296` and {issue}`301`), allow arbitrary dtype ({issue}`289`). Fix building of sparse and matrix representations for non-translationally symmetric operators and operators with trivial (all identity) terms.
 
 **Bug fixes:**
@@ -330,7 +335,7 @@ Other enhancements:
 - Update generic TN optimizer docs.
 - add [`tn.gen_paths_loops`](quimb.tensor.tensor_core.TensorNetwork.gen_paths_loops) for generating all loops of indices in a TN.
 - add [`tn.gen_inds_connected`](quimb.tensor.tensor_core.TensorNetwork.gen_inds_connected) for generating all connected sets of indices in a TN.
-- make SVD fallback error catching more generic ({pull}`#238`)
+- make SVD fallback error catching more generic ({pull}`238`)
 - fix some windows + numba CI issues.
 - [`approx_spectral_function`](quimb.linalg.approx_spectral.approx_spectral_function) add plotting and tracking
 - add dispatching to various tensor primitives to allow overriding
