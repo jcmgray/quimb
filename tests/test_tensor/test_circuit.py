@@ -7,6 +7,25 @@ from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
+from quimb.tensor.circuit import (
+    parse_openqasm3_file,
+    parse_openqasm3_str,
+    parse_openqasm3_url,
+    rx_gate_param_gen,
+)
+from quimb.tensor.interface import pack, unpack
+
+
+def assert_same_gates(circ_a, circ_b):
+    assert len(circ_a.gates) == len(circ_b.gates)
+    for gate_a, gate_b in zip(circ_a.gates, circ_b.gates):
+        assert gate_a.label == gate_b.label
+        assert tuple(gate_a.qubits) == tuple(gate_b.qubits)
+        assert len(gate_a.params) == len(gate_b.params)
+        for pa, pb in zip(gate_a.params, gate_b.params):
+            if np.isnan(pa) and np.isnan(pb):
+                continue
+            assert pa == pytest.approx(pb)
 
 
 def rand_reg_graph(reg, n, seed=None):
@@ -125,6 +144,36 @@ def example_openqasm2_qft():
     """
 
 
+def example_openqasm3_qft():
+    return """
+    // quantum Fourier transform
+
+    OPENQASM 3.0;
+    include "stdgates.inc";
+
+    qubit[4] q;
+    bit[4] c;
+    x q[0];
+    x q[2];
+    barrier q;
+    h q[0];
+    cu1(pi/2) q[1], q[0];
+    h q[1];
+    cu1(pi/4) q[2], q[0];
+    cu1(pi/2) q[2], q[1];
+    /*
+    This is a multi line comment.
+    */
+    h q[2];
+    cu1(pi/8) q[3], q[0];
+    cu1(pi/4) q[3], q[1];
+    cu1(pi/2) q[3], q[2];
+    h q[3];
+
+    measure q -> c;
+    """
+
+
 class TestCircuit:
     def test_prepare_GHZ(self):
         qc = qtn.Circuit(3)
@@ -152,8 +201,651 @@ class TestCircuit:
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
 
     def test_from_openqasm2(self):
-        qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
+        with pytest.warns(SyntaxWarning) as record:
+            qc = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: creg",
+            "Unsupported operation ignored: barrier",
+            "Unsupported operation ignored: measure",
+        ]
         assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_from_openqasm3(self):
+        with pytest.warns(SyntaxWarning) as record:
+            qc = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: bit",
+            "Unsupported operation ignored: barrier",
+            "Unsupported operation ignored: measure",
+        ]
+        assert (qc.psi.H & qc.psi) ^ all == pytest.approx(1.0)
+
+    def test_openqasm2_openqasm3_shared_subset_match(self):
+        with pytest.warns(SyntaxWarning):
+            circ2 = qtn.Circuit.from_openqasm2_str(example_openqasm2_qft())
+        with pytest.warns(SyntaxWarning):
+            circ3 = qtn.Circuit.from_openqasm3_str(example_openqasm3_qft())
+        assert_same_gates(circ2, circ3)
+        assert_allclose(circ2.psi.to_dense(), circ3.psi.to_dense())
+
+    def test_openqasm3_symbolic_params(self):
+        qasm_str = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[1] q;
+        rx(theta) q[0];
+        """
+        circ = qtn.Circuit.from_openqasm3_str(qasm_str)
+        assert circ.named_param_names == ("theta",)
+        assert np.isnan(circ.named_params["theta"])
+        assert circ.param_expressions == {0: ("theta",)}
+        assert circ.gates[0].label == "RX"
+        assert math.isnan(circ.gates[0].params[0])
+
+        circ.set_params({"theta": 0.3})
+        assert circ.named_params["theta"] == pytest.approx(0.3)
+        assert_allclose(
+            np.asarray(circ.psi["GATE_0"].data),
+            np.asarray(rx_gate_param_gen((0.3,))),
+        )
+
+    def test_openqasm3_custom_gates(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[3] q;
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(theta, 0.2, 0.3) b;
+        }
+
+        hello q[0], q[1];
+        hello q[2], q[1];
+        """
+        )
+        assert [g.label for g in circ.gates] == [
+            "H",
+            "CX",
+            "U3",
+            "H",
+            "CX",
+            "U3",
+        ]
+        assert circ.param_expressions[2][0] == "theta"
+
+    def test_openqasm3_named_param_binding_and_copy(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[2] q;
+        rx(theta) q[0];
+        ry(theta / 2) q[1];
+        """
+        )
+        circ2 = circ.copy()
+
+        assert circ2.named_param_names == ("theta",)
+        assert np.isnan(circ2.named_params["theta"])
+        assert circ2.param_expressions == {
+            0: ("theta",),
+            1: ("(theta / 2)",),
+        }
+
+        circ2.set_params({"theta": 0.6})
+        assert circ2.gates[0].params == (pytest.approx(0.6),)
+        assert circ2.gates[1].params == (pytest.approx(0.3),)
+        assert math.isnan(circ.gates[0].params[0])
+        assert math.isnan(circ.gates[1].params[0])
+        assert np.isnan(circ.named_params["theta"])
+
+        circ2.set_params({"theta": 0.2})
+        assert circ2.gates[0].params == (pytest.approx(0.2),)
+        assert circ2.gates[1].params == (pytest.approx(0.1),)
+
+    def test_openqasm3_broadcast_registers(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            qubit[3] q;
+            qubit[3] r;
+            h q;
+            cx q, r;
+            """
+        )
+        assert [(g.label, g.qubits) for g in circ.gates] == [
+            ("H", (0,)),
+            ("H", (1,)),
+            ("H", (2,)),
+            ("CX", (0, 3)),
+            ("CX", (1, 4)),
+            ("CX", (2, 5)),
+        ]
+
+    def test_openqasm3_numeric_parse(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            qubit[1] q;
+            rx(pi / 2) q[0];
+            """
+        )
+        assert circ.gates[0].params == (pytest.approx(math.pi / 2),)
+
+    def test_openqasm3_parse_file_and_url(self, tmp_path):
+        qasm_str = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[2] q;
+        rx(theta) q[0];
+        cx q[0], q[1];
+        """
+        qasm_file = tmp_path / "example.qasm"
+        qasm_file.write_text(qasm_str)
+
+        info_str = parse_openqasm3_str(qasm_str)
+        info_file = parse_openqasm3_file(qasm_file)
+        info_url = parse_openqasm3_url(qasm_file.as_uri())
+
+        assert info_file["n"] == info_str["n"] == info_url["n"]
+        assert (
+            info_file["n_gates"] == info_str["n_gates"] == info_url["n_gates"]
+        )
+        assert info_file["inputs"] == info_str["inputs"] == info_url["inputs"]
+        assert (
+            info_file["symbols"] == info_str["symbols"] == info_url["symbols"]
+        )
+        assert (
+            info_file["expressions"]
+            == info_str["expressions"]
+            == info_url["expressions"]
+        )
+        for parsed in (info_file, info_url):
+            assert_same_gates(
+                qtn.Circuit.from_gates(info_str["gates"], N=info_str["n"]),
+                qtn.Circuit.from_gates(parsed["gates"], N=parsed["n"]),
+            )
+
+    def test_openqasm3_circuit_from_file_and_url(self, tmp_path):
+        qasm_str = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        input float theta;
+        qubit[2] q;
+        rx(theta) q[0];
+        cx q[0], q[1];
+        """
+        qasm_file = tmp_path / "example.qasm"
+        qasm_file.write_text(qasm_str)
+
+        circ_str = qtn.Circuit.from_openqasm3_str(qasm_str)
+        circ_file = qtn.Circuit.from_openqasm3_file(qasm_file)
+        circ_url = qtn.Circuit.from_openqasm3_url(qasm_file.as_uri())
+
+        assert_same_gates(circ_str, circ_file)
+        assert_same_gates(circ_str, circ_url)
+        assert (
+            circ_file.named_param_names
+            == circ_str.named_param_names
+            == circ_url.named_param_names
+        )
+        assert (
+            set(circ_file.named_params)
+            == set(circ_str.named_params)
+            == set(circ_url.named_params)
+        )
+        assert (
+            circ_file.param_expressions
+            == circ_str.param_expressions
+            == circ_url.param_expressions
+        )
+
+    def test_openqasm3_named_binding_supports_partial_updates(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            input float phi;
+            qubit[1] q;
+            u3(theta, phi, 0.0) q[0];
+            """
+        )
+        circ.set_params({"theta": 0.2})
+        assert circ.gates[0].params[0] == pytest.approx(0.2)
+        assert math.isnan(circ.gates[0].params[1])
+        assert circ.gates[0].params[2] == pytest.approx(0.0)
+
+        circ.set_params({"phi": 0.4})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.2, 0.4, 0.0))
+
+    def test_openqasm3_named_binding_empty_dict_preserves_state(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.set_params({})
+        assert math.isnan(circ.gates[0].params[0])
+
+    def test_openqasm3_array_index_symbolic_binding(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            array[float, 2] angles = {theta, theta / 2};
+            qubit[2] q;
+            rx(angles[0]) q[0];
+            ry(angles[1]) q[1];
+            """
+        )
+        assert circ.param_expressions == {
+            0: ("theta",),
+            1: ("(theta / 2)",),
+        }
+
+        circ.set_params({"theta": 0.6})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
+        assert tuple(circ.gates[1].params) == pytest.approx((0.3,))
+
+    def test_openqasm3_named_binding_rejects_unknown_inputs(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta) q[0];
+            """
+        )
+        with pytest.raises(ValueError, match="Unknown named parameter values"):
+            circ.set_params({"theta": 0.2, "phi": 0.3})
+
+    def test_openqasm3_named_binding_accepts_mixed_keys(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[2] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.u3(0.1, 0.2, 0.3, 1, parametrize=True)
+        circ.set_params({"theta": 0.2, 1: (0.4, 0.5, 0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.2,))
+        assert tuple(circ.gates[1].params) == pytest.approx((0.4, 0.5, 0.6))
+
+    def test_openqasm3_get_set_params_roundtrip(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[2] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.u3(0.1, 0.2, 0.3, 1, parametrize=True)
+        circ.set_params({"theta": 0.2, 1: (0.4, 0.5, 0.6)})
+
+        params = circ.get_params()
+        assert params["theta"] == pytest.approx(0.2)
+        assert tuple(params[1]) == pytest.approx((0.4, 0.5, 0.6))
+
+        circ2 = circ.copy()
+        circ2.set_params(params)
+        assert tuple(circ2.gates[0].params) == pytest.approx((0.2,))
+        assert tuple(circ2.gates[1].params) == pytest.approx((0.4, 0.5, 0.6))
+
+    def test_get_params_excludes_named_expression_managed_gate_indices(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[2] q;
+            rx(theta) q[0];
+            """
+        )
+        circ.u3(0.1, 0.2, 0.3, 1, parametrize=True)
+
+        params = circ.get_params()
+        assert set(params) == {"theta", 1}
+        assert 0 not in params
+        assert np.isnan(params["theta"])
+        assert tuple(params[1]) == pytest.approx((0.1, 0.2, 0.3))
+
+    def test_openqasm3_named_params_pack_unpack_roundtrip(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(cos(theta / 2)) q[0];
+            """
+        )
+        circ.set_params({"theta": np.array(0.6)})
+
+        params, skeleton = pack(circ)
+        assert params["theta"] == pytest.approx(0.6)
+
+        circ2 = unpack({"theta": np.array(0.2)}, skeleton)
+        assert tuple(circ2.gates[0].params) == pytest.approx((math.cos(0.1),))
+
+    def test_openqasm3_named_binding_rejects_direct_managed_gate_override(
+        self,
+    ):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta) q[0];
+            """
+        )
+        with pytest.raises(
+            ValueError, match="managed by named parameter expressions"
+        ):
+            circ.set_params({"theta": 0.2, 0: (0.1,)})
+
+    def test_circuit_register_named_params_generic(self):
+        circ = qtn.Circuit(2)
+        circ.rx(np.nan, 0, parametrize=True)
+        circ.ry(np.nan, 1, parametrize=True)
+        circ.register_named_params(
+            {"theta": np.nan},
+            {
+                0: ("theta",),
+                1: ("cos(theta / 2)",),
+            },
+        )
+
+        circ.set_params({"theta": np.array(0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
+        assert tuple(circ.gates[1].params) == pytest.approx((math.cos(0.3),))
+
+    def test_circuit_register_named_params_sequence_and_callable(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+        circ.register_named_params(
+            ["theta"],
+            {0: (lambda env: env["theta"] / 2,)},
+        )
+
+        assert circ.named_param_names == ("theta",)
+        assert np.isnan(circ.named_params["theta"])
+        assert math.isnan(circ.gates[0].params[0])
+
+        circ.set_params({"theta": np.array(0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.3,))
+
+    def test_circuit_set_params_string_keys_require_registration(self):
+        circ = qtn.Circuit(1)
+        circ.rx(0.1, 0, parametrize=True)
+
+        with pytest.raises(
+            TypeError, match="require registered named parameters"
+        ):
+            circ.set_params({"theta": 0.2})
+
+    def test_circuit_register_named_params_rejects_unknown_gate_index(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+
+        with pytest.raises(ValueError, match="unknown gate index: 2"):
+            circ.register_named_params({"theta": np.nan}, {2: ("theta",)})
+
+    def test_circuit_register_named_params_rejects_non_parametrized_gate(self):
+        circ = qtn.Circuit(1)
+        circ.rx(0.1, 0)
+
+        with pytest.raises(ValueError, match="got non-parametrized gate: 0"):
+            circ.register_named_params({"theta": np.nan}, {0: ("theta",)})
+
+    def test_circuit_register_named_params_rejects_wrong_arity(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+
+        with pytest.raises(ValueError, match="expected 1, got 2"):
+            circ.register_named_params(
+                {"theta": np.nan},
+                {0: ("theta", "theta")},
+            )
+
+    def test_circuit_register_named_params_accepts_generator_expressions(self):
+        circ = qtn.Circuit(1)
+        circ.rx(np.nan, 0, parametrize=True)
+        circ.register_named_params(
+            {"theta": np.nan},
+            {0: (expr for expr in ("theta",))},
+        )
+
+        circ.set_params({"theta": np.array(0.6)})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.6,))
+
+    def test_circuit_apply_to_arrays_updates_named_params(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float theta;
+            qubit[1] q;
+            rx(theta / 2) q[0];
+            """
+        )
+        circ.set_params({"theta": np.array(0.6, dtype=np.float64)})
+
+        circ.apply_to_arrays(lambda x: np.asarray(x, dtype=np.float32))
+
+        assert circ.get_params()["theta"].dtype == np.float32
+        assert circ.psi["GATE_0"].params.dtype == np.float32
+
+    def test_openqasm3_output_decl_unsupported(self):
+        with pytest.raises(NotImplementedError, match="Output declarations"):
+            qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                output float theta;
+                qubit[1] q;
+                """
+            )
+
+    def test_openqasm3_unsupported_ops(self):
+        with pytest.raises(NotImplementedError):
+            qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                qubit[1] q;
+                reset q[0];
+                """
+            )
+
+    def test_openqasm3_measure_assignment_warns(self):
+        with pytest.warns(SyntaxWarning) as record:
+            circ = qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                include "stdgates.inc";
+                qubit[1] q;
+                bit c;
+                c = measure q[0];
+                x q[0];
+                """
+            )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: bit",
+            "Unsupported operation ignored: measure",
+        ]
+        assert [g.label for g in circ.gates] == ["X"]
+
+    def test_openqasm3_measure_decl_initializer_warns(self):
+        with pytest.warns(SyntaxWarning) as record:
+            circ = qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                include "stdgates.inc";
+                qubit[1] q;
+                bit c = measure q[0];
+                x q[0];
+                """
+            )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: measure"
+        ]
+        assert [g.label for g in circ.gates] == ["X"]
+
+    def test_openqasm3_custom_gates_overlapping_names(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            input float a;
+            qubit[1] q;
+
+            gate foo(a, aa) q {
+                u3(aa, a, aa) q;
+            }
+
+            foo(0.1, a) q[0];
+            """
+        )
+        assert circ.param_expressions == {0: ("a", 0.1, "a")}
+        circ.set_params({"a": 0.2})
+        assert tuple(circ.gates[0].params) == pytest.approx((0.2, 0.1, 0.2))
+
+    def test_openqasm3_custom_gates_match_openqasm2(self):
+        circ2 = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, theta) q {
+            u2(theta / 2, param1) q;
+            u2(param1, theta / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        circ3 = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit[3] q;
+
+        gate hello a, b {
+            h a;
+            cx a, b;
+            u3(0.1, 0.2, 0.3) b;
+        }
+
+        gate world(param1, theta) q {
+            u2(theta / 2, param1) q;
+            u2(param1, theta / 2) q;
+        }
+
+        hello q[0], q[1];
+        world(0.1, 0.2) q[2];
+        hello q[2], q[1];
+        """
+        )
+        assert_same_gates(circ2, circ3)
+
+    def test_openqasm3_nested_custom_gates_match_openqasm2(self):
+        circ2 = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        qreg q[3];
+
+        gate cphase(theta) a, b {
+            U3(0, 0, theta / 2) a;
+            CX a, b;
+            U3(0, 0, -theta / 2) b;
+            CX a, b;
+            U3(0, 0, theta / 2) b;
+        }
+
+        gate doublecphase(theta) a, b, c {
+            cphase(theta) a, b;
+            cphase(theta) b, c;
+        }
+
+        doublecphase(0.1) q[0], q[1], q[2];
+        doublecphase(0.2) q[2], q[0], q[1];
+        """
+        )
+        circ3 = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit[3] q;
+
+        gate cphase(theta) a, b {
+            U3(0, 0, theta / 2) a;
+            CX a, b;
+            U3(0, 0, -theta / 2) b;
+            CX a, b;
+            U3(0, 0, theta / 2) b;
+        }
+
+        gate doublecphase(theta) a, b, c {
+            cphase(theta) a, b;
+            cphase(theta) b, c;
+        }
+
+        doublecphase(0.1) q[0], q[1], q[2];
+        doublecphase(0.2) q[2], q[0], q[1];
+        """
+        )
+        assert_same_gates(circ2, circ3)
+
+    def test_openqasm3_gate_name_match_openqasm2(self):
+        circ2 = qtn.Circuit.from_openqasm2_str(
+            """
+        OPENQASM 2.0;
+        include "qelib1.inc";
+        gate gate_PauliEvolution(param0) q0,q1 { rz(0.2) q0; rz(-0.1) q1; }
+        qreg q[2];
+        gate_PauliEvolution(0.1) q[0],q[1];
+        """
+        )
+        circ3 = qtn.Circuit.from_openqasm3_str(
+            """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        gate gate_PauliEvolution(param0) q0,q1 { rz(0.2) q0; rz(-0.1) q1; }
+        qubit[2] q;
+        gate_PauliEvolution(0.1) q[0],q[1];
+        """
+        )
+        assert_same_gates(circ2, circ3)
 
     def test_openqasm2_custom_gates(self):
         circ = qtn.Circuit.from_openqasm2_str(
@@ -1103,6 +1795,456 @@ class TestCircuitMPSLazy:
         circ.apply_gates(gates)
 
         assert circ.psi.distance_normalized(ref.psi) < 1e-6
+
+
+class TestCircuitPEPSSimpleUpdate:
+    def test_requires_geometry(self):
+        # none of edges, gates or psi0 given -> cannot define the geometry
+        with pytest.raises(ValueError):
+            qtn.CircuitPEPSSimpleUpdate()
+
+    def test_geometry_inferred_from_gates(self):
+        # passing the two-qubit gates instead of edges should reconstruct the
+        # same geometry, and give the same state as the explicit-edges path
+        edges = [(0, 1), (1, 2), (0, 2)]
+        rng = np.random.default_rng(5)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(3)
+        ]
+        gates += [qtn.Gate("CZ", params=(), qubits=list(e)) for e in edges]
+
+        circ_edges = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ_gates = qtn.CircuitPEPSSimpleUpdate(gates=gates, max_bond=16)
+        # geometry matches (as undirected edges) and the gates are not applied
+        assert {frozenset(e) for e in circ_gates.edges} == {
+            frozenset(e) for e in circ_edges.edges
+        }
+        assert circ_gates.num_gates == 0
+
+        circ_edges.apply_gates(gates)
+        circ_gates.apply_gates(gates)
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(3):
+            xe = circ_edges.local_expectation(Z, i, max_distance=3)
+            xg = circ_gates.local_expectation(Z, i, max_distance=3)
+            assert float(np.real(xg)) == pytest.approx(
+                float(np.real(xe)), abs=1e-10
+            )
+
+    def test_geometry_inferred_from_psi0(self):
+        # build a state, hand it back as psi0, and check the geometry is read
+        # from its bonds and expectations are preserved
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        rng = np.random.default_rng(11)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(4)
+        ]
+        gates += [qtn.Gate("CZ", params=(), qubits=list(e)) for e in edges]
+
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        psi = circ.psi
+
+        circ2 = qtn.CircuitPEPSSimpleUpdate(psi0=psi, max_bond=16)
+        assert {frozenset(e) for e in circ2.edges} == {
+            frozenset(e) for e in edges
+        }
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(4):
+            x1 = circ.local_expectation(Z, i, max_distance=4)
+            x2 = circ2.local_expectation(Z, i, max_distance=4)
+            assert float(np.real(x2)) == pytest.approx(
+                float(np.real(x1)), abs=1e-6
+            )
+
+    def test_construction_and_initial_state(self):
+        # 2x3 grid of integer-labelled sites
+        edges = [(0, 1), (1, 2), (3, 4), (4, 5), (0, 3), (1, 4), (2, 5)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        # one tensor per site, bonds only on the edges, all bond dim 1
+        assert circ.N == 6
+        assert circ._psi.max_bond() == 1
+        assert circ.psi.norm() == pytest.approx(1.0)
+
+    def test_target_api(self):
+        # the exact usage requested in the issue, on a 3x3 grid of integer sites
+        ncol = 3
+        edges = []
+        for r in range(3):
+            for c in range(3):
+                s = r * ncol + c
+                if c + 1 < 3:
+                    edges.append((s, s + 1))
+                if r + 1 < 3:
+                    edges.append((s, s + ncol))
+        rng = np.random.default_rng(42)
+        gates = [
+            qtn.Gate(
+                "U3", params=rng.uniform(0, 2 * np.pi, size=3), qubits=[i]
+            )
+            for i in range(9)
+        ]
+        gates += [
+            qtn.Gate("CZ", params=(), qubits=list(edge)) for edge in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(gates)
+        peps = circ.psi
+        assert peps.max_bond() <= 8
+        assert peps.num_tensors == 9
+
+    def test_matches_exact_on_a_chain(self):
+        # on a chain, simple update at large bond is exact, so local
+        # expectations should match a dense Circuit to high precision
+        N = 5
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(0)
+
+        gates = []
+        for i in range(N):
+            gates.append(
+                qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            )
+        for i, j in edges:
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+            gates.append(
+                qtn.Gate("RZ", params=[rng.uniform(0, np.pi)], qubits=[j])
+            )
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+
+        circ_su = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges, max_bond=32, cutoff=1e-12
+        )
+        circ_su.apply_gates(gates)
+        circ_su.equilibrate()
+
+        circ_exact = qtn.Circuit(N=N)
+        circ_exact.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(N):
+            x_su = circ_su.local_expectation(Z, i, max_distance=N)
+            x_ex = circ_exact.local_expectation(Z, i)
+            assert float(np.real(x_su)) == pytest.approx(
+                float(np.real(x_ex)), abs=1e-8
+            )
+
+    def test_equilibrate_preserves_expectations(self):
+        N = 4
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(7)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(N)
+        ]
+        for i, j in edges:
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=32)
+        circ.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        before = [
+            float(np.real(circ.local_expectation(Z, i, max_distance=N)))
+            for i in range(N)
+        ]
+        circ.equilibrate()
+        after = [
+            float(np.real(circ.local_expectation(Z, i, max_distance=N)))
+            for i in range(N)
+        ]
+        for b, a in zip(before, after):
+            assert b == pytest.approx(a, abs=1e-8)
+
+    def test_matches_exact_on_2x2_plaquette(self):
+        # a 2x2 grid has a 4-cycle, so simple update is genuinely approximate,
+        # but a shallow circuit still matches exact closely. checks both
+        # local_expectation and the gauge-absorbed psi.
+        edges = [(0, 1), (2, 3), (0, 2), (1, 3)]
+        rng = np.random.default_rng(3)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(4)
+        ]
+        for i, j in edges:
+            gates.append(qtn.Gate("CZ", params=(), qubits=[i, j]))
+
+        circ = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges, max_bond=16, cutoff=1e-12
+        )
+        circ.apply_gates(gates)
+
+        circ_exact = qtn.Circuit(N=4)
+        circ_exact.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        # gauge-absorbed psi should be a normalized state
+        psi = circ.psi
+        assert ((psi.H & psi) ^ all) == pytest.approx(1.0, abs=1e-6)
+
+        for i in range(4):
+            x_su = circ.local_expectation(Z, i, max_distance=4)
+            # measure the same way directly on the returned psi
+            x_psi = psi.compute_local_expectation_cluster(
+                {(i,): Z}, max_distance=4, normalized=True
+            )
+            x_ex = circ_exact.local_expectation(Z, i)
+            assert float(np.real(x_su)) == pytest.approx(
+                float(np.real(x_ex)), abs=1e-6
+            )
+            assert float(np.real(x_psi)) == pytest.approx(
+                float(np.real(x_ex)), abs=1e-6
+            )
+
+    def test_psi_access_does_not_mutate_gauges(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(
+            [
+                qtn.Gate("H", params=(), qubits=[0]),
+                qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+                qtn.Gate("CNOT", params=(), qubits=[1, 2]),
+            ]
+        )
+        before = {k: np.asarray(v).copy() for k, v in circ.gauges.items()}
+        _ = circ.psi
+        _ = circ.psi
+        assert set(circ.gauges) == set(before)
+        for k in before:
+            assert_allclose(np.asarray(circ.gauges[k]), before[k])
+
+    def test_controlled_and_exact_methods_raise(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        # controlled gates can't be expressed by the simple update rule
+        with pytest.raises(ValueError):
+            circ.apply_gates(
+                [qtn.Gate("X", params=(), qubits=[2], controls=[0])]
+            )
+        # exact-state methods are not meaningful for a gauged approximate state
+        circ.apply_gates([qtn.Gate("H", params=(), qubits=[0])])
+        with pytest.raises(NotImplementedError):
+            circ.amplitude("000")
+        with pytest.raises(NotImplementedError):
+            list(circ.sample(2))
+        with pytest.raises(NotImplementedError):
+            circ.partial_trace([0])
+        with pytest.raises(NotImplementedError):
+            circ.sample_chaotic_rehearse()
+        with pytest.raises(NotImplementedError):
+            circ.uni
+        # a two-qubit gate off any declared edge is rejected
+        with pytest.raises(ValueError):
+            circ.apply_gates([qtn.Gate("CZ", params=(), qubits=[0, 2])])
+
+    def test_to_dense_matches_exact_on_a_chain(self):
+        # on a chain at large bond simple update is exact, so the gauged dense
+        # contraction should match a dense Circuit up to a global phase
+        N = 5
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(2)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), i)
+            for i in range(N)
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges, max_bond=32, cutoff=1e-12
+        )
+        circ.apply_gates(gates)
+
+        exact = qtn.Circuit(N=N)
+        exact.apply_gates(gates)
+
+        k_su = circ.to_dense()
+        k_ex = exact.to_dense()
+        # column vector of the full state, matching Circuit.to_dense
+        assert k_su.shape == k_ex.shape == (2**N, 1)
+        assert qu.fidelity(k_su, k_ex) == pytest.approx(1.0, abs=1e-8)
+
+    def test_get_state_absorb_gauges(self):
+        # the three absorb_gauges modes should all describe the same state
+        edges = [(0, 1), (1, 2), (0, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(
+            [
+                qtn.Gate("H", params=(), qubits=[0]),
+                qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+                qtn.Gate("CZ", params=(), qubits=[1, 2]),
+            ]
+        )
+        # absorbed network is exactly the `psi` property
+        psi_absorbed = circ.get_state(absorb_gauges=True)
+        assert_allclose(psi_absorbed.to_dense(), circ.psi.to_dense())
+        # gauges added but uncontracted should give the same dense state
+        psi_uncontracted = circ.get_state(absorb_gauges=False)
+        assert qu.fidelity(
+            psi_uncontracted.to_dense(), psi_absorbed.to_dense()
+        ) == pytest.approx(1.0, abs=1e-10)
+        # "return" hands back the raw network plus a copy of the gauges
+        raw, gauges = circ.get_state(absorb_gauges="return")
+        assert set(gauges) == set(circ.gauges)
+        assert gauges is not circ.gauges
+        raw.gauge_simple_insert(gauges)
+        assert qu.fidelity(
+            raw.to_dense(), psi_absorbed.to_dense()
+        ) == pytest.approx(1.0, abs=1e-10)
+
+    def test_local_expectation_on_grid_coordinate_sites(self):
+        # sites are 2D coordinate tuples; a single-site `where` must not be
+        # misread as a two-site operator (regression for the site handling)
+        edges = qtn.edges_2d_square(2, 2)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(0)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) for s in sites
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        circ.equilibrate(max_iterations=300, tol=1e-12)
+
+        qmap = {s: i for i, s in enumerate(sites)}
+        ref = qtn.Circuit(N=len(sites))
+        for G, *where in gates:
+            ref.apply_gate(G, *(qmap[s] for s in where))
+
+        Z = qu.pauli("Z").astype(complex)
+        for s in sites:
+            x = circ.local_expectation(Z, s, max_distance=2)
+            xe = complex(ref.local_expectation(Z, qmap[s]))
+            assert complex(x) == pytest.approx(xe, abs=1e-6)
+
+    def test_local_expectation_accepts_list_where(self):
+        # a multi-site `where` given as a list must not crash on the set
+        # membership check, and should match the tuple form
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(
+            [
+                qtn.Gate("H", params=(), qubits=[0]),
+                qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            ]
+        )
+        Z = qu.pauli("Z").astype(complex)
+        ZZ = qu.kron(Z, Z)
+        x_list = circ.local_expectation(ZZ, [0, 1], max_distance=2)
+        x_tuple = circ.local_expectation(ZZ, (0, 1), max_distance=2)
+        assert complex(x_list) == pytest.approx(complex(x_tuple))
+
+    def test_copy_is_independent(self):
+        edges = qtn.edges_2d_square(2, 2)
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=8)
+        rng = np.random.default_rng(3)
+        circ.apply_gates(
+            [
+                (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+                for a, b in edges
+            ]
+        )
+        other = circ.copy()
+        n_before = circ.num_gates
+        # the copy carries the geometry and gauges and is independently usable
+        assert set(other.edges) == set(circ.edges)
+        assert other.gauges is not circ.gauges
+        assert len(other.gauges) == len(circ.gauges)
+        a, b = circ.edges[0]
+        other.apply_gates([(qu.rand_uni(4), a, b)])
+        # mutating the copy must not touch the original
+        assert circ.num_gates == n_before
+        assert other.num_gates == n_before + 1
+
+    def test_renorm_and_equilibrate_every(self):
+        # the renorm and equilibrate_every options should be accepted and keep
+        # normalized expectations correct on a chain (where SU is exact)
+        N = 5
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(1)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), i)
+            for i in range(N)
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ = qtn.CircuitPEPSSimpleUpdate(
+            edges=edges,
+            max_bond=32,
+            cutoff=1e-12,
+            renorm=True,
+            equilibrate_every=3,
+        )
+        circ.apply_gates(gates)
+        circ.equilibrate()
+
+        exact = qtn.Circuit(N=N)
+        exact.apply_gates(gates)
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(N):
+            x = circ.local_expectation(Z, i, max_distance=N)
+            xe = complex(exact.local_expectation(Z, i))
+            assert complex(x) == pytest.approx(xe, abs=1e-8)
+
+    def test_cluster_error_decreases_with_distance(self):
+        # on a loopy lattice with an essentially exact (large max_bond) state,
+        # a larger cluster must give a more accurate local expectation
+        edges = qtn.edges_2d_square(3, 3)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(11)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) for s in sites
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        qmap = {s: i for i, s in enumerate(sites)}
+        ref = qtn.Circuit(N=len(sites))
+        for G, *where in gates:
+            ref.apply_gate(G, *(qmap[s] for s in where))
+        Z = qu.pauli("Z").astype(complex)
+        exact = {s: complex(ref.local_expectation(Z, qmap[s])) for s in sites}
+
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        circ.equilibrate(max_iterations=200, tol=1e-10)
+
+        def err(md):
+            return max(
+                abs(circ.local_expectation(Z, s, max_distance=md) - exact[s])
+                for s in sites
+            )
+
+        assert err(3) < err(0)
+
+    def test_scales_to_a_larger_lattice(self):
+        # the point of a PEPS simulator: run a circuit on a lattice far too
+        # large to simulate exactly, with the bond dimension capped
+        edges = qtn.edges_2d_square(6, 6)
+        max_bond = 8
+        circ = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=max_bond)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(2)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) for s in sites
+        ]
+        gates += [
+            (qu.rand_uni(4, seed=int(rng.integers(1 << 30))), a, b)
+            for a, b in edges
+        ]
+        circ.apply_gates(gates)
+        psi = circ.psi
+        assert psi.num_tensors == len(sites)
+        assert psi.max_bond() <= max_bond
 
 
 class TestCircuitGen:

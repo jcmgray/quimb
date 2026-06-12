@@ -110,24 +110,49 @@ def test_basic_compress_double_mpo(
     [
         "direct",
         "dm",
-        "fit",
         "zipup",
         "zipup-first",
+        "zipup-oversample",
+        "src",
+        "src-first",
+        "src-oversample",
+        "srcmps",
+        "srcmps-first",
+        "srcmps-oversample",
+        "fit",
+        "fit-zipup",
+        "fit-projector",
+        "fit-oversample",
     ],
 )
 @pytest.mark.parametrize("dtype", dtypes)
-def test_mps_partial_mpo_apply(method, dtype):
+@pytest.mark.parametrize("sweep_reverse", [False, True])
+def test_mps_partial_mpo_apply(method, dtype, sweep_reverse):
+    # the sub-MPO has tensors only at `where`, so the lazily gated MPS has a
+    # long range (site skipping) bond, which every method should handle via
+    # `enforce_1d_like`
     mps = qtn.MPS_rand_state(10, 7, dtype=dtype)
     A = qu.rand_uni(2**3, dtype=dtype)
     where = [8, 4, 5]
     mpo = qtn.MatrixProductOperator.from_dense(A, sites=where)
     new = mps.gate_with_op_lazy(mpo)
     assert (
-        qtn.tensor_network_1d_compress(new, method=method, inplace=True) is new
+        qtn.tensor_network_1d_compress(
+            new,
+            max_bond=32,
+            method=method,
+            sweep_reverse=sweep_reverse,
+            inplace=True,
+        )
+        is new
     )
     assert new.num_tensors == 10
+    eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
+    if "src" in method:
+        # account for noise
+        eps *= 5
     assert new.distance_normalized(mps.gate(A, where)) == pytest.approx(
-        0.0, abs=1e-3 if dtype in ("float32", "complex64") else 1e-6
+        0.0, abs=eps
     )
 
 

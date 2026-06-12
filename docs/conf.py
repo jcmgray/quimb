@@ -63,8 +63,9 @@ autosectionlabel_prefix_document = True
 autoapi_dirs = ["../quimb"]
 
 extlinks = {
-    "issue": ("https://github.com/jcmgray/quimb/issues/%s", "GH %s"),
-    "pull": ("https://github.com/jcmgray/quimb/pull/%s", "PR %s"),
+    "issue": ("https://github.com/jcmgray/quimb/issues/%s", "GH #%s"),
+    "pull": ("https://github.com/jcmgray/quimb/pull/%s", "PR #%s"),
+    "pr": ("https://github.com/jcmgray/quimb/pull/%s", "PR #%s"),
 }
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
