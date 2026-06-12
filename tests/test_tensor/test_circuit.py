@@ -1530,7 +1530,7 @@ class TestCircuitMPS:
 
     def test_lazymps_sampling(self):
         N = 6
-        circ = qtn.CircuitLazyMPS(N)
+        circ = qtn.CircuitLazyMPS(N, max_bond=512)
         circ.h(3)
         circ.cx(3, 2)
         circ.cx(2, 1)
@@ -1543,7 +1543,7 @@ class TestCircuitMPS:
 
     def test_lazymps_sampling_seed(self):
         N = 1
-        circ = qtn.CircuitLazyMPS(N)
+        circ = qtn.CircuitLazyMPS(N, max_bond=512)
         circ.h(0)
         samples = list(circ.sample(10, seed=1234))
         assert len(set(samples)) == 2
