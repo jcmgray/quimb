@@ -1553,7 +1553,7 @@ class TestCircuitMPS:
 
         N = 10
 
-        circ = qtn.CircuitLazyMPS(N)
+        circ = qtn.CircuitLazyMPS(N, max_bond=512, compress_every=4)
 
         start_time = timeit.default_timer()
 
@@ -1565,7 +1565,7 @@ class TestCircuitMPS:
         elapsed_lazymps = timeit.default_timer() - start_time
         lazy_state = circ.psi
 
-        circ = qtn.CircuitMPS(N)
+        circ = qtn.CircuitMPS(N, max_bond=512, gate_opts=dict(method="src", contract="nonlocal"))
 
         start_time = timeit.default_timer()
         circ.h(0)
@@ -1576,7 +1576,7 @@ class TestCircuitMPS:
         elapsed_mps = timeit.default_timer() - start_time
         mps_state = circ.psi
 
-        # assert elapsed_lazymps < elapsed_mps
+        assert elapsed_lazymps < elapsed_mps, f"LazyMPS took {elapsed_lazymps:.2f}s, MPS took {elapsed_mps:.2f}s"
         assert lazy_state @ mps_state == pytest.approx(1.0)
 
 

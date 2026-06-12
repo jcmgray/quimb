@@ -6072,44 +6072,185 @@ class CircuitDense(Circuit):
 class CircuitLazyMPS(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
     lazily applying gates (via sub-MPO representation) and regularly contracting
-    and compressing the gates with the state.
+    and compressing the gates with the state using
+    :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`. This is in
+    contrast to the TEBD approach of eagerly applying gates and then compressing which
+    is used in :class:`CircuitMPS`.
+
+    The periodicity of compression is arbitrary and can be tuned with :attr:`compress_every`,
+    and one can find a goldilocks point for fastest runtime. This circuit class is best
+    utilized for long-range gates, and provides a speedup over :class:`CircuitMPS` when
+    using ``"src"`` compression method.
+
+    Note :attr:`gate_contract` is obsolete for this class as 2+ qubit gates are lazily applied via
+    ``"nonlocal"`` and 1 qubit gates are eagerly applied via `True`.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits in the circuit.
+    psi0 : TensorNetwork1DVector, optional
+        The initial state, assumed to be ``|00000....0>`` if not given. The
+        state is always copied and the tag ``PSI0`` added.
+    max_bond : int, optional
+        The maximum bond dimension to truncate to when applying gates, if any.
+        This is simply a shortcut for setting ``gate_opts['max_bond']``.
+    cutoff : float, optional
+        The singular value cutoff to use when truncating the state.
+        This is simply a shortcut for setting ``gate_opts['cutoff']``.
+    gate_opts : dict, optional
+        Default options to pass to each gate, for example, "max_bond" and
+        "cutoff" etc.
+    compress_opts : dict, optional
+        Default options to pass to :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`,
+        for example, "method", "max_bond" and "cutoff" etc.
+    method : str, optional
+        The method to use for compressing the state with the gates, passed to
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`, e.g.
+        ``"dm"`` for density matrix truncation, ``"src"`` for successive
+        randomized compression, or ``"direct"`` for direct SVD truncation.
+    compress_every : int, optional
+        How many gates to apply to each qubit before contracting and compressing
+        the state with the gates.
+
+    dtype : str, optional
+        The data type to use for the state tensor.
+    to_backend : callable, optional
+        A function to convert tensor data to a particular backend.
+    convert_eager : bool, optional
+        Whether to eagerly perform dtype casting and application of
+        `to_backend` as gates are supplied, or wait until after the necessary
+        TNs for a particular task such as sampling are formed and simplified.
+        Eager conversion (`convert_eager=True`) is the default mode for
+        MPS simulation, unlike full contraction.
+    circuit_opts
+        Supplied to :class:`~quimb.tensor.circuit.Circuit`.
+
+    Attributes
+    ----------
+    psi : MatrixProductState
+        The current state of the circuit, always in MPS form.
+
+    Examples
+    --------
+
+    Create a circuit object that always uses the "src" compression method
+    using a large cutoff and maximum bond dimension::
+
+        circ = qtn.CircuitLazyMPS(
+            N=56,
+            max_bond=1024,
+            cutoff=1e-3,
+            compress_every=5,
+            method="src",
+        )
+
     """
     def __init__(
         self,
         N=None,
+        *,
         psi0=None,
-        gate_opts=None,
+        max_bond=None,
+        cutoff=1e-10,
+        compress_opts=None,
+        method="src",
+        compress_every=5,
+        dtype=None,
+        to_backend=None,
+        convert_eager=True,
         **circuit_opts,
     ):
-        gate_opts = ensure_dict(gate_opts)
-        # this is used to pass around the canonical form
-        gate_opts.setdefault("info", {})
-        gate_opts.setdefault("method", "direct")
-        super().__init__(N, psi0=psi0, gate_opts=gate_opts, **circuit_opts)
-        self._uncompressed_sites = set()
+        super().__init__(
+            N,
+            psi0=psi0,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            dtype=dtype,
+            to_backend=to_backend,
+            convert_eager=convert_eager,
+            **circuit_opts
+        )
+        # separate options for compression step to avoid unknown kwarg errors
+        # when passed to `tensor_network_1d_compress`
+        # note that `method`, `max_bond`, and `cutoff` are duplicated here
+        # as they are also used by the gate application step, so we use
+        # setters and getters dedicated to keep them in sync
+        self.compress_opts = ensure_dict(compress_opts)
+        self.compress_opts.setdefault("max_bond", max_bond)
+        self.compress_opts.setdefault("cutoff", cutoff)
+        self.compress_opts.setdefault("method", method)
+        self._uncompressed_sites = dict()
+        self.compress_every = compress_every
+
+    @property
+    def max_bond(self):
+        return self.compress_opts.get("max_bond", None)
+
+    @max_bond.setter
+    def max_bond(self, value):
+        self.compress_opts["max_bond"] = value
+        self.gate_opts["max_bond"] = value
+
+    @property
+    def cutoff(self):
+        return self.compress_opts.get("cutoff", 1e-10)
+
+    @cutoff.setter
+    def cutoff(self, value):
+        self.compress_opts["cutoff"] = value
+        self.gate_opts["cutoff"] = value
+
+    @property
+    def method(self):
+        return self.compress_opts.get("method", None)
+
+    @method.setter
+    def method(self, value):
+        self.compress_opts["method"] = value
+        self.gate_opts["method"] = value
 
     def _compress(self):
         """Compress the current state by contracting in all gates and then applying
-        the specified compression method.
+        the specified compression method via
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
         """
         from ..tensor.tn1d.compress import tensor_network_1d_compress
 
+        if not self._uncompressed_sites:
+            return
+
         self._psi = tensor_network_1d_compress(
             self._psi,
-            method=self.gate_opts["method"],
-            max_bond=self.gate_opts["max_bond"],
-            cutoff=self.gate_opts["cutoff"],
             permute_arrays=False,
+            **self.compress_opts,
         )
 
+        # `tensor_network_1d_compress` leaves the orthogonality center at the
+        # first site, or the last site if `reverse_sweep` is enabled
+        if self.gate_opts["info"].get("reverse_sweep", False):
+            self.gate_opts["info"]["cur_orthog"] = (self.N - 1, self.N - 1)  # type: ignore
+        else:
+            self.gate_opts["info"]["cur_orthog"] = (0, 0)
+
+        self._uncompressed_sites.clear()
+
     def _apply_gate(self, gate, tags=None, **gate_opts):
-        if any(site in self._uncompressed_sites for site in gate.qubits):
-            self._compress()
-            self._uncompressed_sites.clear()
+        # for 1q gates we can eagerly contract given it does not change the MPS
+        # structure
+        if len(gate.qubits) == 1:
+            return super()._apply_gate(gate, tags=tags, **gate_opts)
+
+        for site in gate.qubits:
+            if self._uncompressed_sites.get(site, 0) >= self.compress_every:
+                self._compress()
+                break
         else:
             min_site, max_site = min(gate.qubits), max(gate.qubits)
-            self._uncompressed_sites.update(range(min_site, max_site + 1))
-        super()._apply_gate(gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts)
+            for site in range(min_site, max_site + 1):
+                self._uncompressed_sites[site] = self._uncompressed_sites.get(site, 0) + 1
+
+        return super()._apply_gate(gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts)
 
     @property
     def psi(self):
