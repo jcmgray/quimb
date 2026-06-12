@@ -5916,13 +5916,14 @@ class CircuitMPSLazy(CircuitMPS):
     :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
 
     Unlike the eager, TEBD style :class:`CircuitMPS`, which compresses the state
-    after every gate, gates here are stacked without contraction until a new
-    gate would act on a site that already carries an uncompressed gate, at which
-    point a global compression is triggered first. Batching gates into layers
-    before a single global compression can be more accurate, and scale better,
-    than compressing pair by pair, particularly for long range gates. It also
-    allows switching out the underlying compression algorithm, including newer
-    ones such as ``"src"`` (successive randomized compression).
+    after every gate, multi-qubit gates here are stacked without contraction
+    until a new gate would take a site past ``compress_every`` uncompressed
+    gates, at which point a global compression is triggered first. Single qubit
+    gates are always contracted in eagerly, since they grow no bonds. Batching
+    gates into layers before a single global compression can be more accurate,
+    and scale better, than compressing pair by pair, particularly for long range
+    gates. It also allows switching out the underlying compression algorithm,
+    including newer ones such as ``"src"`` (successive randomized compression).
 
     The state is flushed (a final compression is performed if any gates are
     pending) whenever :attr:`psi`, :meth:`sample`, :meth:`local_expectation` or
@@ -5946,10 +5947,16 @@ class CircuitMPSLazy(CircuitMPS):
         :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`. Common
         options are ``"dm"`` (default), ``"direct"``, ``"zipup"``, ``"fit"``
         and ``"src"``.
+    compress_every : int, optional
+        Allow each site to accumulate this many uncompressed multi-qubit gates
+        before forcing a global compression. The default of 1 compresses once a
+        gate would overlap a previous uncompressed gate (i.e. roughly once per
+        layer); larger values defer compression across more layers.
     compress_opts : dict, optional
-        Supplied to
-        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress` at each
-        compression.
+        The single source of truth for the compression options. ``max_bond``,
+        ``cutoff`` and ``method`` are stored here, and any extra options are
+        forwarded to
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
     dtype : str, optional
         The data type to use for the state tensor.
     to_backend : callable, optional
@@ -5988,31 +5995,64 @@ class CircuitMPSLazy(CircuitMPS):
         max_bond=None,
         cutoff=1e-10,
         method="dm",
+        compress_every=1,
         compress_opts=None,
         dtype=None,
         to_backend=None,
         convert_eager=True,
         **circuit_opts,
     ):
-        self._method = method
-        self._max_bond = max_bond
-        self._cutoff = cutoff
-        self._compress_opts = ensure_dict(compress_opts)
+        # compress_opts is the single source of truth for the compression
+        # parameters, populated from the convenience kwargs if not given there
+        self.compress_opts = ensure_dict(compress_opts)
+        self.compress_opts.setdefault("max_bond", max_bond)
+        self.compress_opts.setdefault("cutoff", cutoff)
+        self.compress_opts.setdefault("method", method)
+        self.compress_every = compress_every
         # whether any gates have been stacked since the last compression
         self._pending = False
-        # sites carrying uncompressed multi-qubit gates, used to decide when
-        # the next gate should force a compression
-        self._uncompressed = set()
+        # per-site count of stacked, uncompressed multi-qubit gates, used to
+        # decide when the next gate should force a compression
+        self._touch_count = {}
         super().__init__(
             N,
             psi0=psi0,
-            max_bond=max_bond,
-            cutoff=cutoff,
+            max_bond=self.compress_opts["max_bond"],
+            cutoff=self.compress_opts["cutoff"],
             dtype=dtype,
             to_backend=to_backend,
             convert_eager=convert_eager,
             **circuit_opts,
         )
+
+    @property
+    def max_bond(self):
+        """The maximum bond dimension to compress to."""
+        return self.compress_opts["max_bond"]
+
+    @max_bond.setter
+    def max_bond(self, value):
+        self.compress_opts["max_bond"] = value
+        self.gate_opts["max_bond"] = value
+
+    @property
+    def cutoff(self):
+        """The singular value cutoff to use when compressing."""
+        return self.compress_opts["cutoff"]
+
+    @cutoff.setter
+    def cutoff(self, value):
+        self.compress_opts["cutoff"] = value
+        self.gate_opts["cutoff"] = value
+
+    @property
+    def method(self):
+        """The compression method passed to ``tensor_network_1d_compress``."""
+        return self.compress_opts["method"]
+
+    @method.setter
+    def method(self, value):
+        self.compress_opts["method"] = value
 
     def _compress(self):
         """Globally compress the accumulated lazy gates and the state back into
@@ -6024,22 +6064,20 @@ class CircuitMPSLazy(CircuitMPS):
 
         from .tn1d.compress import tensor_network_1d_compress
 
+        opts = self.compress_opts
         # the 'src' family ignores cutoff and warns if it is nonzero
-        cutoff = 0.0 if "src" in self._method else self._cutoff
+        if "src" in opts["method"] and opts.get("cutoff"):
+            opts = {**opts, "cutoff": 0.0}
 
-        self._psi = tensor_network_1d_compress(
-            self._psi,
-            max_bond=self._max_bond,
-            cutoff=cutoff,
-            method=self._method,
-            inplace=True,
-            **self._compress_opts,
-        )
-        # the compression moves the orthogonality center, so any position
-        # recorded by an earlier eager fallback gate is now stale
-        self.gate_opts["info"]["cur_orthog"] = None
+        self._psi = tensor_network_1d_compress(self._psi, inplace=True, **opts)
+        # tensor_network_1d_compress leaves the orthogonality center at the
+        # first site, or the last site if sweeping in reverse
+        if self.compress_opts.get("sweep_reverse", False):
+            self.gate_opts["info"]["cur_orthog"] = (self._psi.L - 1,) * 2
+        else:
+            self.gate_opts["info"]["cur_orthog"] = (0, 0)
         self._pending = False
-        self._uncompressed.clear()
+        self._touch_count.clear()
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
         if gate.special or gate.controls:
@@ -6049,14 +6087,6 @@ class CircuitMPSLazy(CircuitMPS):
             return super()._apply_gate(gate, tags=tags, **gate_opts)
 
         where = gate.qubits
-        multi = len(where) >= 2
-
-        if multi:
-            span = set(range(min(where), max(where) + 1))
-            # compress first if this gate would stack onto a site that already
-            # carries an uncompressed multi-qubit gate
-            if not self._uncompressed.isdisjoint(span):
-                self._compress()
 
         G = gate.array
         if self.convert_eager:
@@ -6065,12 +6095,29 @@ class CircuitMPSLazy(CircuitMPS):
                 self._backend_gate_cache[key] = self._maybe_convert(G)
             G = self._backend_gate_cache[key]
 
+        if len(where) == 1:
+            # a single qubit unitary can be contracted directly into the tensor
+            # currently carrying that site's output index: it changes neither
+            # the geometry nor the orthogonality center, so needs no compression
+            self._psi.gate_inds_(
+                G, (self._psi.site_ind(where[0]),), contract=True
+            )
+            self._gates.append(gate)
+            return
+
+        span = range(min(where), max(where) + 1)
+        # compress first if stacking this gate would take any of its sites past
+        # ``compress_every`` uncompressed multi-qubit gates
+        if any(
+            self._touch_count.get(s, 0) >= self.compress_every for s in span
+        ):
+            self._compress()
+
         # stack the gate as a split sub-MPO without any compression
         self._psi.gate_nonlocal_(G, where, method="lazy")
         self._pending = True
-
-        if multi:
-            self._uncompressed |= span
+        for s in span:
+            self._touch_count[s] = self._touch_count.get(s, 0) + 1
 
         self._gates.append(gate)
 

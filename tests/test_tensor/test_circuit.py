@@ -1563,7 +1563,9 @@ class TestCircuitMPSLazy:
                 )
         return gates
 
-    @pytest.mark.parametrize("method", ["dm", "direct", "zipup", "fit"])
+    @pytest.mark.parametrize(
+        "method", ["dm", "direct", "zipup", "fit", "src"]
+    )
     def test_matches_dense_with_long_range(self, method):
         N = 8
         gates = self._random_circuit_gates(
@@ -1594,18 +1596,35 @@ class TestCircuitMPSLazy:
 
         assert lazy.psi.distance_normalized(eager.psi) < 1e-6
 
-    def test_src_method_on_local_circuit(self):
-        # the 'src' compression method supports local (non system-spanning)
-        # circuits, which is the main use case for lazy compression
-        N = 8
-        gates = self._random_circuit_gates(N, depth=4, seed=7)
+    def test_compress_every(self):
+        # compress_every defers compression across more gate layers: the result
+        # is unchanged at full bond, but fewer compressions are performed
+        N = 6
+        gates = self._random_circuit_gates(N, depth=6, seed=7)
         ref = qtn.Circuit(N)
         ref.apply_gates(gates)
 
-        circ = qtn.CircuitMPSLazy(N, max_bond=2**N, method="src")
-        circ.apply_gates(gates)
+        def count_compressions(compress_every):
+            circ = qtn.CircuitMPSLazy(
+                N, max_bond=2**N, cutoff=1e-12, compress_every=compress_every
+            )
+            n = 0
+            real_compress = circ._compress
 
-        assert circ.psi.distance_normalized(ref.psi) < 1e-6
+            def counting():
+                nonlocal n
+                if circ._pending:
+                    n += 1
+                real_compress()
+
+            circ._compress = counting
+            circ.apply_gates(gates)
+            assert circ.psi.distance_normalized(ref.psi) < 1e-6
+            return n
+
+        n1 = count_compressions(1)
+        n3 = count_compressions(3)
+        assert n3 < n1
 
     def test_explicit_long_range_gate(self):
         N = 6
