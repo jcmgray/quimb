@@ -20,6 +20,8 @@ Release notes for `quimb`.
 - [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
 - [`PEPS`](quimb.tensor.tn2d.core.PEPS), [`PEPO`](quimb.tensor.tn2d.core.PEPO), and [`PEPS3D`](quimb.tensor.tn3d.core.PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
 - [`TensorNetwork2DVector.compute_norm`](quimb.tensor.tn2d.core.TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
+- [`D2BP.partial_trace_loop_series_expansion`](quimb.tensor.belief_propagation.d2bp.D2BP.partial_trace_loop_series_expansion): fix the loop series expansion for complex (hermitian) BP messages, which were inserted with the wrong `(ket, bra)` index ordering in `get_cluster_excited` (both boundary messages and inner excitation projectors), giving incorrect reduced density matrices for complex states ({issue}`380`).
+- [`D2BP.normalize_tensors`](quimb.tensor.belief_propagation.d2bp.D2BP.normalize_tensors): keep the cached dual tensors in sync when rescaling, so that repeated reduced density matrix computations no longer drift ({issue}`381`).
 
 
 ## v1.14.0 (2026-05-10)
