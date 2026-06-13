@@ -174,6 +174,63 @@ def example_openqasm3_qft():
     """
 
 
+def factor_pairs(N):
+    factors = []
+    for i in range(2, int(N**0.5) + 1):
+        if N % i == 0:
+            factors.append((i, N // i))
+    return factors
+
+
+def random_lattice_gates(N, seed=42):
+    from itertools import product
+
+    rng = np.random.default_rng(seed)
+
+    dimensions = rng.choice(factor_pairs(N))
+    rows, cols = dimensions
+
+    rxx = qu.expm(
+        -1j * rng.uniform(0, 2 * np.pi) * (qu.pauli("X") & qu.pauli("X"))
+    )
+    rzz = qu.expm(
+        -1j * rng.uniform(0, 2 * np.pi) * (qu.pauli("Z") & qu.pauli("Z"))
+    )
+    ryy = qu.expm(
+        -1j * rng.uniform(0, 2 * np.pi) * (qu.pauli("Y") & qu.pauli("Y"))
+    )
+
+    rx = qu.expm(-1j * rng.uniform(0, 2 * np.pi) * qu.pauli("X"))
+    ry = qu.expm(-1j * rng.uniform(0, 2 * np.pi) * qu.pauli("Y"))
+    rz = qu.expm(-1j * rng.uniform(0, 2 * np.pi) * qu.pauli("Z"))
+
+    single_site_gates = [rx, ry, rz]
+    two_site_gates = [rxx, ryy, rzz]
+
+    def site(x, y):
+        return x * cols + y
+
+    gates = []
+
+    for i in range(N):
+        gates.append(
+            qtn.Gate.from_raw(rng.choice(single_site_gates), qubits=[i])
+        )
+    for x, y in product(range(rows), range(cols)):
+        if y + 1 < cols:
+            a, b = site(x, y), site(x, y + 1)
+            gates.append(
+                qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+            )
+        if x + 1 < rows:
+            a, b = site(x, y), site(x + 1, y)
+            gates.append(
+                qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+            )
+
+    return gates * 5
+
+
 class TestCircuit:
     def test_prepare_GHZ(self):
         qc = qtn.Circuit(3)
@@ -1548,36 +1605,71 @@ class TestCircuitMPS:
         samples = list(circ.sample(10, seed=1234))
         assert len(set(samples)) == 2
 
-    def test_performance_lazymps_long_range(self):
-        import timeit
+    def test_lazymps_fidelity_with_dense(self):
+        rng = np.random.default_rng(42)
+        N = 6
 
-        N = 10
+        circ = qtn.CircuitLazyMPS(N, max_bond=512)
+        for i in range(N - 1):
+            circ.u3(
+                rng.uniform(0, 2 * np.pi),
+                rng.uniform(0, 2 * np.pi),
+                rng.uniform(0, 2 * np.pi),
+                i,
+            )
+            circ.cx(i, (i + 1))
 
-        circ = qtn.CircuitLazyMPS(N, max_bond=512, compress_every=4)
+        checker = qtn.Circuit(N)
+        checker = checker.from_gates(circ.gates)
 
-        start_time = timeit.default_timer()
+        assert circ.psi.norm() == pytest.approx(1.0)
+        assert circ.psi.distance_normalized(checker.psi) < 1e-6
 
+    def test_lazymps_compress_every(self):
+        circ = qtn.CircuitLazyMPS(4, max_bond=2, compress_every=3)
         circ.h(0)
-        for _ in range(100):
-            for i in range(N - 1):
-                circ.cx(0, i + 1)
+        assert circ._uncompressed_sites == {}
+        circ.cx(0, 1)
+        circ.cx(0, 2)
+        circ.cx(1, 3)
+        assert circ._uncompressed_sites == {0: 2, 1: 3, 2: 2, 3: 1}
+        circ.cx(0, 1)
+        assert circ._uncompressed_sites == {0: 1, 1: 1}
+        _ = circ.psi
+        assert circ._uncompressed_sites == {}
 
-        elapsed_lazymps = timeit.default_timer() - start_time
+    @pytest.mark.parametrize("N", [8, 10, 12])
+    def test_lazymps_2d_long_range_dynamics(self, N):
+        import time
+        import warnings
+
+        gates = random_lattice_gates(N)
+
+        start = time.process_time()
+        circ = qtn.CircuitLazyMPS(
+            N, max_bond=512, compress_every=int(np.sqrt(N))
+        )
+        circ.apply_gates(gates)
+        elapsed_lazy = time.process_time() - start
         lazy_state = circ.psi
 
-        circ = qtn.CircuitMPS(N, max_bond=512, gate_opts=dict(method="src", contract="nonlocal"))
+        start = time.process_time()
+        circ = qtn.CircuitMPS(
+            N, max_bond=512, gate_opts=dict(method="src", contract="nonlocal")
+        )
+        circ.apply_gates(gates)
+        elapsed_eager = time.process_time() - start
+        eager_state = circ.psi
 
-        start_time = timeit.default_timer()
-        circ.h(0)
-        for _ in range(100):
-            for i in range(N - 1):
-                circ.cx(0, i + 1)
+        assert lazy_state.norm() == pytest.approx(1.0)
+        assert lazy_state.distance_normalized(eager_state) < 1e-4
 
-        elapsed_mps = timeit.default_timer() - start_time
-        mps_state = circ.psi
-
-        assert elapsed_lazymps < elapsed_mps, f"LazyMPS took {elapsed_lazymps:.2f}s, MPS took {elapsed_mps:.2f}s"
-        assert lazy_state @ mps_state == pytest.approx(1.0)
+        # due to machine impact on the timing, slower is not necessarily a failure, but
+        # should be flagged for review if it happens consistently
+        if elapsed_lazy >= elapsed_eager:
+            warnings.warn(
+                f"Lazy MPS with N={N} took {elapsed_lazy:.2f}s, which is more than eager MPS at {elapsed_eager:.2f}s."
+            )
 
 
 class TestCircuitPEPSSimpleUpdate:

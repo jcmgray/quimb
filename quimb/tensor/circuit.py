@@ -52,7 +52,7 @@ from .tensor_core import (
     tags_to_oset,
     tensor_contract,
 )
-from .tn1d.core import Dense1D, MatrixProductOperator, MatrixProductState
+from .tn1d.core import Dense1D, MatrixProductOperator
 from .tnag.core import TensorNetworkGenOperator, TensorNetworkGenVector
 
 
@@ -6110,8 +6110,9 @@ class CircuitLazyMPS(CircuitMPS):
         ``"dm"`` for density matrix truncation, ``"src"`` for successive
         randomized compression, or ``"direct"`` for direct SVD truncation.
     compress_every : int, optional
-        How many gates to apply to each qubit before contracting and compressing
-        the state with the gates.
+        How many gates to apply to any qubit before contracting and compressing
+        the state with the gates. A good initial value to try is sqrt(N), and
+        then tune from there.
 
     dtype : str, optional
         The data type to use for the state tensor.
@@ -6135,12 +6136,13 @@ class CircuitLazyMPS(CircuitMPS):
     --------
 
     Create a circuit object that always uses the "src" compression method
-    using a large cutoff and maximum bond dimension::
+    using maximum bond dimension and compressing when 5 gates are applied
+    to any qubit::
 
         circ = qtn.CircuitLazyMPS(
             N=56,
             max_bond=1024,
-            cutoff=1e-3,
+            cutoff=0.0,
             compress_every=5,
             method="src",
         )
@@ -6154,8 +6156,8 @@ class CircuitLazyMPS(CircuitMPS):
         max_bond=None,
         cutoff=1e-10,
         compress_opts=None,
-        method="src",
-        compress_every=5,
+        method="dm",
+        compress_every=2,
         dtype=None,
         to_backend=None,
         convert_eager=True,
@@ -6208,7 +6210,6 @@ class CircuitLazyMPS(CircuitMPS):
     @method.setter
     def method(self, value):
         self.compress_opts["method"] = value
-        self.gate_opts["method"] = value
 
     def _compress(self):
         """Compress the current state by contracting in all gates and then applying
@@ -6223,12 +6224,13 @@ class CircuitLazyMPS(CircuitMPS):
         self._psi = tensor_network_1d_compress(
             self._psi,
             permute_arrays=False,
+            inplace=True,
             **self.compress_opts,
         )
 
         # `tensor_network_1d_compress` leaves the orthogonality center at the
         # first site, or the last site if `reverse_sweep` is enabled
-        if self.gate_opts["info"].get("reverse_sweep", False):
+        if self.compress_opts.get("reverse_sweep", False):
             self.gate_opts["info"]["cur_orthog"] = (self.N - 1, self.N - 1)  # type: ignore
         else:
             self.gate_opts["info"]["cur_orthog"] = (0, 0)
@@ -6241,14 +6243,15 @@ class CircuitLazyMPS(CircuitMPS):
         if len(gate.qubits) == 1:
             return super()._apply_gate(gate, tags=tags, **gate_opts)
 
-        for site in gate.qubits:
+        min_site, max_site = min(gate.qubits), max(gate.qubits)
+
+        for site in range(min_site, max_site + 1):
             if self._uncompressed_sites.get(site, 0) >= self.compress_every:
                 self._compress()
                 break
-        else:
-            min_site, max_site = min(gate.qubits), max(gate.qubits)
-            for site in range(min_site, max_site + 1):
-                self._uncompressed_sites[site] = self._uncompressed_sites.get(site, 0) + 1
+
+        for site in range(min_site, max_site + 1):
+            self._uncompressed_sites[site] = self._uncompressed_sites.get(site, 0) + 1
 
         return super()._apply_gate(gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts)
 
