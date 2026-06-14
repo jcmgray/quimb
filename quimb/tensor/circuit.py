@@ -53,7 +53,11 @@ from .tensor_core import (
     tensor_contract,
 )
 from .tn1d.core import Dense1D, MatrixProductOperator
-from .tnag.core import TensorNetworkGenOperator, TensorNetworkGenVector
+from .tnag.core import (
+    TensorNetworkGenOperator,
+    TensorNetworkGenVector,
+    tensor_network_ag_gate_simple,
+)
 
 
 def recursive_stack(x):
@@ -6518,3 +6522,307 @@ class CircuitPEPSSimpleUpdate(Circuit):
         # the reverse lightcone is not meaningful for a simple update PEPS,
         # which always keeps the whole state, so just return it
         return self.psi
+
+
+class CircuitPEPOSimpleUpdate:
+    """Heisenberg picture quantum circuit simulator that evolves an observable
+    (represented as a PEPO) backwards in time through a circuit. Gates are
+    applied lazily: they are recorded but not executed until
+    :meth:`local_expectation` is called, at which point the observable is
+    sandwiched between gates and their adjoints in reverse order, compressed
+    using simple update, and contracted with the initial state.
+
+    This approach is efficient for computing expectations of local observables
+    in deep circuits where only gates in the observable's reverse lightcone
+    matter. The geometry is automatically inferred from two-qubit gates.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits. If not specified, inferred from gates or edges.
+    edges : sequence of tuple, optional
+        Explicit edge list defining the lattice geometry. If not given, edges
+        are inferred from two-qubit gates when they are applied.
+    max_bond : int, optional
+        Maximum bond dimension for the PEPO when compressing during gate
+        application.
+    cutoff : float, optional
+        Singular value cutoff for compression.
+    gate_opts : dict, optional
+        Additional options passed to the gate sandwich operation.
+    dtype : str, optional
+        Data type for tensors.
+
+    Examples
+    --------
+    Compute expectation of Z on a qubit after a circuit:
+
+        >>> circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        >>> circ.apply_gates(gates)
+        >>> Z = qu.pauli('Z')
+        >>> expec = circ.local_expectation(Z, where=0)
+
+    Notes
+    -----
+    - Gates are stored but not applied until local_expectation is called
+    - Only gates in the reverse lightcone of the observable are actually used
+    - The observable is evolved backwards: O_final = U† O_init U
+    - Compression is done via simple update during sandwich application
+    """
+
+    def __init__(
+        self,
+        N=None,
+        edges=None,
+        max_bond=None,
+        cutoff=1e-10,
+        gate_opts=None,
+        dtype="complex128",
+    ):
+        self.N = N
+        self._explicit_edges = edges
+        self._gates = []
+        self._max_bond = max_bond
+        self._cutoff = cutoff
+        self._gate_opts = ensure_dict(gate_opts)
+        self._gate_opts.setdefault("max_bond", max_bond)
+        self._gate_opts.setdefault("cutoff", cutoff)
+        self._dtype = dtype
+        self._edges_from_gates = set()
+
+    def apply_gates(self, gates):
+        """Record gates for lazy application. Gates are not actually applied
+        until local_expectation is called.
+
+        Parameters
+        ----------
+        gates : sequence
+            Gates to record. Can be Gate objects or gate specifications.
+        """
+        for gate in gates:
+            gate = parse_to_gate(gate)
+            self._gates.append(gate)
+            
+            if len(gate.qubits) == 2:
+                edge = tuple(sorted(gate.qubits))
+                self._edges_from_gates.add(edge)
+
+    @property
+    def edges(self):
+        """The edges defining the geometry, either explicit or inferred from gates."""
+        if self._explicit_edges is not None:
+            return self._explicit_edges
+        return tuple(sorted(self._edges_from_gates))
+
+    @property
+    def sites(self):
+        """All sites appearing in the geometry."""
+        sites = set()
+        for a, b in self.edges:
+            sites.add(a)
+            sites.add(b)
+        
+        for gate in self._gates:
+            sites.update(gate.qubits)
+        
+        if self.N is not None:
+            sites.update(range(self.N))
+        
+        return tuple(sorted(sites))
+
+    def _build_reverse_lightcone(self, where):
+        """Identify gates in the reverse lightcone of the observable sites.
+        
+        A gate is in the reverse lightcone if there exists a path of gates
+        connecting it to the observable sites when traversing backwards.
+        """
+        if isinstance(where, list):
+            where = tuple(where)
+        if where in self.sites:
+            where = (where,)
+        elif not isinstance(where, tuple):
+            where = (where,)
+        
+        affected_sites = set(where)
+        gates_in_cone = []
+        
+        for gate in reversed(self._gates):
+            gate_sites = set(gate.qubits)
+            
+            if gate_sites & affected_sites:
+                gates_in_cone.append(gate)
+                affected_sites.update(gate_sites)
+        
+        return list(reversed(gates_in_cone))
+
+    def _make_initial_operator(self, G, where):
+        if isinstance(where, list):
+            where = tuple(where)
+        if where in self.sites:
+            where = (where,)
+        elif not isinstance(where, tuple):
+            where = (where,)
+        
+        sites = self.sites
+        edges = self.edges
+        
+        G = np.asarray(G, dtype=self._dtype)
+        nsite_op = len(where)
+        phys_dim = 2
+        
+        if G.ndim == 2:
+            total_dim = phys_dim ** nsite_op
+            expected_shape = (total_dim, total_dim)
+            if G.shape != expected_shape:
+                G = G.reshape(expected_shape)
+            G = G.reshape((phys_dim,) * (2 * nsite_op))
+        
+        identity = np.eye(phys_dim, dtype=self._dtype)
+        identity = identity.reshape((phys_dim, phys_dim))
+        
+        bond_map = {}
+        for edge in edges:
+            key = tuple(sorted(edge))
+            bond_map[key] = rand_uuid()
+        
+        tensors = []
+        
+        for site in sites:
+            # Only assign G directly if it's a 1-site operator
+            if nsite_op == 1 and site in where:
+                data = G.copy()
+            else:
+                data = identity.copy()
+            
+            upper_ind = f"k{site}"
+            lower_ind = f"b{site}"
+            
+            bond_inds = []
+            for edge in edges:
+                if site in edge:
+                    key = tuple(sorted(edge))
+                    bond_inds.append(bond_map[key])
+            
+            inds = bond_inds + [lower_ind, upper_ind]
+            
+            if len(bond_inds) > 0:
+                bond_shape = [1] * len(bond_inds)
+                full_shape = bond_shape + [phys_dim, phys_dim]
+                data = data.reshape(tuple(full_shape))
+            
+            tag = f"I{site}"
+            tensors.append(Tensor(data=data, inds=inds, tags=[tag]))
+        
+        tn = TensorNetwork(tensors)
+        pepo = tn.view_as_(
+            TensorNetworkGenOperator,
+            upper_ind_id="k{}",
+            lower_ind_id="b{}",
+            site_tag_id="I{}",
+            sites=sites,
+        )
+        
+        return pepo
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        optimize="auto-hq",
+        max_bond=None,
+        cutoff=None,
+        **contract_opts,
+    ):
+        if isinstance(where, list):
+            where = tuple(where)
+        if where in self.sites:
+            where = (where,)
+        elif not isinstance(where, tuple):
+            where = (where,)
+        
+        gates_in_cone = self._build_reverse_lightcone(where)
+        
+        pepo = self._make_initial_operator(G, where)
+        
+        gauges = {}
+        if len(self.edges) > 0:
+            pepo.gauge_all_simple_(max_iterations=1, gauges=gauges)
+        
+        max_bond_use = max_bond if max_bond is not None else self._max_bond
+        cutoff_use = cutoff if cutoff is not None else self._cutoff
+        
+        opts = dict(self._gate_opts)
+        if max_bond_use is not None:
+            opts["max_bond"] = max_bond_use
+        if cutoff_use is not None:
+            opts["cutoff"] = cutoff_use
+        opts.setdefault("smudge", 1e-12)
+        # renorm is popped so it doesn't conflict with tensor_network_ag_gate_simple's explicit arg
+        opts.pop("renorm", None)
+        
+        operator_scale = 1.0
+
+        if len(where) > 1:
+            info_init = {}
+            tensor_network_ag_gate_simple(
+                pepo,
+                G,
+                where,
+                gauges,
+                renorm=False,
+                which="upper",
+                info=info_init,
+                inplace=True,
+                **opts,
+            )
+            for (_, ix), s in info_init.items():
+                norm = float(np.linalg.norm(s))
+                if norm > 0:
+                    gauges[ix] = s / norm
+                    operator_scale *= norm
+        
+        for gate in reversed(gates_in_cone):
+            U = gate.array
+            where_gate = gate.qubits
+            
+            U_dag = np.conj(np.transpose(U))
+            
+            info = {}
+            tensor_network_ag_gate_simple(
+                pepo,
+                U_dag,
+                where_gate,
+                gauges,
+                renorm=False,
+                info=info,
+                inplace=True,
+                **opts,
+            )
+            
+            # Manually normalize the updated gauge to pull operator scale out
+            for (_, ix), s in info.items():
+                norm = float(np.linalg.norm(s))
+                if norm > 0:
+                    gauges[ix] = s / norm
+                    operator_scale *= norm
+        
+        pepo.gauge_simple_insert(gauges)
+        
+        zero_state = np.array([1.0, 0.0], dtype=self._dtype)
+        
+        for site in self.sites:
+            ket_ind = f"k{site}"
+            bra_ind = f"b{site}"
+            
+            if ket_ind in pepo.ind_map:
+                projector = np.outer(zero_state, np.conj(zero_state))
+                t_proj = Tensor(
+                    data=projector,
+                    inds=[ket_ind, bra_ind],
+                    tags=["PROJ"]
+                )
+                pepo.add_tensor(t_proj, virtual=True)
+        
+        result = pepo.contract(all, optimize=optimize, **contract_opts)
+        
+        return result * operator_scale

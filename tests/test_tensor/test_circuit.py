@@ -1979,6 +1979,231 @@ class TestCircuitPEPSSimpleUpdate:
         assert psi.max_bond() <= max_bond
 
 
+class TestCircuitPEPOSimpleUpdate:
+    def test_basic_construction(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        assert circ._max_bond == 16
+        assert circ._cutoff == 1e-10
+        assert len(circ._gates) == 0
+
+    def test_lazy_gate_recording(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            qtn.Gate("X", params=(), qubits=[1]),
+        ]
+        circ.apply_gates(gates)
+        assert len(circ._gates) == 3
+        assert circ._gates[0].label == "H"
+        assert circ._gates[1].label == "CNOT"
+
+    def test_edges_inferred_from_gates(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            qtn.Gate("CZ", params=(), qubits=[1, 2]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 2]),
+        ]
+        circ.apply_gates(gates)
+        edges = set(circ.edges)
+        assert (0, 1) in edges
+        assert (1, 2) in edges
+        assert (0, 2) in edges
+
+    def test_explicit_edges(self):
+        edges = [(0, 1), (1, 2), (2, 3)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        assert set(circ.edges) == set(edges)
+
+    def test_sites_from_gates(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            qtn.Gate("X", params=(), qubits=[2]),
+        ]
+        circ.apply_gates(gates)
+        sites = set(circ.sites)
+        assert 0 in sites
+        assert 1 in sites
+        assert 2 in sites
+
+    def test_simple_z_expectation_no_gates(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(N=3, max_bond=16)
+        Z = qu.pauli("Z").astype(complex)
+        expec = circ.local_expectation(Z, where=0)
+        assert float(np.real(expec)) == pytest.approx(1.0, abs=1e-10)
+
+    def test_z_after_x_gate(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        circ.apply_gates([qtn.Gate("X", params=(), qubits=[0])])
+        Z = qu.pauli("Z").astype(complex)
+        expec = circ.local_expectation(Z, where=0)
+        assert float(np.real(expec)) == pytest.approx(-1.0, abs=1e-6)
+
+    def test_z_after_hadamard(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        circ.apply_gates([qtn.Gate("H", params=(), qubits=[0])])
+        Z = qu.pauli("Z").astype(complex)
+        expec = circ.local_expectation(Z, where=0)
+        assert abs(float(np.real(expec))) < 1e-6
+
+    def test_matches_exact_on_chain(self):
+        N = 4
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(42)
+        gates = []
+        for i in range(N):
+            gates.append(
+                qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            )
+        for i, j in edges:
+            gates.append(qtn.Gate("CNOT", params=(), qubits=[i, j]))
+            gates.append(
+                qtn.Gate("RZ", params=[rng.uniform(0, np.pi)], qubits=[j])
+            )
+
+        circ_pepo = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=32)
+        circ_pepo.apply_gates(gates)
+
+        circ_exact = qtn.Circuit(N=N)
+        circ_exact.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(N):
+            x_pepo = circ_pepo.local_expectation(Z, i)
+            x_exact = circ_exact.local_expectation(Z, i)
+            assert float(np.real(x_pepo)) == pytest.approx(
+                float(np.real(x_exact)), abs=1e-4
+            )
+
+    def test_lightcone_skips_irrelevant_gates(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("X", params=(), qubits=[5]),
+            qtn.Gate("Y", params=(), qubits=[6]),
+            qtn.Gate("Z", params=(), qubits=[7]),
+        ]
+        circ.apply_gates(gates)
+        
+        gates_in_cone = circ._build_reverse_lightcone(where=(0,))
+        assert len(gates_in_cone) == 1
+        assert gates_in_cone[0].qubits == (0,)
+
+    def test_lightcone_includes_connected_gates(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            qtn.Gate("CNOT", params=(), qubits=[1, 2]),
+            qtn.Gate("X", params=(), qubits=[5]),
+        ]
+        circ.apply_gates(gates)
+        
+        gates_in_cone = circ._build_reverse_lightcone(where=(2,))
+        assert len(gates_in_cone) == 3
+        labels = [g.label for g in gates_in_cone]
+        assert "H" in labels
+        assert labels.count("CNOT") == 2
+
+    def test_two_qubit_observable(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+        ]
+        circ.apply_gates(gates)
+        
+        Z = qu.pauli("Z").astype(complex)
+        ZZ = qu.kron(Z, Z)
+        
+        expec = circ.local_expectation(ZZ, where=(0, 1))
+        
+        circ_exact = qtn.Circuit(N=2)
+        circ_exact.apply_gates(gates)
+        expec_exact = circ_exact.local_expectation(ZZ, where=(0, 1))
+        
+        assert float(np.real(expec)) == pytest.approx(
+            float(np.real(expec_exact)), abs=1e-4
+        )
+
+    def test_bell_state_correlations(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(max_bond=16)
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+        ]
+        circ.apply_gates(gates)
+
+        circ_exact = qtn.Circuit(N=2)
+        circ_exact.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        ZZ = qu.kron(Z, Z)
+        XX = qu.kron(qu.pauli("X"), qu.pauli("X")).astype(complex)
+
+        expec_zz = circ.local_expectation(ZZ, where=(0, 1))
+        expec_xx = circ.local_expectation(XX, where=(0, 1))
+        
+        expec_zz_exact = circ_exact.local_expectation(ZZ, where=(0, 1))
+        expec_xx_exact = circ_exact.local_expectation(XX, where=(0, 1))
+
+        assert float(np.real(expec_zz)) == pytest.approx(
+            float(np.real(expec_zz_exact)), abs=1e-4
+        )
+        assert float(np.real(expec_xx)) == pytest.approx(
+            float(np.real(expec_xx_exact)), abs=1e-4
+        )
+
+    def test_grid_geometry(self):
+        edges = qtn.edges_2d_square(2, 2)
+        sites = sorted({s for e in edges for s in e})
+        rng = np.random.default_rng(7)
+        gates = [
+            (qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s) 
+            for s in sites
+        ]
+        
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(gates)
+        
+        Z = qu.pauli("Z").astype(complex)
+        for site in sites[:2]:
+            expec = circ.local_expectation(Z, where=site)
+            assert isinstance(expec, (float, complex, np.number))
+
+    def test_deeper_circuit_on_chain(self):
+        N = 5
+        depth = 3
+        edges = qtn.edges_1d_chain(N, cyclic=False)
+        rng = np.random.default_rng(123)
+        
+        gates = []
+        for _ in range(depth):
+            for i in range(N):
+                gates.append(
+                    qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+                )
+            for i, j in edges:
+                gates.append(qtn.Gate("CZ", params=(), qubits=[i, j]))
+        
+        circ_pepo = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        circ_pepo.apply_gates(gates)
+        
+        circ_exact = qtn.Circuit(N=N)
+        circ_exact.apply_gates(gates)
+        
+        Z = qu.pauli("Z").astype(complex)
+        x_pepo = circ_pepo.local_expectation(Z, where=N//2)
+        x_exact = circ_exact.local_expectation(Z, where=N//2)
+        
+        assert float(np.real(x_pepo)) == pytest.approx(
+            float(np.real(x_exact)), abs=1e-3
+        )
+
+
 class TestCircuitGen:
     @pytest.mark.parametrize(
         "ansatz,cyclic",
