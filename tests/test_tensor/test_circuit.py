@@ -1,5 +1,6 @@
 import itertools
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -1498,6 +1499,440 @@ class TestCircuitMPS:
         circ.h(0)
         samples = list(circ.sample(10, seed=1234))
         assert len(set(samples)) == 2
+
+    def assert_lazy_mps_clean(self, mps, N):
+        assert isinstance(mps, qtn.MatrixProductState)
+        assert len(mps.tensors) == N
+        assert set(mps.outer_inds()) == {mps.site_ind(i) for i in range(N)}
+
+    @pytest.mark.parametrize("method", ["direct", "dm", "fit", "zipup", "src"])
+    def test_lazy_mps_matches_dense_long_range_methods(self, method):
+        N = 6
+        gates = [
+            ("H", 0),
+            ("RX", 0.2, 3),
+            ("CNOT", 0, 5),
+            ("RY", -0.3, 2),
+            ("CZ", 1, 4),
+            ("RZZ", 0.17, 5, 2),
+            ("RZ", 0.7, 5),
+        ]
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(
+            N, max_bond=2**N, method=method, cutoff=1e-12
+        )
+        lazy.apply_gates(gates)
+
+        psi_lazy = lazy.psi
+        self.assert_lazy_mps_clean(psi_lazy, N)
+        assert lazy._num_pending_gates == 0
+        assert psi_lazy.distance_normalized(ref.psi) < 1e-6
+
+    def test_lazy_mps_single_qubit_gates_are_eager(self):
+        N = 5
+        gates = [
+            ("H", 0),
+            ("RX", 0.2, 1),
+            ("RY", -0.3, 2),
+            ("RZ", 0.4, 3),
+            ("X", 4),
+        ]
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(N, max_bond=4)
+        lazy.apply_gates(gates)
+
+        assert lazy._num_pending_gates == 0
+        psi_lazy = lazy.psi
+        self.assert_lazy_mps_clean(psi_lazy, N)
+        assert psi_lazy.max_bond() == 1
+        assert psi_lazy.distance_normalized(ref.psi) < 1e-12
+
+    def test_lazy_mps_compress_every_counts_span_sites(self):
+        N = 6
+        lazy = qtn.CircuitMPSLazy(
+            N, method="direct", cutoff=1e-12, compress_every=1
+        )
+
+        lazy.cx(0, 2)
+        assert lazy._num_pending_gates == 1
+        assert lazy._pending_site_counts == {0: 1, 1: 1, 2: 1}
+
+        lazy.cz(4, 5)
+        assert lazy._num_pending_gates == 2
+        assert lazy._pending_site_counts[4] == 1
+        assert lazy._pending_site_counts[5] == 1
+
+        lazy.rzz(0.1, 2, 3)
+        assert lazy._num_pending_gates == 1
+        assert lazy._pending_site_counts == {2: 1, 3: 1}
+
+        psi_lazy = lazy.psi
+        self.assert_lazy_mps_clean(psi_lazy, N)
+
+    def test_lazy_mps_compress_every_defers_extra_layers(self):
+        N = 4
+        gates = [
+            ("H", 0),
+            ("CNOT", 0, 3),
+            ("CZ", 1, 3),
+            ("RZZ", 0.2, 0, 2),
+        ]
+
+        counts = []
+        for compress_every in (1, 2):
+            lazy = qtn.CircuitMPSLazy(
+                N,
+                method="direct",
+                cutoff=1e-12,
+                compress_every=compress_every,
+            )
+            nflush = 0
+            real_flush = lazy.flush
+
+            def counting_flush(*args, **kwargs):
+                nonlocal nflush
+                if lazy._num_pending_gates:
+                    nflush += 1
+                return real_flush(*args, **kwargs)
+
+            lazy.flush = counting_flush
+            lazy.apply_gates(gates)
+            _ = lazy.psi
+            counts.append(nflush)
+
+        assert counts[1] < counts[0]
+
+    def test_lazy_mps_copy_with_pending_gates(self):
+        N = 5
+        gates = [
+            ("H", 0),
+            ("CNOT", 0, 4),
+            ("RY", 0.123, 2),
+        ]
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(N, method="direct", cutoff=1e-12)
+        lazy.apply_gates(gates)
+        assert lazy._num_pending_gates == 1
+
+        copied = lazy.copy()
+        assert copied._num_pending_gates == 1
+        assert copied._pending_site_counts == lazy._pending_site_counts
+
+        lazy.x(1)
+        assert copied.num_gates == len(gates)
+        assert copied.psi.distance_normalized(ref.psi) < 1e-10
+
+    def test_lazy_mps_sampling_snapshots_flushed_state(self):
+        circ = qtn.CircuitMPSLazy(2, method="direct", cutoff=1e-12)
+        circ.h(0)
+        circ.cx(0, 1)
+
+        samples = circ.sample(8, seed=42)
+        assert circ._num_pending_gates == 0
+
+        circ.x(0)
+        assert set(samples) <= {"00", "11"}
+
+    def test_lazy_mps_controlled_gate_flushes(self):
+        gates = [
+            qtn.Gate("H", params=[], qubits=[0]),
+            qtn.Gate("RY", params=[0.1], qubits=[2]),
+            qtn.Gate("CNOT", params=[], qubits=[1, 3]),
+            qtn.Gate("X", params=[], qubits=[3], controls=[0, 2]),
+            qtn.Gate("CZ", params=[], qubits=[0, 1]),
+        ]
+
+        ref = qtn.Circuit(4)
+        ref.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(4, max_bond=16, method="direct")
+        lazy.apply_gates(gates)
+
+        assert lazy.psi.distance_normalized(ref.psi) < 1e-7
+
+    def test_lazy_mps_2d_ising_dynamics(self):
+        Lx, Ly = 2, 3
+        N = Lx * Ly
+
+        def site(x, y):
+            return x * Ly + y
+
+        bonds = []
+        for x in range(Lx):
+            for y in range(Ly):
+                if y + 1 < Ly:
+                    bonds.append((site(x, y), site(x, y + 1)))
+                if x + 1 < Lx:
+                    bonds.append((site(x, y), site(x + 1, y)))
+
+        dt = 0.1
+        zz = qu.pauli("Z") & qu.pauli("Z")
+        rzz = qu.expm(-1j * dt * zz)
+        rx = qu.expm(-1j * dt * qu.pauli("X"))
+
+        gates = []
+        for _ in range(3):
+            for i in range(N):
+                gates.append(qtn.Gate.from_raw(rx, qubits=[i]))
+            for a, b in bonds:
+                gates.append(qtn.Gate.from_raw(rzz, qubits=[a, b]))
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(N, max_bond=2**N, method="dm", cutoff=1e-12)
+        lazy.apply_gates(gates)
+
+        psi_lazy = lazy.psi
+        self.assert_lazy_mps_clean(psi_lazy, N)
+        assert psi_lazy.distance_normalized(ref.psi) < 1e-6
+
+    @staticmethod
+    def _lazy_brickwork_gates(N, depth, seed):
+        rng = np.random.default_rng(seed)
+        gates = []
+        for d in range(depth):
+            for i in range(N):
+                gates.append(
+                    qtn.Gate(
+                        "U3", params=rng.uniform(0, 2 * np.pi, 3), qubits=[i]
+                    )
+                )
+            for i in range(d % 2, N - 1, 2):
+                gates.append(
+                    qtn.Gate(
+                        "SU4",
+                        params=rng.uniform(0, 2 * np.pi, 15),
+                        qubits=[i, i + 1],
+                    )
+                )
+        return gates
+
+    @pytest.mark.parametrize("method", ["dm", "direct", "zipup", "fit"])
+    def test_lazy_mps_compression_error_tracking(self, method):
+        N = 8
+        gates = self._lazy_brickwork_gates(N, depth=6, seed=0)
+
+        # at full bond there is no truncation: every recorded compression
+        # error, and the global error estimate, is ~ 0
+        exact = qtn.CircuitMPSLazy(
+            N, max_bond=2**N, cutoff=1e-12, method=method
+        )
+        exact.apply_gates(gates)
+        _ = exact.psi
+        assert len(exact.compression_errors) > 0
+        assert max(exact.compression_errors) < 1e-8
+        assert exact.error_estimate() == pytest.approx(0.0, abs=1e-8)
+
+        # under real truncation the per-flush errors are (essentially)
+        # non-negative and their cumulative product 1 - prod(1 - e_k) must
+        # match the global norm-based error estimate, for every method
+        trunc = qtn.CircuitMPSLazy(N, max_bond=4, cutoff=0.0, method=method)
+        trunc.apply_gates(gates)
+        _ = trunc.psi
+        errs = trunc.compression_errors
+        assert len(errs) > 1
+        assert all(e >= -1e-9 for e in errs)
+        assert sum(errs) > 0.0
+        cumulative = 1.0 - np.prod([1.0 - e for e in errs])
+        assert cumulative == pytest.approx(trunc.error_estimate(), abs=1e-6)
+
+    def test_lazy_mps_dense_and_amplitude_flush_pending_gates(self):
+        N = 8
+        gates = self._lazy_brickwork_gates(N, depth=5, seed=1)
+
+        lazy = qtn.CircuitMPSLazy(
+            N,
+            max_bond=2,
+            cutoff=0.0,
+            method="dm",
+            compress_every=None,
+        )
+        lazy.apply_gates(gates)
+        assert lazy._num_pending_gates > 0
+
+        dense = lazy.to_dense(simplify_sequence="R")
+        assert lazy._num_pending_gates == 0
+        assert len(lazy.compression_errors) == 1
+        np.testing.assert_allclose(dense, lazy.psi.to_dense(), atol=1e-10)
+
+        lazy = qtn.CircuitMPSLazy(
+            N,
+            max_bond=2,
+            cutoff=0.0,
+            method="dm",
+            compress_every=None,
+        )
+        lazy.apply_gates(gates)
+        assert lazy._num_pending_gates > 0
+
+        amp = lazy.amplitude("0" * N, simplify_sequence="R")
+        assert lazy._num_pending_gates == 0
+        assert amp == pytest.approx(lazy.psi.amplitude("0" * N), abs=1e-10)
+
+    def test_lazy_mps_all_qubit_marginal_flushes_pending_gates(self):
+        N = 6
+        gates = self._lazy_brickwork_gates(N, depth=4, seed=2)
+
+        lazy = qtn.CircuitMPSLazy(
+            N,
+            max_bond=2,
+            cutoff=0.0,
+            method="dm",
+            compress_every=None,
+        )
+        lazy.apply_gates(gates)
+        assert lazy._num_pending_gates > 0
+
+        marginal = lazy.compute_marginal(
+            tuple(range(N)),
+            simplify_sequence="R",
+        )
+        assert lazy._num_pending_gates == 0
+
+        ref = qtn.CircuitMPSLazy(
+            N,
+            max_bond=2,
+            cutoff=0.0,
+            method="dm",
+            compress_every=None,
+        )
+        ref.apply_gates(gates)
+        _ = ref.psi
+        ref_marginal = ref.compute_marginal(
+            tuple(range(N)),
+            simplify_sequence="R",
+        )
+
+        np.testing.assert_allclose(marginal, ref_marginal, atol=1e-6)
+        assert marginal.sum() == pytest.approx(
+            ref.fidelity_estimate(), abs=1e-6
+        )
+
+    def test_lazy_mps_flush_clears_simplified_state_cache(self):
+        lazy = qtn.CircuitMPSLazy(4, max_bond=2, cutoff=0.0, method="dm")
+        lazy.cx(0, 3)
+        lazy._storage[("psi_simplified", "R", 1e-12)] = (
+            lazy.get_psi_uncompressed()
+        )
+
+        _ = lazy.psi
+
+        assert lazy._num_pending_gates == 0
+        assert lazy._storage == {}
+
+    def test_lazy_mps_schrodinger_contract_flushes_before_path(self):
+        N = 5
+        gates = self._lazy_brickwork_gates(N, depth=3, seed=3)
+        lazy = qtn.CircuitMPSLazy(
+            N,
+            max_bond=2,
+            cutoff=0.0,
+            method="dm",
+            compress_every=None,
+        )
+        lazy.apply_gates(gates)
+        assert lazy._num_pending_gates > 0
+
+        value = lazy.schrodinger_contract()
+
+        assert lazy._num_pending_gates == 0
+        assert value.shape == (2,) * N
+        assert np.all(np.isfinite(value.data))
+
+    def test_lazy_mps_src_cutoff_suppressed(self):
+        # the 'src' family ignores `cutoff`; flushing must not emit the
+        # "cutoff is ignored for the src method" warning, yet still produce a
+        # correct, clean MPS
+        N = 6
+        gates = [("H", 0), ("CNOT", 0, 5), ("RZZ", 0.3, 1, 4), ("CZ", 2, 3)]
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+
+        lazy = qtn.CircuitMPSLazy(N, max_bond=2**N, method="src")
+        lazy.apply_gates(gates)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            psi_lazy = lazy.psi
+        assert not any("cutoff" in str(w.message).lower() for w in caught)
+        self.assert_lazy_mps_clean(psi_lazy, N)
+        assert psi_lazy.distance_normalized(ref.psi) < 1e-6
+
+    def test_lazy_mps_src_cutoff_suppressed_for_controlled_fallback(self):
+        gates = [
+            qtn.Gate("H", params=[], qubits=[0]),
+            qtn.Gate("CNOT", params=[], qubits=[0, 3]),
+            qtn.Gate("X", params=[], qubits=[3], controls=[0, 1]),
+        ]
+
+        lazy = qtn.CircuitMPSLazy(4, max_bond=8, method="src")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            lazy.apply_gates(gates)
+            psi_lazy = lazy.psi
+
+        assert not any("cutoff" in str(w.message).lower() for w in caught)
+        self.assert_lazy_mps_clean(psi_lazy, 4)
+
+    def test_lazy_mps_2d_ising_local_expectation(self):
+        # the benchmark suggested in the issue: 2D transverse-field Ising
+        # Trotter dynamics, where the vertical couplings are long range in the
+        # 1D MPS ordering. Compare <Z_i> against the dense reference under real
+        # mid-circuit compression, and check the error is tracked and small.
+        Lx, Ly = 3, 3
+        N = Lx * Ly
+
+        def site(x, y):
+            return x * Ly + y
+
+        bonds = []
+        for x in range(Lx):
+            for y in range(Ly):
+                if y + 1 < Ly:
+                    bonds.append((site(x, y), site(x, y + 1)))
+                if x + 1 < Lx:
+                    bonds.append((site(x, y), site(x + 1, y)))
+
+        dt = 0.1
+        zz = qu.pauli("Z") & qu.pauli("Z")
+        rzz = qu.expm(-1j * dt * zz)
+        rx = qu.expm(-1j * dt * qu.pauli("X"))
+
+        gates = []
+        for _ in range(4):
+            for i in range(N):
+                gates.append(qtn.Gate.from_raw(rx, qubits=[i]))
+            for a, b in bonds:
+                gates.append(qtn.Gate.from_raw(rzz, qubits=[a, b]))
+
+        ref = qtn.Circuit(N)
+        ref.apply_gates(gates)
+        psi_dense = ref.to_dense()
+
+        # max_bond well below the exact 2**N forces genuine mid-circuit
+        # compression (many flushes) yet the short-time dynamics stay accurate
+        lazy = qtn.CircuitMPSLazy(N, max_bond=8, cutoff=1e-12, method="dm")
+        lazy.apply_gates(gates)
+
+        Z = qu.pauli("Z")
+        for q in range(N):
+            ref_z = qu.expec(qu.ikron(Z, [2] * N, q), psi_dense).real
+            assert lazy.local_expectation(Z, q).real == pytest.approx(
+                ref_z, abs=1e-5
+            )
+
+        # mid-circuit compression actually happened and its error was tracked
+        assert len(lazy.compression_errors) > 1
+        assert lazy.error_estimate() < 1e-4
 
     def test_permmps_sampling(self):
         N = 6

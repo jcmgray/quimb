@@ -12,6 +12,7 @@ Release notes for `quimb`.
 - add [`LatticeBondMap`](quimb.tensor.tnag.core.LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
 - [`Circuit.from_openqasm3_str`](quimb.tensor.circuit.Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](quimb.tensor.circuit.Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](quimb.tensor.circuit.Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
+- add [`CircuitMPSLazy`](quimb.tensor.circuit.CircuitMPSLazy): a matrix product state circuit simulator that applies gates *lazily* as spatially split sub-MPOs and only periodically performs a single global compression of the accumulated gates with [`tensor_network_1d_compress`](quimb.tensor.tn1d.compress.tensor_network_1d_compress) (selectable ``method``, e.g. ``"dm"``, ``"fit"``, ``"src"``). Compression is deferred across ``compress_every`` layers, ordinary single-qubit gates are contracted eagerly, and the per-compression truncation error is recorded in ``compression_errors``.
 
 
 **Bug fixes:**

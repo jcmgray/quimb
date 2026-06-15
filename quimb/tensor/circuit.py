@@ -5908,6 +5908,381 @@ class CircuitMPS(Circuit):
         )
 
 
+class CircuitMPSLazy(CircuitMPS):
+    """Quantum circuit simulation using lazily stacked nonlocal gates and
+    periodic global MPS compression.
+
+    Multi-qubit gates are spatially split into sub-MPOs and stacked onto the
+    state without contraction. Once applying another multi-qubit gate would
+    take any site beyond ``compress_every`` pending gates, or when the state is
+    requested, the accumulated 1D-like tensor network is compressed back into a
+    proper MPS using
+    :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
+    Ordinary single-qubit gates are contracted eagerly since they do not grow
+    any bonds. Controlled and special gates flush pending lazy gates first,
+    then use the standard :class:`CircuitMPS` path.
+
+    Batching gates into layers before a single global compression can be both
+    more accurate and scale better than compressing pair by pair, especially
+    for long range gates, and it allows swapping the underlying compression
+    algorithm, including newer ones such as ``"src"``. The truncation error of
+    each global compression is recorded in :attr:`compression_errors`.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits in the circuit.
+    psi0 : TensorNetwork1DVector, optional
+        The initial state, assumed to be ``|00000....0>`` if not given.
+    max_bond : int, optional
+        The maximum bond dimension to compress to.
+    cutoff : float, optional
+        The singular value cutoff to use when compressing.
+    method : str, optional
+        The global compression method, for example ``"dm"``, ``"direct"``,
+        ``"zipup"``, ``"fit"``, or ``"src"``.
+    compress_every : int or None, optional
+        Allow each site to accumulate this many pending multi-qubit gates
+        before compressing. The default ``1`` compresses before a gate overlaps
+        a site already carrying pending lazy structure. ``None`` disables
+        automatic mid-circuit compression.
+    compress_opts : dict, optional
+        Extra options supplied to
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
+        ``max_bond``, ``cutoff`` and ``method`` are stored here as the
+        authoritative compression options.
+    gate_opts : dict, optional
+        Options supplied to eager fallback gates.
+    circuit_opts
+        Supplied to :class:`~quimb.tensor.circuit.CircuitMPS`.
+
+    Attributes
+    ----------
+    compression_errors : list[float]
+        The truncation error ``1 - F`` introduced by each global compression
+        (one entry per :meth:`flush`), where ``F`` is the fidelity of that
+        compression. The total accumulated error is available from
+        :meth:`error_estimate`.
+
+    See Also
+    --------
+    CircuitMPS
+    """
+
+    def __init__(
+        self,
+        N=None,
+        *,
+        psi0=None,
+        max_bond=None,
+        cutoff=1e-10,
+        method="dm",
+        compress_every=1,
+        compress_opts=None,
+        gate_opts=None,
+        **circuit_opts,
+    ):
+        if compress_every is not None and compress_every < 1:
+            raise ValueError("`compress_every` must be a positive integer.")
+
+        gate_opts = ensure_dict(gate_opts)
+        self._compression_opts = ensure_dict(compress_opts)
+        self._compression_opts.setdefault(
+            "max_bond", gate_opts.get("max_bond", max_bond)
+        )
+        self._compression_opts.setdefault(
+            "cutoff", gate_opts.get("cutoff", cutoff)
+        )
+        self._compression_opts.setdefault(
+            "method", gate_opts.get("method", method)
+        )
+
+        gate_opts["max_bond"] = self._compression_opts["max_bond"]
+        gate_opts["cutoff"] = self._compression_opts["cutoff"]
+        gate_opts["method"] = self._compression_opts["method"]
+
+        super().__init__(
+            N=N,
+            psi0=psi0,
+            gate_opts=gate_opts,
+            gate_contract="nonlocal",
+            **circuit_opts,
+        )
+
+        self.compress_every = compress_every
+        self._pending_site_counts = {}
+        self._num_pending_gates = 0
+        # per-flush truncation error log and running cumulative fidelity, see
+        # `compression_errors` and `flush`
+        self.compression_errors = []
+        self._fidelity = 1.0
+
+    def _sync_gate_opts_from_compression(self):
+        if not hasattr(self, "gate_opts"):
+            return
+
+        for key in ("max_bond", "cutoff", "method"):
+            if key in self._compression_opts:
+                self.gate_opts[key] = self._compression_opts[key]
+
+    @property
+    def compression_opts(self):
+        """The options used for global lazy compression."""
+        return self._compression_opts
+
+    @compression_opts.setter
+    def compression_opts(self, value):
+        self._compression_opts = ensure_dict(value)
+        self._sync_gate_opts_from_compression()
+
+    @property
+    def compress_opts(self):
+        """Alias for :attr:`compression_opts`."""
+        return self._compression_opts
+
+    @compress_opts.setter
+    def compress_opts(self, value):
+        self.compression_opts = value
+
+    @property
+    def max_bond(self):
+        """The maximum bond dimension used for compression."""
+        return self._compression_opts.get("max_bond", None)
+
+    @max_bond.setter
+    def max_bond(self, value):
+        self._compression_opts["max_bond"] = value
+        self._sync_gate_opts_from_compression()
+
+    @property
+    def cutoff(self):
+        """The singular value cutoff used for compression."""
+        return self._compression_opts.get("cutoff", 1e-10)
+
+    @cutoff.setter
+    def cutoff(self, value):
+        self._compression_opts["cutoff"] = value
+        self._sync_gate_opts_from_compression()
+
+    @property
+    def method(self):
+        """The compression method passed to ``tensor_network_1d_compress``."""
+        return self._compression_opts.get("method", "dm")
+
+    @method.setter
+    def method(self, value):
+        self._compression_opts["method"] = value
+        self._sync_gate_opts_from_compression()
+
+    def copy(self):
+        """Copy the circuit, including pending lazy gate tracking."""
+        new = super().copy()
+        new._compression_opts = self._compression_opts.copy()
+        new._sync_gate_opts_from_compression()
+        new.compress_every = self.compress_every
+        new._pending_site_counts = self._pending_site_counts.copy()
+        new._num_pending_gates = self._num_pending_gates
+        new.compression_errors = list(self.compression_errors)
+        new._fidelity = self._fidelity
+        return new
+
+    @staticmethod
+    def _without_src_cutoff(opts):
+        method = opts.get("method") or ""
+        if ("src" in method) and opts.get("cutoff"):
+            return {**opts, "cutoff": 0.0}
+        return opts
+
+    def flush(self, **compress_opts):
+        """Compress all pending lazy gate layers into the current MPS state.
+
+        The truncation error introduced by this global compression is appended
+        to :attr:`compression_errors` (see that attribute for details). Does
+        nothing if no gates are currently pending.
+
+        Parameters
+        ----------
+        compress_opts
+            Supplied to
+            :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`,
+            overriding the circuit defaults for this flush.
+        """
+        if not self._num_pending_gates:
+            return self
+
+        from .tn1d.compress import tensor_network_1d_compress
+
+        opts = {**self._compression_opts, **compress_opts}
+        # the 'src' family ignores `cutoff` and warns if it is nonzero
+        opts = self._without_src_cutoff(opts)
+
+        self._psi = tensor_network_1d_compress(
+            self._psi,
+            site_tags=self._psi.site_tags,
+            inplace=True,
+            **opts,
+        )
+
+        # tensor_network_1d_compress leaves the orthogonality center at the
+        # first site, or the last site if sweeping in reverse
+        if opts.get("sweep_reverse", False):
+            cur_orthog = (self.N - 1, self.N - 1)
+        else:
+            cur_orthog = (0, 0)
+        self.gate_opts["info"]["cur_orthog"] = cur_orthog
+
+        # record the truncation error introduced by this compression. The
+        # lazily stacked gates are unitary, so on a normalized initial state
+        # they preserve the norm and the only loss of weight is the truncation:
+        # ``F_step = ||psi_after||^2 / ||psi_before||^2``, where
+        # ``||psi_before||^2`` is the previous cumulative fidelity. This is the
+        # exact compression fidelity for the projective methods ('direct',
+        # 'dm', 'zipup') and, at the variational optimum, for 'fit' too.
+        new_fidelity = super().fidelity_estimate()
+        if self._fidelity > 0.0:
+            self.compression_errors.append(1.0 - new_fidelity / self._fidelity)
+        else:
+            self.compression_errors.append(0.0)
+        self._fidelity = new_fidelity
+
+        self._pending_site_counts.clear()
+        self._num_pending_gates = 0
+        self.clear_storage()
+
+        return self
+
+    compress = flush
+    _compress = flush
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        if gate.controls or gate.special:
+            self.flush()
+            self._sync_gate_opts_from_compression()
+            gate_opts = self._without_src_cutoff(
+                {**self.gate_opts, **gate_opts}
+            )
+            return super()._apply_gate(gate, tags=tags, **gate_opts)
+
+        where = gate.qubits
+
+        if len(where) == 1:
+            opts = {**gate_opts, "contract": True}
+            return super()._apply_gate(gate, tags=tags, **opts)
+
+        span = range(min(where), max(where) + 1)
+        if self.compress_every is not None and any(
+            self._pending_site_counts.get(i, 0) >= self.compress_every
+            for i in span
+        ):
+            self.flush()
+
+        opts = {**gate_opts, "contract": "nonlocal", "method": "lazy"}
+        super()._apply_gate(gate, tags=tags, **opts)
+
+        for i in span:
+            self._pending_site_counts[i] = (
+                self._pending_site_counts.get(i, 0) + 1
+            )
+        self._num_pending_gates += 1
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        if progbar:
+            from ..utils import progbar as _progbar
+
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+            gates.set_description(
+                f"pending={self._num_pending_gates}, "
+                f"max_bond={self._psi.max_bond()}"
+            )
+
+        for gate in gates:
+            self._apply_gate(parse_to_gate(gate), **gate_opts)
+
+            if progbar:
+                gates.set_description(
+                    f"pending={self._num_pending_gates}, "
+                    f"max_bond={self._psi.max_bond()}"
+                )
+
+    @property
+    def psi(self):
+        self.flush()
+        return super().psi
+
+    def get_psi_uncompressed(self):
+        """Return the current state including pending lazy gate layers."""
+        psi = self._psi.copy()
+        if not self.convert_eager:
+            self._maybe_convert(psi)
+        return psi
+
+    def get_psi_simplified(self, *args, **kwargs):
+        self.flush()
+        return super().get_psi_simplified(*args, **kwargs)
+
+    def get_rdm_lightcone_simplified(self, *args, **kwargs):
+        self.flush()
+        return super().get_rdm_lightcone_simplified(*args, **kwargs)
+
+    def schrodinger_contract(self, *args, **contract_opts):
+        self.flush()
+        return super().schrodinger_contract(*args, **contract_opts)
+
+    def sample(
+        self,
+        C,
+        seed=None,
+        dtype=None,
+        *,
+        qubits=None,
+        order=None,
+        group_size=None,
+        max_marginal_storage=None,
+        optimize=None,
+        backend=None,
+        simplify_sequence=None,
+        simplify_atol=None,
+        simplify_equalize_norms=None,
+    ):
+        self.flush()
+        unsupported = (
+            qubits,
+            order,
+            group_size,
+            max_marginal_storage,
+            optimize,
+            backend,
+            simplify_sequence,
+            simplify_atol,
+            simplify_equalize_norms,
+        )
+
+        if any(x is not None for x in unsupported):
+            warnings.warn(
+                "Unsupported options for sampling an MPS circuit supplied, "
+                "ignoring: " + ", ".join(map(str, unsupported))
+            )
+
+        psi = self._psi.copy()
+        if dtype is not None or not self.convert_eager:
+            self._maybe_convert(psi, dtype)
+
+        def _samples():
+            for config, _ in psi.sample(C, seed=seed):
+                yield "".join(map(str, config))
+
+        return _samples()
+
+    def local_expectation(self, *args, **kwargs):
+        self.flush()
+        return super().local_expectation(*args, **kwargs)
+
+    def fidelity_estimate(self):
+        self.flush()
+        return super().fidelity_estimate()
+
+
 class CircuitPermMPS(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
     lazily tracking the qubit ordering rather than 'swapping back' qubits after

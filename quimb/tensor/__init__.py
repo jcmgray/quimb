@@ -3,6 +3,7 @@
 from .circuit import (
     Circuit,
     CircuitDense,
+    CircuitMPSLazy,
     CircuitMPS,
     CircuitPEPSSimpleUpdate,
     CircuitPermMPS,
@@ -241,6 +242,7 @@ __all__ = (
     "circ_qaoa",
     "Circuit",
     "CircuitDense",
+    "CircuitMPSLazy",
     "CircuitMPS",
     "CircuitPEPSSimpleUpdate",
     "CircuitPermMPS",
