@@ -38,6 +38,7 @@ from .tensor_builder import (
     HTN_CP_operator_from_products,
     MPO_identity_like,
     MPS_computational_state,
+    TN_from_edges_and_fill_fn,
     TN_from_sites_computational_state,
     TN_from_sites_product_state,
     gen_unique_edges,
@@ -6518,3 +6519,411 @@ class CircuitPEPSSimpleUpdate(Circuit):
         # the reverse lightcone is not meaningful for a simple update PEPS,
         # which always keeps the whole state, so just return it
         return self.psi
+
+
+def _dagger_gate_array(array):
+    """Return the Hermitian conjugate of a gate ``array``, which may be a plain
+    matrix or a rank ``2 * k`` tensor with ``k`` output indices followed by
+    ``k`` input indices. Daggering a tensor gate means conjugating and swapping
+    the output and input index groups, ``(out..., in...) -> (in..., out...)``,
+    not reversing every axis. For a two-qubit gate that is the permutation
+    ``(2, 3, 0, 1)`` rather than ``(3, 2, 1, 0)``.
+    """
+    array = do("conj", array)
+    ndim = len(array.shape)
+    if ndim == 2:
+        return do("transpose", array, (1, 0))
+    k = ndim // 2
+    perm = (*range(k, 2 * k), *range(k))
+    return do("transpose", array, perm)
+
+
+class CircuitPEPOSimpleUpdate(Circuit):
+    r"""Heisenberg picture quantum circuit simulator. Rather than evolving a
+    state forwards, this evolves an operator (a "PEPO", defined by an arbitrary
+    graph of ``edges``) backwards through the circuit, then contracts it with
+    the initial product state to compute expectation values.
+
+    Gates are applied lazily, they are only stored when :meth:`apply_gates` is
+    called. The actual computation happens in :meth:`local_expectation`: the
+    observable :math:`G` is placed on the operator at ``where``, every gate is
+    applied in reverse order as the simple update sandwich
+    :math:`O \rightarrow U^\dagger O U`, and the result is projected onto the
+    :math:`|0\ldots0\rangle` initial state. Concretely the value returned is
+
+    .. math::
+
+        \langle 0 | U^\dagger G U | 0 \rangle
+
+    where :math:`U` is the product of the applied gates. The operator is kept
+    as a single tensor per site with bonds only along ``edges``, gauged in the
+    Vidal style and truncated to ``max_bond`` after each gate, so the cost stays
+    bounded even when the backwards evolution grows entanglement. Two-qubit
+    gates are only supported along an edge.
+
+    This is useful for estimating local observables of circuits on lattices
+    where the forwards state is intractable, but the backwards lightcone of a
+    local operator stays compact, which is one of the most effective recent
+    techniques for simulating quantum dynamics.
+
+    Parameters
+    ----------
+    N : int, optional
+        The number of qubits. If not given it is inferred from the geometry.
+        Supply it to pad the geometry up to ``N`` sites.
+    edges : sequence[tuple[int, int]], optional
+        The edges defining the geometry. A bond is placed between each pair of
+        sites, and two-qubit gates are only supported on these edges. If not
+        given the geometry is inferred from the two-qubit ``gates`` instead.
+    gates : sequence, optional
+        If ``edges`` is not given, infer the geometry from the two-qubit gates
+        in this sequence. The gates are only inspected here, not applied, so
+        you still pass them to :meth:`apply_gates` afterwards.
+    max_bond : int, optional
+        The maximum bond dimension to truncate the operator to when applying
+        gates during the backwards evolution.
+    cutoff : float, optional
+        The singular value cutoff to use when truncating.
+    renorm : bool, optional
+        Whether to renormalize the bond singular values after each gate. The
+        default ``False`` is the sensible choice for evolving an operator,
+        which should not be forced to unit norm.
+    gauge_smudge : float, optional
+        Small value added to the gauges before they are multiplied in and
+        inverted, for numerical stability with very small singular values.
+    gate_opts : dict, optional
+        Default options forwarded to the simple update sandwich, such as
+        ``max_bond`` and ``cutoff``.
+    dtype : str, optional
+        If given, ensure the operator tensors are cast to this data type.
+    to_backend : callable, optional
+        If given, apply this function to the operator tensors to convert them
+        to a particular array backend.
+
+    Attributes
+    ----------
+    edges : tuple[tuple[hashable, hashable]]
+        The unique edges defining the PEPO geometry.
+    sites : tuple[hashable]
+        The sites (qubit labels) of the PEPO.
+    max_bond : int or None
+        The current maximum bond dimension used when applying gates.
+
+    Notes
+    -----
+    Only qubits (physical dimension 2) are supported. The gates applied must
+    address qubits using the same labels that appear in ``edges``, and
+    two-qubit gates are only supported along an existing edge.
+
+    Examples
+    --------
+
+        >>> import quimb as qu
+        >>> import quimb.tensor as qtn
+        >>> edges = [(0, 1), (1, 2), (2, 3)]
+        >>> circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        >>> circ.apply_gates(gates)  # nothing computed yet
+        >>> circ.local_expectation(qu.pauli("Z"), 2)  # evolve and contract
+
+    See Also
+    --------
+    CircuitPEPSSimpleUpdate, CircuitMPS, CircuitDense
+    """
+
+    def __init__(
+        self,
+        N=None,
+        *,
+        edges=None,
+        gates=None,
+        max_bond=None,
+        cutoff=1e-10,
+        renorm=False,
+        gauge_smudge=1e-12,
+        gate_opts=None,
+        dtype=None,
+        to_backend=None,
+        **circuit_opts,
+    ):
+        # geometry comes from explicit `edges` or is inferred from the two site
+        # `gates` (which are only inspected here, not applied)
+        extra_sites = ()
+        if edges is None:
+            if gates is not None:
+                parsed = [parse_to_gate(g) for g in gates]
+                edges = [g.qubits for g in parsed if len(g.qubits) == 2]
+                extra_sites = tuple(q for g in parsed for q in g.qubits)
+            else:
+                raise ValueError(
+                    "You must supply one of `edges` or `gates` to define the "
+                    "PEPO geometry."
+                )
+        self._edges = tuple(gen_unique_edges(edges))
+
+        # sites are everything appearing in the edges, plus any extra sites
+        # touched by single qubit gates, padded up to N
+        sites = set()
+        for a, b in self._edges:
+            sites.add(a)
+            sites.add(b)
+        sites.update(extra_sites)
+        if N is not None:
+            sites.update(range(N))
+        self._sites = tuple(sorted(sites))
+        self._site_set = set(self._sites)
+        self._edge_set = {frozenset(e) for e in self._edges}
+
+        gate_opts = ensure_dict(gate_opts)
+        gate_opts.setdefault("max_bond", max_bond)
+        gate_opts.setdefault("cutoff", cutoff)
+        gate_opts.setdefault("renorm", renorm)
+        gate_opts.setdefault("smudge", gauge_smudge)
+
+        # an operator simulator never tags or builds a forwards state, so don't
+        # bother carrying the gate tagging machinery
+        circuit_opts.setdefault("tag_gate_numbers", False)
+        circuit_opts.setdefault("tag_gate_rounds", False)
+        circuit_opts.setdefault("tag_gate_labels", False)
+
+        circuit_opts.setdefault("dtype", dtype)
+        circuit_opts.setdefault("to_backend", to_backend)
+        # gates are stored lazily, nothing is converted until evolution time
+        circuit_opts.setdefault("convert_eager", False)
+
+        super().__init__(len(self._sites), None, gate_opts, **circuit_opts)
+
+    def _init_state(self, N, dtype="complex128"):
+        # the Heisenberg picture has no forwards state; the |00...0> ket used
+        # for the final projection is built lazily in `local_expectation`. Just
+        # return a bond dimension 1 product state so `Circuit` is satisfied.
+        zero = do("array", [1.0, 0.0], dtype=dtype)
+        return TN_from_sites_product_state(
+            {site: zero for site in self._sites}
+        )
+
+    def copy(self):
+        """Copy the circuit, including its stored gates and geometry."""
+        new = super().copy()
+        new._edges = self._edges
+        new._sites = self._sites
+        new._site_set = self._site_set
+        new._edge_set = self._edge_set
+        return new
+
+    @property
+    def edges(self):
+        """The unique edges defining the PEPO geometry."""
+        return self._edges
+
+    @property
+    def sites(self):
+        """The sites (qubit labels) of the PEPO."""
+        return self._sites
+
+    @property
+    def max_bond(self):
+        """The maximum bond dimension used when applying gates."""
+        return self.gate_opts.get("max_bond")
+
+    @max_bond.setter
+    def max_bond(self, value):
+        self.gate_opts["max_bond"] = value
+
+    def _apply_gate(self, gate, tags=None, **gate_opts):
+        # lazy: just validate and store the gate, the backwards evolution is
+        # deferred to `local_expectation`
+        if gate.controls:
+            raise ValueError(
+                "Controlled gates are not supported by "
+                "`CircuitPEPOSimpleUpdate`. Supply the gate as a full unitary "
+                "on its qubits instead."
+            )
+        if gate.special:
+            raise ValueError(
+                f"The special gate {gate.label!r} is not supported by "
+                "`CircuitPEPOSimpleUpdate`. Supply a gate with an explicit "
+                "array acting on sites connected by an edge."
+            )
+        where = gate.qubits
+        if len(where) > 2:
+            raise ValueError(
+                "`CircuitPEPOSimpleUpdate` only supports one and two site "
+                f"gates, but got {len(where)} sites: {where}."
+            )
+        if (len(where) == 2) and (frozenset(where) not in self._edge_set):
+            raise ValueError(
+                f"The gate acts on sites {where} which are not a declared "
+                "edge of the PEPO, only nearest neighbor gates are allowed."
+            )
+        self._gates.append(gate)
+
+    def apply_gates(self, gates, progbar=False, **gate_opts):
+        if progbar:
+            gates = tuple(gates)
+            gates = _progbar(gates, total=len(gates))
+        for gate in gates:
+            self._apply_gate(parse_to_gate(gate), **gate_opts)
+
+    def _initial_operator(self, dtype="complex128"):
+        # bond dimension 1 identity operator (PEPO) on the circuit geometry
+        eye = np.eye(2, dtype=dtype)
+
+        def fill_fn(shape):
+            # shape is (*bond_dims, 2, 2) with every bond of size 1
+            num_bonds = len(shape) - 2
+            return eye.reshape((1,) * num_bonds + (2, 2))
+
+        return TN_from_edges_and_fill_fn(
+            fill_fn,
+            self._edges,
+            D=1,
+            phys_dim=2,
+            site_ind_id=("k{}", "b{}"),
+        )
+
+    def evolve_operator(self, G, where, *, max_bond=None, **gate_opts):
+        r"""Evolve the observable ``G`` at site(s) ``where`` backwards through
+        the stored gates and return the resulting operator on its own, as a
+        :class:`~quimb.tensor.tnag.core.TensorNetworkGenOperator`. This is the
+        Heisenberg evolved operator :math:`U^\dagger G U` (approximated by the
+        simple update truncation), with no initial state contracted in, so it
+        can be reused or contracted in whatever way is wanted.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator to evolve.
+        where : hashable or sequence[hashable]
+            The site or sites the operator acts on.
+        max_bond : int, optional
+            Override the maximum bond dimension for this evolution.
+        gate_opts
+            Override any default simple update options for this evolution.
+
+        Returns
+        -------
+        TensorNetworkGenOperator
+        """
+        where = self._parse_where(where)
+
+        opts = {**self.gate_opts, **gate_opts}
+        if max_bond is not None:
+            opts["max_bond"] = max_bond
+        opts.pop("contract", None)
+        opts.pop("propagate_tags", None)
+
+        op = self._initial_operator()
+        op.gate_upper_(np.asarray(G), where, contract=True)
+
+        # the reverse lightcone of the evolved operator: only gates that share
+        # a qubit with the current support can change it, since U^dag U = 1 for
+        # any gate outside it. track the support and skip the rest, which is
+        # cheaper and more robust than relying on compression to find it.
+        support = set(where)
+        gauges = {}
+        for gate in reversed(self._gates):
+            if support.isdisjoint(gate.qubits):
+                continue
+            support.update(gate.qubits)
+            # sandwich is O -> g O g^dagger, so pass the dagger to get the
+            # Heisenberg update O -> g^dagger O g
+            g_dag = _dagger_gate_array(gate.array)
+            op.gate_simple_(g_dag, gate.qubits, gauges, **opts)
+
+        op.gauge_simple_insert(gauges)
+        return op
+
+    def sandwich_operator(self, G, where, **evolve_opts):
+        r"""The Heisenberg evolved operator with the :math:`|0\ldots0\rangle`
+        initial state sandwiched onto its upper and lower indices, returned as
+        a scalar tensor network ready to contract. Equivalent to projecting
+        :meth:`evolve_operator` onto the all-zero computational state.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator to evolve.
+        where : hashable or sequence[hashable]
+            The site or sites the operator acts on.
+        evolve_opts
+            Supplied to :meth:`evolve_operator`.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        op = self.evolve_operator(G, where, **evolve_opts)
+        # project both physical indices of every site onto |0>, which is just
+        # selecting the 0 component of each upper and lower index
+        selector = {}
+        for site in self._sites:
+            selector[op.upper_ind(site)] = 0
+            selector[op.lower_ind(site)] = 0
+        return op.isel(selector)
+
+    def local_expectation(self, G, where, **evolve_opts):
+        r"""Compute the expectation value :math:`\langle 0 | U^\dagger G U | 0
+        \rangle` of the operator ``G`` at site(s) ``where``, where ``U`` is the
+        product of the applied gates. The observable is evolved backwards
+        through the circuit with the simple update sandwich and contracted with
+        the all-zero initial state.
+
+        ``G`` may act on one or more sites (for example a two-site ``ZZ``),
+        supplied with ``where`` as the matching sequence of sites.
+
+        There is no ``normalized`` option, unlike the cluster based
+        :meth:`CircuitPEPSSimpleUpdate.local_expectation`. The norm
+        :math:`\langle 0 | U^\dagger U | 0 \rangle` is exactly one here, since
+        the identity operator evolves as :math:`g^\dagger I g = I` with bond
+        dimension 1 and so is never truncated, leaving nothing to normalize by.
+        To contract the evolved operator in a different way, take it from
+        :meth:`evolve_operator` or :meth:`sandwich_operator` and contract it
+        yourself.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator.
+        where : hashable or sequence[hashable]
+            The site or sites to compute the expectation at.
+        evolve_opts
+            Supplied to :meth:`evolve_operator`, for example ``max_bond``.
+
+        Returns
+        -------
+        float or complex
+        """
+        return self.sandwich_operator(G, where, **evolve_opts).contract()
+
+    def _parse_where(self, where):
+        if isinstance(where, list):
+            where = tuple(where)
+        if where in self._site_set:
+            return (where,)
+        return tuple(where)
+
+    def _unsupported_state(self, name):
+        raise NotImplementedError(
+            f"`{name}` is not available for `CircuitPEPOSimpleUpdate`, which "
+            "evolves operators in the Heisenberg picture and never forms a "
+            "forwards state. Use `local_expectation` for observables, or "
+            "`evolve_operator` / `sandwich_operator` to get the evolved "
+            "operator tensor network directly."
+        )
+
+    @property
+    def psi(self):
+        self._unsupported_state("psi")
+
+    def to_dense(self, *args, **kwargs):
+        self._unsupported_state("to_dense")
+
+    def amplitude(self, *args, **kwargs):
+        self._unsupported_state("amplitude")
+
+    def sample(self, *args, **kwargs):
+        self._unsupported_state("sample")
+
+    @property
+    def uni(self):
+        self._unsupported_state("uni")

@@ -2043,3 +2043,299 @@ class TestCircuitGen:
 
         energy2 = sum(circ2.local_expectation(ZZ, edge) for edge in terms)
         assert energy2 > 4
+
+
+def _exact_heisenberg_expectation(gates, G, where, n):
+    # reference value of <0| U^dag G U |0> computed via a dense statevector
+    circ = qtn.Circuit(n)
+    circ.apply_gates(gates)
+    psi = circ.to_dense()
+    Gop = qu.pkron(np.asarray(G), dims=[2] * n, inds=list(where))
+    return complex((psi.conj().T @ (Gop @ psi))[0, 0])
+
+
+class TestCircuitPEPOSimpleUpdate:
+    def test_requires_geometry(self):
+        # neither edges nor gates given -> cannot define the geometry
+        with pytest.raises(ValueError):
+            qtn.CircuitPEPOSimpleUpdate()
+
+    def test_gates_are_stored_lazily(self):
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates([("H", 0), ("CNOT", 0, 1), ("CNOT", 1, 2)])
+        # the gates are recorded but nothing is evolved until asked for
+        assert circ.num_gates == 3
+
+    def test_geometry_inferred_from_gates(self):
+        edges = [(0, 1), (1, 2)]
+        gates = [("H", 0), ("CNOT", 0, 1), ("CNOT", 1, 2)]
+        circ_edges = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        circ_gates = qtn.CircuitPEPOSimpleUpdate(gates=gates, max_bond=16)
+        assert {frozenset(e) for e in circ_gates.edges} == {
+            frozenset(e) for e in circ_edges.edges
+        }
+        # the gates are only inspected for geometry, not applied
+        assert circ_gates.num_gates == 0
+
+    def test_two_qubit_gate_must_lie_on_an_edge(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=[(0, 1), (1, 2)])
+        with pytest.raises(ValueError):
+            # 0 and 2 are not a declared edge
+            circ.apply_gates([("CNOT", 0, 2)])
+
+    def test_controlled_and_three_qubit_gates_rejected(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=[(0, 1), (1, 2)])
+        with pytest.raises(ValueError):
+            circ.apply_gate("CCX", 0, 1, 2)
+
+    @pytest.mark.parametrize("seed", [2, 7])
+    def test_matches_exact_on_a_chain(self, seed):
+        # a tree geometry (a chain) means the simple update truncation is exact
+        # given enough bond dimension, so the result should match dense exactly
+        n = 5
+        edges = [(i, i + 1) for i in range(n - 1)]
+        rng = np.random.default_rng(seed)
+        gates = []
+        for i in range(n):
+            gates.append(
+                qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            )
+        for e in edges:
+            gates.append(qtn.Gate("CNOT", params=(), qubits=list(e)))
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=2**n)
+        circ.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(n):
+            got = complex(circ.local_expectation(Z, i))
+            ref = _exact_heisenberg_expectation(gates, Z, (i,), n)
+            assert got == pytest.approx(ref, abs=1e-10)
+
+    def test_dagger_of_two_qubit_gate_su4(self):
+        # the decisive case: a generic SU(4) gate. A naive dagger that simply
+        # reverses all axes (instead of swapping the output and input index
+        # groups) gives the wrong Heisenberg evolution and is only caught by a
+        # non-symmetric two-qubit gate like this one.
+        n = 4
+        edges = [(0, 1), (1, 2), (2, 3)]
+        rng = np.random.default_rng(0)
+        # a Haar-random 4x4 unitary built without scipy
+        z = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+        q, r = np.linalg.qr(z)
+        su4 = q * (np.diag(r) / np.abs(np.diag(r)))
+
+        gates = [
+            qtn.Gate("RY", params=[0.9], qubits=[0]),
+            qtn.Gate("RY", params=[0.4], qubits=[1]),
+            qtn.Gate("RY", params=[0.7], qubits=[2]),
+            qtn.Gate("RY", params=[1.1], qubits=[3]),
+            qtn.Gate.from_raw(su4, qubits=[1, 2]),
+            qtn.Gate("CNOT", params=(), qubits=[0, 1]),
+            qtn.Gate("CNOT", params=(), qubits=[2, 3]),
+        ]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=2**n)
+        circ.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(n):
+            got = complex(circ.local_expectation(Z, i))
+            ref = _exact_heisenberg_expectation(gates, Z, (i,), n)
+            assert got == pytest.approx(ref, abs=1e-10)
+
+    def test_reverse_lightcone_skips_outside_gates(self):
+        # a gate acting entirely outside the reverse lightcone of the observable
+        # cannot change the result, since U^dag U = 1
+        edges = [(0, 1), (1, 2), (2, 3)]
+        base = [("H", 0), ("CNOT", 0, 1)]
+        Z = qu.pauli("Z").astype(complex)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates(base)
+        v0 = complex(circ.local_expectation(Z, 0))
+
+        circ2 = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        circ2.apply_gates(base + [("X", 3), ("CNOT", 2, 3)])
+        v1 = complex(circ2.local_expectation(Z, 0))
+        assert v1 == pytest.approx(v0, abs=1e-12)
+
+    def test_evolve_and_sandwich_operator(self):
+        # the two exposed return modes: the evolved operator on its own, and the
+        # operator with the |0...0> state sandwiched in
+        edges = [(0, 1), (1, 2)]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=16)
+        circ.apply_gates([("H", 0), ("CNOT", 0, 1), ("RX", 0.5, 2)])
+        Z = qu.pauli("Z").astype(complex)
+
+        op = circ.evolve_operator(Z, 0)
+        # an operator tensor network with an upper and lower index per site
+        assert isinstance(op, qtn.TensorNetworkGenOperator)
+        assert set(op.outer_inds()) == {
+            op.upper_ind(s) for s in circ.sites
+        } | {op.lower_ind(s) for s in circ.sites}
+
+        sandwiched = complex(circ.sandwich_operator(Z, 0).contract())
+        direct = complex(circ.local_expectation(Z, 0))
+        assert sandwiched == pytest.approx(direct, abs=1e-12)
+
+    def test_loads_from_openqasm2(self):
+        # subclassing Circuit means the openqasm loaders work for free
+        qasm = (
+            'OPENQASM 2.0;\ninclude "qelib1.inc";\nqreg q[3];\n'
+            "h q[0];\ncx q[0],q[1];\ncx q[1],q[2];\nrx(0.5) q[2];\n"
+        )
+        circ = qtn.CircuitPEPOSimpleUpdate.from_openqasm2_str(
+            qasm, edges=[(0, 1), (1, 2)], max_bond=16
+        )
+        assert circ.num_gates == 4
+        Z = qu.pauli("Z").astype(complex)
+        got = complex(circ.local_expectation(Z, 2))
+        ref = _exact_heisenberg_expectation(circ.gates, Z, (2,), 3)
+        assert got == pytest.approx(ref, abs=1e-10)
+
+    def test_max_bond_getter_setter(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=[(0, 1)], max_bond=8)
+        assert circ.max_bond == 8
+        circ.max_bond = 32
+        assert circ.max_bond == 32
+        assert circ.gate_opts["max_bond"] == 32
+
+    def test_forwards_state_methods_unsupported(self):
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=[(0, 1)])
+        circ.apply_gates([("H", 0)])
+        for name in ("psi", "uni"):
+            with pytest.raises(NotImplementedError):
+                getattr(circ, name)
+        for name in ("to_dense", "amplitude", "sample"):
+            with pytest.raises(NotImplementedError):
+                getattr(circ, name)()
+
+    def test_norm_is_exactly_one_under_truncation(self):
+        # the identity observable evolves as g^dag I g = I with bond dimension
+        # 1, so it is never truncated and <0| U^dag U |0> stays exactly one even
+        # at tiny max_bond. This is why local_expectation has no normalization.
+        n = 6
+        edges = [(i, i + 1) for i in range(n - 1)]
+        rng = np.random.default_rng(7)
+        gates = []
+        for _ in range(3):
+            for i in range(n):
+                gates.append(
+                    qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+                )
+            for i in range(0, n - 1, 2):
+                gates.append(qtn.Gate("CNOT", params=(), qubits=[i, i + 1]))
+
+        eye = qu.eye(2).astype(complex)
+        for max_bond in (2, 4):
+            circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=max_bond)
+            circ.apply_gates(gates)
+            norm = complex(circ.local_expectation(eye, 3))
+            assert norm == pytest.approx(1.0, abs=1e-10)
+
+    def test_two_site_observable(self):
+        # an operator acting on two sites, e.g. ZZ on an edge, given with `where`
+        # as the pair of sites
+        n = 4
+        edges = [(0, 1), (1, 2), (2, 3)]
+        gates = [
+            ("RY", 0.9, 0),
+            ("RY", 0.4, 1),
+            ("RY", 0.7, 2),
+            ("RY", 1.1, 3),
+            ("CNOT", 0, 1),
+            ("CNOT", 1, 2),
+            ("CNOT", 2, 3),
+        ]
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=2**n)
+        circ.apply_gates(gates)
+
+        ZZ = (qu.pauli("Z") & qu.pauli("Z")).astype(complex)
+        for where in [(1, 2), (2, 3)]:
+            got = complex(circ.local_expectation(ZZ, where))
+            ref = _exact_heisenberg_expectation(circ.gates, ZZ, where, n)
+            assert got == pytest.approx(ref, abs=1e-10)
+
+    def test_matches_exact_on_loopy_geometry(self):
+        # a 2x3 grid has loops, so it is not a tree, but at full bond dimension
+        # the simple update truncation is still exact for this small system
+        n = 6
+        edges = [(0, 1), (1, 2), (3, 4), (4, 5), (0, 3), (1, 4), (2, 5)]
+        rng = np.random.default_rng(3)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(n)
+        ]
+        gates += [qtn.Gate("CNOT", params=(), qubits=list(e)) for e in edges]
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=2**n)
+        circ.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in (0, 4):
+            got = complex(circ.local_expectation(Z, i))
+            ref = _exact_heisenberg_expectation(gates, Z, (i,), n)
+            assert got == pytest.approx(ref, abs=1e-9)
+
+    def test_agrees_with_forwards_peps_picture(self):
+        # the backwards Heisenberg picture here must agree with evolving the
+        # state forwards. Cross-check against CircuitPEPSSimpleUpdate (the
+        # forwards simple update simulator) as well as the dense reference, so
+        # two independent tensor network simulators and the exact answer all
+        # match on the same circuit
+        n = 5
+        edges = [(i, i + 1) for i in range(n - 1)]
+        rng = np.random.default_rng(4)
+        gates = [
+            qtn.Gate("RY", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(n)
+        ]
+        gates += [qtn.Gate("CNOT", params=(), qubits=list(e)) for e in edges]
+        gates += [
+            qtn.Gate("RX", params=[rng.uniform(0, np.pi)], qubits=[i])
+            for i in range(n)
+        ]
+
+        pepo = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=2**n)
+        pepo.apply_gates(gates)
+        peps = qtn.CircuitPEPSSimpleUpdate(edges=edges, max_bond=2**n)
+        peps.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        for i in range(n):
+            backwards = complex(pepo.local_expectation(Z, i))
+            forwards = complex(
+                peps.local_expectation(Z, i, max_distance=n, normalized=True)
+            )
+            exact = _exact_heisenberg_expectation(gates, Z, (i,), n)
+            assert backwards == pytest.approx(exact, abs=1e-9)
+            assert forwards == pytest.approx(exact, abs=1e-7)
+
+    def test_deep_circuit_is_numerically_stable(self):
+        # a deep circuit of random unitaries should not overflow or drift: the
+        # operator stays bounded under the gauged sandwich, so no separate scale
+        # bookkeeping is needed. Full bond on a chain keeps it exact too
+        n = 5
+        edges = [(i, i + 1) for i in range(n - 1)]
+        rng = np.random.default_rng(11)
+        gates = []
+        for _ in range(15):
+            for i in range(n):
+                u1 = qu.rand_uni(2, seed=int(rng.integers(1 << 30)))
+                gates.append(qtn.Gate.from_raw(u1, qubits=[i]))
+            for i in range(0, n - 1, 2):
+                u2 = qu.rand_uni(4, seed=int(rng.integers(1 << 30)))
+                gates.append(qtn.Gate.from_raw(u2, qubits=[i, i + 1]))
+            for i in range(1, n - 1, 2):
+                u2 = qu.rand_uni(4, seed=int(rng.integers(1 << 30)))
+                gates.append(qtn.Gate.from_raw(u2, qubits=[i, i + 1]))
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=2**n)
+        circ.apply_gates(gates)
+
+        Z = qu.pauli("Z").astype(complex)
+        got = complex(circ.local_expectation(Z, 2))
+        assert np.isfinite(got.real) and np.isfinite(got.imag)
+        ref = _exact_heisenberg_expectation(gates, Z, (2,), n)
+        assert got == pytest.approx(ref, abs=1e-9)
