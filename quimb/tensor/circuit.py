@@ -6069,7 +6069,7 @@ class CircuitDense(Circuit):
         return self.psi
 
 
-class CircuitLazyMPS(CircuitMPS):
+class CircuitMPSLazy(CircuitMPS):
     """Quantum circuit simulation keeping the state always in an MPS form, but
     lazily applying gates (via sub-MPO representation) and regularly contracting
     and compressing the gates with the state using
@@ -6111,8 +6111,7 @@ class CircuitLazyMPS(CircuitMPS):
         randomized compression, or ``"direct"`` for direct SVD truncation.
     compress_every : int, optional
         How many gates to apply to any qubit before contracting and compressing
-        the state with the gates. A good initial value to try is sqrt(N), and
-        then tune from there.
+        the state with the gates.
 
     dtype : str, optional
         The data type to use for the state tensor.
@@ -6139,7 +6138,7 @@ class CircuitLazyMPS(CircuitMPS):
     using maximum bond dimension and compressing when 5 gates are applied
     to any qubit::
 
-        circ = qtn.CircuitLazyMPS(
+        circ = qtn.CircuitMPSLazy(
             N=56,
             max_bond=1024,
             cutoff=0.0,
@@ -6221,7 +6220,7 @@ class CircuitLazyMPS(CircuitMPS):
         if not self._uncompressed_sites:
             return
 
-        self._psi = tensor_network_1d_compress(
+        tensor_network_1d_compress(
             self._psi,
             permute_arrays=False,
             inplace=True,
@@ -6229,8 +6228,8 @@ class CircuitLazyMPS(CircuitMPS):
         )
 
         # `tensor_network_1d_compress` leaves the orthogonality center at the
-        # first site, or the last site if `reverse_sweep` is enabled
-        if self.compress_opts.get("reverse_sweep", False):
+        # first site, or the last site if `sweep_reverse` is enabled
+        if self.compress_opts.get("sweep_reverse", False):
             self.gate_opts["info"]["cur_orthog"] = (self.N - 1, self.N - 1)  # type: ignore
         else:
             self.gate_opts["info"]["cur_orthog"] = (0, 0)
@@ -6238,12 +6237,17 @@ class CircuitLazyMPS(CircuitMPS):
         self._uncompressed_sites.clear()
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
-        # for 1q gates we can eagerly contract given it does not change the MPS
+        gate_qubits = gate.qubits
+
+        if gate.controls:
+            gate_qubits = gate.controls + gate_qubits
+
+        # for 1q gates we can eagerly contract given they do not change the MPS
         # structure
-        if len(gate.qubits) == 1:
+        if len(gate_qubits) == 1:
             return super()._apply_gate(gate, tags=tags, **gate_opts)
 
-        min_site, max_site = min(gate.qubits), max(gate.qubits)
+        min_site, max_site = min(gate_qubits), max(gate_qubits)
 
         for site in range(min_site, max_site + 1):
             if self._uncompressed_sites.get(site, 0) >= self.compress_every:

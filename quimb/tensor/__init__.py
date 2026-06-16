@@ -6,7 +6,7 @@ from .circuit import (
     CircuitMPS,
     CircuitPEPSSimpleUpdate,
     CircuitPermMPS,
-    CircuitLazyMPS,
+    CircuitMPSLazy,
     Gate,
 )
 from .circuit_gen import (
@@ -245,7 +245,7 @@ __all__ = (
     "CircuitMPS",
     "CircuitPEPSSimpleUpdate",
     "CircuitPermMPS",
-    "CircuitLazyMPS",
+    "CircuitMPSLazy",
     "cnf_file_parse",
     "connect",
     "contract_backend",

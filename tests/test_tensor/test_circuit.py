@@ -1587,7 +1587,7 @@ class TestCircuitMPS:
 
     def test_lazymps_sampling(self):
         N = 6
-        circ = qtn.CircuitLazyMPS(N, max_bond=512)
+        circ = qtn.CircuitMPSLazy(N)
         circ.h(3)
         circ.cx(3, 2)
         circ.cx(2, 1)
@@ -1600,16 +1600,61 @@ class TestCircuitMPS:
 
     def test_lazymps_sampling_seed(self):
         N = 1
-        circ = qtn.CircuitLazyMPS(N, max_bond=512)
+        circ = qtn.CircuitMPSLazy(N)
         circ.h(0)
         samples = list(circ.sample(10, seed=1234))
         assert len(set(samples)) == 2
+
+    @pytest.mark.parametrize("sweep_reverse", [False, True])
+    def test_lazymps_local_expectation(self, sweep_reverse):
+        circ = qtn.CircuitMPSLazy(3, compress_opts=dict(sweep_reverse=sweep_reverse))
+        circ.h(0)
+        circ.cx(0, 1)
+        circ._compress()
+
+        if sweep_reverse:
+            assert circ.gate_opts["info"]["cur_orthog"] == (2, 2)
+        else:
+            assert circ.gate_opts["info"]["cur_orthog"] == (0, 0)
+
+        G = qu.rand_matrix(2)
+        expec = circ.local_expectation(G, (1))
+        assert circ.gate_opts["info"]["cur_orthog"] == (1, 1)
+
+        psi = circ.to_dense()
+        expec_dense = qu.expec(qu.ikron(G, [2, 2, 2], (1)), psi)
+        assert expec == pytest.approx(expec_dense)
+
+    @pytest.mark.parametrize("sweep_reverse", [False, True])
+    def test_lazymps_fidelity_estimate(self, sweep_reverse):
+        gates = random_lattice_gates(10, seed=1234)
+
+        circ = qtn.CircuitMPSLazy(
+            10, max_bond=32, compress_opts=dict(sweep_reverse=sweep_reverse)
+        )
+        circ.apply_gates(gates)
+        bond_32_fidelity = circ.fidelity_estimate()
+
+        assert bond_32_fidelity == pytest.approx(1.0)
+
+        circ = qtn.CircuitMPSLazy(
+            10, max_bond=8, compress_opts=dict(sweep_reverse=sweep_reverse)
+        )
+        circ.apply_gates(gates)
+        bond_8_fidelity = circ.fidelity_estimate()
+
+        assert bond_8_fidelity == pytest.approx(0.85, abs=0.05)
+
+        if sweep_reverse:
+            assert circ.gate_opts["info"]["cur_orthog"] == (9, 9)
+        else:
+            assert circ.gate_opts["info"]["cur_orthog"] == (0, 0)
 
     def test_lazymps_fidelity_with_dense(self):
         rng = np.random.default_rng(42)
         N = 6
 
-        circ = qtn.CircuitLazyMPS(N, max_bond=512)
+        circ = qtn.CircuitMPSLazy(N)
         for i in range(N - 1):
             circ.u3(
                 rng.uniform(0, 2 * np.pi),
@@ -1626,7 +1671,7 @@ class TestCircuitMPS:
         assert circ.psi.distance_normalized(checker.psi) < 1e-6
 
     def test_lazymps_compress_every(self):
-        circ = qtn.CircuitLazyMPS(4, max_bond=2, compress_every=3)
+        circ = qtn.CircuitMPSLazy(4, max_bond=2, compress_every=3)
         circ.h(0)
         assert circ._uncompressed_sites == {}
         circ.cx(0, 1)
@@ -1638,38 +1683,75 @@ class TestCircuitMPS:
         _ = circ.psi
         assert circ._uncompressed_sites == {}
 
-    @pytest.mark.parametrize("N", [8, 10, 12])
-    def test_lazymps_2d_long_range_dynamics(self, N):
-        import time
-        import warnings
+    def test_multi_controlled_lazymps_circuit(self):
+        N = 10
+        rng = np.random.default_rng(42)
 
+        circ = qtn.CircuitMPSLazy(N)
+
+        circ.apply_gate(
+            qtn.Gate(
+                "SU4",
+                params=rng.uniform(0, 2 * np.pi, size=15),
+                qubits=[6, 2],
+                controls=[8, 3, 4, 0],
+            )
+        )
+        assert circ._uncompressed_sites == {
+            0: 1,
+            1: 1,
+            2: 1,
+            3: 1,
+            4: 1,
+            5: 1,
+            6: 1,
+            7: 1,
+            8: 1,
+        }
+
+        circ.apply_gate(
+            qtn.Gate.from_raw(
+                qu.rand_uni(2**3),
+                qubits=[0, 9, 5],
+                controls=[1, 2, 7],
+            )
+        )
+        assert circ._uncompressed_sites == {
+            0: 2,
+            1: 2,
+            2: 2,
+            3: 2,
+            4: 2,
+            5: 2,
+            6: 2,
+            7: 2,
+            8: 2,
+            9: 1
+        }
+
+        checker = qtn.Circuit(N=10)
+        checker.apply_gates(circ.gates)
+
+        assert circ.psi.norm() == pytest.approx(1.0)
+        assert circ.psi.distance_normalized(checker.psi) < 1e-6
+
+    @pytest.mark.parametrize("N", [8, 10, 12])
+    @pytest.mark.parametrize("method", ["dm", "direct", "src", "zipup"])
+    def test_lazymps_2d_long_range_dynamics(self, N, method):
         gates = random_lattice_gates(N)
 
-        start = time.process_time()
-        circ = qtn.CircuitLazyMPS(
-            N, max_bond=512, compress_every=int(np.sqrt(N))
-        )
+        circ = qtn.CircuitMPSLazy(N, max_bond=128, method=method)
         circ.apply_gates(gates)
-        elapsed_lazy = time.process_time() - start
         lazy_state = circ.psi
 
-        start = time.process_time()
         circ = qtn.CircuitMPS(
-            N, max_bond=512, gate_opts=dict(method="src", contract="nonlocal")
+            N, max_bond=128, gate_opts=dict(method=method, contract="nonlocal")
         )
         circ.apply_gates(gates)
-        elapsed_eager = time.process_time() - start
         eager_state = circ.psi
 
         assert lazy_state.norm() == pytest.approx(1.0)
-        assert lazy_state.distance_normalized(eager_state) < 1e-4
-
-        # due to machine impact on the timing, slower is not necessarily a failure, but
-        # should be flagged for review if it happens consistently
-        if elapsed_lazy >= elapsed_eager:
-            warnings.warn(
-                f"Lazy MPS with N={N} took {elapsed_lazy:.2f}s, which is more than eager MPS at {elapsed_eager:.2f}s."
-            )
+        assert lazy_state.distance_normalized(eager_state) < 1e-6
 
 
 class TestCircuitPEPSSimpleUpdate:
