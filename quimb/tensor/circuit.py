@@ -324,7 +324,9 @@ def _openqasm_eval_expr(expr, env):
         return False
 
     def _combine_symbolic(op, *xs):
-        fmt = lambda x: x if isinstance(x, str) else repr(x)
+        def fmt(x):
+            return x if isinstance(x, str) else repr(x)
+
         if len(xs) == 1:
             (x,) = xs
             if op == "+":
@@ -5947,10 +5949,11 @@ class CircuitMPSLazy(CircuitMPS):
         a site already carrying pending lazy structure. ``None`` disables
         automatic mid-circuit compression.
     compress_opts : dict, optional
-        Extra options supplied to
-        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
-        ``max_bond``, ``cutoff`` and ``method`` are stored here as the
-        authoritative compression options.
+        Options for the periodic global compression, supplied to
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`. Like
+        ``gate_opts`` this is just a plain dict; the ``max_bond``, ``cutoff``
+        and ``method`` arguments are convenient shortcuts for setting the
+        corresponding entries.
     gate_opts : dict, optional
         Options supplied to eager fallback gates.
     circuit_opts
@@ -5959,9 +5962,10 @@ class CircuitMPSLazy(CircuitMPS):
     Attributes
     ----------
     compression_errors : list[float]
-        The truncation error ``1 - F`` introduced by each global compression
-        (one entry per :meth:`flush`), where ``F`` is the fidelity of that
-        compression. The total accumulated error is available from
+        The truncation error ``1 - F`` introduced by each compression event,
+        where ``F`` is the fidelity of that compression. This includes global
+        lazy compressions as well as eager fallback compressions for gates not
+        handled lazily. The total accumulated error is available from
         :meth:`error_estimate`.
 
     See Also
@@ -5985,25 +5989,20 @@ class CircuitMPSLazy(CircuitMPS):
         if compress_every is not None and compress_every < 1:
             raise ValueError("`compress_every` must be a positive integer.")
 
-        gate_opts = ensure_dict(gate_opts)
-        self._compression_opts = ensure_dict(compress_opts)
-        self._compression_opts.setdefault(
-            "max_bond", gate_opts.get("max_bond", max_bond)
-        )
-        self._compression_opts.setdefault(
-            "cutoff", gate_opts.get("cutoff", cutoff)
-        )
-        self._compression_opts.setdefault(
-            "method", gate_opts.get("method", method)
-        )
-
-        gate_opts["max_bond"] = self._compression_opts["max_bond"]
-        gate_opts["cutoff"] = self._compression_opts["cutoff"]
-        gate_opts["method"] = self._compression_opts["method"]
+        # the compression options are a plain dict, like ``gate_opts``;
+        # ``max_bond``, ``cutoff`` and ``method`` are convenient shortcuts for
+        # the corresponding entries (cf. the ``CircuitMPS`` shortcuts which
+        # seed ``gate_opts``). The two dicts are otherwise independent.
+        self.compress_opts = ensure_dict(compress_opts)
+        self.compress_opts.setdefault("max_bond", max_bond)
+        self.compress_opts.setdefault("cutoff", cutoff)
+        self.compress_opts.setdefault("method", method)
 
         super().__init__(
             N=N,
             psi0=psi0,
+            max_bond=max_bond,
+            cutoff=cutoff,
             gate_opts=gate_opts,
             gate_contract="nonlocal",
             **circuit_opts,
@@ -6012,73 +6011,15 @@ class CircuitMPSLazy(CircuitMPS):
         self.compress_every = compress_every
         self._pending_site_counts = {}
         self._num_pending_gates = 0
-        # per-flush truncation error log and running cumulative fidelity, see
-        # `compression_errors` and `flush`
+        # per-compression-event truncation error log and running cumulative
+        # fidelity, see `compression_errors` and `flush`
         self.compression_errors = []
         self._fidelity = 1.0
-
-    def _sync_gate_opts_from_compression(self):
-        if not hasattr(self, "gate_opts"):
-            return
-
-        for key in ("max_bond", "cutoff", "method"):
-            if key in self._compression_opts:
-                self.gate_opts[key] = self._compression_opts[key]
-
-    @property
-    def compression_opts(self):
-        """The options used for global lazy compression."""
-        return self._compression_opts
-
-    @compression_opts.setter
-    def compression_opts(self, value):
-        self._compression_opts = ensure_dict(value)
-        self._sync_gate_opts_from_compression()
-
-    @property
-    def compress_opts(self):
-        """Alias for :attr:`compression_opts`."""
-        return self._compression_opts
-
-    @compress_opts.setter
-    def compress_opts(self, value):
-        self.compression_opts = value
-
-    @property
-    def max_bond(self):
-        """The maximum bond dimension used for compression."""
-        return self._compression_opts.get("max_bond", None)
-
-    @max_bond.setter
-    def max_bond(self, value):
-        self._compression_opts["max_bond"] = value
-        self._sync_gate_opts_from_compression()
-
-    @property
-    def cutoff(self):
-        """The singular value cutoff used for compression."""
-        return self._compression_opts.get("cutoff", 1e-10)
-
-    @cutoff.setter
-    def cutoff(self, value):
-        self._compression_opts["cutoff"] = value
-        self._sync_gate_opts_from_compression()
-
-    @property
-    def method(self):
-        """The compression method passed to ``tensor_network_1d_compress``."""
-        return self._compression_opts.get("method", "dm")
-
-    @method.setter
-    def method(self, value):
-        self._compression_opts["method"] = value
-        self._sync_gate_opts_from_compression()
 
     def copy(self):
         """Copy the circuit, including pending lazy gate tracking."""
         new = super().copy()
-        new._compression_opts = self._compression_opts.copy()
-        new._sync_gate_opts_from_compression()
+        new.compress_opts = self.compress_opts.copy()
         new.compress_every = self.compress_every
         new._pending_site_counts = self._pending_site_counts.copy()
         new._num_pending_gates = self._num_pending_gates
@@ -6086,12 +6027,14 @@ class CircuitMPSLazy(CircuitMPS):
         new._fidelity = self._fidelity
         return new
 
-    @staticmethod
-    def _without_src_cutoff(opts):
-        method = opts.get("method") or ""
-        if ("src" in method) and opts.get("cutoff"):
-            return {**opts, "cutoff": 0.0}
-        return opts
+    def _record_compression_error(self):
+        """Record the compression error since the previous fidelity update."""
+        new_fidelity = super().fidelity_estimate()
+        if self._fidelity > 0.0:
+            self.compression_errors.append(1.0 - new_fidelity / self._fidelity)
+        else:
+            self.compression_errors.append(0.0)
+        self._fidelity = new_fidelity
 
     def flush(self, **compress_opts):
         """Compress all pending lazy gate layers into the current MPS state.
@@ -6112,11 +6055,10 @@ class CircuitMPSLazy(CircuitMPS):
 
         from .tn1d.compress import tensor_network_1d_compress
 
-        opts = {**self._compression_opts, **compress_opts}
-        # the 'src' family ignores `cutoff` and warns if it is nonzero
-        opts = self._without_src_cutoff(opts)
+        opts = {**self.compress_opts, **compress_opts}
 
-        self._psi = tensor_network_1d_compress(
+        # with ``inplace=True`` this compresses ``self._psi`` in place
+        tensor_network_1d_compress(
             self._psi,
             site_tags=self._psi.site_tags,
             inplace=True,
@@ -6138,12 +6080,7 @@ class CircuitMPSLazy(CircuitMPS):
         # ``||psi_before||^2`` is the previous cumulative fidelity. This is the
         # exact compression fidelity for the projective methods ('direct',
         # 'dm', 'zipup') and, at the variational optimum, for 'fit' too.
-        new_fidelity = super().fidelity_estimate()
-        if self._fidelity > 0.0:
-            self.compression_errors.append(1.0 - new_fidelity / self._fidelity)
-        else:
-            self.compression_errors.append(0.0)
-        self._fidelity = new_fidelity
+        self._record_compression_error()
 
         self._pending_site_counts.clear()
         self._num_pending_gates = 0
@@ -6156,12 +6093,12 @@ class CircuitMPSLazy(CircuitMPS):
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
         if gate.controls or gate.special:
+            # fall back to the standard CircuitMPS path for these gates, after
+            # first compressing any pending lazy structure
             self.flush()
-            self._sync_gate_opts_from_compression()
-            gate_opts = self._without_src_cutoff(
-                {**self.gate_opts, **gate_opts}
-            )
-            return super()._apply_gate(gate, tags=tags, **gate_opts)
+            super()._apply_gate(gate, tags=tags, **gate_opts)
+            self._record_compression_error()
+            return None
 
         where = gate.qubits
 
@@ -6226,8 +6163,10 @@ class CircuitMPSLazy(CircuitMPS):
         return super().get_rdm_lightcone_simplified(*args, **kwargs)
 
     def schrodinger_contract(self, *args, **contract_opts):
-        self.flush()
-        return super().schrodinger_contract(*args, **contract_opts)
+        raise NotImplementedError(
+            "Schrödinger (dense) contraction is only defined for exact "
+            "simulation, not for MPS-based circuit simulators."
+        )
 
     def sample(
         self,

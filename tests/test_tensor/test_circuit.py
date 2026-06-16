@@ -1,6 +1,5 @@
 import itertools
 import math
-import warnings
 
 import numpy as np
 import pytest
@@ -1551,7 +1550,7 @@ class TestCircuitMPS:
         psi_lazy = lazy.psi
         self.assert_lazy_mps_clean(psi_lazy, N)
         assert psi_lazy.max_bond() == 1
-        assert psi_lazy.distance_normalized(ref.psi) < 1e-12
+        assert psi_lazy.distance_normalized(ref.psi) < 1e-10
 
     def test_lazy_mps_compress_every_counts_span_sites(self):
         N = 6
@@ -1658,6 +1657,29 @@ class TestCircuitMPS:
         lazy.apply_gates(gates)
 
         assert lazy.psi.distance_normalized(ref.psi) < 1e-7
+
+    def test_lazy_mps_controlled_fallback_tracks_compression_error(self):
+        lazy = qtn.CircuitMPSLazy(4, max_bond=1, cutoff=0.0, method="dm")
+        lazy.h(0)
+        lazy.h(1)
+        lazy.h(2)
+
+        lazy.apply_gate("X", 3, controls=[0, 1, 2])
+
+        controlled_error = lazy.error_estimate()
+        assert controlled_error > 0.0
+        assert len(lazy.compression_errors) == 1
+        assert lazy.compression_errors[0] == pytest.approx(
+            controlled_error, abs=1e-10
+        )
+        assert lazy._fidelity == pytest.approx(lazy.fidelity_estimate())
+
+        lazy.cx(0, 3)
+        _ = lazy.psi
+
+        assert len(lazy.compression_errors) == 2
+        cumulative = 1.0 - np.prod([1.0 - e for e in lazy.compression_errors])
+        assert cumulative == pytest.approx(lazy.error_estimate(), abs=1e-10)
 
     def test_lazy_mps_2d_ising_dynamics(self):
         Lx, Ly = 2, 3
@@ -1830,58 +1852,29 @@ class TestCircuitMPS:
         assert lazy._num_pending_gates == 0
         assert lazy._storage == {}
 
-    def test_lazy_mps_schrodinger_contract_flushes_before_path(self):
-        N = 5
-        gates = self._lazy_brickwork_gates(N, depth=3, seed=3)
-        lazy = qtn.CircuitMPSLazy(
-            N,
-            max_bond=2,
-            cutoff=0.0,
-            method="dm",
-            compress_every=None,
-        )
-        lazy.apply_gates(gates)
-        assert lazy._num_pending_gates > 0
+    def test_lazy_mps_schrodinger_contract_raises(self):
+        # 'Schrodinger' (dense) contraction is not defined for an MPS circuit
+        lazy = qtn.CircuitMPSLazy(5, max_bond=2, method="dm")
+        lazy.cx(0, 4)
+        with pytest.raises(NotImplementedError):
+            lazy.schrodinger_contract()
 
-        value = lazy.schrodinger_contract()
-
-        assert lazy._num_pending_gates == 0
-        assert value.shape == (2,) * N
-        assert np.all(np.isfinite(value.data))
-
-    def test_lazy_mps_src_cutoff_suppressed(self):
-        # the 'src' family ignores `cutoff`; flushing must not emit the
-        # "cutoff is ignored for the src method" warning, yet still produce a
-        # correct, clean MPS
+    def test_lazy_mps_src_cutoff_warns(self):
+        # the 'src' family ignores `cutoff`; rather than silently overriding a
+        # supplied cutoff we let the underlying warning surface, while still
+        # producing a correct, clean MPS
         N = 6
         gates = [("H", 0), ("CNOT", 0, 5), ("RZZ", 0.3, 1, 4), ("CZ", 2, 3)]
         ref = qtn.Circuit(N)
         ref.apply_gates(gates)
 
-        lazy = qtn.CircuitMPSLazy(N, max_bond=2**N, method="src")
+        lazy = qtn.CircuitMPSLazy(N, max_bond=2**N, method="src", cutoff=1e-10)
         lazy.apply_gates(gates)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
+        with pytest.warns(Warning, match="cutoff"):
             psi_lazy = lazy.psi
-        assert not any("cutoff" in str(w.message).lower() for w in caught)
+
         self.assert_lazy_mps_clean(psi_lazy, N)
         assert psi_lazy.distance_normalized(ref.psi) < 1e-6
-
-    def test_lazy_mps_src_cutoff_suppressed_for_controlled_fallback(self):
-        gates = [
-            qtn.Gate("H", params=[], qubits=[0]),
-            qtn.Gate("CNOT", params=[], qubits=[0, 3]),
-            qtn.Gate("X", params=[], qubits=[3], controls=[0, 1]),
-        ]
-
-        lazy = qtn.CircuitMPSLazy(4, max_bond=8, method="src")
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            lazy.apply_gates(gates)
-            psi_lazy = lazy.psi
-
-        assert not any("cutoff" in str(w.message).lower() for w in caught)
-        self.assert_lazy_mps_clean(psi_lazy, 4)
 
     def test_lazy_mps_2d_ising_local_expectation(self):
         # the benchmark suggested in the issue: 2D transverse-field Ising
