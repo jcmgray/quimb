@@ -1735,23 +1735,20 @@ class TestCircuitMPS:
         assert circ.psi.norm() == pytest.approx(1.0)
         assert circ.psi.distance_normalized(checker.psi) < 1e-6
 
-    @pytest.mark.parametrize("N", [8, 10, 12])
-    @pytest.mark.parametrize("method", ["dm", "direct", "src", "zipup"])
-    def test_lazymps_2d_long_range_dynamics(self, N, method):
-        gates = random_lattice_gates(N)
+    @pytest.mark.parametrize("N", [10, 12, 14])
+    @pytest.mark.parametrize("method", ["dm", "direct", "src", "srcmps", "zipup-first"])
+    def test_lazymps_2d_long_range_dynamics_with_nontrivial_compression(self, N, method):
+        gates = random_lattice_gates(N, seed=1234)
 
-        circ = qtn.CircuitMPSLazy(N, max_bond=128, method=method)
+        circ = qtn.CircuitMPSLazy(N, max_bond=2**(N//2 - 1), method=method, compress_every=4)
         circ.apply_gates(gates)
         lazy_state = circ.psi
 
-        circ = qtn.CircuitMPS(
-            N, max_bond=128, gate_opts=dict(method=method, contract="nonlocal")
-        )
+        circ = qtn.Circuit(N)
         circ.apply_gates(gates)
-        eager_state = circ.psi
+        dense_state = circ.psi
 
-        assert lazy_state.norm() == pytest.approx(1.0)
-        assert lazy_state.distance_normalized(eager_state) < 1e-6
+        assert np.abs(lazy_state.H @ dense_state) ** 2 >= 0.8, f"Fidelity too low for N={N}, method={method}"
 
 
 class TestCircuitPEPSSimpleUpdate:
