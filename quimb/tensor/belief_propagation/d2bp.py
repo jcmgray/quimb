@@ -424,7 +424,10 @@ class D2BP(BeliefPropagationCommon):
             tabs = ar.do("abs", tval)
             tsgn = tval / tabs
             tlog = ar.do("log10", tabs)
-            t /= (tsgn * tabs) ** 0.5
+            nfact = (tsgn * tabs) ** 0.5
+            t /= nfact
+            # keep cached dual tensor in sync
+            self.tensor_dual_map[tid] /= ar.do("conj", nfact)
             if strip_exponent:
                 self.sign = tsgn * self.sign
                 self.exponent = tlog + self.exponent
@@ -531,8 +534,8 @@ class D2BP(BeliefPropagationCommon):
                     bix = qtn.rand_uuid()
                     kixmaps[tid][ix] = kix
                     bixmaps[tid][ix] = bix
-                    # store labels for excitation projector
-                    exc_ixs.setdefault(ix, {})[tid] = (kix, bix)
+                    # store labels for excitation projector, (bra, ket)
+                    exc_ixs.setdefault(ix, {})[tid] = (bix, kix)
                 ems.append((ix, tids))
 
             else:
@@ -555,7 +558,8 @@ class D2BP(BeliefPropagationCommon):
         # add boundary message tensors
         for ix, tid in bms:
             data = self.messages[ix, tid]
-            inds = (kixmaps[tid][ix], bixmaps[tid][ix])
+            # message index ordering is (bra, ket)
+            inds = (bixmaps[tid][ix], kixmaps[tid][ix])
             tn |= qtn.Tensor(data, inds)
 
         # add inner exitation projector message tensors

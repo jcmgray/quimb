@@ -1,4 +1,5 @@
 import pytest
+from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -90,6 +91,51 @@ def test_sample(dtype):
 
     # check we are doing better than random guessing
     assert ptotal > nrepeat * 2**-peps.nsites
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_loop_series_expansion_order0_matches_partial_trace(dtype):
+    # see gh-380
+    peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype=dtype)
+    bp = qbp.D2BP(peps)
+    bp.run(max_iterations=1000, tol=1e-12)
+
+    where = [(1, 1)]
+    rho_pt = bp.partial_trace(where)
+    rho_ge = bp.partial_trace_gloop_expand(where, gloops=0)
+    rho_ls = bp.partial_trace_loop_series_expansion(
+        where, gloops=0, multi_excitation_correct=False
+    )
+
+    assert_allclose(rho_ls, rho_pt, atol=1e-10)
+    assert_allclose(rho_ls, rho_ge, atol=1e-10)
+    assert_allclose(rho_ls, rho_ls.conj().T, atol=1e-10)
+
+    rho_ls4 = bp.partial_trace_loop_series_expansion(
+        where, gloops=4, multi_excitation_correct=False
+    )
+    assert_allclose(rho_ls4, rho_ls4.conj().T, atol=1e-10)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_loop_series_expansion_repeatable(dtype):
+    # see gh-381
+    peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype=dtype)
+    bp = qbp.D2BP(peps)
+    bp.run(max_iterations=1000, tol=1e-12)
+
+    where = [(1, 1)]
+
+    def loop_rdm():
+        return bp.partial_trace_loop_series_expansion(
+            where, gloops=4, multi_excitation_correct=False
+        )
+
+    r1 = loop_rdm()
+    r2 = loop_rdm()
+    r3 = loop_rdm()
+    assert_allclose(r1, r2, atol=1e-12)
+    assert_allclose(r1, r3, atol=1e-12)
 
 
 @pytest.mark.parametrize("seed", range(2))
