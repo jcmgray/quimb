@@ -182,27 +182,32 @@ def factor_pairs(N):
     return factors
 
 
-def random_lattice_gates(N, seed=42):
+def random_lattice_gates(
+    N, num_layers=1, angle_range=None, seed=42
+):
     from itertools import product
 
     rng = np.random.default_rng(seed)
+
+    if angle_range is None:
+        angle_range = (0, 2 * np.pi)
 
     dimensions = rng.choice(factor_pairs(N))
     rows, cols = dimensions
 
     rxx = qu.expm(
-        -1j * rng.uniform(0, 2 * np.pi) * (qu.pauli("X") & qu.pauli("X"))
+        -1j * rng.uniform(*angle_range) * (qu.pauli("X") & qu.pauli("X"))
     )
     rzz = qu.expm(
-        -1j * rng.uniform(0, 2 * np.pi) * (qu.pauli("Z") & qu.pauli("Z"))
+        -1j * rng.uniform(*angle_range) * (qu.pauli("Z") & qu.pauli("Z"))
     )
     ryy = qu.expm(
-        -1j * rng.uniform(0, 2 * np.pi) * (qu.pauli("Y") & qu.pauli("Y"))
+        -1j * rng.uniform(*angle_range) * (qu.pauli("Y") & qu.pauli("Y"))
     )
 
-    rx = qu.expm(-1j * rng.uniform(0, 2 * np.pi) * qu.pauli("X"))
-    ry = qu.expm(-1j * rng.uniform(0, 2 * np.pi) * qu.pauli("Y"))
-    rz = qu.expm(-1j * rng.uniform(0, 2 * np.pi) * qu.pauli("Z"))
+    rx = qu.expm(-1j * rng.uniform(*angle_range) * qu.pauli("X"))
+    ry = qu.expm(-1j * rng.uniform(*angle_range) * qu.pauli("Y"))
+    rz = qu.expm(-1j * rng.uniform(*angle_range) * qu.pauli("Z"))
 
     single_site_gates = [rx, ry, rz]
     two_site_gates = [rxx, ryy, rzz]
@@ -212,23 +217,24 @@ def random_lattice_gates(N, seed=42):
 
     gates = []
 
-    for i in range(N):
-        gates.append(
-            qtn.Gate.from_raw(rng.choice(single_site_gates), qubits=[i])
-        )
-    for x, y in product(range(rows), range(cols)):
-        if y + 1 < cols:
-            a, b = site(x, y), site(x, y + 1)
+    for _ in range(num_layers):
+        for i in range(N):
             gates.append(
-                qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+                qtn.Gate.from_raw(rng.choice(single_site_gates), qubits=[i])
             )
-        if x + 1 < rows:
-            a, b = site(x, y), site(x + 1, y)
-            gates.append(
-                qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
-            )
+        for x, y in product(range(rows), range(cols)):
+            if y + 1 < cols:
+                a, b = site(x, y), site(x, y + 1)
+                gates.append(
+                    qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+                )
+            if x + 1 < rows:
+                a, b = site(x, y), site(x + 1, y)
+                gates.append(
+                    qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+                )
 
-    return gates * 5
+    return gates
 
 
 class TestCircuit:
@@ -1627,7 +1633,7 @@ class TestCircuitMPS:
 
     @pytest.mark.parametrize("sweep_reverse", [False, True])
     def test_lazymps_fidelity_estimate(self, sweep_reverse):
-        gates = random_lattice_gates(10, seed=1234)
+        gates = random_lattice_gates(10, num_layers=2, seed=1234)
 
         circ = qtn.CircuitMPSLazy(
             10, max_bond=32, compress_opts=dict(sweep_reverse=sweep_reverse)
@@ -1643,7 +1649,7 @@ class TestCircuitMPS:
         circ.apply_gates(gates)
         bond_8_fidelity = circ.fidelity_estimate()
 
-        assert bond_8_fidelity == pytest.approx(0.85, abs=0.05)
+        assert bond_8_fidelity == pytest.approx(0.8, abs=0.05)
 
         if sweep_reverse:
             assert circ.gate_opts["info"]["cur_orthog"] == (9, 9)
@@ -1735,12 +1741,15 @@ class TestCircuitMPS:
         assert circ.psi.norm() == pytest.approx(1.0)
         assert circ.psi.distance_normalized(checker.psi) < 1e-6
 
-    @pytest.mark.parametrize("N", [10, 12, 14])
-    @pytest.mark.parametrize("method", ["dm", "direct", "src", "srcmps", "zipup-first"])
-    def test_lazymps_2d_long_range_dynamics_with_nontrivial_compression(self, N, method):
-        gates = random_lattice_gates(N, seed=1234)
+    @pytest.mark.parametrize("method", ["dm", "direct", "src", "srcmps", "zipup", "zipup-first"])
+    def test_lazymps_2d_long_range_dynamics_without_compression(self, method):
+        N = 10
 
-        circ = qtn.CircuitMPSLazy(N, max_bond=2**(N//2 - 1), method=method, compress_every=4)
+        gates = random_lattice_gates(N, num_layers=4)
+
+        # bond 32 would be sufficient to represent the state exactly, but
+        # "zipup" requires bond 64 to be exact
+        circ = qtn.CircuitMPSLazy(N, max_bond=64, method=method, compress_every=4)
         circ.apply_gates(gates)
         lazy_state = circ.psi
 
@@ -1748,7 +1757,36 @@ class TestCircuitMPS:
         circ.apply_gates(gates)
         dense_state = circ.psi
 
-        assert np.abs(lazy_state.H @ dense_state) ** 2 >= 0.8, f"Fidelity too low for N={N}, method={method}"
+        fidelity = np.abs(lazy_state.H @ dense_state) ** 2
+
+        assert fidelity == pytest.approx(1.0, abs=1e-10), f"Fidelity too low for N={N}, method={method}"
+
+    @pytest.mark.parametrize("method", ["dm", "direct", "src", "srcmps", "zipup", "zipup-first"])
+    def test_lazymps_2d_long_range_dynamics_with_nontrivial_compression(self, method):
+        N = 10
+
+        # create a long-range circuit on 10 qubits, which requires bond dimension 16
+        # to be represented exactly
+        gates = random_lattice_gates(N, num_layers=3, angle_range=(0.0, 0.1), seed=1234)
+
+        circ = qtn.CircuitMPSLazy(N, max_bond=8, method=method, compress_every=4)
+        circ.apply_gates(gates)
+        lazy_state = circ.psi
+
+        circ = qtn.Circuit(N)
+        circ.apply_gates(gates)
+        dense_state = circ.psi
+
+        if method in {"src"}:
+            baseline = 0.95
+        elif method in {"srcmps", "zipup-first"}:
+            baseline = 0.96
+        else:
+            baseline = 0.99
+
+        fidelity = np.abs(lazy_state.H @ dense_state) ** 2
+
+        assert fidelity >= baseline, f"Fidelity too low for N={N}, method={method}"
 
 
 class TestCircuitPEPSSimpleUpdate:
