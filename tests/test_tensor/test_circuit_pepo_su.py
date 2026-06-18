@@ -232,3 +232,44 @@ def test_large_lattice_local_observable_is_finite():
     assert np.isfinite(val.real)
     assert abs(val.imag) < 1e-8
     assert abs(val.real) <= 1.0 + 1e-8
+
+
+def test_parametrized_2q_gates_match_exact():
+    # parametrized two-qubit gates (e.g. SU4, FSIM) are built as (2, 2, 2, 2)
+    # arrays rather than (4, 4) matrices, so check the reshape-and-adjoint in
+    # the backwards evolution handles them correctly (chain -> exact)
+    edges = [(i, i + 1) for i in range(4)]
+    rng = np.random.default_rng(13)
+
+    gates = []
+    for s in range(5):
+        gates.append((qu.rand_uni(2, seed=int(rng.integers(1 << 30))), s))
+    for a, b in edges:
+        gates.append(("SU4", *rng.uniform(0, 2 * np.pi, size=15), a, b))
+        gates.append(("FSIM", *rng.uniform(0, 2 * np.pi, size=2), a, b))
+
+    circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=64)
+    circ.apply_gates(gates)
+
+    ref = qtn.Circuit(N=5)
+    ref.apply_gates(gates)
+
+    for P in ("X", "Y", "Z"):
+        assert_allclose(
+            complex(circ.local_expectation(qu.pauli(P), 2)),
+            complex(ref.local_expectation(qu.pauli(P), 2)),
+            atol=1e-10,
+        )
+
+
+def test_gate_opts_is_public_and_get_evolved_operator_returns_operator():
+    # gate_opts should be a public dict like the other Circuit classes, and
+    # get_evolved_operator should return a single operator carrying its scale
+    edges = [(0, 1), (1, 2)]
+    circ = qtn.CircuitPEPOSimpleUpdate(edges, max_bond=8, cutoff=1e-12)
+    assert circ.gate_opts["max_bond"] == 8
+    assert circ.gate_opts["cutoff"] == 1e-12
+
+    circ.apply_gates(build_gates([0, 1, 2], edges, n_layers=1, seed=1)[0])
+    op = circ.get_evolved_operator(qu.pauli("Z"), 1)
+    assert isinstance(op, qtn.TensorNetworkGenOperator)

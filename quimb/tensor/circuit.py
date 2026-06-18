@@ -6547,15 +6547,17 @@ class CircuitPEPOSimpleUpdate(Circuit):
         If ``edges`` is not given, infer the geometry from the two site gates in
         this sequence (the gates are *not* applied, just inspected).
     max_bond : int, optional
-        The maximum bond dimension to allow when compressing the operator. ``None``
-        means no limit.
+        The maximum bond dimension to allow when compressing the operator.
+        ``None`` means no limit.
     cutoff : float, optional
         The singular value cutoff to use when compressing the operator bonds.
     gauge_smudge : float, optional
         A small value added to the gauges before they are multiplied in and
         inverted, to avoid numerical issues.
-    phys_dim : int, optional
-        The physical dimension of each site, by default 2 (a qubit).
+    gate_opts : dict, optional
+        Supplied to each simple update gate application,
+        :meth:`~quimb.tensor.tnag.core.TensorNetworkGenOperator.gate_simple_`,
+        with ``max_bond``, ``cutoff`` and ``smudge`` taken from the above.
     dtype : str, optional
         The data type of the operator tensors.
 
@@ -6565,6 +6567,8 @@ class CircuitPEPOSimpleUpdate(Circuit):
         The unique edges defining the geometry.
     sites : tuple[hashable]
         The sites of the operator.
+    gate_opts : dict
+        The simple update options applied to each backwards gate.
 
     See Also
     --------
@@ -6579,7 +6583,7 @@ class CircuitPEPOSimpleUpdate(Circuit):
         max_bond=None,
         cutoff=1e-10,
         gauge_smudge=1e-6,
-        phys_dim=2,
+        gate_opts=None,
         dtype="complex128",
         **circuit_opts,
     ):
@@ -6602,18 +6606,12 @@ class CircuitPEPOSimpleUpdate(Circuit):
         self.sites = sites
         self._edge_set = {frozenset(e) for e in edges}
         self._site_set = set(sites)
-        self.phys_dim = phys_dim
+        # a qubit circuit simulator, so the physical dimension is always 2
+        self.phys_dim = 2
         self._op_dtype = dtype
 
-        # operator compression options
-        self._su_opts = {
-            "max_bond": max_bond,
-            "cutoff": cutoff,
-            "smudge": gauge_smudge,
-        }
-
         # the initial |00...0> state the evolved operator is contracted with
-        zero = np.zeros(phys_dim, dtype=dtype)
+        zero = np.zeros(self.phys_dim, dtype=dtype)
         zero[0] = 1.0
         psi0 = TN_from_sites_product_state({site: zero for site in sites})
 
@@ -6624,6 +6622,12 @@ class CircuitPEPOSimpleUpdate(Circuit):
 
         super().__init__(psi0=psi0, **circuit_opts)
 
+        # simple update options applied to each backwards (two site) gate
+        self.gate_opts = ensure_dict(gate_opts)
+        self.gate_opts.setdefault("max_bond", max_bond)
+        self.gate_opts.setdefault("cutoff", cutoff)
+        self.gate_opts.setdefault("smudge", gauge_smudge)
+
     def copy(self):
         """Copy the circuit and its recorded gates."""
         new = super().copy()
@@ -6633,7 +6637,6 @@ class CircuitPEPOSimpleUpdate(Circuit):
         new._site_set = self._site_set
         new.phys_dim = self.phys_dim
         new._op_dtype = self._op_dtype
-        new._su_opts = dict(self._su_opts)
         return new
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
@@ -6696,10 +6699,12 @@ class CircuitPEPOSimpleUpdate(Circuit):
             site_ind_id=("k{}", "b{}"),
         )
 
-    def get_evolved_operator(self, G, where):
+    def get_evolved_operator(self, G, where, restrict_to_lightcone=True):
         """Build the observable ``G`` at ``where`` and evolve it backwards in
         time through all the recorded gates, returning the resulting compressed
-        PEPO, its separately tracked bond gauges, and an overall scale.
+        PEPO. The simple update bond gauges are absorbed back in, and the overall
+        scale of the operator is stored in its ``exponent`` attribute (in base
+        10) so that the tensors themselves stay ``O(1)`` and don't overflow.
 
         Parameters
         ----------
@@ -6707,20 +6712,15 @@ class CircuitPEPOSimpleUpdate(Circuit):
             The local observable.
         where : hashable or sequence[hashable]
             The site or sites the observable acts on.
+        restrict_to_lightcone : bool, optional
+            If ``True`` (default), only return the operator's reverse lightcone,
+            i.e. the sites it acts on non-trivially. Every other site is the
+            identity and contributes trivially. If ``False``, return the full
+            operator on all sites.
 
         Returns
         -------
-        op : TensorNetworkGenOperator
-            The backwards-evolved operator (gauges not yet absorbed).
-        gauges : dict[str, array_like]
-            The simple update bond gauges, individually normalized.
-        scale : float
-            The overall scale of the operator, kept separate from the (O(1))
-            tensors to avoid numerical overflow. The represented operator is
-            ``scale`` times ``op`` with ``gauges`` absorbed.
-        support : set
-            The sites the operator acts on non-trivially (its reverse
-            lightcone); all other sites remain the identity.
+        TensorNetworkGenOperator
         """
         where = self._parse_where(where)
 
@@ -6731,7 +6731,9 @@ class CircuitPEPOSimpleUpdate(Circuit):
 
         d = self.phys_dim
         gauges = {}
-        scale = 1.0
+        # accumulate the operator's log10 scale separately, then fold it into
+        # the exponent at the end - this keeps the gauges and tensors O(1)
+        exponent = 0.0
         # track the operator's support so gates outside its reverse lightcone
         # (where g^dag I g = I) can be skipped
         support = set(where)
@@ -6740,30 +6742,44 @@ class CircuitPEPOSimpleUpdate(Circuit):
             if support.isdisjoint(qubits):
                 continue
             k = len(qubits)
-            gmat = np.asarray(gate.array).reshape(d**k, d**k)
             # sandwich with the adjoint to evolve the operator backwards in time
-            gdag = gmat.conj().T
-            # renorm=False so the gauge carries the operator scale, which we
-            # then strip out and accumulate separately - this keeps the tensors
-            # O(1) and avoids overflow on large operators
+            gdag = np.asarray(gate.array).reshape(d**k, d**k).conj().T
             if k == 1:
-                op.gate_simple_(gdag, qubits, gauges, renorm=False)
+                # single site gate is a unitary sandwich on one tensor, with no
+                # bond to compress and no change of scale
+                op.gate_simple_(gdag, qubits, gauges)
             else:
-                seen = {ix: id(v) for ix, v in gauges.items()}
+                # renorm=False so the gauge carries the operator scale; the
+                # `info` dict records which bond was updated so we can strip the
+                # scale into the exponent and keep the gauge O(1)
+                info = {}
                 op.gate_simple_(
-                    gdag, qubits, gauges, renorm=False, **self._su_opts
+                    gdag,
+                    qubits,
+                    gauges,
+                    renorm=False,
+                    info=info,
+                    **self.gate_opts,
                 )
-                for ix, v in gauges.items():
-                    if seen.get(ix) != id(v):
-                        # the bond updated by this gate
-                        nrm = float(do("linalg.norm", v))
-                        if nrm > 0.0:
-                            gauges[ix] = v / nrm
-                            scale = scale * nrm
-                        break
+                (((_, ix), _),) = info.items()
+                nrm = float(do("linalg.norm", gauges[ix]))
+                gauges[ix] = gauges[ix] / nrm
+                exponent += math.log10(nrm)
             support.update(qubits)
 
-        return op, gauges, scale, support
+        op.gauge_simple_insert(gauges)
+        op.exponent = op.exponent + exponent
+
+        if restrict_to_lightcone:
+            op = op.select(
+                [op.site_tag(s) for s in support],
+                which="any",
+                with_exponent=True,
+            )
+            # close the size-1 bonds to the dropped (identity) environment
+            op.isel_({ix: 0 for ix in op.outer_inds() if op.ind_size(ix) == 1})
+
+        return op
 
     def local_expectation(self, G, where, *, optimize="auto", **contract_opts):
         """Compute :math:`\\langle 0 | U^\\dagger G U | 0 \\rangle`, the
@@ -6787,27 +6803,12 @@ class CircuitPEPOSimpleUpdate(Circuit):
         -------
         float
         """
-        op, gauges, scale, support = self.get_evolved_operator(G, where)
-        op.gauge_simple_insert(gauges)
-
-        # only the support (reverse lightcone) is non-identity; every other site
-        # contributes <0|I|0> = 1, so restrict the contraction to that region
-        tn = op.select([op.site_tag(s) for s in support], which="any").copy()
-
-        # project the support physical indices onto the |00...0> state
-        zero = np.zeros(self.phys_dim, dtype=self._op_dtype)
-        zero[0] = 1.0
-        for s in support:
-            tn |= Tensor(zero, inds=(op.upper_ind(s),))
-            tn |= Tensor(zero, inds=(op.lower_ind(s),))
-
-        # the only remaining open indices are the size-1 bonds to the dropped
-        # identity region - select their single element to close the network
-        tn.isel_({ix: 0 for ix in tn.outer_inds()})
-
-        # the (O(1)) tensors are contracted first, then rescaled - the physical
-        # expectation is bounded so this final product is well behaved
-        return scale * tn.contract(all, optimize=optimize, **contract_opts)
+        op = self.get_evolved_operator(G, where)
+        # project <00...0| O |00...0> by selecting the 0 element of every
+        # remaining (physical) index; the operator's exponent is applied
+        # automatically by the contraction
+        op.isel_({ix: 0 for ix in op.outer_inds()})
+        return op.contract(all, optimize=optimize, **contract_opts)
 
     @property
     def psi(self):
