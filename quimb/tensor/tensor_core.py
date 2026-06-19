@@ -669,16 +669,18 @@ def tensor_split(
 
 
 def tensor_canonize_bond(
-    T1: "Tensor",
-    T2: "Tensor",
+    ta: "Tensor",
+    tb: "Tensor",
     absorb="right",
     gauges=None,
     gauge_smudge=1e-6,
     create_bond=False,
+    swap_inds=None,
+    bond_ind=None,
     **split_opts,
 ):
     r"""Inplace 'canonization' of two tensors. This gauges the bond between
-    the two such that ``T1`` is isometric::
+    the two such that ``ta`` is isometric::
 
           |   |          |   |          |   |
         --1---2--  =>  -->~R-2--  =>  -->~~~O--
@@ -688,9 +690,9 @@ def tensor_canonize_bond(
 
     Parameters
     ----------
-    T1 : Tensor
+    ta : Tensor
         The tensor to be isometrized.
-    T2 : Tensor
+    tb : Tensor
         The tensor to absorb the R-factor into.
     absorb : {'right', 'left', 'both', None}, optional
         Which tensor to effectively absorb the singular values into.
@@ -702,6 +704,13 @@ def tensor_canonize_bond(
     create_bond : bool, optional
         If ``True``, and there is no bond between the two tensors, create a
         new bond with size 1 before canonizing. Else raise an error.
+    swap_inds : str or sequence[str], optional
+        In the process of canonizing, swap this or these indices from the
+        current tensor to the other. This is useful for example for 'moving' a
+        physical index.
+    bond_ind : str or set, optional
+        If creating a new bond or fusing multiple bonds, use this as the name
+        of the new bond. If a set is supplied, prefer any existing index in it.
     split_opts
         Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`, with
         modified defaults of ``method=='qr'`` and ``absorb='right'``.
@@ -712,46 +721,103 @@ def tensor_canonize_bond(
     if absorb == "both":
         # same as doing reduced compression with no truncation
         return tensor_compress_bond(
-            T1,
-            T2,
+            ta,
+            tb,
             gauges=gauges,
             gauge_smudge=gauge_smudge,
             create_bond=create_bond,
+            swap_inds=swap_inds,
+            bond_ind=bond_ind,
             **split_opts,
         )
 
     split_opts.setdefault("absorb", "right")
     if absorb == "left":
-        T1, T2 = T2, T1
+        ta, tb = tb, ta
 
-    lix, bix, _ = tensor_make_single_bond(
-        T1, T2, gauges=gauges, create_bond=create_bond
+    lix, bond_ind, rix = tensor_make_single_bond(
+        ta,
+        tb,
+        gauges=gauges,
+        create_bond=create_bond,
+        bond_ind=bond_ind,
     )
-    if not bix:
+
+    if not bond_ind:
         raise ValueError(
             "The tensors specified don't share an bond. "
             "To create one automatically, set `create_bond=True`."
         )
 
-    if (T1.left_inds is not None) and set(T1.left_inds) == set(lix):
+    if swap_inds is not None:
+        if isinstance(swap_inds, str):
+            swap_inds = {swap_inds}
+        else:
+            swap_inds = set(swap_inds)
+
+        new_lix = []
+        bix = [bond_ind]
+        for ind in lix:
+            if ind in swap_inds:
+                bix.append(ind)
+                swap_inds.remove(ind)
+            else:
+                new_lix.append(ind)
+
+        if swap_inds:
+            raise NotImplementedError(
+                "Can currently only swap indices from isometric to reduced."
+            )
+
+        lix = tuple(new_lix)
+        bix = tuple(bix)
+    else:
+        # just splitting off the single shared index
+        bix = (bond_ind,)
+
+    # XXX: only check if gauges is None?
+    if (
+        (swap_inds is None)
+        and (ta.left_inds is not None)
+        and (set(ta.left_inds) == set(lix))
+    ):
         # tensor is already isometric with respect to shared bonds
+        # (only valid as a shortcut when we aren't also moving an index)
         return
 
     if gauges is not None:
         # gauge outer and inner but only revert outer
         absorb = None
-        tn = T1 | T2
+        tn = ta | tb
         outer, _ = tn.gauge_simple_insert(gauges, smudge=gauge_smudge)
-        gauges.pop(bix, None)
+        gauges.pop(bond_ind, None)
 
-    new_T1, tRfact = T1.split(lix, get="tensors", **split_opts)
-    new_T2 = tRfact @ T2
+    tmp_bnd = rand_uuid()
 
-    new_T1.transpose_like_(T1)
-    new_T2.transpose_like_(T2)
+    ta_Q, ta_R = tensor_split(
+        ta,
+        left_inds=lix,
+        right_inds=bix,
+        get="tensors",
+        bond_ind=tmp_bnd,
+        **split_opts,
+    )
+    tb_new = ta_R @ tb
 
-    T1.modify(data=new_T1.data, left_inds=lix)
-    T2.modify(data=new_T2.data)
+    if swap_inds is None:
+        # want to update tensors inplace, keeping original index order
+        ta_Q.transpose_like_(ta)
+        tb_new.transpose_like_(tb)
+        ta.modify(data=ta_Q.data, left_inds=lix)
+        tb.modify(data=tb_new.data)
+    else:
+        # can't keep index order if we're moving an index
+        # but at least retain name of bond connecting tensors
+        inds_a = (*lix, bond_ind)
+        inds_b = (*bix, *rix)
+
+        ta.modify(data=ta_Q.data, inds=inds_a, left_inds=lix)
+        tb.modify(data=tb_new.data, inds=inds_b)
 
     if gauges is not None:
         tn.gauge_simple_remove(outer=outer)
@@ -803,6 +869,8 @@ def tensor_compress_bond(
     gauges=None,
     gauge_smudge=1e-6,
     create_bond=False,
+    swap_inds=None,
+    bond_ind=None,
     inds=None,
     info=None,
     reduce_opts=None,
@@ -850,6 +918,13 @@ def tensor_compress_bond(
     create_bond : bool, optional
         If ``True``, and there is no bond between the two tensors, create a
         new bond with size 1 before compressing. Else raise an error.
+    swap_inds : str or sequence[str], optional
+        In the process of compressing, swap this or these indices from the
+        current tensor to the other. This is useful for example for 'moving' a
+        physical index.
+    bond_ind : str or set, optional
+        If creating a new bond or fusing multiple bonds, use this as the name
+        of the new bond. If a set is supplied, prefer any existing index in it.
     inds : None or tuple[sequence[str], str, sequence[str]], optional
         Optionally specify the left, bond, and right indices to use for the
         compression. By default these are worked out automatically, but this
@@ -874,16 +949,25 @@ def tensor_compress_bond(
     compress_opts.setdefault("get", "tensors")
 
     if inds is None:
-        lix, bix, rix = tensor_make_single_bond(
-            ta, tb, gauges=gauges, create_bond=create_bond
+        lix, bond_ind, rix = tensor_make_single_bond(
+            ta,
+            tb,
+            gauges=gauges,
+            create_bond=create_bond,
+            bond_ind=bond_ind,
         )
     else:
-        lix, bix, rix = inds
+        lix, bond_ind, rix = inds
 
-    if not bix:
+    if not bond_ind:
         raise ValueError(
             "The tensors specified don't share an bond. "
             "To create one automatically, set `create_bond=True`."
+        )
+
+    if swap_inds is not None:
+        raise NotImplementedError(
+            "Swapping indices during compression is not yet implemented."
         )
 
     if gauges is not None:
@@ -896,14 +980,14 @@ def tensor_compress_bond(
         tmp_bix_1 = rand_uuid()
         ta_Q, ta_R = ta.split(
             left_inds=lix,
-            right_inds=bix,
+            right_inds=bond_ind,
             bond_ind=tmp_bix_1,
             absorb="right",
             **reduce_opts,
         )
         tmp_bix_2 = rand_uuid()
         tb_R, tb_Q = tb.split(
-            left_inds=bix,
+            left_inds=bond_ind,
             right_inds=rix,
             bond_ind=tmp_bix_2,
             absorb="left",
@@ -917,7 +1001,7 @@ def tensor_compress_bond(
         tc_left, *s, tc_right = tc.split(
             left_inds=[tmp_bix_1],
             right_inds=[tmp_bix_2],
-            bond_ind=bix,
+            bond_ind=bond_ind,
             absorb=absorb,
             **compress_opts,
         )
@@ -929,7 +1013,7 @@ def tensor_compress_bond(
     elif reduced == "right":
         # if left canonical, just do svd on right tensor
         tc, *s, tb_compressed = tb.split(
-            left_inds=bix,
+            left_inds=bond_ind,
             right_inds=rix,
             absorb=absorb,
             **compress_opts,
@@ -946,7 +1030,7 @@ def tensor_compress_bond(
         # if right canonical, just do svd on left tensor
         ta_compressed, *s, tc = ta.split(
             left_inds=lix,
-            right_inds=bix,
+            right_inds=bond_ind,
             absorb=absorb,
             **compress_opts,
         )
@@ -1002,7 +1086,7 @@ def tensor_compress_bond(
         g = s[0].data
         fact = do("linalg.norm", g)
         g = g / fact
-        gauges[bix] = g
+        gauges[bond_ind] = g
         fact_1_2 = fact**0.5
         ta *= fact_1_2
         tb *= fact_1_2
@@ -1030,11 +1114,33 @@ def tensor_balance_bond(t1: "Tensor", t2: "Tensor", smudge=1e-6):
     t2.multiply_index_diagonal_(ix, s**+0.25)
 
 
-def tensor_multifuse(ts, inds, gauges=None):
+def tensor_multifuse(
+    ts,
+    inds,
+    gauges=None,
+    bond_ind=None,
+):
     """For tensors ``ts`` which should all have indices ``inds``, fuse the
     those bonds together, optionally updating ``gauges`` if present. Inplace
     operation.
+
+    Parameters
+    ----------
+    ts : sequence of Tensor
+        The tensors to fuse the indices on.
+    inds : sequence of str
+        The indices to fuse together.
+    gauges : None or dict, optional
+        If supplied, a dict of bond gauges to perform the fusion with respect
+        to. The gauges will be updated in place to reflect the fusion, and any
+        gauges corresponding to the fused indices will be removed.
+    bond_ind : str, optional
+        The name of the new fused bond. If not supplied, the first index in
+        ``inds`` is used as the new bond index.
     """
+    if bond_ind is None:
+        bond_ind = inds[0]
+
     if (gauges is not None) and any(ix in gauges for ix in inds):
         # gauge fusing
         gs = [
@@ -1045,7 +1151,7 @@ def tensor_multifuse(ts, inds, gauges=None):
             for ix in inds
         ]
         # contract into a single gauge
-        gauges[inds[0]] = functools.reduce(lambda x, y: do("kron", x, y), gs)
+        gauges[bond_ind] = functools.reduce(lambda x, y: do("kron", x, y), gs)
 
     if ts[0].isblocksparse():
         # need to drop unaligned sectors pre-fusing
@@ -1057,7 +1163,7 @@ def tensor_multifuse(ts, inds, gauges=None):
 
     # index fusing
     for t in ts:
-        t.fuse_({inds[0]: inds})
+        t.fuse_({bond_ind: inds})
 
 
 def tensor_make_single_bond(
@@ -1065,6 +1171,7 @@ def tensor_make_single_bond(
     t2: "Tensor",
     gauges=None,
     create_bond=False,
+    bond_ind=None,
 ):
     """If two tensors share multibonds, fuse them together and return the left
     indices, bond if it exists, and right indices. Handles simple ``gauges``.
@@ -1080,12 +1187,15 @@ def tensor_make_single_bond(
         A dictionary of gauge tensors, which will be updated in place.
     create : bool, optional
         If ``True``, create a new bond if none exists.
+    bond_ind : str or set, optional
+        If creating a new bond or fusing multiple bonds, use this as the name
+        of the new bond. If a set is supplied, prefer any existing index in it.
 
     Returns
     -------
     left : list of str
         Indices appearing only on the left tensor.
-    bond : str or None
+    bond_ind : str or None
         The bond index of the tensors, or None if they don't share one and
         ``create=False``.
     right : list of str
@@ -1097,16 +1207,33 @@ def tensor_make_single_bond(
     if nshared == 0:
         if create_bond:
             # create a new bond between the tensors
-            bond = rand_uuid()
-            new_bond(t1, t2, name=bond)
-            return left, bond, right
+            if not isinstance(bond_ind, str):
+                # None or set-like, just generate a random name
+                bond_ind = rand_uuid()
+            new_bond(t1, t2, name=bond_ind)
         else:
-            return left, None, right
+            bond_ind = None
+    else:
+        if bond_ind is None:
+            bond_ind = shared[0]
+        elif not isinstance(bond_ind, str):
+            # set-like, prefer any shared index that appears in the set
+            for ix in shared:
+                if ix in bond_ind:
+                    bond_ind = ix
+                    break
+            else:
+                bond_ind = shared[0]
 
-    if nshared > 1:
-        tensor_multifuse((t1, t2), shared, gauges=gauges)
+        if nshared > 1:
+            tensor_multifuse(
+                (t1, t2),
+                shared,
+                gauges=gauges,
+                bond_ind=bond_ind,
+            )
 
-    return left, shared[0], right
+    return left, bond_ind, right
 
 
 def tensor_fuse_squeeze(
@@ -1114,20 +1241,248 @@ def tensor_fuse_squeeze(
     t2: "Tensor",
     squeeze=True,
     gauges=None,
+    bond_ind=None,
 ):
     """If ``t1`` and ``t2`` share more than one bond fuse it, and if the size
     of the shared dimenion(s) is 1, squeeze it. Inplace operation.
     """
-    _, ind0, _ = tensor_make_single_bond(t1, t2, gauges=gauges)
+    _, bond_ind, _ = tensor_make_single_bond(
+        t1,
+        t2,
+        gauges=gauges,
+        bond_ind=bond_ind,
+    )
 
-    if squeeze and t1.ind_size(ind0) == 1:
-        t1.squeeze_(include=(ind0,))
-        t2.squeeze_(include=(ind0,))
+    if squeeze and t1.ind_size(bond_ind) == 1:
+        t1.squeeze_(include=(bond_ind,))
+        t2.squeeze_(include=(bond_ind,))
 
         if gauges is not None:
-            s0_1_2 = gauges.pop(ind0).item() ** 0.5
+            s0_1_2 = gauges.pop(bond_ind).item() ** 0.5
             t1 *= s0_1_2
             t2 *= s0_1_2
+
+
+@functools.lru_cache(maxsize=128)
+def _get_gauge_conditioner(power=1.0, smudge=1e-12):
+    """Get a function closed over `power` and `smudge` for conditioning simple
+    update style gauges."""
+    if power == 1.0:
+        if smudge == 0.0:
+
+            def conditioner(g):
+                return g
+
+        else:
+
+            def conditioner(g):
+                return g + smudge
+
+    else:
+        if smudge == 0.0:
+
+            def conditioner(g):
+                return g**power
+
+        else:
+
+            def conditioner(g):
+                return (g + smudge) ** power
+
+    return conditioner
+
+
+def tensor_gauge_simple_bond(
+    ta: "Tensor",
+    tb: "Tensor",
+    gauges: dict,
+    smudge=1e-12,
+    power=1.0,
+    damping=0.0,
+    fuse_multibonds=True,
+    create_bond=False,
+    bond_ind=None,
+    renorm=False,
+    info=None,
+    reduced=True,
+    reduce_opts=None,
+    compress_opts=None,
+    have_conditioned=None,
+    gauges_conditioned=None,
+):
+    """Perform a single step of the simple update style gauging procedure for
+    two tensors sharing a bond or bonds. This is an inplace operation that
+    updates both tensors as well as the `bond_ind` gauge in `gauges`.
+
+    Parameters
+    ----------
+    ta : Tensor
+        The first tensor.
+    tb : Tensor
+        The second tensor.
+    gauges : dict
+        The gauge bond weights, if any, to insert around and between the
+        tensors. The outer bonds are then ungauged, and the inner bond is
+        updated to be the new gauge. This is modified in place. Unless
+        ``renorm=True``, the new gauge is stored *unnormalized* (the raw
+        singular values).
+    smudge : float, optional
+        A small value to add to the singular values when gauging.
+    power : float, optional
+        A power to raise the singular values to when gauging.
+    damping : float, optional
+        If > 0, the new gauge is a damped update of the old gauge,
+        i.e. ``new_gauge = damping * old_gauge + (1 - damping) * new_gauge``.
+        Only relevant if `gauges_conditioned` is supplied.
+    fuse_multibonds : bool, optional
+        If the tensors share more than one bond, whether to fuse them together
+        for the gauging and compression step. If False, only `bond_ind` is
+        treated as the connecting bond, and is chosen as the first shared index
+        if not specified.
+    create_bond : bool, optional
+        If ``True``, and there is no bond between the two tensors, create a new
+        bond with size 1 before gauging. Else raise an error.
+    bond_ind : str or set, optional
+        If creating a new bond or fusing multiple bonds, use this as the name
+        of the new bond. If a set is supplied, prefer any existing index in it.
+    renorm : bool, optional
+        If ``True``, normalize the new gauge to unit norm before storing it in
+        `gauges`, which keeps the gauge weights bounded across repeated calls.
+        The discarded ``log10`` scale is accrued into ``info["exponent"]`` if
+        an ``"exponent"`` key is present in `info`.
+    info : dict or None, optional
+        If supplied, used to track extra information across calls, modified in
+        place. Tracking for a given quantity is enabled by seeding its key:
+
+        - if an ``"exponent"`` key is present, the ``log10`` of the norm
+          stripped by ``renorm`` is added to it, allowing the overall scale to
+          be tracked externally;
+        - if a ``"max_sdiff"`` key is present, the norm of the difference
+          between the old and new gauge is stored in ``info["sdiff"]`` and, if
+          larger than the current value, in ``info["max_sdiff"]``.
+
+    reduced : {True, False, "left", "right", "lazy"}, optional
+        Supplied to
+        :func:`~quimb.tensor.tensor_core.tensor_compress_bond`, controlling how
+        the bond is decomposed. If the two tensors are already canonical with
+        respect to the bond, ``"left"`` or ``"right"`` can be used to avoid the
+        redundant reduction step.
+    reduce_opts : dict, optional
+        Supplied to
+        :func:`~quimb.tensor.tensor_core.tensor_compress_bond` for the
+        reduction step. Values set here take precedence over any defaults.
+    compress_opts : dict, optional
+        Supplied to
+        :func:`~quimb.tensor.tensor_core.tensor_compress_bond`. Values set
+        here take precedence over any defaults.
+    have_conditioned : set or None, optional
+        If supplied, a set of indices which have already been conditioned this
+        'sweep', to avoid recomputing the same conditioned gauge multiple times
+        when updating multiple indices around a tensor. This is modified
+        inplace.
+    gauges_conditioned : dict or None, optional
+        If supplied, a dict of the already conditioned gauges for this sweep,
+        to avoid recomputing the same conditioned gauge multiple times when
+        when updating multiple indices around a tensor. This is modified in
+        place.
+    """
+
+    if bond_ind is None:
+        # default to first shared index, or None if there is no shared bond
+        # (in which case ``create_bond`` should be set to make one)
+        bond_ind = next((ix for ix in ta.inds if ix in tb.inds), None)
+
+    conditioner = _get_gauge_conditioner(power=power, smudge=smudge)
+
+    if have_conditioned is None:
+        have_conditioned = set()
+    if gauges_conditioned is None:
+        gauges_conditioned = {}
+
+    if fuse_multibonds:
+        lix, bond_ind, rix = tensor_make_single_bond(
+            ta,
+            tb,
+            gauges=gauges,
+            create_bond=create_bond,
+            bond_ind=bond_ind,
+        )
+    else:
+        lix = tuple(jx for jx in ta.inds if jx != bond_ind)
+        rix = tuple(jx for jx in tb.inds if jx != bond_ind)
+
+    # absorb 'outer' gauges into tensors
+    inv_gauges = []
+    for t, ixs in ((ta, lix), (tb, rix)):
+        for ix in ixs:
+            if ix not in gauges:
+                # gauge is missing -> just skip
+                continue
+
+            # following logic is to avoid recomputing the conditioned gauge
+            # multiple times when updating e.g. each index around a tensor
+            if ix not in have_conditioned:
+                s = conditioner(gauges[ix])
+                if ix in gauges_conditioned and damping > 0.0:
+                    # damped update w/ prev, combine old and new
+                    s = damping * gauges_conditioned[ix] + (1 - damping) * s
+                gauges_conditioned[ix] = s
+                # mark as computed
+                have_conditioned.add(ix)
+            else:
+                # have already computed s this sweep
+                s = gauges_conditioned[ix]
+
+            t.multiply_index_diagonal_(ix, s)
+            # keep track of how to invert gauge
+            inv_gauges.append((t, ix, 1 / s))
+
+    # absorb the inner gauge, if it exists - also remember it so we can
+    # optionally measure the convergence diff against the updated gauge below
+    old_gauge = gauges.get(bond_ind, None)
+    if old_gauge is not None:
+        ta.multiply_index_diagonal_(bond_ind, old_gauge)
+
+    # for retrieving singular values
+    sub_info = {}
+    # perform SVD to get new bond gauge
+    tensor_compress_bond(
+        ta,
+        tb,
+        reduced=reduced,
+        absorb=None,
+        info=sub_info,
+        cutoff=0.0,
+        reduce_opts=reduce_opts,
+        compress_opts=compress_opts,
+        inds=(lix, bond_ind, rix),
+    )
+
+    new_gauge = sub_info["singular_values"]
+
+    if renorm:
+        # keep the gauge weights bounded, tracking the scale externally
+        gnorm = do("linalg.norm", new_gauge)
+        new_gauge = new_gauge / gnorm
+        if (info is not None) and ("exponent" in info):
+            info["exponent"] = info["exponent"] + do("log10", gnorm)
+
+    # optionally measure how much the (normalized) gauge changed - store this
+    # bond's value in `info["sdiff"]` and update the running maximum
+    if (info is not None) and ("max_sdiff" in info):
+        if (old_gauge is None) or (size(old_gauge) != size(new_gauge)):
+            # no previous gauge, or the bond changed size, so we can't compare
+            # the singular values directly
+            old_gauge = 1.0
+        sdiff = do("linalg.norm", old_gauge - new_gauge)
+        info["sdiff"] = sdiff
+        if sdiff > info["max_sdiff"]:
+            info["max_sdiff"] = sdiff
+
+    # update inner gauge and undo outer gauges
+    gauges[bond_ind] = new_gauge
+    for t, ix, inv_s in inv_gauges:
+        t.multiply_index_diagonal_(ix, inv_s)
 
 
 def new_bond(
@@ -7211,10 +7566,11 @@ class TensorNetwork:
             The tensor identifiers to start the gauge sweep from.
         info : dict, optional
             Store extra information about the gauging process in this dict.
-            If supplied, the following keys are filled:
+            The following keys are filled:
 
             - 'iterations': the number of iterations performed.
-            - 'max_sdiff': the maximum singular value difference.
+            - 'max_sdiff': the maximum singular value difference of the final
+              sweep (``-1.0`` if no diffs were computed).
 
         progbar : bool, optional
             Whether to show a progress bar.
@@ -7243,25 +7599,11 @@ class TensorNetwork:
         # if damping we need to mark if we have updated gauge specifically
         have_conditioned = set()
 
-        _sval_conditioner = {
-            (True, True): lambda s: s,
-            (True, False): lambda s: s + smudge,
-            (False, True): lambda s: s**power,
-            (False, False): lambda s: (s + smudge) ** power,
-        }[(power == 1.0, smudge == 0.0)]
-
-        # for retrieving singular values
-        sub_info = {}
-
-        # accrue scaling to avoid numerical blow-ups
-        nfact = 0.0
-
-        if progbar:
-            import tqdm
-
-            pbar = tqdm.tqdm()
-        else:
-            pbar = None
+        if info is None:
+            info = {}
+        # tensor_gauge_simple_bond accrues the log10 of each stripped gauge
+        # norm into "exponent" - seed it so the scaling is tracked
+        info["exponent"] = 0.0
 
         # keep track of which indices are available to be updated
         if touched_tids is not None:
@@ -7273,122 +7615,72 @@ class TensorNetwork:
             # use all indices
             next_touched = oset(tn._inner_inds)
 
+        if progbar:
+            import tqdm
+
+            pbar = tqdm.tqdm()
+        else:
+            pbar = None
+
         it = 0
         unconverged = True
+        compute_diff = (tol > 0.0) or (pbar is not None)
+
         while unconverged and it < max_iterations:
-            # can only converge if tol > 0.0
-            max_sdiff = -1.0
+            # seeding "max_sdiff" tells tensor_gauge_simple_bond to track the
+            # running maximum diff here (and can only converge if tol > 0.0)
+            if compute_diff:
+                info["max_sdiff"] = -1.0
 
             touched, next_touched = next_touched, oset()
             # add an arbitrary index to start the sweep
             queue = oset([touched.popleft()])
 
             while queue:
-                ind = queue.popleft()
+                bond_ind = queue.popleft()
 
                 try:
-                    tid1, tid2 = tn.ind_map[ind]
+                    tida, tidb = tn.ind_map[bond_ind]
                 except (KeyError, ValueError):
                     # fused multibond (removed) or not a bond (len(tids != 2))
                     continue
 
-                t1 = tn.tensor_map[tid1]
-                t2 = tn.tensor_map[tid2]
-                if fuse_multibonds:
-                    lix, bond, rix = tensor_make_single_bond(
-                        t1, t2, gauges=gauges
-                    )
-                else:
-                    lix = tuple(jx for jx in t1.inds if jx != ind)
-                    bond = ind
-                    rix = tuple(jx for jx in t2.inds if jx != ind)
+                ta = tn.tensor_map[tida]
+                tb = tn.tensor_map[tidb]
 
-                # absorb 'outer' gauges into tensors
-                inv_gauges = []
-                for t, ixs in ((t1, lix), (t2, rix)):
-                    for ix in ixs:
-                        if ix not in gauges:
-                            continue
-
-                        if ix not in have_conditioned:
-                            if ix not in gauges_conditioned:
-                                # first iteration
-                                s = _sval_conditioner(gauges[ix])
-                                gauges_conditioned[ix] = s
-                            else:
-                                snew = _sval_conditioner(gauges[ix])
-                                if damping == 0.0:
-                                    s = snew
-                                else:
-                                    # damped update, combine old and new
-                                    sold = gauges_conditioned[ix]
-                                    s = damping * sold + (1 - damping) * snew
-                                gauges_conditioned[ix] = s
-
-                            # mark as computed
-                            have_conditioned.add(ix)
-                        else:
-                            # have already computed s this sweep
-                            s = gauges_conditioned[ix]
-
-                        t.multiply_index_diagonal_(ix, s)
-                        # keep track of how to invert gauge
-                        inv_gauges.append((t, ix, 1 / s))
-
-                # absorb the inner gauge, if it exists
-                if bond in gauges:
-                    t1.multiply_index_diagonal_(bond, gauges[bond])
-
-                # perform SVD to get new bond gauge
-                tensor_compress_bond(
-                    t1,
-                    t2,
-                    absorb=None,
-                    info=sub_info,
-                    cutoff=0.0,
+                tensor_gauge_simple_bond(
+                    ta,
+                    tb,
+                    gauges,
+                    smudge=smudge,
+                    power=power,
+                    damping=damping,
+                    fuse_multibonds=fuse_multibonds,
+                    bond_ind=bond_ind,
+                    have_conditioned=have_conditioned,
+                    gauges_conditioned=gauges_conditioned,
+                    renorm=True,
+                    info=info,
                     reduce_opts=reduce_opts,
                     compress_opts=compress_opts,
-                    inds=(lix, bond, rix),
                 )
-
-                s = sub_info["singular_values"]
-                snorm = do("linalg.norm", s)
-                new_gauge = s / snorm
-                nfact = do("log10", snorm) + nfact
-
-                if (tol > 0.0) or (pbar is not None):
-                    # check convergence
-                    old_gauge = gauges.get(bond, 1.0)
-
-                    if size(old_gauge) != size(new_gauge):
-                        # the bond has changed size, so we can't
-                        # compare the singular values directly
-                        old_gauge = 1.0
-
-                    sdiff = do("linalg.norm", old_gauge - new_gauge)
-                    max_sdiff = max(max_sdiff, sdiff)
-
-                # update inner gauge and undo outer gauges
-                gauges[bond] = new_gauge
-                for t, ix, inv_s in inv_gauges:
-                    t.multiply_index_diagonal_(ix, inv_s)
 
                 if equalize_norms:
                     # the norms of the tensors are not kept under control by
                     # the the orthogonalization because of the inverse gauge
                     # application above, so explicitly equalize here
-                    tn.strip_exponent(tid1)
-                    tn.strip_exponent(tid2)
+                    tn.strip_exponent(tida)
+                    tn.strip_exponent(tidb)
 
-                # mark conditioned version as out-of-date
-                have_conditioned.discard(bond)
-                has_changed = (tol == 0.0) or (sdiff > tol)
-
+                # mark conditioned version as out-of-date (note we still retain
+                # the old version in gauge_conditioned for possible damping)
+                have_conditioned.discard(bond_ind)
+                has_changed = (tol == 0.0) or (info["sdiff"] > tol)
                 if has_changed:
                     # mark index and neighbors as touched for next sweep
-                    next_touched.add(bond)
+                    next_touched.add(bond_ind)
 
-                for neighbor_ind in tn._get_neighbor_inds(bond):
+                for neighbor_ind in tn._get_neighbor_inds(bond_ind):
                     if neighbor_ind in tn._inner_inds:
                         if neighbor_ind in touched:
                             # move into queue
@@ -7401,12 +7693,16 @@ class TensorNetwork:
             if pbar is not None:
                 pbar.update()
                 pbar.set_description(
-                    f"max|dS|={max_sdiff:.2e}, nfact={nfact:.2f}"
+                    f"max|dS|={info['max_sdiff']:.2e}, "
+                    f"nfact={info['exponent']:.2f}"
                 )
 
-            unconverged = (tol == 0.0) or (max_sdiff > tol)
+            unconverged = (tol == 0.0) or (info["max_sdiff"] > tol)
             it += 1
 
+        # pop the accrued scale back out - it is redistributed into the network
+        # below, not left as a pending exponent for the caller to apply
+        nfact = info.pop("exponent")
         if equalize_norms:
             tn.exponent += nfact
         else:
@@ -7421,9 +7717,11 @@ class TensorNetwork:
                 t1.multiply_index_diagonal_(ix, s_1_2)
                 t2.multiply_index_diagonal_(ix, s_1_2)
 
-        if info is not None:
-            info["iterations"] = it
-            info["max_sdiff"] = max_sdiff
+        info["iterations"] = it
+        # if diffs were never computed (tol == 0.0 and no progbar) report -1.0
+        info.setdefault("max_sdiff", -1.0)
+        # running diff is just internal bookeeping
+        info.pop("sdiff", None)
 
         return tn
 

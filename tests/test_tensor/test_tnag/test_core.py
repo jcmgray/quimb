@@ -205,6 +205,47 @@ def test_normalize_simple():
         assert k.H @ k == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize(
+    "damping,power,smudge,fuse_multibonds",
+    [
+        (0.0, 1.0, 1e-12, True),  # default path, multibonds fused
+        (0.5, 1.0, 1e-12, True),  # damped update
+        (0.0, 0.5, 1e-12, True),  # power != 1
+        (0.0, 1.0, 0.0, True),  # smudge == 0
+        (0.0, 1.0, 1e-12, False),  # multibonds kept separate
+    ],
+)
+def test_gauge_all_simple_options(damping, power, smudge, fuse_multibonds):
+    # cyclic 2x2 PEPS has all multibonds
+    psi = qtn.PEPS.rand(2, 2, bond_dim=3, cyclic=True, seed=10)
+    norm0 = psi.norm()
+
+    opts = dict(
+        max_iterations=1000,
+        tol=1e-11,
+        damping=damping,
+        power=power,
+        smudge=smudge,
+        fuse_multibonds=fuse_multibonds,
+    )
+
+    psig = psi.copy()
+    psig.gauge_all_simple_(**opts)
+    assert psig.norm() == pytest.approx(norm0)
+    assert psig.num_indices == 8 if fuse_multibonds else 12
+
+    gauges = {}
+    info = {}
+    psi.gauge_all_simple_(gauges=gauges, info=info, **opts)
+    assert len(gauges) == (4 if fuse_multibonds else 8)
+
+    assert info["iterations"] <= 1000
+    if info["iterations"] < 1000:
+        assert info["max_sdiff"] < 1e-11
+    # the accrued scale is popped back out, not left as a pending exponent
+    assert "exponent" not in info
+
+
 @pytest.mark.parametrize("grow_from", ["all", "any"])
 def test_local_expectation_sloop_expand(grow_from):
     import quimb as qu

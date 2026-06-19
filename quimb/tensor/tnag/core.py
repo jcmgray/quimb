@@ -747,6 +747,13 @@ def tensor_network_ag_gate_simple(
         Supplied to
         :meth:`~quimb.tensor.gating.tensor_network_gate_inds`.
     """
+    if not inplace:
+        warnings.warn(
+            "Even with `inplace=False`, the supplied `gauges` dict is still "
+            "modified in place - this is currently the only way to access the "
+            "updated bond gauge."
+        )
+
     tn = self if inplace else self.copy()
 
     if not isinstance(where, (tuple, list)):

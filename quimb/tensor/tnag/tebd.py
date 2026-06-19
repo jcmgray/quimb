@@ -88,11 +88,10 @@ class LocalHamGen:
         an edge and each value the local hamilotonian term for those two nodes.
     H1 : array_like or dict[node, array_like], optional
         The one site term(s). If a single array is given, assume to be the
-        default onsite term for all terms. If a dict is supplied,
-        the keys should represent specific coordinates like
-        ``(i, j)`` with the values the array representing the local term for
-        that site. A default term for all remaining sites can still be supplied
-        with the key ``None``.
+        default onsite term for all terms. If a dict is supplied, the keys
+        should represent specific coordinates like ``(i, j)`` with the values
+        the array representing the local term for that site. A default term for
+        all remaining sites can still be supplied with the key ``None``.
 
     Attributes
     ----------
@@ -114,7 +113,7 @@ class LocalHamGen:
                 self.terms[key] = self._convert_from_qarray_cached(X)
 
         self.sites = tuple(
-            sorted(set(itertools.chain.from_iterable(self.terms)))
+            sorted({coo for where in self.terms for coo in where})
         )
 
         # first combine terms to ensure coo1 < coo2
@@ -958,7 +957,11 @@ class GateSimpleUpdateMixin:
         self._psi = psi.copy()
         if gauges is None:
             self._gauges = {}
-            self._psi.gauge_all_simple_(max_iterations=1, gauges=self._gauges)
+            self._psi.gauge_all_simple_(
+                max_iterations=1,
+                gauges=self._gauges,
+                fuse_multibonds=False,
+            )
         else:
             self._gauges = dict(gauges)
 
@@ -1024,7 +1027,12 @@ class GateSimpleUpdateMixin:
             self._gauges = self._next_gauges
 
         # do the equilibration!
-        self._psi.gauge_all_simple_(gauges=self._gauges, info=info, **kwargs)
+        self._psi.gauge_all_simple_(
+            gauges=self._gauges,
+            fuse_multibonds=False,
+            info=info,
+            **kwargs,
+        )
         if (not self.equilibration_ns) or (
             self._n != self.equilibration_ns[-1]
         ):
