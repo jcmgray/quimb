@@ -6147,6 +6147,7 @@ class CircuitMPSLazy(CircuitMPS):
         )
 
     """
+
     def __init__(
         self,
         N=None,
@@ -6170,7 +6171,7 @@ class CircuitMPSLazy(CircuitMPS):
             dtype=dtype,
             to_backend=to_backend,
             convert_eager=convert_eager,
-            **circuit_opts
+            **circuit_opts,
         )
         # separate options for compression step to avoid unknown kwarg errors
         # when passed to `tensor_network_1d_compress`
@@ -6255,9 +6256,13 @@ class CircuitMPSLazy(CircuitMPS):
                 break
 
         for site in range(min_site, max_site + 1):
-            self._uncompressed_sites[site] = self._uncompressed_sites.get(site, 0) + 1
+            self._uncompressed_sites[site] = (
+                self._uncompressed_sites.get(site, 0) + 1
+            )
 
-        return super()._apply_gate(gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts)
+        return super()._apply_gate(
+            gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts
+        )
 
     @property
     def psi(self):

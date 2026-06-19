@@ -4,10 +4,10 @@ from .circuit import (
     Circuit,
     CircuitDense,
     CircuitMPS,
+    CircuitMPSLazy,
     CircuitPEPOSimpleUpdate,
     CircuitPEPSSimpleUpdate,
     CircuitPermMPS,
-    CircuitMPSLazy,
     Gate,
 )
 from .circuit_gen import (

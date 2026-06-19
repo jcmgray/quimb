@@ -182,9 +182,7 @@ def factor_pairs(N):
     return factors
 
 
-def random_lattice_gates(
-    N, num_layers=1, angle_range=None, seed=42
-):
+def random_lattice_gates(N, num_layers=1, angle_range=None, seed=42):
     from itertools import product
 
     rng = np.random.default_rng(seed)
@@ -226,12 +224,16 @@ def random_lattice_gates(
             if y + 1 < cols:
                 a, b = site(x, y), site(x, y + 1)
                 gates.append(
-                    qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+                    qtn.Gate.from_raw(
+                        rng.choice(two_site_gates), qubits=[a, b]
+                    )
                 )
             if x + 1 < rows:
                 a, b = site(x, y), site(x + 1, y)
                 gates.append(
-                    qtn.Gate.from_raw(rng.choice(two_site_gates), qubits=[a, b])
+                    qtn.Gate.from_raw(
+                        rng.choice(two_site_gates), qubits=[a, b]
+                    )
                 )
 
     return gates
@@ -1613,7 +1615,9 @@ class TestCircuitMPS:
 
     @pytest.mark.parametrize("sweep_reverse", [False, True])
     def test_lazymps_local_expectation(self, sweep_reverse):
-        circ = qtn.CircuitMPSLazy(3, compress_opts=dict(sweep_reverse=sweep_reverse))
+        circ = qtn.CircuitMPSLazy(
+            3, compress_opts=dict(sweep_reverse=sweep_reverse)
+        )
         circ.h(0)
         circ.cx(0, 1)
         circ._compress()
@@ -1732,7 +1736,7 @@ class TestCircuitMPS:
             6: 2,
             7: 2,
             8: 2,
-            9: 1
+            9: 1,
         }
 
         checker = qtn.Circuit(N=10)
@@ -1741,7 +1745,9 @@ class TestCircuitMPS:
         assert circ.psi.norm() == pytest.approx(1.0)
         assert circ.psi.distance_normalized(checker.psi) < 1e-6
 
-    @pytest.mark.parametrize("method", ["dm", "direct", "src", "srcmps", "zipup", "zipup-first"])
+    @pytest.mark.parametrize(
+        "method", ["dm", "direct", "src", "srcmps", "zipup", "zipup-first"]
+    )
     def test_lazymps_2d_long_range_dynamics_without_compression(self, method):
         N = 10
 
@@ -1749,7 +1755,9 @@ class TestCircuitMPS:
 
         # bond 32 would be sufficient to represent the state exactly, but
         # "zipup" requires bond 64 to be exact
-        circ = qtn.CircuitMPSLazy(N, max_bond=64, method=method, compress_every=4)
+        circ = qtn.CircuitMPSLazy(
+            N, max_bond=64, method=method, compress_every=4
+        )
         circ.apply_gates(gates)
         lazy_state = circ.psi
 
@@ -1759,17 +1767,27 @@ class TestCircuitMPS:
 
         fidelity = np.abs(lazy_state.H @ dense_state) ** 2
 
-        assert fidelity == pytest.approx(1.0, abs=1e-10), f"Fidelity too low for N={N}, method={method}"
+        assert fidelity == pytest.approx(1.0, abs=1e-10), (
+            f"Fidelity too low for N={N}, method={method}"
+        )
 
-    @pytest.mark.parametrize("method", ["dm", "direct", "src", "srcmps", "zipup", "zipup-first"])
-    def test_lazymps_2d_long_range_dynamics_with_nontrivial_compression(self, method):
+    @pytest.mark.parametrize(
+        "method", ["dm", "direct", "src", "srcmps", "zipup", "zipup-first"]
+    )
+    def test_lazymps_2d_long_range_dynamics_with_nontrivial_compression(
+        self, method
+    ):
         N = 10
 
         # create a long-range circuit on 10 qubits, which requires bond dimension 16
         # to be represented exactly
-        gates = random_lattice_gates(N, num_layers=3, angle_range=(0.0, 0.1), seed=1234)
+        gates = random_lattice_gates(
+            N, num_layers=3, angle_range=(0.0, 0.1), seed=1234
+        )
 
-        circ = qtn.CircuitMPSLazy(N, max_bond=8, method=method, compress_every=4)
+        circ = qtn.CircuitMPSLazy(
+            N, max_bond=8, method=method, compress_every=4
+        )
         circ.apply_gates(gates)
         lazy_state = circ.psi
 
@@ -1786,7 +1804,9 @@ class TestCircuitMPS:
 
         fidelity = np.abs(lazy_state.H @ dense_state) ** 2
 
-        assert fidelity >= baseline, f"Fidelity too low for N={N}, method={method}"
+        assert fidelity >= baseline, (
+            f"Fidelity too low for N={N}, method={method}"
+        )
 
 
 class TestCircuitPEPSSimpleUpdate:
@@ -2322,8 +2342,12 @@ class TestCircuitPEPOSimpleUpdate:
     def test_geometry_inferred_from_gates(self):
         rng = np.random.default_rng(1)
         gates = [
-            qtn.Gate("SU4", params=rng.uniform(0, 2 * np.pi, 15), qubits=[0, 1]),
-            qtn.Gate("SU4", params=rng.uniform(0, 2 * np.pi, 15), qubits=[1, 2]),
+            qtn.Gate(
+                "SU4", params=rng.uniform(0, 2 * np.pi, 15), qubits=[0, 1]
+            ),
+            qtn.Gate(
+                "SU4", params=rng.uniform(0, 2 * np.pi, 15), qubits=[1, 2]
+            ),
         ]
         circ = qtn.CircuitPEPOSimpleUpdate(gates=gates, max_bond=8)
         assert set(circ.sites) == {0, 1, 2}
@@ -2423,7 +2447,9 @@ class TestCircuitPEPOSimpleUpdate:
             circ.apply_gate(qtn.Gate.from_raw(qu.rand_uni(4), qubits=[0, 2]))
         with pytest.raises(ValueError):
             # three qubit gate
-            circ.apply_gate(qtn.Gate.from_raw(qu.rand_uni(8), qubits=[0, 1, 2]))
+            circ.apply_gate(
+                qtn.Gate.from_raw(qu.rand_uni(8), qubits=[0, 1, 2])
+            )
         with pytest.raises(ValueError):
             # controlled gate
             circ.apply_gate(
