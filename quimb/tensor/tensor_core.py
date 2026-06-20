@@ -6237,7 +6237,15 @@ class TensorNetwork:
 
         # rewire and combine
         tn_target.reindex_(tixmap)
-        tn_target |= gate.reindex(gixmap)
+        # the connection indices (values of tixmap) are intentionally shared
+        # between tn_target and gate; exclude them from the collision check so
+        # that hyperindices are not inadvertently mangled during the merge
+        connection_inds = oset(tixmap.values())
+        gate_reindexed = gate.reindex(gixmap)
+        clash_ix = (tn_target._inner_inds & gate_reindexed._inner_inds) - connection_inds
+        if clash_ix:
+            gate_reindexed.reindex_({ix: rand_uuid() for ix in clash_ix})
+        tn_target.add_tensor_network(gate_reindexed, virtual=True, check_collisions=False)
 
         return tn_target
 
