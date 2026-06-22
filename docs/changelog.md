@@ -17,9 +17,13 @@ Release notes for `quimb`.
 - [`eigh_truncated`](quimb.tensor.decomp.eigh_truncated): add a ``shift`` option for optional diagonal regularization.
 - [`CircuitMPSLazy`](quimb.tensor.circuit.CircuitMPSLazy): add a MPS-based circuit simulator using lazily evaluated gates and periodic automated compression, performing better compared to `CircuitMPS` for long-range gates when using `src` compression method.
 - [`Circuit.from_openqasm3_str`](quimb.tensor.circuit.Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](quimb.tensor.circuit.Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](quimb.tensor.circuit.Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
+- [`CircuitDense`](quimb.tensor.circuit.CircuitDense): support controlled gates supplied via the ``controls=`` kwarg, by inserting the low-rank hyper tensor network representation of the gate and contracting it into the dense state (avoiding ever forming the full dense operator).
 
 
 **Bug fixes:**
+
+- [`CircuitDense`](quimb.tensor.circuit.CircuitDense): fix `psi`, `partial_trace` and `local_expectation`, which raised ``ValueError`` because the contracted ``Dense1D`` view was not given its number of sites.
+- [`CircuitPermMPS`](quimb.tensor.circuit.CircuitPermMPS): fix `amplitude`, `to_dense` and `local_expectation` returning incorrectly-labelled qubits under a non-trivial lazy permutation (only `sample` previously inverted the permutation back to logical qubit order).
 
 - [`tensor_network_1d_compress_src`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_src) and [`tensor_network_1d_compress_srcmps`](quimb.tensor.tn1d.compress.tensor_network_1d_compress_srcmps): call [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like) like the other 1D compression methods, fixing compression of tensor networks with long range (site skipping) bonds, e.g. from lazily applied long range gates.
 - [`enforce_1d_like`](quimb.tensor.tn1d.compress.enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
