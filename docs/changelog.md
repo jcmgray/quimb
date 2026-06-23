@@ -20,6 +20,11 @@ Release notes for `quimb`.
 - [`CircuitDense`](quimb.tensor.circuit.CircuitDense): support controlled gates supplied via the ``controls=`` kwarg, by inserting the low-rank hyper tensor network representation of the gate and contracting it into the dense state (avoiding ever forming the full dense operator).
 
 
+**Internal:**
+
+- reorganize the `quimb.tensor.circuit` module into a package (`gates`, `qasm`, `exact`, `mps`, `peps`, `pepo` submodules). The public import path `quimb.tensor.circuit.*` and every class's ``__module__`` are unchanged, so this is behavior-preserving for users and pickles.
+
+
 **Bug fixes:**
 
 - [`CircuitDense`](quimb.tensor.circuit.CircuitDense): fix `psi`, `partial_trace` and `local_expectation`, which raised ``ValueError`` because the contracted ``Dense1D`` view was not given its number of sites.
