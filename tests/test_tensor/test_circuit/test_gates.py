@@ -133,7 +133,6 @@ class TestCircuitGates:
         assert qu.expec(psi, psi) == pytest.approx(1.0)
 
     def test_auto_split_gate(self):
-        n = 3
         ops = [
             ("u3", 1.0, 2.0, 3.0, 0),
             ("u3", 2.0, 3.0, 1.0, 1),
@@ -146,16 +145,19 @@ class TestCircuitGates:
             ("h", 1),
             ("h", 2),
         ]
-        cnorm = qtn.Circuit(n, gate_opts=dict(contract="split-gate"))
-        cnorm.apply_gates(ops)
+        cnorm = qtn.Circuit.from_gates(
+            ops, gate_opts=dict(contract="split-gate")
+        )
         assert cnorm.psi.max_bond() == 4
 
-        cswap = qtn.Circuit(n, gate_opts=dict(contract="swap-split-gate"))
-        cswap.apply_gates(ops)
+        cswap = qtn.Circuit.from_gates(
+            ops, gate_opts=dict(contract="swap-split-gate")
+        )
         assert cswap.psi.max_bond() == 4
 
-        cauto = qtn.Circuit(n, gate_opts=dict(contract="auto-split-gate"))
-        cauto.apply_gates(ops)
+        cauto = qtn.Circuit.from_gates(
+            ops, gate_opts=dict(contract="auto-split-gate")
+        )
         assert cauto.psi.max_bond() == 2
 
         assert qu.fidelity(
@@ -222,3 +224,29 @@ class TestCircuitGates:
         circ.apply_gate("SWAP", qubits=(N - 2, N - 1), controls=range(N - 2))
         (b,) = circ.sample(1, group_size=3, seed=42)
         assert b[N - 2] == "0"
+
+
+class TestGate:
+    def test_copy_with_is_nonmutating(self):
+        g = qtn.Gate("RX", params=(0.5,), qubits=(2,))
+        g2 = g.copy_with(qubits=(3,))
+        assert g2.qubits == (3,)
+        assert g.qubits == (2,)  # original unchanged
+        assert g2.label == "RX"
+        assert tuple(g2.params) == (0.5,)
+
+    @pytest.mark.parametrize(
+        "label, params, qubits, L",
+        [
+            ("CX", (), (0, 1), 2),
+            ("CX", (), (0, 2), 4),
+            ("RZZ", (0.7,), (1, 3), 4),
+        ],
+    )
+    def test_build_mpo_is_unitary(self, label, params, qubits, L):
+        gate = qtn.Gate(label, params=params, qubits=qubits)
+        mpo = gate.build_mpo(L=L)
+        assert isinstance(mpo, qtn.MatrixProductOperator)
+        assert mpo.L == L
+        U = mpo.to_dense()
+        assert_allclose(U @ U.conj().T, np.eye(U.shape[0]), atol=1e-10)

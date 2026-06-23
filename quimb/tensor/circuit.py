@@ -1890,6 +1890,38 @@ def _apply_controlled_gate_htn(
     )
 
 
+def _apply_controlled_gate_eager(psi, gate, tags=None, **gate_opts):
+    """Apply a multi-controlled gate to a state whose gates are eagerly
+    contracted (e.g. a dense statevector): insert the low-rank HTN
+    representation of the gate, then contract the resulting tensor network
+    back into the dense state. This avoids ever forming the full ``2**(2N)``
+    dense operator.
+    """
+    all_qubits = (*gate.controls, *gate.qubits)
+    ntotal = len(all_qubits)
+    upper_inds = [rand_uuid() for _ in range(ntotal)]
+    lower_inds = [rand_uuid() for _ in range(ntotal)]
+
+    htn = build_controlled_gate_htn(
+        len(gate.controls),
+        gate,
+        upper_inds=upper_inds,
+        lower_inds=lower_inds,
+        tags_each=[psi.site_tag(i) for i in all_qubits],
+        tags_all=tags,
+    )
+    psi.gate_inds_with_tn_(
+        inds=[psi.site_ind(i) for i in all_qubits],
+        gate=htn,
+        gate_inds_inner=lower_inds,
+        gate_inds_outer=upper_inds,
+    )
+    # contract the whole state back to one tensor; strictly only the acted-on
+    # sites' region needs contracting, but that requires carefully specifying
+    # output_inds (the HTN hyper-index plus bonds to the rest of the state)
+    psi.contract_(output_inds=tuple(psi.outer_inds()))
+
+
 def apply_controlled_gate(
     psi,
     gate,
@@ -1900,13 +1932,13 @@ def apply_controlled_gate(
 ):
     if contract in ("auto-mps", "nonlocal"):
         _apply_controlled_gate_mps(psi, gate, tags=tags, **gate_opts)
-    elif contract in (
-        "auto-split-gate",
-        "split-gate",
-    ):
+    elif contract in ("auto-split-gate", "split-gate"):
         _apply_controlled_gate_htn(
             psi, gate, tags=tags, propagate_tags=propagate_tags, **gate_opts
         )
+    elif contract is True:
+        # eagerly contracted dense state: form HTN gate and contract it in
+        _apply_controlled_gate_eager(psi, gate, tags=tags, **gate_opts)
     else:
         raise ValueError(
             f"Contract method '{contract}' not "
@@ -6023,6 +6055,49 @@ class CircuitPermMPS(CircuitMPS):
 
         return psi
 
+    def to_dense(
+        self, reverse=False, optimize="auto-hq", backend=None, dtype=None
+    ):
+        # contract the qubit-relabeled MPS directly (`self.psi` already maps
+        # `site_ind(i)` to logical qubit `i`); no exact-TN simplification
+        psi = self.psi
+        self._maybe_convert(psi, dtype)
+        output_inds = tuple(map(psi.site_ind, range(self.N)))
+        if reverse:
+            output_inds = output_inds[::-1]
+        t = psi.contract(
+            all, output_inds=output_inds, optimize=optimize, backend=backend
+        )
+        k = ops.reshape(t.data, (-1, 1))
+        if isinstance(k, np.ndarray):
+            k = qu.qarray(k)
+        return k
+
+    def amplitude(self, b, optimize="auto-hq", backend=None, dtype=None):
+        if len(b) != self.N:
+            raise ValueError(
+                f"Bit-string {b} length does not "
+                f"match number of qubits {self.N}."
+            )
+        # project each physical index onto its bitstring value first, then
+        # contract the resulting scalar network (cheap single-layer amplitude)
+        psi = self.psi
+        self._maybe_convert(psi, dtype)
+        for i, x in zip(range(self.N), b):
+            psi.isel_({psi.site_ind(i): int(x)})
+        return psi.contract(
+            all, output_inds=(), optimize=optimize, backend=backend
+        )
+
+    def local_expectation(self, G, where, *args, **kwargs):
+        # translate logical qubit(s) to their current physical site(s), since
+        # the underlying MPS is stored in permuted (physical) order
+        if isinstance(where, numbers.Integral):
+            where = self.qubits.index(where)
+        else:
+            where = tuple(self.qubits.index(w) for w in where)
+        return super().local_expectation(G, where, *args, **kwargs)
+
 
 class CircuitDense(Circuit):
     """Quantum circuit simulation keeping the state in full dense form."""
@@ -6046,7 +6121,7 @@ class CircuitDense(Circuit):
     def psi(self):
         t = self._psi ^ ...
         psi = t.as_network()
-        psi.view_as_(Dense1D, like=self._psi)
+        psi.view_as_(Dense1D, like=self._psi, L=self.N)
         return psi
 
     @property

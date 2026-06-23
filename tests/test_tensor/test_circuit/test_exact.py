@@ -29,10 +29,7 @@ def random_a2a_circ(L, depth, seed=42):
             g = rng.choice(["rx", "ry", "rz"])
             gates.append((d, g, rng.normal(1.0, 0.5), q))
 
-    circ = qtn.Circuit(L)
-    circ.apply_gates(gates)
-
-    return circ
+    return qtn.Circuit.from_gates(gates)
 
 
 def qft_circ(n, swaps=True, **circuit_opts):
@@ -492,3 +489,63 @@ class TestCircuitParams:
 
         assert circ.get_params()["theta"].dtype == np.float32
         assert circ.psi["GATE_0"].params.dtype == np.float32
+
+
+class TestCircuitDense:
+    def _circ(self, Sim=qtn.CircuitDense):
+        N = 5
+        gates = [("H", i) for i in range(N)]
+        for i in range(N - 1):
+            gates.append(("CX", i, i + 1))
+        for i in range(N):
+            gates.append(("RY", 0.1 * (i + 1), i))
+        return Sim.from_gates(gates), N, gates
+
+    def test_matches_exact_statevector_and_amplitude(self):
+        cd, N, gates = self._circ()
+        ce = qtn.Circuit.from_gates(gates)
+        assert_allclose(cd.to_dense(), ce.to_dense(), atol=1e-12)
+        for b in ["0" * N, "1" * N, "01010"]:
+            assert_allclose(cd.amplitude(b), ce.amplitude(b), atol=1e-12)
+
+    def test_simulate_counts(self):
+        cd, N, _ = self._circ()
+        counts = cd.simulate_counts(512)
+        assert sum(counts.values()) == 512
+        assert all(len(b) == N for b in counts)
+
+    def test_psi_partial_trace_local_expectation_match_exact(self):
+        cd, N, gates = self._circ()
+        ce = qtn.Circuit.from_gates(gates)
+        assert_allclose(cd.psi.to_dense(), ce.psi.to_dense(), atol=1e-12)
+        assert_allclose(
+            cd.partial_trace([0, 1]), ce.partial_trace([0, 1]), atol=1e-12
+        )
+        for i in range(N):
+            assert_allclose(
+                cd.local_expectation(qu.pauli("Z"), i),
+                ce.local_expectation(qu.pauli("Z"), i),
+                atol=1e-12,
+            )
+
+    def test_uni_unsupported(self):
+        # a contracted dense state has no unitary TN to extract
+        cd, N, _ = self._circ()
+        with pytest.raises(ValueError):
+            cd.uni
+
+    def test_controlled_gates_match_exact(self):
+        # controls= gates apply by contracting the controlled operator into
+        # the dense state (single and multi control)
+        gates = [
+            ("H", 0),
+            ("RY", 0.7, 1),
+            ("RX", 0.3, 2),
+            ("RY", 0.9, 3),
+            qtn.Gate("X", params=(), qubits=(2,), controls=(0,)),
+            qtn.Gate("Z", params=(), qubits=(1,), controls=(0, 3)),
+            qtn.Gate("Y", params=(), qubits=(3,), controls=(0, 1, 2)),
+        ]
+        cd = qtn.CircuitDense.from_gates(gates)
+        ce = qtn.Circuit.from_gates(gates)
+        assert_allclose(cd.to_dense(), ce.to_dense(), atol=1e-12)
