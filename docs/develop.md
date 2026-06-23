@@ -115,6 +115,29 @@ The local server hosts the built docs at
 `http://localhost:8000/`. The generated HTML is in `docs/_build/html/`.
 
 
+### Referencing functions and methods
+
+The API docs are generated with
+[`sphinx-autoapi`](https://sphinx-autoapi.readthedocs.io/en/latest/), which
+documents each object only where it is *defined*, (not where it is re-exported,
+e.g. `Tensor` lives at `quimb.tensor.tensor_core.Tensor`, not
+`quimb.tensor.Tensor`). References should either use the full path or a
+short suffix-matching form:
+
+- In MyST markdown (changelog, notebooks, prose), use a link with a leading
+  `#`: `` [`Tensor`](#Tensor) ``, `` [`sample`](#CircuitMPS.sample) ``. This is
+  the preferred form, since it also renders cleanly as plain markdown.
+- In a docutils role, use a leading `.`: `` {class}`.Tensor` ``,
+  `` {meth}`.CircuitMPS.sample` ``. Roles are typed, so prefer them in
+  docstrings and to disambiguate a name that matches more than one object.
+
+Keep enough trailing components to be unambiguous, e.g.
+`` {meth}`.Class.method` `` rather than `` {meth}`.method` ``. If a bare name
+still matches several objects, qualify it further
+(`` [x](#tensor_core.bonds) ``) or give an explicit title
+(`` {func}`svds <.base_linalg.svds>` ``).
+
+
 ### Building the DocSet
 
 Building the DocSet requires

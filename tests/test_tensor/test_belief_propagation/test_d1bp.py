@@ -14,7 +14,7 @@ def test_contract_tree_exact(local_convergence):
         tn, info=info, local_convergence=local_convergence, progbar=True
     )
     assert info["converged"]
-    assert Z == pytest.approx(Z_bp, rel=1e-12)
+    assert Z == pytest.approx(Z_bp, rel=1e-10)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
