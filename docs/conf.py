@@ -61,6 +61,16 @@ autosectionlabel_prefix_document = True
 
 # sphinx-autoapi
 autoapi_dirs = ["../quimb"]
+autoapi_ignore = ["*/experimental/*", "*/.ipynb_checkpoints/*"]
+# these are the defaults apart from 'imported-members' is removed
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "private-members",
+    "show-inheritance",
+    "show-module-summary",
+    "special-members",
+]
 
 extlinks = {
     "issue": ("https://github.com/jcmgray/quimb/issues/%s", "GH #%s"),
@@ -74,6 +84,8 @@ intersphinx_mapping = {
     "cotengra": ("https://cotengra.readthedocs.io/en/latest/", None),
     "autoray": ("https://autoray.readthedocs.io/en/latest/", None),
 }
+# these are sometimes not reachable: don't let build hang
+intersphinx_timeout = 10
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

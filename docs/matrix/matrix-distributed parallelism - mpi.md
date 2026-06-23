@@ -9,11 +9,11 @@ By default, `quimb` thus switches between standard execution and a cached pool o
 
 If running in a distributed cluster it is also best not to pass full operators to these functions (which will be pickled then transferred), rather it is best to leave the operator unconstructed, whith each worker constructing only the rows it needs.
 
-1. The first aspect is handled by the {class}`~quimb.Lazy` object, which is essentially
+1. The first aspect is handled by the {class}`.Lazy` object, which is essentially
    `functools.partial` with a `.shape` attribute that must be supplied.
 2. The second aspect (only constructing the right rows) is achieved whenever a function takes a
    `ownership` argument specifying the slice of rows to construct. Any operators based on
-   {func}`~quimb.kron` and {func}`~quimb.ikron` such as the built-in Hamiltonians can do this.
+   {func}`.kron` and {func}`.ikron` such as the built-in Hamiltonians can do this.
 
 See the {ref}`examples` for a demonstration of this.
 
@@ -34,7 +34,7 @@ In syncro mode, potentially conflicting operations such as IO should be guarded 
 
 ## MPI pool
 
-The pool of MPI workers is generated automatically for special functions that require it, but can also be explicitly used with {func}`~quimb.get_mpi_pool` for other simple parallel tasks that will then scale to multi-node cluster settings.
+The pool of MPI workers is generated automatically for special functions that require it, but can also be explicitly used with {func}`.get_mpi_pool` for other simple parallel tasks that will then scale to multi-node cluster settings.
 
 See the {ref}`examples` for a demonstration of this.
 
@@ -122,4 +122,4 @@ I am worker 3 of total 4 running main script...
 0: I have logneg results: [0.8909014842733911, 0.8909987302898126, 0.892404590019593, 0.8921292033437763, 0.8912200853252026, 0.8913080757931393, 0.8908582609382716, 0.8924006528057071]
 ```
 
-Now all workers run the main script, but still correctly split work when a `slepc` computation is encountered, and when work is distributed via {func}`~quimb.linalg.mpi_launcher.get_mpi_pool`.
+Now all workers run the main script, but still correctly split work when a `slepc` computation is encountered, and when work is distributed via {func}`.get_mpi_pool`.

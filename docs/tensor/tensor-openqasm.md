@@ -1,15 +1,15 @@
 # Importing OpenQASM Circuits
 
 `quimb` supports importing both OpenQASM 2 and a practical subset of
-OpenQASM 3 into [`Circuit`](quimb.tensor.circuit.Circuit) objects.
+OpenQASM 3 into [`Circuit`](#Circuit) objects.
 
 ## OpenQASM 3 entry points
 
-Use the classmethods on [`Circuit`](quimb.tensor.circuit.Circuit):
+Use the classmethods on [`Circuit`](#Circuit):
 
-- [`Circuit.from_openqasm3_str`](quimb.tensor.circuit.Circuit.from_openqasm3_str)
-- [`Circuit.from_openqasm3_file`](quimb.tensor.circuit.Circuit.from_openqasm3_file)
-- [`Circuit.from_openqasm3_url`](quimb.tensor.circuit.Circuit.from_openqasm3_url)
+- [`Circuit.from_openqasm3_str`](#Circuit.from_openqasm3_str)
+- [`Circuit.from_openqasm3_file`](#Circuit.from_openqasm3_file)
+- [`Circuit.from_openqasm3_url`](#Circuit.from_openqasm3_url)
 
 These parse the source and immediately build a circuit with the imported
 gates:
@@ -60,7 +60,7 @@ Unsupported constructs raise `NotImplementedError`, including:
 
 OpenQASM 3 `input` declarations are registered as named circuit parameters so
 that values can be bound later with
-[`Circuit.set_params`](quimb.tensor.circuit.Circuit.set_params):
+[`Circuit.set_params`](#Circuit.set_params):
 
 ```python
 import quimb.tensor as qtn
@@ -92,13 +92,13 @@ Named updates can be mixed with raw gate-index updates in the same
 This round-trips with `get_params()`, which returns named parameters plus only
 those integer-indexed parametrized gates not managed by named expressions, and
 works with generic parameter-handling tools such as
-[`TNOptimizer`](quimb.tensor.optimize.TNOptimizer). Partial named updates are
+[`TNOptimizer`](#TNOptimizer). Partial named updates are
 allowed: expressions that still depend on unbound names remain `nan` until
 those names are set. Unknown names raise an error, and expression-managed gates
 cannot be overridden directly via their integer gate indices.
 
 The same named-parameter mechanism can also be used outside OpenQASM import via
-[`Circuit.register_named_params`](quimb.tensor.circuit.Circuit.register_named_params),
+[`Circuit.register_named_params`](#Circuit.register_named_params),
 either by supplying a sequence of names or a mapping of initial values, with
 string expressions such as `cos(theta / 2)` or callables attached to arbitrary
 parametrized gates. String-keyed `set_params(...)` updates require such named
@@ -108,9 +108,9 @@ parameters to have been registered first.
 
 Equivalent OpenQASM 2 import helpers remain available:
 
-- [`Circuit.from_openqasm2_str`](quimb.tensor.circuit.Circuit.from_openqasm2_str)
-- [`Circuit.from_openqasm2_file`](quimb.tensor.circuit.Circuit.from_openqasm2_file)
-- [`Circuit.from_openqasm2_url`](quimb.tensor.circuit.Circuit.from_openqasm2_url)
+- [`Circuit.from_openqasm2_str`](#Circuit.from_openqasm2_str)
+- [`Circuit.from_openqasm2_file`](#Circuit.from_openqasm2_file)
+- [`Circuit.from_openqasm2_url`](#Circuit.from_openqasm2_url)
 
 Where the same gate subset is used, the OpenQASM 2 and OpenQASM 3 import paths
 produce matching circuits.
