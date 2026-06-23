@@ -9,7 +9,6 @@ requires_symmray = pytest.mark.skipif(
 )
 
 
-@requires_symmray
 @pytest.fixture
 def get_fpeps_and_norm():
     import symmray as sr
