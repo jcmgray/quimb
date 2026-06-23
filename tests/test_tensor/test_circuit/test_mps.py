@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
@@ -111,12 +112,8 @@ class TestCircuitMPS:
             )
         )
 
-        circ = qtn.Circuit(N=10)
-        circ.apply_gates(gates)
-        psi_lazy = circ.psi
-        circ = qtn.CircuitMPS(N=10)
-        circ.apply_gates(gates)
-        mps = circ.psi
+        psi_lazy = qtn.Circuit.from_gates(gates).psi
+        mps = qtn.CircuitMPS.from_gates(gates).psi
         assert mps.norm() == pytest.approx(1.0)
         assert mps.distance_normalized(psi_lazy) < 1e-6
 
@@ -140,6 +137,43 @@ class TestCircuitMPS:
         samples = list(circ.sample(10, seed=1234))
         assert len(set(samples)) == 2
 
+    def _entangling_gates(self, N=10, depth=6, seed=1):
+        rng = np.random.default_rng(seed)
+        gates = [("H", i) for i in range(N)]
+        for d in range(depth):
+            for i in range(d % 2, N - 1, 2):
+                gates.append(("CX", i, i + 1))
+            for i in range(N):
+                gates.append(("RY", float(rng.uniform(0, 2 * np.pi)), i))
+        return gates
+
+    def test_max_bond_truncates_the_state(self):
+        gates = self._entangling_gates()
+        full = qtn.CircuitMPS.from_gates(gates)
+        trunc = qtn.CircuitMPS.from_gates(gates, max_bond=4)
+        assert trunc.psi.max_bond() == 4
+        assert full.psi.max_bond() > 4
+
+    def test_fidelity_and_error_estimate(self):
+        gates = self._entangling_gates()
+        full = qtn.CircuitMPS.from_gates(gates)
+        assert full.fidelity_estimate() == pytest.approx(1.0, abs=1e-10)
+        assert full.error_estimate() == pytest.approx(0.0, abs=1e-10)
+
+        trunc = qtn.CircuitMPS.from_gates(gates, max_bond=4)
+        f = trunc.fidelity_estimate()
+        assert 0.0 < f < 1.0
+        # error estimate is the complementary norm loss
+        assert trunc.error_estimate() == pytest.approx(1.0 - f, abs=1e-10)
+
+    def test_uni_unsupported(self):
+        circ = qtn.CircuitMPS(3)
+        circ.h(0)
+        with pytest.raises(ValueError):
+            circ.uni
+
+
+class TestCircuitPermMPS:
     def test_permmps_sampling(self):
         N = 6
         circ = qtn.CircuitPermMPS(N)
@@ -169,6 +203,124 @@ class TestCircuitMPS:
         assert circ.qubits == [0, 3, 1, 2]
         assert set(circ.sample(10, seed=42)) == {"0100"}
 
+    def _permuting_circuit(self):
+        # nonlocal 2-qubit gates make the lazy qubit permutation non-trivial
+        gates = [("H", 0), ("CX", 0, 3), ("CX", 1, 4), ("RY", 0.3, 2)]
+        return qtn.CircuitPermMPS.from_gates(gates), gates
+
+    def test_qubit_ordering_tracks_permutation(self):
+        cp, _ = self._permuting_circuit()
+        order = tuple(cp.calc_qubit_ordering())
+        assert sorted(order) == list(range(5))  # a genuine permutation
+        assert order != tuple(range(5))  # and a non-trivial one
+
+    def test_get_psi_unordered_is_raw_mps(self):
+        cp, _ = self._permuting_circuit()
+        raw = cp.get_psi_unordered()
+        assert isinstance(raw, qtn.MatrixProductState)
+        # the public psi is a general tensor network, not an MPS
+        assert not isinstance(cp.psi, qtn.MatrixProductState)
+
+    def test_adjacent_su4_matches_exact(self):
+        # an adjacent 2q gate induces no permutation, so psi/to_dense are correct
+        rng = np.random.default_rng(7)
+        su4 = tuple(rng.uniform(0, 2 * np.pi, 15))
+        gates = [("H", 0), ("H", 1), ("SU4", *su4, 0, 1)]
+        # qubit 2 is idle, so pass N explicitly (from_gates would infer N=2)
+        cp = qtn.CircuitPermMPS.from_gates(gates, N=3)
+        ce = qtn.Circuit.from_gates(gates, N=3)
+        assert tuple(cp.qubits) == (0, 1, 2)  # no permutation induced
+        assert abs(qu.fidelity(cp.to_dense(), ce.to_dense())) == pytest.approx(
+            1.0, abs=1e-10
+        )
+
+    def test_sample_correct_under_permutation(self):
+        # sample() inverts the lazy permutation back to logical order
+        # logical state is (|000> + |101>)/√2
+        cp = qtn.CircuitPermMPS.from_gates([("H", 0), ("CX", 0, 2)])
+        assert tuple(cp.qubits) != (0, 1, 2)
+        assert set(cp.sample(50, seed=1)) == {"000", "101"}
+
+    def test_controlled_gate_via_controls_kwarg_unsupported(self):
+        # controlled gates (controls=) are unsupported under the swap+split path
+        cp = qtn.CircuitPermMPS(3)
+        cp.h(0)
+        with pytest.raises(ValueError):
+            cp.apply_gate("X", 2, controls=(0,))
+
+    def test_amplitude_to_dense_correct_under_permutation(self):
+        # the lazy permutation is relabelled back to logical order for the
+        # exact-contraction entry points: H(0);CX(0,2) is (|000> + |101>)/√2
+        cp = qtn.CircuitPermMPS.from_gates([("H", 0), ("CX", 0, 2)])
+        ce = qtn.Circuit.from_gates([("H", 0), ("CX", 0, 2)])
+        assert tuple(cp.qubits) != (0, 1, 2)  # a non-trivial permutation
+        assert cp.amplitude("101") == pytest.approx(ce.amplitude("101"))
+        assert cp.amplitude("110") == pytest.approx(0.0)
+        assert abs(qu.fidelity(cp.to_dense(), ce.to_dense())) == pytest.approx(
+            1.0, abs=1e-10
+        )
+
+    def test_observables_correct_under_3cycle_permutation(self):
+        # a genuine 3-cycle (not self-inverse) with non-symmetric amplitudes:
+        # distinguishes "permutation applied" from "applied twice / not at all"
+        N = 4
+        gates = [
+            ("RY", 0.7, 0),
+            ("RY", 1.1, 1),
+            ("RY", 0.3, 2),
+            ("RY", 0.5, 3),
+            ("CX", 0, 2),
+            ("CX", 0, 3),
+            ("CX", 1, 3),
+        ]
+        cp = qtn.CircuitPermMPS.from_gates(gates)
+        ce = qtn.Circuit.from_gates(gates)
+        order = tuple(cp.qubits)
+        inverse = [0] * N
+        for site, logical in enumerate(order):
+            inverse[logical] = site
+        # genuine 3-cycle: not identity, and not self-inverse (transposition)
+        assert order not in (tuple(range(N)), tuple(inverse))
+
+        assert_allclose(cp.to_dense(), ce.to_dense(), atol=1e-10)
+        for i in range(2**N):
+            b = f"{i:0{N}b}"
+            assert cp.amplitude(b) == pytest.approx(ce.amplitude(b), abs=1e-10)
+        assert_allclose(
+            cp.partial_trace([0, 1]), ce.partial_trace([0, 1]), atol=1e-10
+        )
+        for i in range(N):
+            assert cp.local_expectation(qu.pauli("Z"), i) == pytest.approx(
+                ce.local_expectation(qu.pauli("Z"), i)
+            )
+
+    def test_long_range_local_expectation_under_permutation(self):
+        # a 2-site observable whose logical qubits land on non-adjacent
+        # *physical* sites after the lazy permutation
+        N = 6
+        gates = [
+            ("H", 0),
+            ("RY", 0.7, 1),
+            ("RY", 1.1, 2),
+            ("RY", 0.3, 3),
+            ("RY", 0.9, 4),
+            ("RY", 0.5, 5),
+            ("CX", 0, 2),
+            ("CX", 1, 4),
+            ("CZ", 0, 5),
+            ("RZZ", 0.4, 2, 5),
+        ]
+        cp = qtn.CircuitPermMPS.from_gates(gates)
+        ce = qtn.Circuit.from_gates(gates)
+        assert tuple(cp.qubits) != tuple(range(N))  # non-trivial permutation
+        ZZ = qu.pauli("Z") & qu.pauli("Z")
+        for where in [(0, 5), (1, 4), (0, 3)]:
+            assert cp.local_expectation(ZZ, where) == pytest.approx(
+                ce.local_expectation(ZZ, where), abs=1e-10
+            )
+
+
+class TestCircuitMPSLazy:
     def test_lazymps_sampling(self):
         N = 6
         circ = qtn.CircuitMPSLazy(N)
@@ -315,8 +467,7 @@ class TestCircuitMPS:
             9: 1,
         }
 
-        checker = qtn.Circuit(N=10)
-        checker.apply_gates(circ.gates)
+        checker = qtn.Circuit.from_gates(circ.gates)
 
         assert circ.psi.norm() == pytest.approx(1.0)
         assert circ.psi.distance_normalized(checker.psi) < 1e-6
@@ -337,9 +488,7 @@ class TestCircuitMPS:
         circ.apply_gates(gates)
         lazy_state = circ.psi
 
-        circ = qtn.Circuit(N)
-        circ.apply_gates(gates)
-        dense_state = circ.psi
+        dense_state = qtn.Circuit.from_gates(gates).psi
 
         fidelity = np.abs(lazy_state.H @ dense_state) ** 2
 
@@ -367,9 +516,7 @@ class TestCircuitMPS:
         circ.apply_gates(gates)
         lazy_state = circ.psi
 
-        circ = qtn.Circuit(N)
-        circ.apply_gates(gates)
-        dense_state = circ.psi
+        dense_state = qtn.Circuit.from_gates(gates).psi
 
         if method in {"src"}:
             baseline = 0.95
@@ -383,3 +530,53 @@ class TestCircuitMPS:
         assert fidelity >= baseline, (
             f"Fidelity too low for N={N}, method={method}"
         )
+
+    def test_single_qubit_gates_stay_eager(self):
+        circ = qtn.CircuitMPSLazy(4)
+        for i in range(4):
+            circ.h(i)
+            circ.rx(0.3, i)
+        # eager 1q gates leave nothing pending and never grow a bond
+        assert dict(circ._uncompressed_sites) == {}
+        assert circ.psi.max_bond() == 1
+
+    def test_two_qubit_gates_deferred_until_flush(self):
+        circ = qtn.CircuitMPSLazy(4, max_bond=8, compress_every=10)
+        for i in range(3):
+            circ.cx(i, i + 1)
+        # pending, not yet compressed
+        assert dict(circ._uncompressed_sites)
+
+        n_calls = {"n": 0}
+        orig = circ._compress
+
+        def counted():
+            n_calls["n"] += 1
+            return orig()
+
+        circ._compress = counted
+        _ = circ.psi  # a state access flushes exactly once
+        assert n_calls["n"] == 1
+        assert dict(circ._uncompressed_sites) == {}
+
+    def test_special_gates_match_exact(self):
+        gates = [("H", 0), ("H", 1), ("CX", 0, 1), ("SWAP", 1, 2), ("IDEN", 0)]
+        ce = qtn.Circuit.from_gates(gates)
+        cl = qtn.CircuitMPSLazy.from_gates(gates)
+        assert abs(qu.fidelity(cl.to_dense(), ce.to_dense())) == pytest.approx(
+            1.0, abs=1e-10
+        )
+
+    def test_property_setters_sync(self):
+        circ = qtn.CircuitMPSLazy(3)
+        circ.max_bond = 16
+        circ.cutoff = 1e-9
+        circ.method = "dm"
+        assert circ.max_bond == 16
+        assert circ.cutoff == 1e-9
+        assert circ.method == "dm"
+        # both the per-flush compress opts and the gate-application opts track
+        assert circ.gate_opts["max_bond"] == 16
+        assert circ.compress_opts["max_bond"] == 16
+        assert circ.compress_opts["cutoff"] == 1e-9
+        assert circ.compress_opts["method"] == "dm"
