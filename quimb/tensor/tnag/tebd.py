@@ -948,7 +948,7 @@ class GateSimpleUpdateMixin:
         """Return a copy of the current gauges."""
         return self._gauges
 
-    def set_state(self, psi, gauges=None):
+    def set_state(self, psi: TensorNetworkGenVector, gauges=None):
         """Set the current state and possibly the gauges."""
 
         if isinstance(psi, (tuple, list)):
