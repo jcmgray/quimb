@@ -710,3 +710,138 @@ class TestCircuitQASM:
         """
         circ = qtn.Circuit.from_openqasm2_str(qasm_str)
         assert len(circ.gates) == 2
+
+    def test_openqasm2_identity_gate(self):
+        # e.g. cirq emits `id q[i];` for identity gates
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+            OPENQASM 2.0;
+            include "qelib1.inc";
+            qreg q[2];
+            x q[0];
+            id q[0];
+            i q[1];
+            """
+        )
+        assert [g.label for g in circ.gates] == ["X", "IDEN", "IDEN"]
+        # the identity gates leave the state at |10>
+        assert_allclose(circ.psi.to_dense().ravel(), [0, 0, 1, 0])
+
+    def test_openqasm2_gate_name_aliases(self):
+        # u/p/cp are qelib1 gates that are not registered under those literal
+        # names, so they are resolved via the shared alias table
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+            OPENQASM 2.0;
+            include "qelib1.inc";
+            qreg q[2];
+            u(0.1, 0.2, 0.3) q[0];
+            p(0.4) q[1];
+            cp(0.5) q[0], q[1];
+            """
+        )
+        assert [g.label for g in circ.gates] == ["U3", "PHASE", "CPHASE"]
+
+    def test_openqasm2_whole_register_broadcast(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+            OPENQASM 2.0;
+            include "qelib1.inc";
+            qreg q[3];
+            h q;
+            """
+        )
+        assert [g.label for g in circ.gates] == ["H", "H", "H"]
+        assert [tuple(g.qubits) for g in circ.gates] == [(0,), (1,), (2,)]
+
+    def test_openqasm2_math_functions_in_params(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+            OPENQASM 2.0;
+            include "qelib1.inc";
+            qreg q[1];
+            rz(sin(pi / 4)) q[0];
+            """
+        )
+        assert circ.gates[0].params[0] == pytest.approx(math.sin(math.pi / 4))
+
+    def test_openqasm2_reset_unsupported(self):
+        with pytest.raises(NotImplementedError, match="not supported"):
+            qtn.Circuit.from_openqasm2_str(
+                """
+                OPENQASM 2.0;
+                include "qelib1.inc";
+                qreg q[1];
+                reset q[0];
+                """
+            )
+
+    def test_openqasm2_inline_comments_and_multiple_statements(self):
+        circ = qtn.Circuit.from_openqasm2_str(
+            """
+            OPENQASM 2.0;
+            include "qelib1.inc";
+            qreg q[2];
+            /* multi
+            line comment */ h q[0]; // trailing; comment
+            cx q[0], q[1]; x q[1];
+            """
+        )
+        assert [g.label for g in circ.gates] == ["H", "CX", "X"]
+
+    def test_openqasm3_indexed_measurement_warns(self):
+        # qiskit emits per-qubit measurement as `c[i] = measure q[i];`
+        with pytest.warns(SyntaxWarning) as record:
+            circ = qtn.Circuit.from_openqasm3_str(
+                """
+                OPENQASM 3.0;
+                include "stdgates.inc";
+                bit[2] c;
+                qubit[2] q;
+                h q[0];
+                cx q[0], q[1];
+                c[0] = measure q[0];
+                c[1] = measure q[1];
+                """
+            )
+        assert [str(w.message) for w in record] == [
+            "Unsupported operation ignored: bit",
+            "Unsupported operation ignored: measure",
+        ]
+        assert [g.label for g in circ.gates] == ["H", "CX"]
+
+    def test_openqasm3_inline_block_comment(self):
+        # code following a closing block comment on the same line is kept
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            qubit[1] q;
+            /* multi
+            line comment */ h q[0];
+            """
+        )
+        assert [g.label for g in circ.gates] == ["H"]
+
+    def test_openqasm3_inline_line_comment_with_semicolon(self):
+        # a trailing // comment, including stray semicolons, is stripped
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            qubit[1] q;
+            h q[0]; // note: be careful; here
+            """
+        )
+        assert [g.label for g in circ.gates] == ["H"]
+
+    def test_openqasm3_multiple_statements_per_line(self):
+        circ = qtn.Circuit.from_openqasm3_str(
+            """
+            OPENQASM 3.0;
+            include "stdgates.inc";
+            qubit[2] q;
+            h q[0]; cx q[0], q[1];
+            """
+        )
+        assert [g.label for g in circ.gates] == ["H", "CX"]
