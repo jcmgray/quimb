@@ -764,12 +764,12 @@ class Circuit:
         gate_id : Gate, str, or array_like
             Which gate to apply. This can be:
 
-                - A ``Gate`` instance, i.e. with parameters and qubits already
-                  specified.
-                - A string, e.g. ``'H'``, ``'U3'``, etc. in which case
-                  ``gate_args`` should be supplied with ``(*params, *qubits)``.
-                - A raw array, in which case ``gate_args`` should be supplied
-                  with ``(*qubits,)``.
+            - A ``Gate`` instance, i.e. with parameters and qubits already
+              specified.
+            - A string, e.g. ``'H'``, ``'U3'``, etc. in which case
+              ``gate_args`` should be supplied with ``(*params, *qubits)``.
+            - A raw array, in which case ``gate_args`` should be supplied with
+              ``(*qubits,)``.
 
         gate_args : list[str]
             The arguments to supply to it.
