@@ -206,9 +206,11 @@ from .tn2d.tebd import (
     SimpleUpdate,
 )
 from .tn2dinf.core import (
-    GeometryInfinite2D,
     PEPSInfinite2D,
     TensorNetworkInfinite2DFlat,
+)
+from .tn2dinf.geometry import (
+    GeometryInfinite2D,
 )
 from .tn2dinf.tebd import (
     LocalHamInfinite2D,

@@ -5,7 +5,7 @@ translation-invariant 2D tensor networks (``tn2dinf``).
 import collections
 
 from ..tnag.tebd import LocalHamGen, SimpleUpdateGen
-from .core import GeometryInfinite2D
+from .geometry import GeometryInfinite2D
 
 
 class LocalHamInfinite2D(LocalHamGen):

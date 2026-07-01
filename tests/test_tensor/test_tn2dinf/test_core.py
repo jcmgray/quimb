@@ -6,13 +6,11 @@ import pytest
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor.tn2dinf.core import (
-    GeometryInfinite2D,
-    GeometryInfinite2D_square_2x2,
-    GeometryInfinite2D_square_2x2_nn,
     PEPSInfinite2D,
     TensorNetworkInfinite2DFlat,
-    edges_inf_2d_square_2x2,
-    edges_inf_2d_square_2x2_nn,
+)
+from quimb.tensor.tn2dinf.geometry import (
+    GeometryInfinite2D,
     get_bond_sorted,
     get_bond_type,
 )
@@ -20,6 +18,11 @@ from quimb.tensor.tn2dinf.tebd import (
     LocalHamInfinite2D,
     SimpleUpdateInfinite2D,
 )
+
+geom_square_2x2 = GeometryInfinite2D.square()
+geom_square_2x2_nnn = GeometryInfinite2D.square(couplings=2)
+edges_inf_2d_square_2x2 = geom_square_2x2.bond_types
+edges_inf_2d_square_2x2_nnn = geom_square_2x2_nnn.bond_types
 
 
 def test_public_exports():
@@ -33,11 +36,11 @@ def test_public_exports():
 
 class TestGetBondType:
     def test_order_invariant(self):
-        for a, b in edges_inf_2d_square_2x2:
+        for a, b in GeometryInfinite2D.square(3, couplings=3).bond_types:
             assert get_bond_type(a, b) == get_bond_type(b, a)
 
     def test_starts_in_origin_cell(self):
-        for edges in (edges_inf_2d_square_2x2, edges_inf_2d_square_2x2_nn):
+        for edges in (edges_inf_2d_square_2x2, edges_inf_2d_square_2x2_nnn):
             for a, b in edges:
                 (cell_a, _), _ = get_bond_type(a, b)
                 assert cell_a == (0, 0)
@@ -50,7 +53,7 @@ class TestGetBondType:
 
     def test_is_sorted_pair(self):
         # canonical form: first endpoint at the origin cell, and the pair sorted
-        for edges in (edges_inf_2d_square_2x2, edges_inf_2d_square_2x2_nn):
+        for edges in (edges_inf_2d_square_2x2, edges_inf_2d_square_2x2_nnn):
             for a, b in edges:
                 first, second = get_bond_type(a, b)
                 assert first[0] == (0, 0)
@@ -63,7 +66,7 @@ class TestGetBondType:
         assert get_bond_type(((-1, 1), "B"), ((0, 0), "A")) == bt
 
     def test_idempotent(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         for bt in g.bond_types:
             a, b = bt
             assert get_bond_type(a, b) == bt
@@ -85,12 +88,12 @@ class TestGetBondSorted:
 
 class TestGeometryInfinite2D:
     def test_site_and_bond_type_counts(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         assert len(g.site_types) == 4
         assert len(g.bond_types) == 8
 
     def test_types_are_canonically_sorted(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         assert g.site_types == tuple(sorted(g.site_types))
         assert g.bond_types == tuple(sorted(g.bond_types))
 
@@ -98,7 +101,7 @@ class TestGeometryInfinite2D:
         # __init__ dedup must agree with canonicalizing each edge by hand
         for edges in (
             edges_inf_2d_square_2x2,
-            edges_inf_2d_square_2x2_nn,
+            edges_inf_2d_square_2x2_nnn,
         ):
             manual = {get_bond_type(a, b) for a, b in edges}
             g = GeometryInfinite2D(edges)
@@ -106,7 +109,7 @@ class TestGeometryInfinite2D:
             assert len(g.bond_types) == len(manual)
 
     def test_get_site_neighbors_concrete(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         nbrs = set(g.get_site_neighbors(((0, 0), (0, 0))))
         assert nbrs == {
             ((0, 0), (0, 1)),
@@ -116,51 +119,51 @@ class TestGeometryInfinite2D:
         }
 
     def test_neighbors_reciprocal(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         for st in g.site_types:
             site = ((0, 0), st)
             for nb in g.get_site_neighbors(site):
                 assert site in set(g.get_site_neighbors(nb))
 
     def test_neighbors_translation_invariant(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         base = set(g.get_site_neighbors(((0, 0), (1, 1))))
         shifted = set(g.get_site_neighbors(((3, -2), (1, 1))))
         assert shifted == {((c[0] + 3, c[1] - 2), st) for c, st in base}
 
     def test_neighbor_entry_count_matches_bond_degree(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         total = sum(len(v) for v in g.site_type_neighbors.values())
         assert total == 2 * len(g.bond_types)
 
     def test_covering_sites_include_unit_cell(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         for st in g.site_types:
             assert ((0, 0), st) in g.covering_sites
 
     def test_covering_bonds_endpoints_present_and_sorted(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         for a, b in g.covering_bonds:
             assert a in g.covering_sites
             assert b in g.covering_sites
             assert a <= b
 
     def test_coordinate_default_is_cell(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)  # no basis/positions
+        g = GeometryInfinite2D.square()  # no basis/positions
         x, y = g.coordinate(((2, 3), (0, 0)))
         assert (x, y) == pytest.approx((2.0, 3.0))
 
     def test_coordinate_with_positions_and_translation(self):
-        g = GeometryInfinite2D_square_2x2  # square basis + fractional offsets
+        g = geom_square_2x2  # square basis + 0-based offsets
         x, y = g.coordinate(((0, 0), (0, 1)))
-        assert (x, y) == pytest.approx((0.25, 0.75))
+        assert (x, y) == pytest.approx((0.0, 0.5))
         # +1 cell along a1=(1,0) shifts x by 1
         x2, y2 = g.coordinate(((1, 0), (0, 1)))
-        assert (x2, y2) == pytest.approx((1.25, 0.75))
+        assert (x2, y2) == pytest.approx((1.0, 0.5))
 
     def test_coordinate_nonsquare_basis(self):
         basis = ((1.0, 0.0), (0.5, math.sqrt(3) / 2))
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2, basis=basis)
+        g = GeometryInfinite2D.square(basis=basis)
         # cell (0, 1), no offsets -> exactly a2
         x, y = g.coordinate(((0, 1), (0, 0)))
         assert (x, y) == pytest.approx((0.5, math.sqrt(3) / 2))
@@ -171,21 +174,15 @@ class TestGeometryInfinite2D:
             GeometryInfinite2D(edges)
 
     def test_repr(self):
-        g = GeometryInfinite2D(edges_inf_2d_square_2x2)
+        g = GeometryInfinite2D.square()
         r = repr(g)
         assert "GeometryInfinite2D" in r
         assert "site_types=4" in r
         assert "bond_types=8" in r
 
-    def test_prebuilt_instances(self):
-        assert len(GeometryInfinite2D_square_2x2.site_types) == 4
-        assert len(GeometryInfinite2D_square_2x2.bond_types) == 8
-        # the nn variant adds next-nearest bonds -> strictly more bond types
-        assert len(GeometryInfinite2D_square_2x2_nn.bond_types) > 8
-
     def test_cell_size_2x2(self):
         # 2x2 unit cell spans two sub-lattice hops in each direction
-        assert GeometryInfinite2D_square_2x2.get_cell_size() == (2, 2)
+        assert geom_square_2x2.get_cell_size() == (2, 2)
 
     def test_cell_size_asymmetric(self):
         # an nx-by-ny block cell of NN-bonded sites costs (nx, ny) hops to
@@ -213,7 +210,7 @@ class TestGeometryInfinite2D:
         assert g.get_cell_size() == (3, 2)
 
     def test_tiling_for_radius(self):
-        g = GeometryInfinite2D_square_2x2  # dx = dy = 2
+        g = geom_square_2x2  # dx = dy = 2
         assert g.get_tiling_for_radius(0) == (0, 0)
         assert g.get_tiling_for_radius(2) == (1, 1)
         assert g.get_tiling_for_radius(3) == (2, 2)  # reaches into 2nd cell
@@ -222,13 +219,59 @@ class TestGeometryInfinite2D:
         assert g.get_tiling_for_radius(5) >= g.get_tiling_for_radius(4)
 
 
+class TestSquareBuilder:
+    def test_2x2_matches_constant(self):
+        g = GeometryInfinite2D.square(2, 2)
+        ref = GeometryInfinite2D.square()
+        assert set(g.bond_types) == set(ref.bond_types)
+        assert set(g.site_types) == set(ref.site_types)
+
+    def test_nnn_matches_constant(self):
+        g = GeometryInfinite2D.square(2, 2, couplings=2)
+        ref = GeometryInfinite2D(edges_inf_2d_square_2x2_nnn)
+        assert set(g.bond_types) == set(ref.bond_types)
+
+    def test_radius_equals_two_shells(self):
+        # radius sqrt(2) ~ 1.5 includes NN + NNN, same as couplings=2
+        a = GeometryInfinite2D.square(2, 2, radius=1.5).bond_types
+        b = GeometryInfinite2D.square(2, 2, couplings=2).bond_types
+        assert set(a) == set(b)
+
+    def test_couplings_and_radius_conflict_raises(self):
+        with pytest.raises(ValueError):
+            GeometryInfinite2D.square(2, 2, couplings=1, radius=1.0)
+
+    def test_float_couplings_points_to_radius(self):
+        with pytest.raises(TypeError):
+            GeometryInfinite2D.square(2, 2, couplings=1.5)
+
+    def test_explicit_displacements(self):
+        g = GeometryInfinite2D.square(3, couplings=[(1, 0), (0, 1)])  # M -> N
+        assert len(g.site_types) == 9
+        assert set(g.bond_types) == set(
+            GeometryInfinite2D.square(3).bond_types
+        )
+
+    def test_zero_based_positions(self):
+        g = GeometryInfinite2D.square(2, 2)
+        assert g.coordinate(((0, 0), (0, 0))) == pytest.approx((0.0, 0.0))
+        assert g.coordinate(((0, 0), (1, 1))) == pytest.approx((0.5, 0.5))
+
+    def test_coupling_folds_onto_sublattice_raises(self):
+        # 3rd-NN (2, 0) folds onto the same sublattice in a 2x2 cell
+        with pytest.raises(ValueError):
+            GeometryInfinite2D.square(2, 2, couplings=[(2, 0)])
+        # but is representable in a larger cell
+        assert GeometryInfinite2D.square(4, 4, couplings=[(2, 0)]).bond_types
+
+
 class TestPEPSInfinite2D:
     def test_subclasses_tensor_network_infinite_2d(self):
         assert issubclass(PEPSInfinite2D, TensorNetworkInfinite2DFlat)
 
     def test_base_builds_bare_gen_fragment(self):
         # the base is concrete: an empty bare TensorNetworkGen (no physical leg)
-        itn = TensorNetworkInfinite2DFlat(GeometryInfinite2D_square_2x2)
+        itn = TensorNetworkInfinite2DFlat(geom_square_2x2)
         assert itn.fragment.num_tensors == 0
         assert isinstance(itn.fragment, qtn.TensorNetworkGen)
         assert not isinstance(itn.fragment, qtn.TensorNetworkGenVector)
@@ -240,36 +283,36 @@ class TestPEPSInfinite2D:
         assert len(itn.get_site_duals(site)) == degree
 
     def test_construct_from_geometry_or_edges(self):
-        a = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=2)
+        a = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=2)
         b = PEPSInfinite2D.rand(edges_inf_2d_square_2x2, bond_dim=2)
         assert a.site_types == b.site_types
         assert isinstance(b.geometry, GeometryInfinite2D)
-        assert a.geometry is GeometryInfinite2D_square_2x2
+        assert a.geometry is geom_square_2x2
 
     def test_bare_init_is_empty(self):
         # the bare constructor builds an empty scaffold, no tensors / dims
-        psi = PEPSInfinite2D(GeometryInfinite2D_square_2x2)
+        psi = PEPSInfinite2D(geom_square_2x2)
         assert psi.fragment.num_tensors == 0
         assert psi._sites == set()
         assert not hasattr(psi, "bond_dim")
 
     def test_rand_populates_block_with_shapes(self):
         psi = PEPSInfinite2D.rand(
-            GeometryInfinite2D_square_2x2, bond_dim=3, phys_dim=2, seed=0
+            geom_square_2x2, bond_dim=3, phys_dim=2, seed=0
         )
         for site in psi._sites:
             assert psi.fragment[site].shape == psi.get_site_shape(site, 3, 2)
 
     def test_from_fill_fn_is_fill_fn_first(self):
         # fill_fn is the first positional arg (tensor_builder convention)
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.from_fill_fn(np.ones, geom, bond_dim=2)
         for ts in psi.shared_tensors.values():
             for t in ts:
                 assert t.data == pytest.approx(1.0)
 
     def test_get_site_shape(self):
-        psi = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=2)
+        psi = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=2)
         site = ((0, 0), psi.site_types[0])
         degree = len(list(psi.geometry.get_site_neighbors(site)))
         assert psi.get_site_shape(site, 5, phys_dim=3) == (5,) * degree + (3,)
@@ -277,7 +320,7 @@ class TestPEPSInfinite2D:
         assert psi.fragment[site].shape == psi.get_site_shape(site, 2, 2)
 
     def test_get_site_duals_opposite_across_bond(self):
-        psi = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=2)
+        psi = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=2)
         geom = psi.geometry
         for st in geom.site_types:
             sa = ((0, 0), st)
@@ -290,7 +333,7 @@ class TestPEPSInfinite2D:
                 assert duals_a[i] != psi.get_site_duals(sb)[j]
 
     def test_init_populates_neighbor_block(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         # `.rand` adds the full [-1, 1]^2 block of cells x site_types
         block = {
             ((x, y), st)
@@ -311,7 +354,7 @@ class TestPEPSInfinite2D:
             assert itn.site_type_tag_id.format(site[1]) in t.tags
 
     def test_add_site_idempotent(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         st = itn.site_types[0]
         site = ((0, 0), st)
         assert itn.has_fragment_site(site)
@@ -321,12 +364,12 @@ class TestPEPSInfinite2D:
         assert len(itn.shared_tensors[st]) == n_shared
 
     def test_add_site_out_of_range_raises(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         with pytest.raises(ValueError):
             itn.add_fragment_site(((2, 0), itn.site_types[0]))
 
     def test_same_site_type_shares_data(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         for st, ts in itn.shared_tensors.items():
             assert len(ts) >= 1
             first = ts[0]
@@ -334,13 +377,13 @@ class TestPEPSInfinite2D:
                 assert t.data is first.data
 
     def test_get_bond_ind_order_invariant(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         a = ((0, 0), itn.site_types[0])
         b = next(iter(itn.geometry.get_site_neighbors(a)))
         assert itn.get_bond_ind(a, b) == itn.get_bond_ind(b, a)
 
     def test_bond_shared_between_neighbors(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         a = ((0, 0), itn.site_types[0])
         b = next(iter(itn.geometry.get_site_neighbors(a)))
 
@@ -354,11 +397,11 @@ class TestPEPSInfinite2D:
         assert bix in itn.shared_indices[itn.get_bond_type(a, b)]
 
     def test_fragment_tensor_count_matches_sites(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         assert itn.fragment.num_tensors == len(itn._sites)
 
     def test_copy_independent_structure(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         c = itn.copy()
         assert c.fragment is not itn.fragment
         assert c._sites == itn._sites and c._sites is not itn._sites
@@ -369,7 +412,7 @@ class TestPEPSInfinite2D:
         assert c.bond_ind_id == itn.bond_ind_id
 
     def test_copy_shared_tensors_regrouped_not_aliased(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         c = itn.copy()
         assert set(c.shared_tensors) == set(itn.shared_tensors)
         for st, ts in c.shared_tensors.items():
@@ -381,7 +424,7 @@ class TestPEPSInfinite2D:
                 assert any(t is ft for ft in c.fragment)
 
     def test_copy_modify_isolated_shallow(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         c = itn.copy()  # deep=False -> arrays shared, but modify is isolated
         st = itn.site_types[0]
         orig = itn.shared_tensors[st][0].data.copy()
@@ -390,7 +433,7 @@ class TestPEPSInfinite2D:
         assert itn.shared_tensors[st][0].data == pytest.approx(orig)
 
     def test_copy_shared_indices_value_copy(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         c = itn.copy()
         assert c.shared_indices == itn.shared_indices
         assert c.shared_indices is not itn.shared_indices
@@ -398,7 +441,7 @@ class TestPEPSInfinite2D:
             assert c.shared_indices[bt] is not itn.shared_indices[bt]
 
     def test_copy_deep_independent_data(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         c = itn.copy(deep=True)
         st = itn.site_types[0]
         assert (
@@ -406,7 +449,7 @@ class TestPEPSInfinite2D:
         )
 
     def test_compute_local_expectation_cluster_sum_and_return_all(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         itn = PEPSInfinite2D.rand(geom, bond_dim=3)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -427,7 +470,7 @@ class TestPEPSInfinite2D:
     def test_cluster_expectation_product_state_is_exact(self):
         # for bond_dim=1 (a product state) the max_distance=0 cluster value
         # must equal the exact two-site expectation
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         itn = PEPSInfinite2D.rand(geom, bond_dim=1)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -447,7 +490,7 @@ class TestPEPSInfinite2D:
 
     def test_cluster_trivial_bonds_gauge_independent(self):
         # bond_dim=1 -> trivial bonds -> gauges make no difference
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         itn = PEPSInfinite2D.rand(geom, bond_dim=1)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -457,7 +500,7 @@ class TestPEPSInfinite2D:
         assert eg == pytest.approx(en)
 
     def test_partial_trace_cluster_matches_expectation(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         itn = PEPSInfinite2D.rand(geom, bond_dim=3)
         gauges = {}
         itn.gauge_all_simple_(gauges=gauges, max_iterations=50, tol=1e-12)
@@ -473,7 +516,7 @@ class TestPEPSInfinite2D:
         )
 
     def test_build_fragment_unrestricted_and_tiles_gauges(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=3)
         gauges = {}
         psi.gauge_all_simple_(gauges=gauges, max_iterations=20)
@@ -510,7 +553,7 @@ class TestPEPSInfinite2D:
 
     def test_cluster_max_distance_runs(self):
         # max_distance>0 builds a tiled fragment; values are finite + real
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -524,7 +567,7 @@ class TestPEPSInfinite2D:
     def test_cluster_max_distance_translation_invariant(self):
         # tiled fragment + tiled gauges are translation consistent: a shifted
         # `where` gives an identical expectation regardless of convergence
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -543,7 +586,7 @@ class TestPEPSInfinite2D:
     def test_cluster_max_distance_product_state_exact(self):
         # bond_dim=1 product state: any max_distance equals the exact 2-site
         # expectation (trivial environment)
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=1)
         gauges = {}
         psi.gauge_all_simple_(gauges=gauges, max_iterations=20)
@@ -562,7 +605,7 @@ class TestPEPSInfinite2D:
             assert e == pytest.approx(exact)
 
     def test_gloop_expand_runs_and_sums(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -583,7 +626,7 @@ class TestPEPSInfinite2D:
 
     def test_gloop_expand_explicit_loops(self):
         # explicit loop site-lists are honored (region = union of their sites)
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -602,7 +645,7 @@ class TestPEPSInfinite2D:
         assert np.isfinite(v) and abs(np.imag(v)) < 1e-10
 
     def test_gauge_all_simple_populates_and_normalizes(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=4)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=4)
         gauges = {}
         itn.gauge_all_simple_(gauges=gauges, max_iterations=50, tol=1e-12)
         # every covering bond has a gauge, each renormalized to unit norm
@@ -612,7 +655,7 @@ class TestPEPSInfinite2D:
             assert float(np.linalg.norm(g)) == pytest.approx(1.0)
 
     def test_gauge_all_simple_preserves_shared_invariants(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=4)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=4)
         gauges = {}
         itn.gauge_all_simple_(gauges=gauges, max_iterations=20)
         # same site_type -> identical data
@@ -626,7 +669,7 @@ class TestPEPSInfinite2D:
                 assert gauges[ix] == pytest.approx(ref)
 
     def test_gauge_all_simple_converges(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=4)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=4)
         gauges = {}
         itn.gauge_all_simple_(gauges=gauges, max_iterations=50, tol=1e-12)
         before = dict(gauges)
@@ -636,7 +679,7 @@ class TestPEPSInfinite2D:
         )
 
     def test_gauge_all_simple_info(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=4)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=4)
         # tol > 0 tracks the singular value diff and can stop early
         info = {}
         itn.gauge_all_simple_(max_iterations=50, tol=1e-12, info=info)
@@ -651,7 +694,7 @@ class TestPEPSInfinite2D:
         assert info["max_sdiff"] == -1.0
 
     def test_gauge_all_simple_not_inplace_leaves_original(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=4)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=4)
         st = itn.site_types[0]
         before = itn.shared_tensors[st][0].data.copy()
         out = itn.gauge_all_simple(max_iterations=10)  # copy + reabsorb
@@ -659,7 +702,7 @@ class TestPEPSInfinite2D:
         assert itn.shared_tensors[st][0].data == pytest.approx(before)
 
     def test_gate_simple_preserves_shared_invariants(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -678,7 +721,7 @@ class TestPEPSInfinite2D:
                 assert gauges[ix] == pytest.approx(ref)
 
     def test_gate_simple_not_inplace_leaves_tensors(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         gauges = {}
@@ -693,7 +736,7 @@ class TestPEPSInfinite2D:
         assert psi.shared_tensors[st][0].data == pytest.approx(before)
 
     def test_gate_simple_lowers_energy(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         rng = np.random.default_rng(0)
         psi = PEPSInfinite2D.from_fill_fn(
             lambda s: rng.standard_normal(s), geom, bond_dim=2
@@ -719,7 +762,7 @@ class TestPEPSInfinite2D:
         assert e1 < e0
 
     def test_gate_simple_single_site(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2)
         gauges = {}
         psi.gauge_all_simple_(gauges=gauges, max_iterations=20)
@@ -732,10 +775,8 @@ class TestPEPSInfinite2D:
     def test_gate_simple_long_range(self):
         # NNN Hamiltonian term on an NN PEPS: endpoints aren't directly bonded,
         # so the gate goes via a path of sites (different TN/ham geometries)
-        tn_geom = GeometryInfinite2D_square_2x2
-        ham = LocalHamInfinite2D(
-            GeometryInfinite2D_square_2x2_nn, qu.ham_heis(2)
-        )
+        tn_geom = geom_square_2x2
+        ham = LocalHamInfinite2D(geom_square_2x2_nnn, qu.ham_heis(2))
         psi = PEPSInfinite2D.rand(tn_geom, bond_dim=2)
         gauges = {}
         psi.gauge_all_simple_(gauges=gauges, max_iterations=20)
@@ -760,11 +801,11 @@ class TestPEPSInfinite2D:
                 assert gauges[ix] == pytest.approx(ref)
 
     def test_max_bond(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         assert itn.max_bond() == 3
 
     def test_gauge_all_simple_rejects_fuse_multibonds(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=2)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=2)
         with pytest.raises(NotImplementedError):
             itn.gauge_all_simple_(gauges={}, fuse_multibonds=True)
         # the default (False) still works
@@ -777,7 +818,7 @@ class TestPEPSInfinite2D:
         rng = np.random.default_rng(1)
         a = PEPSInfinite2D.from_fill_fn(
             lambda s: rng.standard_normal(s),
-            GeometryInfinite2D_square_2x2,
+            geom_square_2x2,
             bond_dim=3,
         )
         b = a.copy(deep=True)
@@ -792,7 +833,7 @@ class TestPEPSInfinite2D:
             )
 
     def test_normalize_simple(self):
-        itn = PEPSInfinite2D.rand(GeometryInfinite2D_square_2x2, bond_dim=3)
+        itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=3)
         gauges = {}
         itn.gauge_all_simple_(gauges=gauges, max_iterations=10)
         # perturb a site_type's norm, then renormalize
@@ -819,7 +860,7 @@ class TestPEPSInfinite2D:
     def test_simple_update_reaches_heisenberg_ground_state(self):
         # end-to-end: imaginary-time simple update on 2D square Heisenberg.
         # QMC reference e/site ~ -0.6694; D=4 simple update lands close.
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         rng = np.random.default_rng(0)
         psi = PEPSInfinite2D.from_fill_fn(
             lambda s: rng.standard_normal(s), geom, bond_dim=2

@@ -3,19 +3,21 @@ import pytest
 
 import quimb as qu
 from quimb.tensor.tn2dinf.core import (
-    GeometryInfinite2D_square_2x2,
-    GeometryInfinite2D_square_2x2_nn,
     PEPSInfinite2D,
 )
+from quimb.tensor.tn2dinf.geometry import GeometryInfinite2D
 from quimb.tensor.tn2dinf.tebd import (
     LocalHamInfinite2D,
     SimpleUpdateInfinite2D,
 )
 
+geom_square_2x2 = GeometryInfinite2D.square()
+geom_square_2x2_nnn = GeometryInfinite2D.square(couplings=2)
+
 
 class TestLocalHamInfinite2D:
     def test_uniform_two_site_terms(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         H2 = qu.ham_heis(2)
         ham = LocalHamInfinite2D(geom, H2)
         assert set(ham.terms) == set(geom.bond_types)
@@ -23,20 +25,20 @@ class TestLocalHamInfinite2D:
             assert ham.terms[bt] == pytest.approx(H2)
 
     def test_get_gate_order_invariant(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         a, b = geom.bond_types[0]
         assert ham.get_gate((a, b)) is ham.get_gate((b, a))
 
     def test_get_gate_expm_cached(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         bt = geom.bond_types[0]
         assert ham.get_gate_expm(bt, -0.1) is ham.get_gate_expm(bt, -0.1)
         assert ham.get_gate_expm(bt, -0.1).shape == (4, 4)
 
     def test_one_site_term_absorbed_evenly(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         H2 = qu.ham_heis(2)
         Z = qu.pauli("Z")
         ham = LocalHamInfinite2D(geom, H2, H1=Z)
@@ -49,7 +51,7 @@ class TestLocalHamInfinite2D:
         assert ham.terms[bt] == pytest.approx(expected)
 
     def test_missing_two_site_term_raises(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         partial = {
             geom.bond_types[0]: qu.ham_heis(2)
         }  # no default, incomplete
@@ -57,7 +59,7 @@ class TestLocalHamInfinite2D:
             LocalHamInfinite2D(geom, partial)
 
     def test_get_auto_ordering_commuting_layers(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         ordering = ham.get_auto_ordering(group=True)
         flat = [bt for layer in ordering for bt in layer]
@@ -70,13 +72,13 @@ class TestLocalHamInfinite2D:
 
     def test_different_geometry_same_site_types(self):
         H2 = qu.ham_heis(2)
-        ham_nn = LocalHamInfinite2D(GeometryInfinite2D_square_2x2, H2)
-        ham_nnn = LocalHamInfinite2D(GeometryInfinite2D_square_2x2_nn, H2)
+        ham_nn = LocalHamInfinite2D(geom_square_2x2, H2)
+        ham_nnn = LocalHamInfinite2D(geom_square_2x2_nnn, H2)
         assert ham_nn.site_types == ham_nnn.site_types
         assert len(ham_nnn.bond_types) > len(ham_nn.bond_types)
 
     def test_nsites_and_repr(self):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
         assert ham.nsites == 4
         assert "LocalHamInfinite2D" in repr(ham)
@@ -84,7 +86,7 @@ class TestLocalHamInfinite2D:
 
 class TestSimpleUpdateInfinite2D:
     def _setup(self, bond_dim=2, seed=0):
-        geom = GeometryInfinite2D_square_2x2
+        geom = geom_square_2x2
         rng = np.random.default_rng(seed)
         psi = PEPSInfinite2D.from_fill_fn(
             lambda s: rng.standard_normal(s), geom, bond_dim=bond_dim

@@ -1,23 +1,6 @@
-"""Infinite, translation-invariant 2D tensor networks on a unit cell.
-
-Some notable definitions and conventions of terms used in this module:
-
-- "site": a concrete (cell, site_type) pair defining a location site in the
-  infinite lattice.
-- "cell": (dx, dy) integer unit-cell translation (not a position).
-- "site_type": label of a site within the unit cell, all sites with the same
-  site_type share data.
-- "bond_type": a bond's translation class, canonicalized with the first
-  endpoint anchored at cell (0, 0) and the pair sorted
-- "bond index": the concrete index name on one specific translated bond
-- "canonical": the (0, 0) anchored representative keying a translation class
-- "fragment": the finite materialized TN patch standing in for the infinite
-  network, that operations act on and are synced from.
-- "shared_tensors" / "shared_indices": the set of tensors or indices in the
-  fragment sharing the same site_type or bond_type, respectively.
-- "position": the cartesian coordinate of a site, defined by the unit cell's
-  basis and the site_type's fractional offset within the unit cell.
-
+"""Infinite, translation-invariant 2D tensor networks on a unit cell: the
+flat single-tensor-per-site base and the PEPS wavefunction. See the
+subpackage ``__init__`` for the shared vocabulary.
 """
 
 import functools
@@ -26,458 +9,7 @@ from autoray import do
 
 from ..tensor_core import Tensor, tensor_gauge_simple_bond
 from ..tnag.core import TensorNetworkGen, TensorNetworkGenVector
-
-
-def is_inf_2d_site(site):
-    """Check if `site` is a valid infinite site specifier, that is, it is tuple
-    `(cell, site_type)` where `cell` is a tuple `(x : int, y : int)`.
-    """
-    if not isinstance(site, tuple) or len(site) != 2:
-        return False
-    cell, _ = site
-    if not isinstance(cell, tuple) or len(cell) != 2:
-        return False
-    x, y = cell
-    if not isinstance(x, int) or not isinstance(y, int):
-        return False
-    return True
-
-
-def as_sites(where):
-    """Ensure ``where`` (a single site or a sequence of sites) is a tuple of
-    sites.
-    """
-    if is_inf_2d_site(where):
-        return (where,)
-    return tuple(where)
-
-
-def get_bond_sorted(sitea, siteb):
-    """Given a bond between two sites, simply return the sorted order of the
-    two, which is the canonical way to refer to it / use it as a key etc.
-    """
-    if sitea <= siteb:
-        return (sitea, siteb)
-    else:
-        return (siteb, sitea)
-
-
-def get_bond_type(sitea, siteb):
-    """Given a bond between two sites, get its bond type: the canonical
-    representative of the bond's translation class. The first endpoint is
-    translated to cell (0, 0) and the orientation chosen so the two endpoints
-    are in sorted order, i.e. ``cella < cellb``, or (within-cell)
-    ``site_type_a < site_type_b``. Cells compare dx-first.
-    """
-    cella, site_type_a = sitea
-    cellb, site_type_b = siteb
-
-    dx = cellb[0] - cella[0]
-    dy = cellb[1] - cella[1]
-    if abs(dx) > 1 or abs(dy) > 1:
-        raise ValueError(
-            "Only edges between neighboring cells are allowed. "
-            f"Got edge from {sitea} to {siteb}."
-        )
-
-    # anchor the first endpoint at cell (0, 0) and keep the sorted
-    # orientation, else flip, anchoring the other endpoint instead
-    first = ((0, 0), site_type_a)
-    second = ((dx, dy), site_type_b)
-    if first <= second:
-        return (first, second)
-    return (((0, 0), site_type_b), ((-dx, -dy), site_type_a))
-
-
-class GeometryInfinite2D:
-    """Helper class to represent the geometry of an infinite 2D lattice.
-
-    Parameters
-    ----------
-    edges : sequence[(((int, int) hashable), ((int, int) hashable)), ...]
-        A sequence of edges, where each edge is a pair of sites. Each site is
-        represented as a tuple of (cell, site_type), where cell is a tuple of
-        integers representing the cell coordinates, and site_type is a hashable
-        representing the type of site (e.g., an integer or string). Equivalent
-        edges are automatically deduplicated and normalized to a canonical
-        ``bond_type``: the first endpoint translated to cell (0, 0) and the two
-        endpoints in sorted order, i.e. ``cella < cellb``, or (within-cell)
-        ``site_type_a < site_type_b`` (cells compare dx-first).
-    basis : (float, float), optional
-        A pair of 2D vectors representing the lattice basis vectors. If not
-        provided, the default basis is the standard square lattice basis.
-    positions : dict, optional
-        A dictionary mapping site types to their fractional positions within
-        the unit cell. If not provided, the default position for each site type
-        is (0.0, 0.0). Currently only used for drawing.
-    """
-
-    def __init__(
-        self,
-        edges,
-        basis=None,
-        positions=None,
-    ):
-        # first get all unique types of bond and site
-        bond_types = set()
-        site_types = set()
-        for sitea, siteb in edges:
-            _, site_type_a = sitea
-            _, site_type_b = siteb
-            site_types.add(site_type_a)
-            site_types.add(site_type_b)
-
-            # deduplicate such that each starts in cell (0, 0) and 'points up'
-            bond_type = self.get_bond_type(sitea, siteb)
-            bond_types.add(bond_type)
-
-        # put in canonical order as well
-        self.site_types = tuple(sorted(site_types))
-        self.bond_types = tuple(sorted(bond_types))
-
-        # build base neighbor map
-        self.site_type_neighbors = {}
-        for bond_type in self.bond_types:
-            (_, site_type_a), (cellb, site_type_b) = bond_type
-
-            if site_type_a == site_type_b:
-                raise NotImplementedError(
-                    f"Self-loops {site_type_a} <-> {site_type_b}"
-                    "are not supported, consider expanding unit cell."
-                )
-
-            dx, dy = cellb  # cella is always (0, 0)
-            self.site_type_neighbors.setdefault(site_type_a, []).append(
-                ((dx, dy), site_type_b)
-            )
-            self.site_type_neighbors.setdefault(site_type_b, []).append(
-                ((-dx, -dy), site_type_a)
-            )
-
-        # build covering bonds and sites ->
-        #     all sites and bonds that connect to the unit cell (0, 0)
-        covering_sites = set()
-        covering_bonds = set()
-        for site_typea in self.site_types:
-            sitea = ((0, 0), site_typea)
-            covering_sites.add(sitea)
-            for cellb, site_typeb in self.site_type_neighbors[site_typea]:
-                siteb = (cellb, site_typeb)
-                covering_sites.add(siteb)
-                bond = self.get_bond_sorted(sitea, siteb)
-                covering_bonds.add(bond)
-        self.covering_sites = tuple(sorted(covering_sites))
-        self.covering_bonds = tuple(sorted(covering_bonds))
-
-        # optional spatial embedding: lattice vectors (a1, a2) (default square)
-        self.basis = basis if basis is not None else ((1, 0), (0, 1))
-        # and fractional sublattice offsets within the cell, keyed by site_type
-        self.positions = dict(positions) if positions is not None else {}
-
-    def get_site_neighbors(self, site):
-        """Get the neighbors of a given site."""
-        cella, site_type_a = site
-        for (dx, dy), site_type_b in self.site_type_neighbors[site_type_a]:
-            yield ((cella[0] + dx, cella[1] + dy), site_type_b)
-
-    def coordinate(self, site):
-        """Map a site ``(cell, site_type)`` to its cartesian position:
-        ``(cell + fractional_offset) @ basis``, defining a spatial embedding.
-        """
-        (x, y), site_type = site
-        sx, sy = self.positions.get(site_type, (0.0, 0.0))
-        fx = x + sx
-        fy = y + sy
-        (a1x, a1y), (a2x, a2y) = self.basis
-        return (fx * a1x + fy * a2x, fx * a1y + fy * a2y)
-
-    def get_graph_distance(self, sitea, siteb, max_hops=None):
-        """Calculate the graph distance (number of hops) between two sites,
-        found by BFS over the site graph. ``max_hops`` caps the search,
-        guarding against an unreachable siteb (any connected pair terminates
-        without it).
-        """
-        if max_hops is None:
-            max_hops = 8 * len(self.site_types) + 8
-        if sitea == siteb:
-            return 0
-        seen = {sitea}
-        boundary = [sitea]
-        for d in range(1, max_hops + 1):
-            next_boundary = []
-            for site in boundary:
-                for neighb in self.get_site_neighbors(site):
-                    if neighb == siteb:
-                        return d
-                    if neighb not in seen:
-                        seen.add(neighb)
-                        next_boundary.append(neighb)
-            boundary = next_boundary
-        raise ValueError(
-            f"No path from {sitea} to {siteb} within {max_hops} hops."
-        )
-
-    def get_sites_within_radius(self, site, radius):
-        """All sites within ``radius`` graph distance of ``site``, inclusive."""
-        seen = {site}
-        boundary = [site]
-        for _ in range(radius):
-            next_boundary = []
-            for site in boundary:
-                for neighb in self.get_site_neighbors(site):
-                    if neighb not in seen:
-                        seen.add(neighb)
-                        next_boundary.append(neighb)
-            boundary = next_boundary
-        return seen
-
-    def get_cell_size(self):
-        """Return (dx, dy), the 'width' and 'height' of the unit cell in terms
-        of the minimum number of bond hops for any site_type to reach the same
-        site_type in the neighboring cell in the x and y directions,
-        respectively. Useful for computing necessary tiling sizes.
-        """
-        dx = min(
-            self.get_graph_distance(((0, 0), st), ((1, 0), st))
-            for st in self.site_types
-        )
-        dy = min(
-            self.get_graph_distance(((0, 0), st), ((0, 1), st))
-            for st in self.site_types
-        )
-        return dx, dy
-
-    def get_tiling_for_radius(self, radius):
-        """Number of cells to tile out from the origin in each direction so
-        that every site within ``radius`` bond-hops of the origin cell is
-        contained. Returns ``(nx, ny)``, i.e. tile cells ``-nx..nx`` by
-        ``-ny..ny``. Explores the graph directly, so the tiling never
-        undershoots (an oversized fragment is harmless, the region of interest
-        is subselected from it).
-        """
-        nx = ny = 0
-        for site_type in self.site_types:
-            for (cx, cy), _ in self.get_sites_within_radius(
-                ((0, 0), site_type), radius
-            ):
-                nx = max(nx, abs(cx))
-                ny = max(ny, abs(cy))
-        return nx, ny
-
-    # exposed as static methods, defined as top-level functions above
-    get_bond_sorted = staticmethod(get_bond_sorted)
-    get_bond_type = staticmethod(get_bond_type)
-
-    def is_canonical_bond(self, sitea, siteb):
-        """Whether the bond between ``sitea`` and ``siteb`` is already in
-        canonical ``bond_type`` form, i.e. sorted with its first endpoint in
-        the origin cell (0, 0).
-        """
-        return get_bond_sorted(sitea, siteb) == get_bond_type(sitea, siteb)
-
-    def get_auto_ordering(self, order="sort", group=False):
-        """An ordering of the ``bond_types`` such that consecutive entries act
-        on disjoint ``site_types`` where possible, i.e. grouped into commuting
-        layers. Used to sequence gates in a simple-update sweep.
-
-        Parameters
-        ----------
-        order : str, optional
-            The base order to greedily group from. Currently only the default
-            ``bond_types`` order is used.
-        group : bool, optional
-            If ``True``, return a list of layers (tuples of ``bond_types``),
-            otherwise return a flat list of ``bond_types``.
-
-        Returns
-        -------
-        list[bond_type] or list[tuple[bond_type]]
-        """
-        bonds = list(self.bond_types)
-        i = 0
-        ordering = []
-        current_site_types = set()
-        layer = []
-        while bonds:
-            (_, sta), (_, stb) = bonds[i]
-            sts = {sta, stb}
-
-            if sts & current_site_types:
-                # does not commute with current -> skip
-                i += 1
-            else:
-                # commutes with current -> accept
-                layer.append(bonds.pop(i))
-                current_site_types.update(sts)
-
-            if i >= len(bonds):
-                # no commuting bond available -> flush
-                if group:
-                    ordering.append(tuple(layer))
-                else:
-                    ordering.extend(tuple(layer))
-                i = 0
-                layer.clear()
-                current_site_types.clear()
-
-        return ordering
-
-    def draw(self, pos=None):
-        """Draw the covering sites and bonds of the unit cell, with the cell
-        boundary marked.
-
-        Parameters
-        ----------
-        pos : dict, optional
-            A mapping of ``site_type`` to fractional position within the unit
-            cell. If not given, the geometry's own ``coordinate`` is used.
-        """
-        from ...schematic import (
-            Drawing,
-            # auto_colors,
-            hash_to_color,
-        )
-
-        if pos is None:
-            get_pos = self.coordinate
-        else:
-
-            def get_pos(site):
-                cell, site_type = site
-                sx, sy = pos[site_type]
-                fx, fy = cell[0] + sx, cell[1] + sy
-                (a1x, a1y), (a2x, a2y) = self.basis
-                return (fx * a1x + fy * a2x, fx * a1y + fy * a2y)
-
-        def _draw_site(site):
-            x, y = get_pos(site)
-            color = hash_to_color(str(site[1]))
-            # color = site_type_to_color[site[1]]
-            d.circle((x, y), color=color, radius=0.1)
-            d.text(
-                (x, y),
-                site[-1],
-                fontsize=12,
-                ha="center",
-                va="center",
-            )
-
-        def _draw_bond(sitea, siteb):
-            bond_type = self.get_bond_type(sitea, siteb)
-            # color = edge_type_to_color[bond_type]
-            color = hash_to_color(str(bond_type))
-            d.line(
-                get_pos(sitea),
-                get_pos(siteb),
-                color=color,
-                linewidth=3,
-            )
-
-        # site_type_colors = auto_colors(len(self.site_types))
-        # site_type_to_color = dict(zip(self.site_types, site_type_colors))
-
-        # edge_type_colors = auto_colors(len(self.bond_types))
-        # edge_type_to_color = dict(zip(self.bond_types, edge_type_colors))
-
-        d = Drawing()
-
-        for site in self.covering_sites:
-            _draw_site(site)
-        for sitea, siteb in self.covering_bonds:
-            _draw_bond(sitea, siteb)
-
-        # draw the unit cell boundary (corners mapped through the basis)
-        (a1x, a1y), (a2x, a2y) = self.basis
-        corners = [
-            (0, 0),
-            (a1x, a1y),
-            (a1x + a2x, a1y + a2y),
-            (a2x, a2y),
-        ]
-        d.shape(
-            corners,
-            edgecolor=(0.5, 0.5, 0.5),
-            linestyle=":",
-            color="none",
-            zorder=-100,
-        )
-
-        return d.fig, d.ax
-
-    def __repr__(self):
-        return (
-            f"{self.__class__.__name__}("
-            f"#site_types={len(self.site_types)}, "
-            f"#bond_types={len(self.bond_types)})"
-        )
-
-
-edges_inf_2d_square_2x2 = (
-    #
-    (((+0, +0), (0, 0)), ((+0, +0), (0, 1))),  # NN
-    (((+0, +0), (0, 0)), ((+0, +0), (1, 0))),  # NN
-    #
-    (((+0, +0), (0, 1)), ((+0, +1), (0, 0))),  # NN
-    (((+0, +0), (0, 1)), ((+0, +0), (1, 1))),  # NN
-    #
-    (((+0, +0), (1, 0)), ((+0, +0), (1, 1))),  # NN
-    (((+0, +0), (1, 0)), ((+1, +0), (0, 0))),  # NN
-    #
-    (((+0, +0), (1, 1)), ((+0, +1), (1, 0))),  # NN
-    (((+0, +0), (1, 1)), ((+1, +0), (0, 1))),  # NN
-)
-
-edges_inf_2d_square_2x2_nn = (
-    #
-    (((+0, +0), (0, 0)), ((+0, +0), (0, 1))),  # NN
-    (((+0, +0), (0, 0)), ((+0, +0), (1, 0))),  # NN
-    (((+0, +0), (0, 0)), ((+0, +0), (1, 1))),  # NNN
-    (((+0, +0), (0, 0)), ((-1, +0), (1, 1))),  # NNN
-    #
-    (((+0, +0), (0, 1)), ((+0, +1), (0, 0))),  # NN
-    (((+0, +0), (0, 1)), ((+0, +0), (1, 1))),  # NN
-    (((+0, +0), (0, 1)), ((+0, +1), (1, 0))),  # NNN
-    (((+0, +0), (0, 1)), ((-1, +1), (1, 0))),  # NNN
-    #
-    (((+0, +0), (1, 0)), ((+0, +0), (1, 1))),  # NN
-    (((+0, +0), (1, 0)), ((+1, +0), (0, 0))),  # NN
-    (((+0, +0), (1, 0)), ((+0, +0), (0, 1))),  # NNN
-    (((+0, +0), (1, 0)), ((+1, +0), (0, 1))),  # NNN
-    #
-    (((+0, +0), (1, 1)), ((+0, +1), (1, 0))),  # NN
-    (((+0, +0), (1, 1)), ((+1, +0), (0, 1))),  # NN
-    (((+0, +0), (1, 1)), ((+0, +1), (0, 0))),  # NNN
-    (((+0, +0), (1, 1)), ((+1, +1), (0, 0))),  # NNN
-)
-
-pos_inf_2d_square = {
-    (0, 1): (0.25, 0.75),
-    (1, 1): (0.75, 0.75),
-    (0, 0): (0.25, 0.25),
-    (1, 0): (0.75, 0.25),
-}
-"""Fractional positions of the 4 sites in the 2x2 unit cell of the infinite 2D
-square lattice geometry.
-"""
-
-
-GeometryInfinite2D_square_2x2 = GeometryInfinite2D(
-    edges=edges_inf_2d_square_2x2,
-    basis=((1, 0), (0, 1)),
-    positions=pos_inf_2d_square,
-)
-"""Infinite 2D square lattice geometry with 2x2 unit cell and nearest-neighbor
-bonds only.
-"""
-
-GeometryInfinite2D_square_2x2_nn = GeometryInfinite2D(
-    edges=edges_inf_2d_square_2x2_nn,
-    basis=((1, 0), (0, 1)),
-    positions=pos_inf_2d_square,
-)
-"""Infinite 2D square lattice geometry with 2x2 unit cell including
-nearest-neighbor and next-nearest-neighbor (diagonal only) bonds.
-"""
+from .geometry import GeometryInfinite2D, ensure_inf_2d_sites, is_inf_2d_site
 
 
 class TensorNetworkInfinite2DFlat:
@@ -489,9 +21,8 @@ class TensorNetworkInfinite2DFlat:
     Subclasses specialize the per-site legs and the fragment type via
     ``get_site_inds`` (+ ``get_site_shape`` / ``get_site_duals``) and
     ``_new_fragment``, e.g. ``PEPSInfinite2D`` for a wavefunction (physical
-    index per site). On its own this base is a bare virtual-bond network, e.g. a
-    classical network. (The norm of an infinite PEPS has *two* tensors per site
-    and so will be a separate, non-flat class.)
+    index per site). On its own this base is a bare virtual-bond network, e.g.
+    a classical network.
 
     Parameters
     ----------
@@ -939,7 +470,7 @@ class TensorNetworkInfinite2DFlat:
     def _region_sites(self, where, radius):
         """The set of sites within ``radius`` hops of any site in ``where``."""
         sites = set()
-        for site in where:
+        for site in ensure_inf_2d_sites(where):
             sites |= self.geometry.get_sites_within_radius(site, radius)
         return sites
 
@@ -1289,7 +820,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
                 where, gauges=gauges, max_distance=0, **kwargs
             )
         fragment, fragment_gauges = self.build_fragment_with_gauges(
-            self._region_sites(as_sites(where), max_distance), gauges
+            self._region_sites(where, max_distance), gauges
         )
         return fragment.get_cluster(
             where, gauges=fragment_gauges, max_distance=max_distance, **kwargs
@@ -1323,7 +854,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             fragment, fragment_gauges = self.fragment, gauges
         else:
             fragment, fragment_gauges = self.build_fragment_with_gauges(
-                self._region_sites(as_sites(where), max_distance), gauges
+                self._region_sites(where, max_distance), gauges
             )
         return fragment.partial_trace_cluster(
             where,
@@ -1362,7 +893,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             fragment, fragment_gauges = self.fragment, gauges
         else:
             fragment, fragment_gauges = self.build_fragment_with_gauges(
-                self._region_sites(as_sites(where), max_distance), gauges
+                self._region_sites(where, max_distance), gauges
             )
         return fragment.local_expectation_cluster(
             G,
@@ -1411,7 +942,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         else:
             where_sites = set()
             for where, _ in terms.items():
-                where_sites.update(as_sites(where))
+                where_sites.update(ensure_inf_2d_sites(where))
             fragment, fragment_gauges = self.build_fragment_with_gauges(
                 self._region_sites(where_sites, max_distance), gauges
             )
@@ -1472,7 +1003,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         float
         """
 
-        fragment_sites = self._gloop_region(as_sites(where), gloops)
+        fragment_sites = self._gloop_region(where, gloops)
 
         fragment, fragment_gauges = self.build_fragment_with_gauges(
             fragment_sites, gauges
@@ -1523,10 +1054,9 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         """
         where_sites = set()
         for where, _ in terms.items():
-            where_sites.update(as_sites(where))
-        fragment_sites = self._gloop_region(where_sites, gloops)
+            where_sites.update(ensure_inf_2d_sites(where))
         fragment, fragment_gauges = self.build_fragment_with_gauges(
-            fragment_sites, gauges
+            self._gloop_region(where_sites, gloops), gauges
         )
         return fragment.compute_local_expectation_gloop_expand(
             terms,
