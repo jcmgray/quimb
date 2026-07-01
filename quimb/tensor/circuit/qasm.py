@@ -135,13 +135,10 @@ def _openqasm_replace_tokens(s, replacements):
 def get_openqasm2_regexes():
     return {
         "header": re.compile(r"(OPENQASM\s+2.0;)|(include\s+\"qelib1.inc\";)"),
-        "comment": re.compile(r"^//"),
-        "comment_start": re.compile(r"/\*"),
-        "comment_end": re.compile(r"\*/"),
         "qreg": re.compile(r"qreg\s+(\w+)\s*\[(\d+)\];"),
         "gate": re.compile(r"(\w+)\s*(\((.+)\))?\s*(.*);"),
-        "error": re.compile(r"^(if|for)"),
-        "ignore": re.compile(r"^(creg|measure|barrier)"),
+        "error": re.compile(r"^(reset|if|for)\b"),
+        "ignore": re.compile(r"^(creg|measure|barrier)\b"),
         "gate_def": re.compile(r"^gate\s+"),
         "gate_sig": re.compile(r"^gate\s+(\w+)\s*(\((.+)\))?\s*(.*)"),
     }
@@ -154,9 +151,6 @@ def get_openqasm3_regexes():
             r"(OPENQASM\s+3(?:\.\d+)?;)"
             r"|(include\s+\"(?:stdgates|qelib1)\.inc\";)"
         ),
-        "comment": re.compile(r"^//"),
-        "comment_start": re.compile(r"/\*"),
-        "comment_end": re.compile(r"\*/"),
         "qubit": re.compile(r"qubit(?:\s*\[(.+)\])?\s+(\w+);"),
         "input": re.compile(r"input\s+\w+(?:\s*\[[^\]]+\])?\s+(\w+);"),
         "output": re.compile(r"output\s+\w+(?:\s*\[[^\]]+\])?\s+(\w+);"),
@@ -168,7 +162,7 @@ def get_openqasm3_regexes():
             r"(\w+)(?:\s*=\s*(.+))?;"
         ),
         "array_decl": re.compile(r"array\s*\[.*\]\s+(\w+)\s*=\s*(.+);"),
-        "assign": re.compile(r"(\w+)\s*=\s*(.+);"),
+        "assign": re.compile(r"(\w+(?:\s*\[[^\]]+\])?)\s*=\s*(.+);"),
         "ignore": re.compile(r"^(measure|barrier|gphase)\b"),
         "error": re.compile(
             r"^(reset|if|for|while|switch|box|delay|defcal|cal|extern|pragma"
@@ -219,6 +213,104 @@ def _openqasm_split_top_level(s, sep=","):
         parts.append("".join(cur).strip())
 
     return [p for p in parts if p]
+
+
+def _strip_openqasm_comments(contents):
+    """Remove ``//`` line comments and ``/* ... */`` block comments from an
+    OpenQASM source string, including ones that begin or end part way through a
+    line. Comment markers inside double-quoted strings are ignored, and
+    newlines are preserved so line numbers are retained.
+    """
+    out = []
+    i = 0
+    n = len(contents)
+    in_block = in_line = in_string = False
+    while i < n:
+        c = contents[i]
+        pair = contents[i : i + 2]
+        if in_block:
+            if pair == "*/":
+                in_block = False
+                i += 2
+            else:
+                if c == "\n":
+                    out.append(c)
+                i += 1
+        elif in_line:
+            if c == "\n":
+                in_line = False
+                out.append(c)
+            i += 1
+        elif in_string:
+            out.append(c)
+            in_string = c != '"'
+            i += 1
+        elif pair == "/*":
+            in_block = True
+            i += 2
+        elif pair == "//":
+            in_line = True
+            i += 2
+        else:
+            in_string = c == '"'
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _split_openqasm_statements(contents):
+    """Split an OpenQASM source string into individual statements, breaking on
+    top-level ``;`` and after the closing ``}`` of a top-level block such as a
+    gate definition. Bracketed and quoted regions are kept intact, so multiple
+    statements on one physical line, or a single statement spread across lines,
+    are both handled.
+    """
+    statements = []
+    cur = []
+    depth = 0
+    in_string = False
+    i = 0
+    n = len(contents)
+    while i < n:
+        c = contents[i]
+        if in_string:
+            cur.append(c)
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+        elif c in "([{":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == "}":
+            depth -= 1
+            cur.append(c)
+            i += 1
+            if depth == 0:
+                # a block such as a gate definition ends at this '}', unless
+                # it is part of an expression terminated by ';' (e.g. an array
+                # literal initializer)
+                j = i
+                while j < n and contents[j].isspace():
+                    j += 1
+                if j >= n or contents[j] != ";":
+                    statements.append("".join(cur).strip())
+                    cur = []
+            continue
+        cur.append(c)
+        if c == ";" and depth == 0:
+            statements.append("".join(cur).strip())
+            cur = []
+        i += 1
+
+    tail = "".join(cur).strip()
+    if tail:
+        statements.append(tail)
+
+    return [s for s in statements if s]
 
 
 def _openqasm_eval_expr(expr, env):
@@ -283,7 +375,10 @@ def _openqasm_eval_expr(expr, env):
         return False
 
     def _combine_symbolic(op, *xs):
-        fmt = lambda x: x if isinstance(x, str) else repr(x)
+
+        def fmt(x):
+            return x if isinstance(x, str) else repr(x)
+
         if len(xs) == 1:
             (x,) = xs
             if op == "+":
@@ -442,38 +537,142 @@ def _placeholder_param_vector(values):
     raise TypeError("No placeholder values supplied.")
 
 
+# mapping from lower-case OpenQASM gate names to canonical quimb gate labels,
+# shared by the OpenQASM 2 and 3 parsers
+OPENQASM_GATE_ALIASES = {
+    "u": "U3",
+    "u1": "U1",
+    "u2": "U2",
+    "u3": "U3",
+    "p": "PHASE",
+    "phase": "PHASE",
+    "id": "IDEN",
+    "i": "IDEN",
+    "cnot": "CNOT",
+    "cx": "CX",
+    "cy": "CY",
+    "cz": "CZ",
+    "h": "H",
+    "x": "X",
+    "y": "Y",
+    "z": "Z",
+    "s": "S",
+    "sdg": "SDG",
+    "t": "T",
+    "tdg": "TDG",
+    "sx": "SX",
+    "sxdg": "SXDG",
+    "swap": "SWAP",
+    "iswap": "ISWAP",
+    "rx": "RX",
+    "ry": "RY",
+    "rz": "RZ",
+    "crx": "CRX",
+    "cry": "CRY",
+    "crz": "CRZ",
+    "cu1": "CU1",
+    "cu2": "CU2",
+    "cu3": "CU3",
+    "cphase": "CPHASE",
+    "cp": "CPHASE",
+    "ccx": "CCX",
+    "ccnot": "CCX",
+    "toffoli": "CCX",
+    "cswap": "CSWAP",
+    "fredkin": "CSWAP",
+}
+
+
+def _resolve_qubit_arg(token, sitemap, registers, env=None):
+    """Resolve a single OpenQASM qubit argument into either a qubit index or,
+    for a whole-register reference, a tuple of indices to broadcast over.
+    """
+    env = {} if env is None else env
+    token = token.strip()
+
+    # name bound to a collection of indices in env, e.g. "q" -> [0, 1]
+    if token in env and isinstance(env[token], (tuple, list)):
+        return tuple(env[token])
+
+    # whole register, e.g. "q" -> (0, 1, 2), a size-1 register -> bare index 0
+    if token in registers:
+        reg = registers[token]
+        return reg if len(reg) > 1 else reg[0]
+
+    # indexed element, e.g. "q[0]" or "q[n - 1]" with n resolved from env
+    match = re.fullmatch(r"(\w+)\[(.+)\]", token)
+    if match:
+        base, idx_expr = match.groups()
+        idx = _openqasm_eval_expr(idx_expr, env)
+        # the index must be concrete, e.g. "q[theta]" is rejected
+        if not isinstance(idx, numbers.Number):
+            raise NotImplementedError(
+                "Symbolic qubit indices are unsupported."
+            )
+        idx = int(idx)
+        # index into an env collection, else the global sitemap "q[2]" -> 2
+        if base in env and isinstance(env[base], (tuple, list)):
+            return env[base][idx]
+        return sitemap[f"{base}[{idx}]"]
+
+    # not a register, env collection or indexed element, e.g. "foo"
+    raise NotImplementedError(f"Unknown qubit identifier: {token}")
+
+
+def _broadcast_gate_qubits(resolved):
+    """Given the resolved qubit arguments of a gate (each either a single index
+    or a register tuple), return the list of concrete qubit tuples to apply,
+    broadcasting any whole-register arguments over their length.
+    """
+    sizes = {len(q) for q in resolved if isinstance(q, (tuple, list))}
+    if not sizes:
+        return [tuple(resolved)]
+    if len(sizes) != 1:
+        raise NotImplementedError(
+            "Broadcasted gate args must use registers of equal length."
+        )
+    (size,) = sizes
+    return [
+        tuple(
+            value[i] if isinstance(value, (tuple, list)) else value
+            for value in resolved
+        )
+        for i in range(size)
+    ]
+
+
 def parse_openqasm2_str(contents):
-    """Parse the string contents of an OpenQASM 2.0 file. This parser does not
-    support classical control flow is not guaranteed to check the full openqasm
-    grammar.
+    """Parse the string contents of an OpenQASM 2.0 file. This shares the gate
+    aliasing, arithmetic expression evaluation and whole-register broadcasting
+    of the OpenQASM 3 parser. It does not support classical control flow and is
+    not guaranteed to check the full OpenQASM grammar.
     """
     # define regular expressions for parsing
     rgxs = get_openqasm2_regexes()
 
+    # strip comments and normalize to one statement per line so that inline
+    # comments, code following a block comment, and several statements on one
+    # line are all handled
+    contents = _strip_openqasm_comments(contents)
+    contents = "\n".join(_split_openqasm_statements(contents))
+
     # initialise number of qubits to zero and an empty list for gates
     sitemap = {}
+    registers = {}
     gates = []
     custom_gates = {}
+    # openqasm 2 has no symbolic parameters, but an empty env lets the shared
+    # expression and qubit-resolution helpers be reused
+    env = {}
     # only want to warn once about each ignored instruction
     warned = {}
 
     # Process each line
-    in_comment = False
     lines = contents.split("\n")
     while lines:
         line = lines.pop(0).strip()
         if not line:
             # blank line
-            continue
-        if rgxs["comment"].match(line):
-            # single comment
-            continue
-        if rgxs["comment_start"].match(line):
-            # start of multiline comments
-            in_comment = True
-        if in_comment:
-            # in multiline comment, check if its ending
-            in_comment = not bool(rgxs["comment_end"].match(line))
             continue
         if rgxs["header"].match(line):
             # ignore standard header lines
@@ -483,8 +682,11 @@ def parse_openqasm2_str(contents):
         if match:
             # quantum register -> extend sites
             name, nq = match.groups()
-            for i in range(int(nq)):
-                sitemap[f"{name}[{i}]"] = len(sitemap)
+            registers[name] = tuple(
+                range(len(sitemap), len(sitemap) + int(nq))
+            )
+            for i, q in enumerate(registers[name]):
+                sitemap[f"{name}[{i}]"] = q
             continue
 
         match = rgxs["ignore"].match(line)
@@ -577,18 +779,21 @@ def parse_openqasm2_str(contents):
 
                 continue
 
-            # standard gate -> add to list directly
-            if params:
-                params = tuple(
-                    eval(param, {"pi": math.pi}) for param in params.split(",")
-                )
-            else:
-                params = ()
+            # standard gate -> resolve aliases, parameters and qubits
+            label = OPENQASM_GATE_ALIASES.get(label.lower(), label)
+            if label not in ALL_GATES:
+                raise NotImplementedError(f"Unknown gate: {label}")
 
-            qubits = tuple(
-                sitemap[qubit.strip()] for qubit in qubits.split(",")
+            params = tuple(
+                _openqasm_eval_expr(p, env)
+                for p in _openqasm_split_top_level(params)
             )
-            gates.append(Gate(label, params, qubits))
+            resolved = [
+                _resolve_qubit_arg(q, sitemap, registers, env)
+                for q in _openqasm_split_top_level(qubits)
+            ]
+            for call_qubits in _broadcast_gate_qubits(resolved):
+                gates.append(Gate(label, params, call_qubits))
             continue
 
         # if not covered by previous checks, simply raise
@@ -655,6 +860,12 @@ def parse_openqasm3_str(contents):
         supported grammar subset.
     """
     rgxs = get_openqasm3_regexes()
+    # strip comments and normalize to one statement per line so that inline
+    # comments, code following a block comment, and several statements on one
+    # line are all handled
+    contents = _strip_openqasm_comments(contents)
+    contents = "\n".join(_split_openqasm_statements(contents))
+
     sitemap = {}
     registers = {}
     gates = []
@@ -665,84 +876,10 @@ def parse_openqasm3_str(contents):
     expressions = {}
     warned = {}
 
-    aliases = {
-        "u": "U3",
-        "u1": "U1",
-        "u2": "U2",
-        "u3": "U3",
-        "p": "PHASE",
-        "phase": "PHASE",
-        "id": "IDEN",
-        "i": "IDEN",
-        "cnot": "CNOT",
-        "cx": "CX",
-        "cy": "CY",
-        "cz": "CZ",
-        "h": "H",
-        "x": "X",
-        "y": "Y",
-        "z": "Z",
-        "s": "S",
-        "sdg": "SDG",
-        "t": "T",
-        "tdg": "TDG",
-        "sx": "SX",
-        "sxdg": "SXDG",
-        "swap": "SWAP",
-        "iswap": "ISWAP",
-        "rx": "RX",
-        "ry": "RY",
-        "rz": "RZ",
-        "crx": "CRX",
-        "cry": "CRY",
-        "crz": "CRZ",
-        "cu1": "CU1",
-        "cu2": "CU2",
-        "cu3": "CU3",
-        "cphase": "CPHASE",
-        "cp": "CPHASE",
-        "ccx": "CCX",
-        "ccnot": "CCX",
-        "toffoli": "CCX",
-        "cswap": "CSWAP",
-        "fredkin": "CSWAP",
-    }
-
-    def _resolve_qubit_arg(token):
-        token = token.strip()
-        if token in env and isinstance(env[token], (tuple, list)):
-            return tuple(env[token])
-        if token in registers:
-            reg = registers[token]
-            return reg if len(reg) > 1 else reg[0]
-
-        match = re.fullmatch(r"(\w+)\[(.+)\]", token)
-        if match:
-            base, idx_expr = match.groups()
-            idx = _openqasm_eval_expr(idx_expr, env)
-            if not isinstance(idx, numbers.Number):
-                raise NotImplementedError(
-                    "Symbolic qubit indices are unsupported."
-                )
-            idx = int(idx)
-            if base in env and isinstance(env[base], (tuple, list)):
-                return env[base][idx]
-            return sitemap[f"{base}[{idx}]"]
-
-        raise NotImplementedError(f"Unknown qubit identifier: {token}")
-
-    in_comment = False
     lines = contents.split("\n")
     while lines:
         line = lines.pop(0).strip()
         if not line:
-            continue
-        if rgxs["comment"].match(line):
-            continue
-        if rgxs["comment_start"].match(line):
-            in_comment = True
-        if in_comment:
-            in_comment = not bool(rgxs["comment_end"].search(line))
             continue
         if rgxs["header"].match(line):
             continue
@@ -892,7 +1029,10 @@ def parse_openqasm3_str(contents):
                     )
 
                 replacer_base = dict(zip(sig_params, params))
-                resolved = [_resolve_qubit_arg(q) for q in qubits]
+                resolved = [
+                    _resolve_qubit_arg(q, sitemap, registers, env)
+                    for q in qubits
+                ]
                 sizes = {
                     len(q) for q in resolved if isinstance(q, (tuple, list))
                 }
@@ -930,29 +1070,15 @@ def parse_openqasm3_str(contents):
                         lines.insert(0, gl.format(**replacer))
                 continue
 
-            label = aliases.get(label.lower(), label)
+            label = OPENQASM_GATE_ALIASES.get(label.lower(), label)
             if label not in ALL_GATES:
                 raise NotImplementedError(f"Unknown gate: {label}")
 
             raw_params = tuple(_openqasm_eval_expr(p, env) for p in params)
-            resolved = [_resolve_qubit_arg(q) for q in qubits]
-            sizes = {len(q) for q in resolved if isinstance(q, (tuple, list))}
-            if not sizes:
-                qubit_calls = [tuple(resolved)]
-            else:
-                if len(sizes) != 1:
-                    raise NotImplementedError(
-                        "Broadcasted gate args must use registers of equal "
-                        "length."
-                    )
-                (size,) = sizes
-                qubit_calls = [
-                    tuple(
-                        value[i] if isinstance(value, (tuple, list)) else value
-                        for value in resolved
-                    )
-                    for i in range(size)
-                ]
+            resolved = [
+                _resolve_qubit_arg(q, sitemap, registers, env) for q in qubits
+            ]
+            qubit_calls = _broadcast_gate_qubits(resolved)
             parametrize = any(
                 not isinstance(p, numbers.Number) for p in raw_params
             )
