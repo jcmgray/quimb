@@ -83,7 +83,9 @@ class TensorNetworkInfinite2DFlat:
         return self.site_tag_id.format(site)
 
     def site_type_tag(self, site_type):
-        """The tag of the tensor at ``site_type`` in the fragment tensor network."""
+        """The shared tag applied to every tensor of ``site_type`` in the
+        fragment tensor network.
+        """
         return self.site_type_tag_id.format(site_type)
 
     def get_site_inds(self, site):

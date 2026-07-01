@@ -1,6 +1,6 @@
-"""Geometry of infinite, translation-invariant 2D lattices: the unit cell
-of sites and bonds, and prebuilt square-lattice instances. See the subpackage
-``__init__`` for some shared definition.
+"""Geometry of infinite, translation-invariant 2D lattices: the unit cell of
+sites and bonds, with a ``GeometryInfinite2D.square`` builder for square
+lattices. See the subpackage ``__init__`` for some shared definition.
 """
 
 
@@ -255,13 +255,13 @@ class GeometryInfinite2D:
         boundary = [sitea]
         for d in range(1, max_hops + 1):
             next_boundary = []
-            for site in boundary:
-                for neighb in self.get_site_neighbors(site):
-                    if neighb == siteb:
+            for sb in boundary:
+                for sn in self.get_site_neighbors(sb):
+                    if sn == siteb:
                         return d
-                    if neighb not in seen:
-                        seen.add(neighb)
-                        next_boundary.append(neighb)
+                    if sn not in seen:
+                        seen.add(sn)
+                        next_boundary.append(sn)
             boundary = next_boundary
         raise ValueError(
             f"No path from {sitea} to {siteb} within {max_hops} hops."
@@ -273,11 +273,11 @@ class GeometryInfinite2D:
         boundary = [site]
         for _ in range(radius):
             next_boundary = []
-            for site in boundary:
-                for neighb in self.get_site_neighbors(site):
-                    if neighb not in seen:
-                        seen.add(neighb)
-                        next_boundary.append(neighb)
+            for sb in boundary:
+                for sn in self.get_site_neighbors(sb):
+                    if sn not in seen:
+                        seen.add(sn)
+                        next_boundary.append(sn)
             boundary = next_boundary
         return seen
 
@@ -334,7 +334,7 @@ class GeometryInfinite2D:
         ----------
         order : str, optional
             Strategy for coloring the bond-types to generate the ordering.
-            Note currently only "sort" is supported, other .
+            Note currently only "sort" is supported.
         group : bool, optional
             If ``True``, return a list of layers (tuples of ``bond_types``),
             otherwise return a flat list of ``bond_types``.
