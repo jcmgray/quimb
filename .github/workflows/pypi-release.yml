@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'jcmgray/quimb'
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v6
