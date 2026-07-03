@@ -5,10 +5,17 @@ Release notes for `quimb`.
 
 ## v1.14.1 (unreleased)
 
+**Breaking Changes:**
+
+- [`Circuit.uni`](#Circuit.uni): now returns the non-transposed unitary tensor network, so that ``circ.uni.to_dense()`` gives ``U`` acting on a state like ``U @ psi``. This was previously transposed and emitting a ``FutureWarning`` announcing the change; the warning is now removed. Use ``circ.get_uni(transposed=True)`` to recover the old transposed convention.
+- the non-exact circuit simulators ([`CircuitMPS`](#CircuitMPS), [`CircuitPermMPS`](#CircuitPermMPS), [`CircuitMPSLazy`](#CircuitMPSLazy), [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate), [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate)) no longer subclass the exact [`Circuit`](#Circuit); they now compose the shared [`CircuitBase`](#CircuitBase). Use ``isinstance(circ, CircuitBase)`` rather than ``isinstance(circ, Circuit)`` to check for any circuit type. As a consequence these classes no longer expose exact-contraction-only methods that they previously inherited but which did not produce meaningful results (e.g. ``get_uni``, ``compute_marginal``, ``sample_chaotic``, ``schrodinger_contract``); the methods they do support (``to_dense``, ``amplitude``, ``sample``, ``partial_trace``, ``local_expectation``, ``simulate_counts``, ``xeb``, where applicable) are unchanged.
+
+
 **Enhancements:**
 
 - add [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate): a high level quantum circuit simulator that keeps the state as an arbitrary geometry PEPS and applies nearest-neighbor gates with 'simple update' style gauging. The geometry is given by a set of ``edges``, inferred from the ``gates`` or read from a ``psi0``; the accuracy is set by ``max_bond``; gauges can be periodically re-equilibrated with ``equilibrate``; local expectations are computed with the cluster approximation.
 - add [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate): the Heisenberg-picture companion to [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate). Gates are recorded lazily, then a local observable is built as a bond dimension 1 PEPO on the ``edges`` and evolved backwards through them with simple update gauging and compression (skipping gates outside its reverse lightcone), exposing the evolved operator via ``get_evolved_operator`` and its ``|00...0>`` expectation via ``local_expectation``.
+- add [`CircuitBase`](#CircuitBase): the shared, representation-agnostic base for all circuit simulators, holding the gate-application front-end and convenience gate methods, named-parameter management, the ``from_*`` constructors and drawing. The exact, MPS, PEPS and PEPO simulators now compose it instead of inheriting the exact [`Circuit`](#Circuit).
 - [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple): add a ``fuse_multibonds`` option for updating gauges while preserving multi-index bonds, supported by explicit bond-index selection in [`tensor_compress_bond`](#tensor_compress_bond).
 - add [`tensor_gauge_simple_bond`](#tensor_gauge_simple_bond): the single-bond 'simple update' gauging step extracted from [`gauge_all_simple`](#TensorNetwork.gauge_all_simple), for gauging an individual bond between two tensors against a shared ``gauges`` dict.
 - [`tensor_canonize_bond`](#tensor_canonize_bond): add a ``swap_inds`` option to relocate one or more indices onto the other tensor while canonizing (e.g. to 'move' a physical index), plus a ``bond_ind`` option for explicit bond-index selection, matching [`tensor_compress_bond`](#tensor_compress_bond).
@@ -22,7 +29,7 @@ Release notes for `quimb`.
 
 **Internal:**
 
-- reorganize the `quimb.tensor.circuit` module into a package (`gates`, `qasm`, `exact`, `mps`, `peps`, `pepo` submodules). The public import path `quimb.tensor.circuit.*` and every class's ``__module__`` are unchanged, so this is behavior-preserving for users and pickles.
+- reorganize the `quimb.tensor.circuit` module into a package (`gates`, `qasm`, `core`, `exact`, `simple_update`, `mps`, `peps`, `pepo` submodules). The public import path `quimb.tensor.circuit.*` and every class's ``__module__`` are unchanged, so the relocation is behavior-preserving for users and pickles. `core` holds the new [`CircuitBase`](#CircuitBase) and `simple_update` a shared base for the PEPS/PEPO simple-update simulators (see the Breaking Changes above for the inheritance change).
 
 
 **Docs:**

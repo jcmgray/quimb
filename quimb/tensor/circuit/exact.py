@@ -5,7 +5,6 @@ import itertools
 import numbers
 import operator
 import re
-import warnings
 import numpy as np
 import quimb as qu
 from ...utils import progbar as _progbar
@@ -204,15 +203,12 @@ class Circuit(CircuitBase):
 
     @property
     def uni(self):
-
-        warnings.warn(
-            "In future the tensor network returned by ``circ.uni`` will not "
-            "be transposed as it is currently, to match the expectation from "
-            "``U = circ.uni.to_dense()`` behaving like ``U @ psi``. You can "
-            "retain this behaviour with ``circ.get_uni(transposed=True)``.",
-            FutureWarning,
-        )
-        return self.get_uni(transposed=True)
+        """Tensor network representation of the unitary operator, i.e. the
+        circuit with the initial state removed, such that ``circ.uni.to_dense()``
+        gives ``U`` acting on a state like ``U @ psi``. For the old transposed
+        convention use ``circ.get_uni(transposed=True)``.
+        """
+        return self.get_uni()
 
     def get_reverse_lightcone_tags(self, where):
         """Get the tags of gates in this circuit corresponding to the 'reverse'

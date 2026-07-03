@@ -18,8 +18,8 @@ class CircuitSimpleUpdate(CircuitBase):
     views, the ``copy`` skeleton that carries the geometry, the natural
     site-based qubit ordering, and the friendly ``_unsupported`` error for
     representation-invalid methods. Subclasses implement ``_init_state``,
-    ``_apply_gate``, ``local_expectation`` and their representation-specific
-    surface.
+    ``_apply_gate``, ``local_expectation`` and their other
+    representation-specific methods.
     """
 
     # subclass-specific hint appended to the ``_unsupported`` error message
