@@ -138,11 +138,13 @@ class LocalHamInfinite2D(LocalHamGen):
         """Get the local term for the ``bond_type`` of ``where``, cached."""
         return self.terms[self.geometry.get_bond_type(*where)]
 
-    def get_auto_ordering(self, order="sort", group=False):
+    def get_auto_ordering(self, order="sort", group=False, **kwargs):
         """Ordering of ``bond_types`` into commuting (non site_type-overlapping)
         groups, delegated to the geometry.
         """
-        return self.geometry.get_auto_ordering(order=order, group=group)
+        return self.geometry.get_auto_ordering(
+            order=order, group=group, **kwargs
+        )
 
     def draw(self, *args, **kwargs):
         """Draw the Hamiltonian's geometry."""

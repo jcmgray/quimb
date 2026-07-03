@@ -3,6 +3,9 @@ sites and bonds, with a ``GeometryInfinite2D.square`` builder for square
 lattices. See the subpackage ``__init__`` for some shared definition.
 """
 
+import itertools
+import random
+
 
 def is_inf_2d_site(site):
     """Check if `site` is a valid 2d infinite site specifier, that is, it is
@@ -325,68 +328,135 @@ class GeometryInfinite2D:
         """
         return get_bond_sorted(sitea, siteb) == get_bond_type(sitea, siteb)
 
-    def get_auto_ordering(self, order="sort", group=False):
+    def get_auto_ordering(
+        self,
+        order="sort",
+        group=False,
+        interchange=True,
+    ):
         """An ordering of the ``bond_types`` such that consecutive entries act
         on disjoint ``site_types`` where possible, i.e. grouped into commuting
         layers. Used to sequence gates in e.g. a simple-update sweep.
 
         Parameters
         ----------
-        order : str, optional
-            Strategy for coloring the bond-types to generate the ordering.
-            Note currently only "sort" is supported.
+        order : {'sort', None, 'random', 'random-ungrouped', str}, optional
+            How to order the ``bond_types`` *before* greedily grouping them
+            into commuting (non site_type-overlapping) layers:
+
+            - ``'sort'`` sorts the ``bond_types`` first.
+            - ``None`` uses their current order.
+            - ``'random'`` randomly shuffles them before grouping.
+            - ``'random-ungrouped'`` randomly shuffles them and does *not*
+              group them at all. With ``group=True`` the shuffled
+              ``bond_types`` are aggregated only with commuting neighbors.
+
+            Any other value is passed as a strategy to
+            :func:`networkx.coloring.greedy_color`, coloring the graph whose
+            nodes are ``bond_types``, linked when they share a ``site_type``,
+            so each color is a commuting layer.
         group : bool, optional
             If ``True``, return a list of layers (tuples of ``bond_types``),
             otherwise return a flat list of ``bond_types``.
+        interchange : bool, optional
+            For the networkx coloring strategies, whether to use the
+            interchange heuristic (usually better colorings, but slower).
 
         Returns
         -------
         list[bond_type] or list[tuple[bond_type]]
         """
-        # TODO: implement networkx strategies
+        if order in (None, "sort", "random", "random-ungrouped"):
+            pairs = list(self.bond_types)
+            if order == "sort":
+                pairs.sort()
+            elif order in ("random", "random-ungrouped"):
+                random.shuffle(pairs)
 
-        bonds = list(self.bond_types)
-        i = 0
-        ordering = []
-        current_site_types = set()
-        layer = []
-        while bonds:
-            (_, sta), (_, stb) = bonds[i]
-            sts = {sta, stb}
+            sequential = order == "random-ungrouped"
+            if sequential and not group:
+                # ungrouped -> the flattened layers are just the shuffled order
+                return pairs
 
-            if sts & current_site_types:
-                # does not commute with current -> skip
-                i += 1
-            else:
-                # commutes with current -> accept
-                layer.append(bonds.pop(i))
-                current_site_types.update(sts)
-
-            if i >= len(bonds):
-                # no commuting bond available -> flush
+            # greedily group into commuting layers
+            pairs = dict.fromkeys(pairs)
+            ordering = []
+            layer = []
+            cover = set()
+            while pairs:
+                for pair in tuple(pairs):
+                    (_, sta), (_, stb) = pair
+                    if sta not in cover and stb not in cover:
+                        # commutes with current -> accept
+                        layer.append(pair)
+                        cover.add(sta)
+                        cover.add(stb)
+                        del pairs[pair]
+                    elif sequential:
+                        # random-ungrouped -> don't continue down list
+                        break
+                # checked every pair (or cut early), flush layer and restart
                 if group:
                     ordering.append(tuple(layer))
                 else:
                     ordering.extend(tuple(layer))
-                i = 0
                 layer.clear()
-                current_site_types.clear()
+                cover.clear()
 
+            return ordering
+
+        # otherwise treat ``order`` as a networkx greedy-coloring strategy,
+        # coloring the conflict graph whose nodes are ``bond_types``, linked
+        # when they share a ``site_type``, so each color is a commuting layer
+        import networkx as nx
+
+        site_type_to_bond_types = {}
+        for bond_type in self.bond_types:
+            (_, sta), (_, stb) = bond_type
+            site_type_to_bond_types.setdefault(sta, []).append(bond_type)
+            site_type_to_bond_types.setdefault(stb, []).append(bond_type)
+
+        conflict = nx.Graph()
+        # include isolated bond_types (sharing no site_type) as bare nodes
+        conflict.add_nodes_from(self.bond_types)
+        for bond_types in site_type_to_bond_types.values():
+            for bta, btb in itertools.combinations(bond_types, 2):
+                conflict.add_edge(bta, btb)
+
+        bond_type_to_color = nx.coloring.greedy_color(
+            conflict, order, interchange=interchange
+        )
+
+        coloring = {}
+        for bond_type, color in bond_type_to_color.items():
+            coloring.setdefault(color, []).append(bond_type)
+
+        ordering = []
+        for color in sorted(coloring):
+            if group:
+                ordering.append(tuple(coloring[color]))
+            else:
+                ordering.extend(coloring[color])
         return ordering
 
-    def draw(self, pos=None):
+    def draw(self, order=None, pos=None):
         """Draw the covering sites and bonds of the unit cell, with the cell
         boundary marked.
 
         Parameters
         ----------
+        order : str, optional
+            If given, color the bonds by the commuting layer they fall into,
+            as computed by :meth:`get_auto_ordering` with this ``order``
+            strategy (e.g. ``"sort"``). If ``None``, each ``bond_type`` is
+            colored by its own hash instead.
         pos : dict, optional
             A mapping of ``site_type`` to fractional position within the unit
             cell. If not given, the geometry's own ``coordinate`` is used.
         """
         from ...schematic import (
             Drawing,
-            # auto_colors,
+            auto_colors,
             hash_to_color,
         )
 
@@ -414,22 +484,30 @@ class GeometryInfinite2D:
                 va="center",
             )
 
+        # optionally color bonds by their commuting layer, else by hash
+        if order is not None:
+            layers = self.get_auto_ordering(order, group=True)
+            layer_colors = auto_colors(len(layers))
+            bond_type_to_color = {
+                bond_type: layer_colors[i]
+                for i, layer in enumerate(layers)
+                for bond_type in layer
+            }
+        else:
+            bond_type_to_color = None
+
         def _draw_bond(sitea, siteb):
             bond_type = self.get_bond_type(sitea, siteb)
-            # color = edge_type_to_color[bond_type]
-            color = hash_to_color(str(bond_type))
+            if bond_type_to_color is not None:
+                color = bond_type_to_color[bond_type]
+            else:
+                color = hash_to_color(str(bond_type))
             d.line(
                 get_pos(sitea),
                 get_pos(siteb),
                 color=color,
                 linewidth=3,
             )
-
-        # site_type_colors = auto_colors(len(self.site_types))
-        # site_type_to_color = dict(zip(self.site_types, site_type_colors))
-
-        # edge_type_colors = auto_colors(len(self.bond_types))
-        # edge_type_to_color = dict(zip(self.bond_types, edge_type_colors))
 
         d = Drawing()
 
