@@ -15,11 +15,11 @@ from ..tensor_builder import (
     MPS_computational_state,
 )
 from ..tnag.core import TensorNetworkGenVector
-from .exact import Circuit
+from .core import CircuitBase
 from .gates import parse_to_gate
 
 
-class CircuitMPS(Circuit):
+class CircuitMPS(CircuitBase):
     """Quantum circuit simulation keeping the state always in a MPS form. If
     you think the circuit will not build up much entanglement, or you just want
     to keep a rigorous handle on how much entanglement is present, this can
@@ -159,6 +159,87 @@ class CircuitMPS(Circuit):
         raise ValueError(
             "You can't extract the circuit unitary TN from a ``CircuitMPS``."
         )
+
+    def to_dense(
+        self, reverse=False, optimize="auto-hq", backend=None, dtype=None
+    ):
+        """Contract the MPS into a dense wavefunction, a column-vector
+        ``qarray`` of length ``2**N``. Contracts ``self.psi`` directly (already
+        in MPS/qubit order), with no exact-TN simplification.
+        """
+        psi = self.psi
+        self._maybe_convert(psi, dtype)
+        output_inds = tuple(map(psi.site_ind, range(self.N)))
+        if reverse:
+            output_inds = output_inds[::-1]
+        t = psi.contract(
+            all, output_inds=output_inds, optimize=optimize, backend=backend
+        )
+        k = ops.reshape(t.data, (-1, 1))
+        if isinstance(k, np.ndarray):
+            k = qu.qarray(k)
+        return k
+
+    def amplitude(self, b, optimize="auto-hq", backend=None, dtype=None):
+        """Compute the amplitude ``<b|psi>`` of bitstring ``b`` by projecting
+        each physical index of ``self.psi`` and contracting the resulting
+        single-layer (scalar) network, rather than forming the full state.
+        """
+        if len(b) != self.N:
+            raise ValueError(
+                f"Bit-string {b} length does not "
+                f"match number of qubits {self.N}."
+            )
+        psi = self.psi
+        self._maybe_convert(psi, dtype)
+        for i, x in zip(range(self.N), b):
+            psi.isel_({psi.site_ind(i): int(x)})
+        return psi.contract(
+            all, output_inds=(), optimize=optimize, backend=backend
+        )
+
+    def partial_trace(
+        self,
+        keep,
+        optimize="auto-hq",
+        simplify_sequence="ADCRS",
+        simplify_atol=1e-12,
+        simplify_equalize_norms=True,
+        backend=None,
+        dtype=None,
+    ):
+        r"""Reduced density matrix on the qubits in ``keep``, tracing out the
+        rest. Forms the double-layer network from the full state ``self.psi``
+        (an MPS keeps no lightcone), simplifies it, and contracts.
+
+        Parameters
+        ----------
+        keep : int or sequence of int
+            The qubit(s) to keep as we trace out the rest.
+        """
+        if isinstance(keep, numbers.Integral):
+            keep = (keep,)
+
+        # `get_psi_reverse_lightcone` returns the full `self.psi` for an MPS
+        ket = self.get_psi_reverse_lightcone(keep)
+        self._maybe_convert(ket, dtype)
+
+        k_inds = tuple(map(self.ket_site_ind, keep))
+        b_inds = tuple(map(self.bra_site_ind, keep))
+        output_inds = k_inds + b_inds
+
+        bra = ket.conj().reindex(dict(zip(k_inds, b_inds)))
+        rho = bra | ket
+        rho.full_simplify_(
+            seq=simplify_sequence,
+            atol=simplify_atol,
+            output_inds=output_inds,
+            equalize_norms=simplify_equalize_norms,
+        )
+        rho_dense = rho.contract(
+            all, output_inds=output_inds, optimize=optimize, backend=backend
+        ).data
+        return ops.reshape(rho_dense, [2 ** len(keep), 2 ** len(keep)])
 
     def calc_qubit_ordering(self, qubits=None):
         """MPS already has a natural ordering."""
@@ -441,39 +522,9 @@ class CircuitPermMPS(CircuitMPS):
 
         return psi
 
-    def to_dense(
-        self, reverse=False, optimize="auto-hq", backend=None, dtype=None
-    ):
-        # contract the qubit-relabeled MPS directly (`self.psi` already maps
-        # `site_ind(i)` to logical qubit `i`); no exact-TN simplification
-        psi = self.psi
-        self._maybe_convert(psi, dtype)
-        output_inds = tuple(map(psi.site_ind, range(self.N)))
-        if reverse:
-            output_inds = output_inds[::-1]
-        t = psi.contract(
-            all, output_inds=output_inds, optimize=optimize, backend=backend
-        )
-        k = ops.reshape(t.data, (-1, 1))
-        if isinstance(k, np.ndarray):
-            k = qu.qarray(k)
-        return k
-
-    def amplitude(self, b, optimize="auto-hq", backend=None, dtype=None):
-        if len(b) != self.N:
-            raise ValueError(
-                f"Bit-string {b} length does not "
-                f"match number of qubits {self.N}."
-            )
-        # project each physical index onto its bitstring value first, then
-        # contract the resulting scalar network (cheap single-layer amplitude)
-        psi = self.psi
-        self._maybe_convert(psi, dtype)
-        for i, x in zip(range(self.N), b):
-            psi.isel_({psi.site_ind(i): int(x)})
-        return psi.contract(
-            all, output_inds=(), optimize=optimize, backend=backend
-        )
+    # `to_dense`/`amplitude` are inherited from `CircuitMPS`: they read
+    # `self.psi`, which this class already overrides to relabel the sites into
+    # logical-qubit order, so the base contraction is correct under permutation.
 
     def local_expectation(self, G, where, *args, **kwargs):
         # translate logical qubit(s) to their current physical site(s), since

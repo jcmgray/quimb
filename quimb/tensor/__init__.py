@@ -2,6 +2,7 @@
 
 from .circuit import (
     Circuit,
+    CircuitBase,
     CircuitDense,
     CircuitMPS,
     CircuitMPSLazy,
@@ -243,6 +244,7 @@ __all__ = (
     "circ_ansatz_1D_zigzag",
     "circ_qaoa",
     "Circuit",
+    "CircuitBase",
     "CircuitDense",
     "CircuitMPS",
     "CircuitPEPOSimpleUpdate",

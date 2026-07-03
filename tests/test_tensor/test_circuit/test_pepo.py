@@ -48,8 +48,10 @@ class TestCircuitPEPOSimpleUpdate:
 
     def test_is_circuit_subclass(self):
         circ = qtn.CircuitPEPOSimpleUpdate(edges=[(0, 1), (1, 2)])
-        assert isinstance(circ, qtn.Circuit)
-        # the inherited gate-specification API works
+        # non-exact simulators compose `CircuitBase`, not the exact `Circuit`
+        assert isinstance(circ, qtn.circuit.CircuitBase)
+        assert not isinstance(circ, qtn.Circuit)
+        # the shared gate-specification API works
         circ.h(0)
         circ.cx(0, 1)
         circ.apply_gate("CX", 1, 2)

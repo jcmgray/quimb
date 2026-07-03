@@ -10,13 +10,12 @@ from ...utils import (
 )
 from ..tensor_builder import (
     TN_from_sites_product_state,
-    gen_unique_edges,
 )
-from .exact import Circuit
 from .gates import parse_to_gate
+from .simple_update import CircuitSimpleUpdate
 
 
-class CircuitPEPOSimpleUpdate(Circuit):
+class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
     r"""Quantum circuit simulator that evolves an observable *backwards* in time,
     in the Heisenberg picture, by representing it as an arbitrary geometry PEPO
     and applying the gates with the simple update rule.
@@ -85,6 +84,13 @@ class CircuitPEPOSimpleUpdate(Circuit):
     CircuitPEPSSimpleUpdate, CircuitMPS
     """
 
+    _unsupported_hint = (
+        "which evolves an observable in the Heisenberg picture rather than "
+        "holding a forward state. Use `local_expectation` for expectation "
+        "values, or `get_evolved_operator` / `get_evolved_operator_with_state`"
+        " for the evolved operator."
+    )
+
     def __init__(
         self,
         N=None,
@@ -98,30 +104,7 @@ class CircuitPEPOSimpleUpdate(Circuit):
         **circuit_opts,
     ):
         # geometry from explicit `edges`, or inferred from the two-site `gates`
-        # (only inspected here, not applied)
-        extra_sites = ()
-        if edges is None:
-            if gates is not None:
-                parsed = [parse_to_gate(g) for g in gates]
-                edges = [g.qubits for g in parsed if len(g.qubits) == 2]
-                extra_sites = tuple(q for g in parsed for q in g.qubits)
-            else:
-                raise ValueError(
-                    "You must supply one of `edges` or `gates` to define the "
-                    "geometry."
-                )
-        self._edges = tuple(gen_unique_edges(edges))
-
-        sites = set()
-        for a, b in self._edges:
-            sites.add(a)
-            sites.add(b)
-        sites.update(extra_sites)
-        if N is not None:
-            sites.update(range(N))
-        self._sites = tuple(sorted(sites))
-        self._site_set = set(self._sites)
-        self._edge_set = {frozenset(e) for e in self._edges}
+        self._init_geometry(edges, gates, None, N)
 
         # gate_opts is the single source of truth for the compression options
         gate_opts = ensure_dict(gate_opts)
@@ -137,27 +120,6 @@ class CircuitPEPOSimpleUpdate(Circuit):
         circuit_opts.setdefault("tag_gate_labels", False)
 
         super().__init__(len(self._sites), None, gate_opts, **circuit_opts)
-
-    def copy(self):
-        """Copy the circuit, carrying over the geometry that the base
-        :class:`Circuit` copy does not know about.
-        """
-        new = super().copy()
-        new._edges = self._edges
-        new._sites = self._sites
-        new._site_set = self._site_set
-        new._edge_set = self._edge_set
-        return new
-
-    @property
-    def edges(self):
-        """The unique edges defining the geometry."""
-        return self._edges
-
-    @property
-    def sites(self):
-        """The sites (qubit labels)."""
-        return self._sites
 
     @property
     def max_bond(self):
@@ -383,15 +345,6 @@ class CircuitPEPOSimpleUpdate(Circuit):
             G, where, max_bond=max_bond, cutoff=cutoff
         )
         return tn.contract(all, optimize=optimize, **contract_opts)
-
-    def _unsupported(self, name):
-        raise NotImplementedError(
-            f"`{name}` is not available for `CircuitPEPOSimpleUpdate`, which "
-            "evolves an observable in the Heisenberg picture rather than "
-            "holding a forward state. Use `local_expectation` for expectation "
-            "values, or `get_evolved_operator` / "
-            "`get_evolved_operator_with_state` for the evolved operator."
-        )
 
     @property
     def psi(self):
