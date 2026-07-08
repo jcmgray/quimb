@@ -36,6 +36,9 @@ Release notes for `quimb`.
 
 - [`CircuitDense`](#CircuitDense): fix `psi`, `partial_trace` and `local_expectation`, which raised ``ValueError`` because the contracted ``Dense1D`` view was not given its number of sites.
 - [`CircuitPermMPS`](#CircuitPermMPS): fix `amplitude`, `to_dense` and `local_expectation` returning incorrectly-labelled qubits under a non-trivial lazy permutation (only `sample` previously inverted the permutation back to logical qubit order).
+- [`CircuitPermMPS`](#CircuitPermMPS) and [`CircuitMPSLazy`](#CircuitMPSLazy): fix `copy()`, which returned unusable copies missing the subclass attributes such as the qubit ordering and the lazy compression bookkeeping ({issue}`387`).
+- [`CircuitMPSLazy`](#CircuitMPSLazy): flush pending lazy gates in all inherited state accessors (`to_dense`, `amplitude`, `partial_trace`, `compute_marginal`, ...), which previously returned the exact state, bypassing the configured compression, and invalidate cached simplified states when a compression mutates the state, so results no longer depend on accessor order ({issue}`387`).
+- [`CircuitMPSLazy`](#CircuitMPSLazy): raise `NotImplementedError` for `schrodinger_contract`, which is not defined for the approximate lazy MPS simulator and previously failed with an internal `IndexError` ({issue}`387`).
 
 - [`tensor_network_1d_compress_src`](#tensor_network_1d_compress_src) and [`tensor_network_1d_compress_srcmps`](#tensor_network_1d_compress_srcmps): call [`enforce_1d_like`](#enforce_1d_like) like the other 1D compression methods, fixing compression of tensor networks with long range (site skipping) bonds, e.g. from lazily applied long range gates.
 - [`enforce_1d_like`](#enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
