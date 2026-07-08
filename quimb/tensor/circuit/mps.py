@@ -353,6 +353,12 @@ class CircuitPermMPS(CircuitMPS):
         # keep track of the current qubit ordering
         self.qubits = list(range(self.N))
 
+    def copy(self):
+        """Copy the circuit and its state."""
+        new = super().copy()
+        new.qubits = list(self.qubits)
+        return new
+
     def _apply_gate(self, gate, tags=None, **gate_opts):
         # first translate gate qubits to their current 'physical' location
         qubits = gate.qubits
@@ -627,6 +633,14 @@ class CircuitMPSLazy(CircuitMPS):
     def method(self, value):
         self.compress_opts["method"] = value
 
+    def copy(self):
+        """Copy the circuit and its state."""
+        new = super().copy()
+        new.compress_opts = dict(self.compress_opts)
+        new._uncompressed_sites = dict(self._uncompressed_sites)
+        new.compress_every = self.compress_every
+        return new
+
     def _compress(self):
         """Compress the current state by contracting in all gates and then applying
         the specified compression method via
@@ -652,6 +666,10 @@ class CircuitMPSLazy(CircuitMPS):
             self.gate_opts["info"]["cur_orthog"] = (0, 0)
 
         self._uncompressed_sites.clear()
+
+        # compression mutates `_psi` in place, so any cached simplified
+        # representations of the pre-compression state are now stale
+        self.clear_storage()
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
         gate_qubits = gate.qubits
@@ -685,6 +703,19 @@ class CircuitMPSLazy(CircuitMPS):
         self._compress()
         return super().psi
 
+    # all inherited state accessors (`to_dense`, `amplitude`,
+    # `partial_trace`, `compute_marginal`, `sample_chaotic`, ...) funnel
+    # through one of the following two methods, so flushing pending lazy
+    # gates here keeps them consistent with the compressed state
+
+    def get_psi_simplified(self, *args, **kwargs):
+        self._compress()
+        return super().get_psi_simplified(*args, **kwargs)
+
+    def get_rdm_lightcone_simplified(self, *args, **kwargs):
+        self._compress()
+        return super().get_rdm_lightcone_simplified(*args, **kwargs)
+
     def sample(self, C, *args, **kwargs):
         self._compress()
         yield from super().sample(C, *args, **kwargs)
@@ -696,3 +727,10 @@ class CircuitMPSLazy(CircuitMPS):
     def fidelity_estimate(self):
         self._compress()
         return super().fidelity_estimate()
+
+    def schrodinger_contract(self, *args, **contract_opts):
+        raise NotImplementedError(
+            "'Schrodinger' contraction is not defined for the approximate "
+            "lazy MPS simulator, use e.g. `psi`, `to_dense`, `amplitude`, "
+            "`sample` or `local_expectation` instead."
+        )
