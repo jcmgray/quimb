@@ -5,18 +5,21 @@ import itertools
 import numbers
 import operator
 import re
+
 import numpy as np
-import quimb as qu
-from ...utils import progbar as _progbar
-from .. import array_ops as ops
 from autoray import (
     do,
     reshape,
 )
+
+import quimb as qu
+
 from ...utils import (
     ensure_dict,
     partition_all,
 )
+from ...utils import progbar as _progbar
+from .. import array_ops as ops
 from ..tensor_builder import TN_from_sites_computational_state
 from ..tensor_core import (
     Tensor,
@@ -25,11 +28,11 @@ from ..tensor_core import (
 )
 from ..tn1d.core import Dense1D
 from ..tnag.core import TensorNetworkGenOperator
+from .core import CircuitBase
 from .gates import (
     rehearsal_dict,
     sample_bitstring_from_prob_ndarray,
 )
-from .core import CircuitBase
 
 
 class Circuit(CircuitBase):
@@ -155,14 +158,13 @@ class Circuit(CircuitBase):
             site_map={i: "0" for i in range(N)}, dtype=dtype
         )
 
-    @property
-    def psi(self):
-        """Tensor network representation of the wavefunction."""
-        # make sure all same dtype and drop singlet dimensions
+    def get_psi(self):
+        """Get a copy of the current state tensor network, with any singlet
+        dimensions squeezed out.
+        """
         psi = self._psi.copy()
         psi.squeeze_()
         if not self.convert_eager:
-            # not converted yet
             self._maybe_convert(psi)
         return psi
 
@@ -383,6 +385,8 @@ class Circuit(CircuitBase):
         -------
         TensorNetwork
         """
+        self._maybe_init_storage()
+
         key = ("rdm_lightcone_simplified", tuple(sorted(where)), seq, atol)
         if key in self._storage:
             return self._storage[key].copy()
@@ -2037,17 +2041,19 @@ class CircuitDense(Circuit):
         gate_opts.setdefault("convert_eager", convert_eager)
         super().__init__(N, psi0, gate_opts, tags, **circuit_opts)
 
-    @property
-    def psi(self):
+    def get_psi(self):
+        """Get the dense wavefunction as a length one tensor network, with a
+        ``Dense1D`` view.
+        """
         t = self._psi ^ ...
         psi = t.as_network()
         psi.view_as_(Dense1D, like=self._psi, L=self.N)
         return psi
 
-    @property
-    def uni(self):
-        raise ValueError(
-            "You can't extract the circuit unitary TN from a ``CircuitDense``."
+    def get_uni(self, transposed=False):
+        raise NotImplementedError(
+            "You can't extract the circuit unitary TN from a "
+            "``CircuitDense``, which contracts the state as it goes."
         )
 
     def calc_qubit_ordering(self, qubits=None):

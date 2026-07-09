@@ -84,13 +84,6 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
     CircuitPEPSSimpleUpdate, CircuitMPS
     """
 
-    _unsupported_hint = (
-        "which evolves an observable in the Heisenberg picture rather than "
-        "holding a forward state. Use `local_expectation` for expectation "
-        "values, or `get_evolved_operator` / `get_evolved_operator_with_state`"
-        " for the evolved operator."
-    )
-
     def __init__(
         self,
         N=None,
@@ -346,31 +339,20 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
         )
         return tn.contract(all, optimize=optimize, **contract_opts)
 
-    @property
-    def psi(self):
+    # this simulator evolves observables, not a state, so the remaining state
+    # access methods, supported by the PEPS version, are also unsupported
+
+    def _unsupported(self, name):
+        raise NotImplementedError(
+            f"`{name}` is not available for `CircuitPEPOSimpleUpdate`, "
+            "which evolves an observable in the Heisenberg picture rather "
+            "than holding a forward state. Use `local_expectation` for "
+            "expectation values, or `get_evolved_operator` / "
+            "`get_evolved_operator_with_state` for the evolved operator."
+        )
+
+    def get_psi(self):
         self._unsupported("psi")
 
     def to_dense(self, *args, **kwargs):
         self._unsupported("to_dense")
-
-    def sample(self, *args, **kwargs):
-        self._unsupported("sample")
-
-    def sample_rehearse(self, *args, **kwargs):
-        self._unsupported("sample_rehearse")
-
-    def sample_chaotic(self, *args, **kwargs):
-        self._unsupported("sample_chaotic")
-
-    def sample_chaotic_rehearse(self, *args, **kwargs):
-        self._unsupported("sample_chaotic_rehearse")
-
-    def amplitude(self, *args, **kwargs):
-        self._unsupported("amplitude")
-
-    def partial_trace(self, *args, **kwargs):
-        self._unsupported("partial_trace")
-
-    @property
-    def uni(self):
-        self._unsupported("uni")

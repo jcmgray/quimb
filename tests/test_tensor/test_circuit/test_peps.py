@@ -41,6 +41,25 @@ class TestCircuitPEPSSimpleUpdate:
                 float(np.real(xe)), abs=1e-10
             )
 
+    def test_edges_through_parsing_constructors(self):
+        # the geometry can be supplied to the generic `from_*` constructors,
+        # which forward it as a circuit option
+        edges = [(0, 1), (1, 2)]
+        gates = [("H", 0), ("CX", 0, 1), ("RY", 0.3, 2), ("CZ", 1, 2)]
+        ce = qtn.Circuit.from_gates(gates)
+
+        circ = qtn.CircuitPEPSSimpleUpdate.from_gates(gates, edges=edges)
+        assert abs(
+            qu.fidelity(circ.to_dense(), ce.to_dense())
+        ) == pytest.approx(1.0, abs=1e-10)
+
+        qsim = "3\n0 h 0\n1 cz 0 1\n2 cz 1 2\n"
+        circ = qtn.CircuitPEPSSimpleUpdate.from_qsim_str(qsim, edges=edges)
+        ceq = qtn.Circuit.from_qsim_str(qsim)
+        assert abs(
+            qu.fidelity(circ.to_dense(), ceq.to_dense())
+        ) == pytest.approx(1.0, abs=1e-10)
+
     def test_geometry_inferred_from_psi0(self):
         # build a state, hand it back as psi0, and check the geometry is read
         # from its bonds and expectations are preserved
@@ -241,7 +260,7 @@ class TestCircuitPEPSSimpleUpdate:
         with pytest.raises(NotImplementedError):
             circ.partial_trace([0])
         with pytest.raises(NotImplementedError):
-            circ.sample_chaotic_rehearse()
+            circ.compute_marginal((0,))
         with pytest.raises(NotImplementedError):
             circ.uni
         # a two-qubit gate off any declared edge is rejected

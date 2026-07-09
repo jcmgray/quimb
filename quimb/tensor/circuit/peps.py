@@ -116,12 +116,6 @@ class CircuitPEPSSimpleUpdate(CircuitSimpleUpdate):
     CircuitMPS, CircuitDense
     """
 
-    _unsupported_hint = (
-        "which only ever holds an approximate, gauged tensor network state. "
-        "Use `local_expectation` for observables or `psi` to get the gauged "
-        "PEPS state and contract or sample it with the approximation you want."
-    )
-
     def __init__(
         self,
         N=None,
@@ -366,11 +360,10 @@ class CircuitPEPSSimpleUpdate(CircuitSimpleUpdate):
             self._maybe_convert(psi)
         return psi
 
-    @property
-    def psi(self):
-        """The PEPS tensor network state, with the simple update bond gauges
-        absorbed back in so that it represents the actual wavefunction (a
-        proper contraction of ``psi`` gives the state, up to the simple update
+    def get_psi(self):
+        """Get the PEPS tensor network state, with the simple update bond
+        gauges absorbed back in so that it represents the actual wavefunction
+        (a proper contraction of it gives the state, up to the simple update
         approximation). The internal gauged form is left untouched. Shorthand
         for ``get_state(absorb_gauges=True)``.
         """
@@ -387,30 +380,11 @@ class CircuitPEPSSimpleUpdate(CircuitSimpleUpdate):
         """
         return self.psi.to_dense(*args, **kwargs)
 
-    def amplitude(self, *args, **kwargs):
-        self._unsupported("amplitude")
-
-    def sample(self, *args, **kwargs):
-        self._unsupported("sample")
-
-    def sample_chaotic(self, *args, **kwargs):
-        self._unsupported("sample_chaotic")
-
-    def sample_chaotic_rehearse(self, *args, **kwargs):
-        self._unsupported("sample_chaotic_rehearse")
-
-    def partial_trace(self, *args, **kwargs):
-        self._unsupported("partial_trace")
-
-    @property
-    def uni(self):
+    def _unsupported(self, name):
         raise NotImplementedError(
-            "`uni` (the dense circuit unitary) is not available for "
-            "`CircuitPEPSSimpleUpdate`, which never forms the full unitary. "
-            "Apply gates to a state and use `psi` or `local_expectation`."
+            f"`{name}` is not available for `CircuitPEPSSimpleUpdate`, "
+            "which only ever holds an approximate, gauged tensor network "
+            "state. Use `local_expectation` for observables or `psi` to get "
+            "the gauged PEPS state and contract or sample it with the "
+            "approximation you want."
         )
-
-    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
-        # the reverse lightcone is not meaningful for a simple update PEPS,
-        # which always keeps the whole state, so just return it
-        return self.psi

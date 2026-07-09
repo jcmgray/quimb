@@ -4,6 +4,7 @@ import numbers
 import warnings
 
 import numpy as np
+from autoray import do
 
 import quimb as qu
 
@@ -16,7 +17,10 @@ from ..tensor_builder import (
 )
 from ..tnag.core import TensorNetworkGenVector
 from .core import CircuitBase
-from .gates import parse_to_gate
+from .gates import (
+    parse_to_gate,
+    sample_bitstring_from_prob_ndarray,
+)
 
 
 class CircuitMPS(CircuitBase):
@@ -146,9 +150,8 @@ class CircuitMPS(CircuitBase):
                     f"error~={self.error_estimate():.3g}"
                 )
 
-    @property
-    def psi(self):
-        # no squeeze so that bond dims of 1 preserved
+    def get_psi(self):
+        """Get a copy of the current matrix product state."""
         psi = self._psi.copy()
         if not self.convert_eager:
             self._maybe_convert(psi)
@@ -156,8 +159,14 @@ class CircuitMPS(CircuitBase):
 
     @property
     def uni(self):
-        raise ValueError(
+        raise NotImplementedError(
             "You can't extract the circuit unitary TN from a ``CircuitMPS``."
+        )
+
+    def schrodinger_contract(self, *args, **kwargs):
+        raise NotImplementedError(
+            "'Schrodinger' contraction is not "
+            f"defined for {self.__class__.__name__}."
         )
 
     def to_dense(
@@ -202,15 +211,12 @@ class CircuitMPS(CircuitBase):
         self,
         keep,
         optimize="auto-hq",
-        simplify_sequence="ADCRS",
-        simplify_atol=1e-12,
-        simplify_equalize_norms=True,
         backend=None,
         dtype=None,
     ):
         r"""Reduced density matrix on the qubits in ``keep``, tracing out the
         rest. Forms the double-layer network from the full state ``self.psi``
-        (an MPS keeps no lightcone), simplifies it, and contracts.
+        and contracts it.
 
         Parameters
         ----------
@@ -220,8 +226,7 @@ class CircuitMPS(CircuitBase):
         if isinstance(keep, numbers.Integral):
             keep = (keep,)
 
-        # `get_psi_reverse_lightcone` returns the full `self.psi` for an MPS
-        ket = self.get_psi_reverse_lightcone(keep)
+        ket = self.psi
         self._maybe_convert(ket, dtype)
 
         k_inds = tuple(map(self.ket_site_ind, keep))
@@ -230,16 +235,176 @@ class CircuitMPS(CircuitBase):
 
         bra = ket.conj().reindex(dict(zip(k_inds, b_inds)))
         rho = bra | ket
-        rho.full_simplify_(
-            seq=simplify_sequence,
-            atol=simplify_atol,
-            output_inds=output_inds,
-            equalize_norms=simplify_equalize_norms,
-        )
         rho_dense = rho.contract(
             all, output_inds=output_inds, optimize=optimize, backend=backend
         ).data
         return ops.reshape(rho_dense, [2 ** len(keep), 2 ** len(keep)])
+
+    def compute_marginal(
+        self,
+        where,
+        fix=None,
+        optimize="auto-hq",
+        backend=None,
+        dtype=None,
+    ):
+        """Compute the probability tensor of qubits in ``where``, given
+        possibly fixed qubits in ``fix``, tracing out the rest. Forms the
+        single or double layer network directly from the full state
+        ``self.psi``.
+
+        Parameters
+        ----------
+        where : sequence of int
+            The qubits to compute the marginal probability distribution of.
+        fix : None or dict[int, str], optional
+            Measurement results on other qubits to fix.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginal.
+        backend : str, optional
+            Backend to perform the marginal contraction with.
+        dtype : str, optional
+            If given, ensure the TN is cast to this dtype before contracting.
+        """
+        # index trick to contract straight to reduced density matrix diagonal
+        # rho_ii -> p_i (i.e. insert a COPY tensor into the norm)
+        output_inds = [self.ket_site_ind(i) for i in where]
+
+        # the region of qubits that are either measured or fixed
+        region = set(where)
+        if fix is not None:
+            region |= set(fix)
+
+        # have we fixed or are measuring all qubits?
+        final_marginal = len(region) == self.N
+
+        ket = self.psi
+        self._maybe_convert(ket, dtype)
+
+        if final_marginal:
+            # no tracing, only need the single ket layer
+            p_tn = ket
+        else:
+            # double layer sharing all site indices, so that contracting
+            # takes the diagonal on ``region`` and the trace elsewhere
+            p_tn = ket.conj() | ket
+
+        if fix:
+            # project (slice) fixed sites with the bitstring
+            # this severs the indices connecting bra and ket on fixed sites
+            p_tn.isel_({self.ket_site_ind(i): b for i, b in fix.items()})
+
+        # for stability with very small probabilities, scale by average prob
+        if fix is not None:
+            nfact = 2 ** len(fix)
+            if final_marginal:
+                p_tn.multiply_(nfact**0.5, spread_over="all")
+            else:
+                p_tn.multiply_(nfact, spread_over="all")
+
+        p_marginal = abs(
+            p_tn.contract(
+                all,
+                output_inds=output_inds,
+                optimize=optimize,
+                backend=backend,
+            ).data
+        )
+
+        if final_marginal:
+            # we only did half the ket contraction so need to square
+            p_marginal = p_marginal**2
+
+        if fix is not None:
+            p_marginal = p_marginal / nfact
+
+        return p_marginal
+
+    def sample_chaotic(
+        self,
+        C,
+        marginal_qubits,
+        fix=None,
+        max_marginal_storage=2**20,
+        seed=None,
+        optimize="auto-hq",
+        backend=None,
+        dtype=None,
+    ):
+        r"""Sample from this circuit, *assuming* it to be chaotic: only the
+        marginal on ``marginal_qubits`` is computed and sampled correctly,
+        with the remaining qubits sampled uniformly and conditioned on. See
+        :meth:`~quimb.tensor.circuit.Circuit.sample_chaotic` for a full
+        description.
+
+        Parameters
+        ----------
+        C : int
+            The number of times to sample.
+        marginal_qubits : int or sequence of int
+            The number of qubits to treat as marginal, or the actual qubits.
+            If an int is given then the qubits treated as marginal will be
+            ``circuit.calc_qubit_ordering()[:marginal_qubits]``.
+        fix : None or dict[int, str], optional
+            Measurement results on other qubits to fix. These will be randomly
+            sampled if ``fix`` is not given or a qubit is missing.
+        seed : None or int, optional
+            A random seed for the uniformly sampled qubits.
+
+        Yields
+        ------
+        str
+        """
+        # init the conditional marginal cache
+        self._maybe_init_storage()
+        qubits = tuple(range(self.N))
+
+        rng = np.random.default_rng(seed)
+
+        if isinstance(marginal_qubits, numbers.Integral):
+            marginal_qubits = self.calc_qubit_ordering()[:marginal_qubits]
+        where = tuple(sorted(marginal_qubits))
+
+        # we will uniformly sample, and post-select on, the remaining qubits
+        fix_qubits = tuple(q for q in qubits if q not in where)
+
+        result = dict()
+        for _ in range(C):
+            # generate a random bit-string for the fixed qubits
+            for q in fix_qubits:
+                if (fix is None) or (q not in fix):
+                    result[q] = rng.choice(("0", "1"))
+                else:
+                    result[q] = fix[q]
+
+            # compute the remaining marginal
+            key = (where, tuple(sorted(result.items())))
+            if key not in self._sampled_conditionals:
+                p = self.compute_marginal(
+                    where=where,
+                    fix=result,
+                    optimize=optimize,
+                    backend=backend,
+                    dtype=dtype,
+                )
+                p = do("to_numpy", p).astype("float64")
+                p /= p.sum()
+
+                if self._marginal_storage_size <= max_marginal_storage:
+                    self._sampled_conditionals[key] = p
+                    self._marginal_storage_size += p.size
+            else:
+                p = self._sampled_conditionals[key]
+
+            # sample a bit-string for the marginal qubits
+            b_where = sample_bitstring_from_prob_ndarray(p)
+
+            # split back into individual qubit results
+            for q, b in zip(where, b_where):
+                result[q] = b
+
+            yield "".join(result[i] for i in qubits)
+            result.clear()
 
     def calc_qubit_ordering(self, qubits=None):
         """MPS already has a natural ordering."""
@@ -247,12 +412,6 @@ class CircuitMPS(CircuitBase):
             return tuple(range(self.N))
         else:
             return tuple(sorted(qubits))
-
-    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
-        """Override ``get_psi_reverse_lightcone`` as for an MPS the lightcone
-        is not meaningful.
-        """
-        return self.psi
 
     def sample(
         self,
@@ -473,6 +632,16 @@ class CircuitPermMPS(CircuitMPS):
         C,
         seed=None,
         dtype=None,
+        *,
+        qubits=None,
+        order=None,
+        group_size=None,
+        max_marginal_storage=None,
+        optimize=None,
+        backend=None,
+        simplify_sequence=None,
+        simplify_atol=None,
+        simplify_equalize_norms=None,
     ):
         """Sample the PermMPS circuit ``C`` times.
 
@@ -488,6 +657,24 @@ class CircuitPermMPS(CircuitMPS):
         str
             The next sample bitstring.
         """
+        unsupported = (
+            qubits,
+            order,
+            group_size,
+            max_marginal_storage,
+            optimize,
+            backend,
+            simplify_sequence,
+            simplify_atol,
+            simplify_equalize_norms,
+        )
+
+        if any(x is not None for x in unsupported):
+            warnings.warn(
+                "Unsupported options for sampling an MPS circuit supplied, "
+                "ignoring: " + ", ".join(map(str, unsupported))
+            )
+
         if dtype is not None or not self.convert_eager:
             psi = self._psi.copy()
             self._maybe_convert(psi, dtype)
@@ -504,9 +691,10 @@ class CircuitPermMPS(CircuitMPS):
                 str(config[site_from_qubit[i]]) for i in range(self.N)
             )
 
-    @property
-    def psi(self):
-        # need to reindex and retag the MPS
+    def get_psi(self):
+        """Get the current state, reindexed and retagged into logical qubit
+        order, meaning it is no longer generally an MPS.
+        """
         psi = self._psi.copy()
 
         psi.view_as_(TensorNetworkGenVector)
@@ -749,23 +937,13 @@ class CircuitMPSLazy(CircuitMPS):
             gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts
         )
 
-    @property
-    def psi(self):
+    def get_psi(self):
+        # all state accessors (`to_dense`, `amplitude`, `partial_trace`,
+        # `compute_marginal`, `sample_chaotic`, ...) read the state via here,
+        # so this flushes pending lazy gates and keeps them all consistent
+        # with the compressed state
         self._compress()
-        return super().psi
-
-    # all inherited state accessors (`to_dense`, `amplitude`,
-    # `partial_trace`, `compute_marginal`, `sample_chaotic`, ...) funnel
-    # through one of the following two methods, so flushing pending lazy
-    # gates here keeps them consistent with the compressed state
-
-    def get_psi_simplified(self, *args, **kwargs):
-        self._compress()
-        return super().get_psi_simplified(*args, **kwargs)
-
-    def get_rdm_lightcone_simplified(self, *args, **kwargs):
-        self._compress()
-        return super().get_rdm_lightcone_simplified(*args, **kwargs)
+        return super().get_psi()
 
     def sample(self, C, *args, **kwargs):
         self._compress()
@@ -778,10 +956,3 @@ class CircuitMPSLazy(CircuitMPS):
     def fidelity_estimate(self):
         self._compress()
         return super().fidelity_estimate()
-
-    def schrodinger_contract(self, *args, **contract_opts):
-        raise NotImplementedError(
-            "'Schrodinger' contraction is not defined for the approximate "
-            "lazy MPS simulator, use e.g. `psi`, `to_dense`, `amplitude`, "
-            "`sample` or `local_expectation` instead."
-        )

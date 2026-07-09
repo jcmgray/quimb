@@ -161,6 +161,25 @@ class TestCircuit:
                 atol=1e-12,
             )
 
+    def test_rdm_lightcone_cache_cleared_by_new_gates(self):
+        # the cached rdm lightcone must not survive later gates
+        circ = qtn.Circuit(2)
+        circ.partial_trace((0,))
+        circ.h(0)
+        assert_allclose(
+            circ.partial_trace((0,)),
+            np.array([[0.5, 0.5], [0.5, 0.5]]),
+            atol=1e-12,
+        )
+        # local_expectation shares the same cache
+        circ = qtn.Circuit(1)
+        circ.local_expectation(qu.pauli("Z"), 0)
+        circ.h(0)
+        assert circ.local_expectation(qu.pauli("X"), 0) == pytest.approx(1.0)
+        assert circ.local_expectation(qu.pauli("Z"), 0) == pytest.approx(
+            0.0, abs=1e-12
+        )
+
     @pytest.mark.parametrize("group_size", (1, 2, 6))
     def test_sample(self, group_size):
         import collections
@@ -531,8 +550,10 @@ class TestCircuitDense:
     def test_uni_unsupported(self):
         # a contracted dense state has no unitary TN to extract
         cd, N, _ = self._circ()
-        with pytest.raises(ValueError):
+        with pytest.raises(NotImplementedError):
             cd.uni
+        with pytest.raises(NotImplementedError):
+            cd.get_uni()
 
     def test_controlled_gates_match_exact(self):
         # controls= gates apply by contracting the controlled operator into

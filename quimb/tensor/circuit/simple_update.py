@@ -16,14 +16,11 @@ class CircuitSimpleUpdate(CircuitBase):
 
     This base handles the edge/site geometry parsing, the ``edges``/``sites``
     views, the ``copy`` skeleton that carries the geometry, the natural
-    site-based qubit ordering, and the friendly ``_unsupported`` error for
-    representation-invalid methods. Subclasses implement ``_init_state``,
-    ``_apply_gate``, ``local_expectation`` and their other
-    representation-specific methods.
+    site-based qubit ordering, and the shared unsupported-method errors.
+    Subclasses implement ``_init_state``, ``_apply_gate``,
+    ``local_expectation``, the ``_unsupported(name)`` error message, and their
+    other representation-specific methods.
     """
-
-    # subclass-specific hint appended to the ``_unsupported`` error message
-    _unsupported_hint = ""
 
     def _init_geometry(self, edges, gates, psi0, N):
         """Resolve the geometry from explicit ``edges``, else the two-site
@@ -89,8 +86,26 @@ class CircuitSimpleUpdate(CircuitBase):
             return tuple(self._sites)
         return tuple(sorted(qubits))
 
-    def _unsupported(self, name):
-        raise NotImplementedError(
-            f"`{name}` is not available for `{type(self).__name__}`, "
-            + self._unsupported_hint
-        )
+    # the parts of the generic simulator API (supported by the exact and MPS
+    # classes) that the simple update simulators cannot provide get shared
+    # friendly errors, while exact-only extras are simply absent, subclasses
+    # implement `_unsupported(name)` with a message explaining what to use
+
+    @property
+    def uni(self):
+        self._unsupported("uni")
+
+    def amplitude(self, *args, **kwargs):
+        self._unsupported("amplitude")
+
+    def partial_trace(self, *args, **kwargs):
+        self._unsupported("partial_trace")
+
+    def compute_marginal(self, *args, **kwargs):
+        self._unsupported("compute_marginal")
+
+    def sample(self, *args, **kwargs):
+        self._unsupported("sample")
+
+    def sample_chaotic(self, *args, **kwargs):
+        self._unsupported("sample_chaotic")

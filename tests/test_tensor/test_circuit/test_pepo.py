@@ -219,3 +219,19 @@ class TestCircuitPEPOSimpleUpdate:
             circ.sample(10)
         with pytest.raises(NotImplementedError):
             circ.amplitude("00")
+
+    def test_edges_through_parsing_constructors(self):
+        # the geometry can be supplied to the generic `from_*` constructors,
+        # which forward it as a circuit option
+        gates = [
+            qtn.Gate("H", params=(), qubits=[0]),
+            qtn.Gate("CZ", params=(), qubits=[0, 1]),
+            qtn.Gate("RY", params=[0.3], qubits=[1]),
+        ]
+        circ = qtn.CircuitPEPOSimpleUpdate.from_gates(
+            gates, edges=[(0, 1)], max_bond=8
+        )
+        Z = qu.pauli("Z").astype(complex)
+        x = circ.local_expectation(Z, 1)
+        xe = self._exact(2, 1, Z, gates)
+        assert complex(x).real == pytest.approx(xe.real, abs=1e-10)

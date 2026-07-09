@@ -4,19 +4,22 @@ import collections.abc
 import copy
 import itertools
 import numbers
-import quimb as qu
-from ...utils import progbar as _progbar
-from .. import array_ops as ops
+
 from autoray import (
     astype,
     get_dtype_name,
 )
+
+import quimb as qu
+
 from ...utils import (
     LRU,
     deprecated,
     ensure_dict,
     tree_map,
 )
+from ...utils import progbar as _progbar
+from .. import array_ops as ops
 from ..tensor_core import (
     PTensor,
     TensorNetwork,
@@ -1384,19 +1387,27 @@ class CircuitBase:
         r = "<Circuit(n={}, num_gates={}, gate_opts={})>"
         return r.format(self.N, self.num_gates, self.gate_opts)
 
-    # ------------------------- abstract / default hooks ------------------- #
-    # Implemented per representation; the exact ``Circuit`` overrides all three.
-
     def _init_state(self, N, dtype="complex128"):
         raise NotImplementedError(
             "Each circuit representation must build its own initial state."
         )
 
+    def get_psi(self):
+        """Get a copy of the current state tensor network. This is the single
+        method each representation must implement to expose its state, and is
+        what the ``psi`` property calls.
+        """
+        raise NotImplementedError(
+            "Each circuit representation must provide its own state via "
+            "`get_psi`."
+        )
+
     @property
     def psi(self):
-        raise NotImplementedError(
-            "Each circuit representation must provide its own state ``psi``."
-        )
+        """Tensor network representation of the current state, a copy, see
+        :meth:`get_psi`.
+        """
+        return self.get_psi()
 
     def calc_qubit_ordering(self, qubits=None):
         """Default trivial qubit ordering; the exact ``Circuit`` overrides this
