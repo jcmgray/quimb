@@ -4,6 +4,7 @@ import numbers
 import warnings
 
 import numpy as np
+from autoray import do
 
 import quimb as qu
 
@@ -15,11 +16,14 @@ from ..tensor_builder import (
     MPS_computational_state,
 )
 from ..tnag.core import TensorNetworkGenVector
-from .exact import Circuit
-from .gates import parse_to_gate
+from .core import CircuitBase
+from .gates import (
+    parse_to_gate,
+    sample_bitstring_from_prob_ndarray,
+)
 
 
-class CircuitMPS(Circuit):
+class CircuitMPS(CircuitBase):
     """Quantum circuit simulation keeping the state always in a MPS form. If
     you think the circuit will not build up much entanglement, or you just want
     to keep a rigorous handle on how much entanglement is present, this can
@@ -146,9 +150,8 @@ class CircuitMPS(Circuit):
                     f"error~={self.error_estimate():.3g}"
                 )
 
-    @property
-    def psi(self):
-        # no squeeze so that bond dims of 1 preserved
+    def get_psi(self):
+        """Get a copy of the current matrix product state."""
         psi = self._psi.copy()
         if not self.convert_eager:
             self._maybe_convert(psi)
@@ -156,9 +159,252 @@ class CircuitMPS(Circuit):
 
     @property
     def uni(self):
-        raise ValueError(
+        raise NotImplementedError(
             "You can't extract the circuit unitary TN from a ``CircuitMPS``."
         )
+
+    def schrodinger_contract(self, *args, **kwargs):
+        raise NotImplementedError(
+            "'Schrodinger' contraction is not "
+            f"defined for {self.__class__.__name__}."
+        )
+
+    def to_dense(
+        self, reverse=False, optimize="auto-hq", backend=None, dtype=None
+    ):
+        """Contract the MPS into a dense wavefunction, a column-vector
+        ``qarray`` of length ``2**N``. Contracts ``self.psi`` directly (already
+        in MPS/qubit order), with no exact-TN simplification.
+        """
+        psi = self.psi
+        self._maybe_convert(psi, dtype)
+        output_inds = tuple(map(psi.site_ind, range(self.N)))
+        if reverse:
+            output_inds = output_inds[::-1]
+        t = psi.contract(
+            all, output_inds=output_inds, optimize=optimize, backend=backend
+        )
+        k = ops.reshape(t.data, (-1, 1))
+        if isinstance(k, np.ndarray):
+            k = qu.qarray(k)
+        return k
+
+    def amplitude(self, b, optimize="auto-hq", backend=None, dtype=None):
+        """Compute the amplitude ``<b|psi>`` of bitstring ``b`` by projecting
+        each physical index of ``self.psi`` and contracting the resulting
+        single-layer (scalar) network, rather than forming the full state.
+        """
+        if len(b) != self.N:
+            raise ValueError(
+                f"Bit-string {b} length does not "
+                f"match number of qubits {self.N}."
+            )
+        psi = self.psi
+        self._maybe_convert(psi, dtype)
+        for i, x in zip(range(self.N), b):
+            psi.isel_({psi.site_ind(i): int(x)})
+        return psi.contract(
+            all, output_inds=(), optimize=optimize, backend=backend
+        )
+
+    def partial_trace(
+        self,
+        keep,
+        optimize="auto-hq",
+        backend=None,
+        dtype=None,
+    ):
+        r"""Reduced density matrix on the qubits in ``keep``, tracing out the
+        rest. Forms the double-layer network from the full state ``self.psi``
+        and contracts it.
+
+        Parameters
+        ----------
+        keep : int or sequence of int
+            The qubit(s) to keep as we trace out the rest.
+        """
+        if isinstance(keep, numbers.Integral):
+            keep = (keep,)
+
+        ket = self.psi
+        self._maybe_convert(ket, dtype)
+
+        k_inds = tuple(map(self.ket_site_ind, keep))
+        b_inds = tuple(map(self.bra_site_ind, keep))
+        output_inds = k_inds + b_inds
+
+        bra = ket.conj().reindex(dict(zip(k_inds, b_inds)))
+        rho = bra | ket
+        rho_dense = rho.contract(
+            all, output_inds=output_inds, optimize=optimize, backend=backend
+        ).data
+        return ops.reshape(rho_dense, [2 ** len(keep), 2 ** len(keep)])
+
+    def compute_marginal(
+        self,
+        where,
+        fix=None,
+        optimize="auto-hq",
+        backend=None,
+        dtype=None,
+    ):
+        """Compute the probability tensor of qubits in ``where``, given
+        possibly fixed qubits in ``fix``, tracing out the rest. Forms the
+        single or double layer network directly from the full state
+        ``self.psi``.
+
+        Parameters
+        ----------
+        where : sequence of int
+            The qubits to compute the marginal probability distribution of.
+        fix : None or dict[int, str], optional
+            Measurement results on other qubits to fix.
+        optimize : str, optional
+            Contraction path optimizer to use for the marginal.
+        backend : str, optional
+            Backend to perform the marginal contraction with.
+        dtype : str, optional
+            If given, ensure the TN is cast to this dtype before contracting.
+        """
+        # index trick to contract straight to reduced density matrix diagonal
+        # rho_ii -> p_i (i.e. insert a COPY tensor into the norm)
+        output_inds = [self.ket_site_ind(i) for i in where]
+
+        # the region of qubits that are either measured or fixed
+        region = set(where)
+        if fix is not None:
+            region |= set(fix)
+
+        # have we fixed or are measuring all qubits?
+        final_marginal = len(region) == self.N
+
+        ket = self.psi
+        self._maybe_convert(ket, dtype)
+
+        if final_marginal:
+            # no tracing, only need the single ket layer
+            p_tn = ket
+        else:
+            # double layer sharing all site indices, so that contracting
+            # takes the diagonal on ``region`` and the trace elsewhere
+            p_tn = ket.conj() | ket
+
+        if fix:
+            # project (slice) fixed sites with the bitstring
+            # this severs the indices connecting bra and ket on fixed sites
+            p_tn.isel_({self.ket_site_ind(i): b for i, b in fix.items()})
+
+        # for stability with very small probabilities, scale by average prob
+        if fix is not None:
+            nfact = 2 ** len(fix)
+            if final_marginal:
+                p_tn.multiply_(nfact**0.5, spread_over="all")
+            else:
+                p_tn.multiply_(nfact, spread_over="all")
+
+        p_marginal = abs(
+            p_tn.contract(
+                all,
+                output_inds=output_inds,
+                optimize=optimize,
+                backend=backend,
+            ).data
+        )
+
+        if final_marginal:
+            # we only did half the ket contraction so need to square
+            p_marginal = p_marginal**2
+
+        if fix is not None:
+            p_marginal = p_marginal / nfact
+
+        return p_marginal
+
+    def sample_chaotic(
+        self,
+        C,
+        marginal_qubits,
+        fix=None,
+        max_marginal_storage=2**20,
+        seed=None,
+        optimize="auto-hq",
+        backend=None,
+        dtype=None,
+    ):
+        r"""Sample from this circuit, *assuming* it to be chaotic: only the
+        marginal on ``marginal_qubits`` is computed and sampled correctly,
+        with the remaining qubits sampled uniformly and conditioned on. See
+        :meth:`~quimb.tensor.circuit.Circuit.sample_chaotic` for a full
+        description.
+
+        Parameters
+        ----------
+        C : int
+            The number of times to sample.
+        marginal_qubits : int or sequence of int
+            The number of qubits to treat as marginal, or the actual qubits.
+            If an int is given then the qubits treated as marginal will be
+            ``circuit.calc_qubit_ordering()[:marginal_qubits]``.
+        fix : None or dict[int, str], optional
+            Measurement results on other qubits to fix. These will be randomly
+            sampled if ``fix`` is not given or a qubit is missing.
+        seed : None or int, optional
+            A random seed for the uniformly sampled qubits.
+
+        Yields
+        ------
+        str
+        """
+        # init the conditional marginal cache
+        self._maybe_init_storage()
+        qubits = tuple(range(self.N))
+
+        rng = np.random.default_rng(seed)
+
+        if isinstance(marginal_qubits, numbers.Integral):
+            marginal_qubits = self.calc_qubit_ordering()[:marginal_qubits]
+        where = tuple(sorted(marginal_qubits))
+
+        # we will uniformly sample, and post-select on, the remaining qubits
+        fix_qubits = tuple(q for q in qubits if q not in where)
+
+        result = dict()
+        for _ in range(C):
+            # generate a random bit-string for the fixed qubits
+            for q in fix_qubits:
+                if (fix is None) or (q not in fix):
+                    result[q] = rng.choice(("0", "1"))
+                else:
+                    result[q] = fix[q]
+
+            # compute the remaining marginal
+            key = (where, tuple(sorted(result.items())))
+            if key not in self._sampled_conditionals:
+                p = self.compute_marginal(
+                    where=where,
+                    fix=result,
+                    optimize=optimize,
+                    backend=backend,
+                    dtype=dtype,
+                )
+                p = do("to_numpy", p).astype("float64")
+                p /= p.sum()
+
+                if self._marginal_storage_size <= max_marginal_storage:
+                    self._sampled_conditionals[key] = p
+                    self._marginal_storage_size += p.size
+            else:
+                p = self._sampled_conditionals[key]
+
+            # sample a bit-string for the marginal qubits
+            b_where = sample_bitstring_from_prob_ndarray(p)
+
+            # split back into individual qubit results
+            for q, b in zip(where, b_where):
+                result[q] = b
+
+            yield "".join(result[i] for i in qubits)
+            result.clear()
 
     def calc_qubit_ordering(self, qubits=None):
         """MPS already has a natural ordering."""
@@ -166,12 +412,6 @@ class CircuitMPS(Circuit):
             return tuple(range(self.N))
         else:
             return tuple(sorted(qubits))
-
-    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
-        """Override ``get_psi_reverse_lightcone`` as for an MPS the lightcone
-        is not meaningful.
-        """
-        return self.psi
 
     def sample(
         self,
@@ -353,6 +593,12 @@ class CircuitPermMPS(CircuitMPS):
         # keep track of the current qubit ordering
         self.qubits = list(range(self.N))
 
+    def copy(self):
+        """Copy the circuit and its state."""
+        new = super().copy()
+        new.qubits = list(self.qubits)
+        return new
+
     def _apply_gate(self, gate, tags=None, **gate_opts):
         # first translate gate qubits to their current 'physical' location
         qubits = gate.qubits
@@ -386,6 +632,16 @@ class CircuitPermMPS(CircuitMPS):
         C,
         seed=None,
         dtype=None,
+        *,
+        qubits=None,
+        order=None,
+        group_size=None,
+        max_marginal_storage=None,
+        optimize=None,
+        backend=None,
+        simplify_sequence=None,
+        simplify_atol=None,
+        simplify_equalize_norms=None,
     ):
         """Sample the PermMPS circuit ``C`` times.
 
@@ -401,6 +657,24 @@ class CircuitPermMPS(CircuitMPS):
         str
             The next sample bitstring.
         """
+        unsupported = (
+            qubits,
+            order,
+            group_size,
+            max_marginal_storage,
+            optimize,
+            backend,
+            simplify_sequence,
+            simplify_atol,
+            simplify_equalize_norms,
+        )
+
+        if any(x is not None for x in unsupported):
+            warnings.warn(
+                "Unsupported options for sampling an MPS circuit supplied, "
+                "ignoring: " + ", ".join(map(str, unsupported))
+            )
+
         if dtype is not None or not self.convert_eager:
             psi = self._psi.copy()
             self._maybe_convert(psi, dtype)
@@ -417,9 +691,10 @@ class CircuitPermMPS(CircuitMPS):
                 str(config[site_from_qubit[i]]) for i in range(self.N)
             )
 
-    @property
-    def psi(self):
-        # need to reindex and retag the MPS
+    def get_psi(self):
+        """Get the current state, reindexed and retagged into logical qubit
+        order, meaning it is no longer generally an MPS.
+        """
         psi = self._psi.copy()
 
         psi.view_as_(TensorNetworkGenVector)
@@ -441,39 +716,9 @@ class CircuitPermMPS(CircuitMPS):
 
         return psi
 
-    def to_dense(
-        self, reverse=False, optimize="auto-hq", backend=None, dtype=None
-    ):
-        # contract the qubit-relabeled MPS directly (`self.psi` already maps
-        # `site_ind(i)` to logical qubit `i`); no exact-TN simplification
-        psi = self.psi
-        self._maybe_convert(psi, dtype)
-        output_inds = tuple(map(psi.site_ind, range(self.N)))
-        if reverse:
-            output_inds = output_inds[::-1]
-        t = psi.contract(
-            all, output_inds=output_inds, optimize=optimize, backend=backend
-        )
-        k = ops.reshape(t.data, (-1, 1))
-        if isinstance(k, np.ndarray):
-            k = qu.qarray(k)
-        return k
-
-    def amplitude(self, b, optimize="auto-hq", backend=None, dtype=None):
-        if len(b) != self.N:
-            raise ValueError(
-                f"Bit-string {b} length does not "
-                f"match number of qubits {self.N}."
-            )
-        # project each physical index onto its bitstring value first, then
-        # contract the resulting scalar network (cheap single-layer amplitude)
-        psi = self.psi
-        self._maybe_convert(psi, dtype)
-        for i, x in zip(range(self.N), b):
-            psi.isel_({psi.site_ind(i): int(x)})
-        return psi.contract(
-            all, output_inds=(), optimize=optimize, backend=backend
-        )
+    # `to_dense`/`amplitude` are inherited from `CircuitMPS`: they read
+    # `self.psi`, which this class already overrides to relabel the sites into
+    # logical-qubit order, so the base contraction is correct under permutation.
 
     def local_expectation(self, G, where, *args, **kwargs):
         # translate logical qubit(s) to their current physical site(s), since
@@ -627,6 +872,14 @@ class CircuitMPSLazy(CircuitMPS):
     def method(self, value):
         self.compress_opts["method"] = value
 
+    def copy(self):
+        """Copy the circuit and its state."""
+        new = super().copy()
+        new.compress_opts = dict(self.compress_opts)
+        new._uncompressed_sites = dict(self._uncompressed_sites)
+        new.compress_every = self.compress_every
+        return new
+
     def _compress(self):
         """Compress the current state by contracting in all gates and then applying
         the specified compression method via
@@ -652,6 +905,10 @@ class CircuitMPSLazy(CircuitMPS):
             self.gate_opts["info"]["cur_orthog"] = (0, 0)
 
         self._uncompressed_sites.clear()
+
+        # compression mutates `_psi` in place, so any cached simplified
+        # representations of the pre-compression state are now stale
+        self.clear_storage()
 
     def _apply_gate(self, gate, tags=None, **gate_opts):
         gate_qubits = gate.qubits
@@ -680,10 +937,13 @@ class CircuitMPSLazy(CircuitMPS):
             gate, tags=tags, contract="nonlocal", method="lazy", **gate_opts
         )
 
-    @property
-    def psi(self):
+    def get_psi(self):
+        # all state accessors (`to_dense`, `amplitude`, `partial_trace`,
+        # `compute_marginal`, `sample_chaotic`, ...) read the state via here,
+        # so this flushes pending lazy gates and keeps them all consistent
+        # with the compressed state
         self._compress()
-        return super().psi
+        return super().get_psi()
 
     def sample(self, C, *args, **kwargs):
         self._compress()

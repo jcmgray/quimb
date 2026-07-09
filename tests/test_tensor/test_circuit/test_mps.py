@@ -169,8 +169,49 @@ class TestCircuitMPS:
     def test_uni_unsupported(self):
         circ = qtn.CircuitMPS(3)
         circ.h(0)
-        with pytest.raises(ValueError):
+        with pytest.raises(NotImplementedError):
             circ.uni
+
+    def test_compute_marginal_matches_exact(self):
+        rng = np.random.default_rng(42)
+        gates = [("H", i) for i in range(4)]
+        gates += [("CX", 0, 1), ("CX", 1, 2), ("CX", 2, 3)]
+        gates += [
+            ("RY", float(rng.uniform(0, 2 * np.pi)), i) for i in range(4)
+        ]
+        ce = qtn.Circuit.from_gates(gates)
+        cm = qtn.CircuitMPS.from_gates(gates)
+        # traced qubits only
+        assert_allclose(
+            cm.compute_marginal((1, 3)),
+            ce.compute_marginal((1, 3), dtype="complex128"),
+            atol=1e-10,
+        )
+        # fixed and traced qubits
+        assert_allclose(
+            cm.compute_marginal((1, 3), fix={0: "1"}),
+            ce.compute_marginal((1, 3), fix={0: "1"}, dtype="complex128"),
+            atol=1e-10,
+        )
+        # all qubits measured or fixed, the single layer path
+        assert_allclose(
+            cm.compute_marginal((1, 3), fix={0: "1", 2: "0"}),
+            ce.compute_marginal(
+                (1, 3), fix={0: "1", 2: "0"}, dtype="complex128"
+            ),
+            atol=1e-10,
+        )
+
+    def test_sample_chaotic_matches_exact(self):
+        # conditioned on the uniformly sampled qubit, the GHZ marginal is a
+        # delta distribution, so the sample stream is pinned by the seed alone
+        gates = [("H", 0), ("CX", 0, 1), ("CX", 1, 2)]
+        ce = qtn.Circuit.from_gates(gates)
+        cm = qtn.CircuitMPS.from_gates(gates)
+        se = list(ce.sample_chaotic(16, (0, 1), seed=42, dtype="complex128"))
+        sm = list(cm.sample_chaotic(16, (0, 1), seed=42))
+        assert sm == se
+        assert set(sm) == {"000", "111"}
 
 
 class TestCircuitPermMPS:
@@ -318,6 +359,39 @@ class TestCircuitPermMPS:
             assert cp.local_expectation(ZZ, where) == pytest.approx(
                 ce.local_expectation(ZZ, where), abs=1e-10
             )
+
+    def test_compute_marginal_correct_under_permutation(self):
+        cp, gates = self._permuting_circuit()
+        assert cp.qubits != list(range(5))  # a non-trivial permutation
+        ce = qtn.Circuit.from_gates(gates)
+        # traced, fixed and traced, and final marginal paths, with the fixed
+        # values chosen to have nonzero probability
+        for where, fix in [
+            ((0, 4), None),
+            ((0, 4), {1: "0", 3: "1"}),
+            ((0, 4), {1: "0", 2: "1", 3: "0"}),
+        ]:
+            assert_allclose(
+                cp.compute_marginal(where, fix=fix),
+                ce.compute_marginal(where, fix=fix, dtype="complex128"),
+                atol=1e-10,
+            )
+
+    def test_copy_preserves_qubit_permutation(self):
+        gates = [("H", 0), ("CX", 0, 3), ("RY", 0.3, 2)]
+        circ = qtn.CircuitPermMPS.from_gates(gates)
+        assert tuple(circ.qubits) != tuple(range(4))
+
+        copied = circ.copy()
+        assert copied.qubits == circ.qubits
+        assert copied.qubits is not circ.qubits
+        assert copied.psi.distance_normalized(circ.psi) < 1e-6
+
+        # further gates on the copy leave the original untouched
+        qubits_before = list(circ.qubits)
+        copied.cx(1, 2)
+        assert circ.qubits == qubits_before
+        assert circ.num_gates == len(gates)
 
 
 class TestCircuitMPSLazy:
@@ -580,3 +654,104 @@ class TestCircuitMPSLazy:
         assert circ.compress_opts["max_bond"] == 16
         assert circ.compress_opts["cutoff"] == 1e-9
         assert circ.compress_opts["method"] == "dm"
+
+    def test_copy_with_pending_gates(self):
+        circ = qtn.CircuitMPSLazy(4, max_bond=8, compress_every=4)
+        circ.h(0)
+        circ.cx(0, 3)
+        assert dict(circ._uncompressed_sites)
+
+        copied = circ.copy()
+        assert copied.compress_every == circ.compress_every
+        assert copied.compress_opts == circ.compress_opts
+        assert copied.compress_opts is not circ.compress_opts
+        assert copied._uncompressed_sites == circ._uncompressed_sites
+        assert copied._uncompressed_sites is not circ._uncompressed_sites
+
+        # the copy represents the same state ...
+        psi_orig = circ.psi
+        assert copied.psi.distance_normalized(psi_orig) < 1e-6
+
+        # ... and is independent of the original
+        copied.x(1)
+        assert circ.num_gates == 2
+        assert circ.psi.distance_normalized(psi_orig) < 1e-6
+
+    @staticmethod
+    def _pending_truncating_ghz():
+        # an exact GHZ state is not representable at bond dimension 1, so the
+        # configured compression visibly truncates (discarding half the
+        # norm), distinguishing the pending exact TN from the compressed MPS
+        circ = qtn.CircuitMPSLazy(
+            6, max_bond=1, cutoff=0.0, method="dm", compress_every=100
+        )
+        circ.h(0)
+        for i in range(5):
+            circ.cx(i, i + 1)
+        assert dict(circ._uncompressed_sites)
+        return circ
+
+    def test_to_dense_flushes_and_matches_psi(self):
+        circ = self._pending_truncating_ghz()
+        dense = np.asarray(circ.to_dense()).reshape(-1)
+        assert not circ._uncompressed_sites
+        k = np.asarray(circ.psi.to_dense()).reshape(-1)
+        assert_allclose(dense, k, atol=1e-10)
+        assert np.linalg.norm(dense) ** 2 == pytest.approx(0.5)
+
+    def test_amplitude_flushes_and_matches_psi(self):
+        circ = self._pending_truncating_ghz()
+        amp = circ.amplitude("1" * 6)
+        assert not circ._uncompressed_sites
+        k = np.asarray(circ.psi.to_dense()).reshape(-1)
+        assert amp == pytest.approx(complex(k[-1]), abs=1e-10)
+
+    def test_partial_trace_flushes_and_matches_psi(self):
+        circ = self._pending_truncating_ghz()
+        rho = np.asarray(circ.partial_trace((0,)))
+        assert not circ._uncompressed_sites
+        kk = np.asarray(circ.psi.to_dense()).reshape(2, 32)
+        assert_allclose(rho, kk @ kk.conj().T, atol=1e-10)
+
+    def test_compute_marginal_flushes_and_matches_psi(self):
+        circ = self._pending_truncating_ghz()
+        marginal = np.asarray(circ.compute_marginal((0,))).reshape(-1)
+        assert not circ._uncompressed_sites
+        k = np.asarray(circ.psi.to_dense()).reshape(2, 32)
+        assert_allclose(marginal, (np.abs(k) ** 2).sum(axis=1), atol=1e-10)
+
+    def test_accessor_order_independence(self):
+        # the sequence from issue #387: to_dense before and after accessing
+        # psi must describe the same (compressed) state
+        circ = self._pending_truncating_ghz()
+        dense_before = np.asarray(circ.to_dense()).reshape(-1)
+        k = np.asarray(circ.psi.to_dense()).reshape(-1)
+        dense_after = np.asarray(circ.to_dense()).reshape(-1)
+        assert_allclose(dense_before, k, atol=1e-10)
+        assert_allclose(dense_after, k, atol=1e-10)
+
+    def test_compress_clears_cached_simplified_state(self):
+        circ = qtn.CircuitMPSLazy(4, max_bond=2)
+        circ.h(0)
+        circ.cx(0, 3)
+        # a cached simplified state from before the compression is stale
+        circ._storage[("psi_simplified", "R", 1e-12)] = circ._psi.copy()
+        circ._compress()
+        assert circ._storage == {}
+
+    def test_sample_chaotic_flushes_pending_gates(self):
+        circ = qtn.CircuitMPSLazy(4, max_bond=8, compress_every=10)
+        for i in range(4):
+            circ.h(i)
+        circ.cx(0, 3)
+        assert dict(circ._uncompressed_sites)
+        samples = list(circ.sample_chaotic(4, 2, seed=0))
+        assert not circ._uncompressed_sites
+        assert all(len(b) == 4 and set(b) <= {"0", "1"} for b in samples)
+
+    def test_schrodinger_contract_raises(self):
+        circ = qtn.CircuitMPSLazy(3, max_bond=2)
+        circ.h(0)
+        circ.cx(0, 2)
+        with pytest.raises(NotImplementedError):
+            circ.schrodinger_contract()

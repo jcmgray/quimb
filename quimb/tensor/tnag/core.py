@@ -3725,11 +3725,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
         method : {'rho', 'rho-reduced'}, optional
             The method to use to compute the expectation value.
 
-                - 'rho': compute the expectation value via the reduced density
-                  matrix.
-                - 'rho-reduced': compute the expectation value via the reduced
-                  density matrix, having reduced the physical indices onto the
-                  bonds first.
+            - 'rho': compute the expectation value via the reduced density
+              matrix.
+            - 'rho-reduced': compute the expectation value via the reduced
+              density matrix, having reduced the physical indices onto the
+              bonds first.
 
         flatten : bool, optional
             Whether to force 'flattening' (contracting all physical indices) of

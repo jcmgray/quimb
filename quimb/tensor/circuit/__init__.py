@@ -1,11 +1,12 @@
 """Quantum circuit simulation using tensor networks.
 
-This package re-exports the full public surface under the stable path
-``quimb.tensor.circuit`` and pins each class's ``__module__`` to it so that
-pickle paths and Sphinx cross-references stay independent of the internal
-module split.
+This subpackage re-exports all the main classes and functions as if it were
+a single module.
 """
 
+from .core import (
+    CircuitBase,
+)
 from .exact import (
     Circuit,
     CircuitDense,
@@ -85,6 +86,7 @@ from .qasm import (
 
 # pin canonical module path (pickle + Sphinx xref stability)
 for _cls in (
+    CircuitBase,
     Circuit,
     CircuitDense,
     CircuitMPS,
@@ -107,6 +109,7 @@ __all__ = (
     "CircuitDense",
     "CircuitMPS",
     "CircuitMPSLazy",
+    "CircuitBase",
     "CircuitPEPOSimpleUpdate",
     "CircuitPEPSSimpleUpdate",
     "CircuitPermMPS",
