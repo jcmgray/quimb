@@ -9,16 +9,15 @@ from ...utils import (
 )
 from ..tensor_builder import (
     TN_from_sites_product_state,
-    gen_unique_edges,
 )
 from ..tensor_core import (
     Tensor,
 )
-from .exact import Circuit
 from .gates import parse_to_gate
+from .simple_update import CircuitSimpleUpdate
 
 
-class CircuitPEPSSimpleUpdate(Circuit):
+class CircuitPEPSSimpleUpdate(CircuitSimpleUpdate):
     """Quantum circuit simulation keeping the state as a generic tensor
     network (a "PEPS" defined by an arbitrary graph of ``edges``) and applying
     gates with the simple update rule. The state always keeps a single tensor
@@ -136,38 +135,8 @@ class CircuitPEPSSimpleUpdate(Circuit):
         convert_eager=True,
         **circuit_opts,
     ):
-        # geometry can come from explicit `edges`, be inferred from the two
-        # site `gates` (only inspected here, not applied) or be read from the
-        # bonds of an existing `psi0`
-        extra_sites = ()
-        if edges is None:
-            if psi0 is not None:
-                edges = tuple(psi0.gen_bond_coos())
-            elif gates is not None:
-                parsed = [parse_to_gate(g) for g in gates]
-                edges = [g.qubits for g in parsed if len(g.qubits) == 2]
-                extra_sites = tuple(q for g in parsed for q in g.qubits)
-            else:
-                raise ValueError(
-                    "You must supply one of `edges`, `gates` or `psi0` to "
-                    "define the PEPS geometry."
-                )
-        self._edges = tuple(gen_unique_edges(edges))
-
-        # sites are everything appearing in the edges, plus any extra sites
-        # touched by single qubit gates or present in psi0, padded up to N
-        sites = set()
-        for a, b in self._edges:
-            sites.add(a)
-            sites.add(b)
-        sites.update(extra_sites)
-        if psi0 is not None:
-            sites.update(psi0.sites)
-        if N is not None:
-            sites.update(range(N))
-        self._sites = tuple(sorted(sites))
-        self._site_set = set(self._sites)
-        self._edge_set = {frozenset(e) for e in self._edges}
+        # geometry from explicit `edges`, the two-site `gates`, or `psi0` bonds
+        self._init_geometry(edges, gates, psi0, N)
 
         # bond gauges tracked across gate applications
         self.gauges = {}
@@ -197,30 +166,16 @@ class CircuitPEPSSimpleUpdate(Circuit):
             self._psi.gauge_all_simple_(gauges=self.gauges, max_iterations=1)
 
     def copy(self):
-        """Copy the circuit, including its state, gauges and geometry. The
-        base :class:`Circuit` copy does not know about the extra simple update
-        attributes, so they are carried over here (the gauges are copied so the
-        two circuits can be evolved independently).
+        """Copy the circuit, including its state, gauges and geometry. The base
+        :class:`CircuitSimpleUpdate` copy carries the geometry; the gauges and
+        equilibrate options are copied here so the two circuits can be evolved
+        independently.
         """
         new = super().copy()
-        new._edges = self._edges
-        new._sites = self._sites
-        new._site_set = self._site_set
-        new._edge_set = self._edge_set
         new.gauges = dict(self.gauges)
         new._equilibrate_every = self._equilibrate_every
         new._equilibrate_opts = dict(self._equilibrate_opts)
         return new
-
-    @property
-    def edges(self):
-        """The unique edges defining the PEPS geometry."""
-        return self._edges
-
-    @property
-    def sites(self):
-        """The sites (qubit labels) of the PEPS."""
-        return self._sites
 
     def _init_state(self, N, dtype="complex128"):
         # |00...0> product state with bond dimension 1 bonds along the edges
@@ -405,29 +360,14 @@ class CircuitPEPSSimpleUpdate(Circuit):
             self._maybe_convert(psi)
         return psi
 
-    @property
-    def psi(self):
-        """The PEPS tensor network state, with the simple update bond gauges
-        absorbed back in so that it represents the actual wavefunction (a
-        proper contraction of ``psi`` gives the state, up to the simple update
+    def get_psi(self):
+        """Get the PEPS tensor network state, with the simple update bond
+        gauges absorbed back in so that it represents the actual wavefunction
+        (a proper contraction of it gives the state, up to the simple update
         approximation). The internal gauged form is left untouched. Shorthand
         for ``get_state(absorb_gauges=True)``.
         """
         return self.get_state(absorb_gauges=True)
-
-    def calc_qubit_ordering(self, qubits=None):
-        if qubits is None:
-            return tuple(self._sites)
-        return tuple(sorted(qubits))
-
-    def _unsupported_exact(self, name):
-        raise NotImplementedError(
-            f"`{name}` is not supported by `CircuitPEPSSimpleUpdate`, which "
-            "only ever holds an approximate, gauged tensor network state. Use "
-            "`local_expectation` for observables or `psi` to get the gauged "
-            "PEPS state and contract or sample it with the approximation you "
-            "want."
-        )
 
     def to_dense(self, *args, **kwargs):
         """Contract the gauged PEPS into a dense wavefunction, a column-vector
@@ -440,30 +380,11 @@ class CircuitPEPSSimpleUpdate(Circuit):
         """
         return self.psi.to_dense(*args, **kwargs)
 
-    def amplitude(self, *args, **kwargs):
-        self._unsupported_exact("amplitude")
-
-    def sample(self, *args, **kwargs):
-        self._unsupported_exact("sample")
-
-    def sample_chaotic(self, *args, **kwargs):
-        self._unsupported_exact("sample_chaotic")
-
-    def sample_chaotic_rehearse(self, *args, **kwargs):
-        self._unsupported_exact("sample_chaotic_rehearse")
-
-    def partial_trace(self, *args, **kwargs):
-        self._unsupported_exact("partial_trace")
-
-    @property
-    def uni(self):
+    def _unsupported(self, name):
         raise NotImplementedError(
-            "`uni` (the dense circuit unitary) is not available for "
-            "`CircuitPEPSSimpleUpdate`, which never forms the full unitary. "
-            "Apply gates to a state and use `psi` or `local_expectation`."
+            f"`{name}` is not available for `CircuitPEPSSimpleUpdate`, "
+            "which only ever holds an approximate, gauged tensor network "
+            "state. Use `local_expectation` for observables or `psi` to get "
+            "the gauged PEPS state and contract or sample it with the "
+            "approximation you want."
         )
-
-    def get_psi_reverse_lightcone(self, where, keep_psi0=False):
-        # the reverse lightcone is not meaningful for a simple update PEPS,
-        # which always keeps the whole state, so just return it
-        return self.psi

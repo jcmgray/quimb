@@ -169,8 +169,49 @@ class TestCircuitMPS:
     def test_uni_unsupported(self):
         circ = qtn.CircuitMPS(3)
         circ.h(0)
-        with pytest.raises(ValueError):
+        with pytest.raises(NotImplementedError):
             circ.uni
+
+    def test_compute_marginal_matches_exact(self):
+        rng = np.random.default_rng(42)
+        gates = [("H", i) for i in range(4)]
+        gates += [("CX", 0, 1), ("CX", 1, 2), ("CX", 2, 3)]
+        gates += [
+            ("RY", float(rng.uniform(0, 2 * np.pi)), i) for i in range(4)
+        ]
+        ce = qtn.Circuit.from_gates(gates)
+        cm = qtn.CircuitMPS.from_gates(gates)
+        # traced qubits only
+        assert_allclose(
+            cm.compute_marginal((1, 3)),
+            ce.compute_marginal((1, 3), dtype="complex128"),
+            atol=1e-10,
+        )
+        # fixed and traced qubits
+        assert_allclose(
+            cm.compute_marginal((1, 3), fix={0: "1"}),
+            ce.compute_marginal((1, 3), fix={0: "1"}, dtype="complex128"),
+            atol=1e-10,
+        )
+        # all qubits measured or fixed, the single layer path
+        assert_allclose(
+            cm.compute_marginal((1, 3), fix={0: "1", 2: "0"}),
+            ce.compute_marginal(
+                (1, 3), fix={0: "1", 2: "0"}, dtype="complex128"
+            ),
+            atol=1e-10,
+        )
+
+    def test_sample_chaotic_matches_exact(self):
+        # conditioned on the uniformly sampled qubit, the GHZ marginal is a
+        # delta distribution, so the sample stream is pinned by the seed alone
+        gates = [("H", 0), ("CX", 0, 1), ("CX", 1, 2)]
+        ce = qtn.Circuit.from_gates(gates)
+        cm = qtn.CircuitMPS.from_gates(gates)
+        se = list(ce.sample_chaotic(16, (0, 1), seed=42, dtype="complex128"))
+        sm = list(cm.sample_chaotic(16, (0, 1), seed=42))
+        assert sm == se
+        assert set(sm) == {"000", "111"}
 
 
 class TestCircuitPermMPS:
@@ -317,6 +358,23 @@ class TestCircuitPermMPS:
         for where in [(0, 5), (1, 4), (0, 3)]:
             assert cp.local_expectation(ZZ, where) == pytest.approx(
                 ce.local_expectation(ZZ, where), abs=1e-10
+            )
+
+    def test_compute_marginal_correct_under_permutation(self):
+        cp, gates = self._permuting_circuit()
+        assert cp.qubits != list(range(5))  # a non-trivial permutation
+        ce = qtn.Circuit.from_gates(gates)
+        # traced, fixed and traced, and final marginal paths, with the fixed
+        # values chosen to have nonzero probability
+        for where, fix in [
+            ((0, 4), None),
+            ((0, 4), {1: "0", 3: "1"}),
+            ((0, 4), {1: "0", 2: "1", 3: "0"}),
+        ]:
+            assert_allclose(
+                cp.compute_marginal(where, fix=fix),
+                ce.compute_marginal(where, fix=fix, dtype="complex128"),
+                atol=1e-10,
             )
 
     def test_copy_preserves_qubit_permutation(self):
@@ -680,6 +738,16 @@ class TestCircuitMPSLazy:
         circ._storage[("psi_simplified", "R", 1e-12)] = circ._psi.copy()
         circ._compress()
         assert circ._storage == {}
+
+    def test_sample_chaotic_flushes_pending_gates(self):
+        circ = qtn.CircuitMPSLazy(4, max_bond=8, compress_every=10)
+        for i in range(4):
+            circ.h(i)
+        circ.cx(0, 3)
+        assert dict(circ._uncompressed_sites)
+        samples = list(circ.sample_chaotic(4, 2, seed=0))
+        assert not circ._uncompressed_sites
+        assert all(len(b) == 4 and set(b) <= {"0", "1"} for b in samples)
 
     def test_schrodinger_contract_raises(self):
         circ = qtn.CircuitMPSLazy(3, max_bond=2)
