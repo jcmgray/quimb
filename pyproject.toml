@@ -49,6 +49,7 @@ recommended = [
     "kahypar",
     "matplotlib",
     "networkx",
+    "opt-einsum",
     "plotly",
     "pygraphviz",
 ]
