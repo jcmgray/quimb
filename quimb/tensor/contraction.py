@@ -317,7 +317,9 @@ def array_contract_pathinfo(*args, **kwargs):
     try:
         import opt_einsum as oe
     except ImportError as e:
-        raise ImportError("opt_einsum is required for array_contract_pathinfo.") from e
+        raise ImportError(
+            "opt_einsum is required for array_contract_pathinfo."
+        ) from e
 
     tree = array_contract_tree(*args, **kwargs)
 
