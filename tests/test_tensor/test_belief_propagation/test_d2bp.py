@@ -1,9 +1,11 @@
+import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
 import quimb.tensor.belief_propagation as qbp
+from quimb.tensor.belief_propagation.d2bp import _get_message_conditioner
 
 
 @pytest.mark.parametrize("damping", [0.0, 0.1])
@@ -157,3 +159,127 @@ def test_gate(seed):
     d2 = bp.tn.distance_normalized(peps_g_ex)
     assert d2 < d1
     assert abs(bp.contract()) ** 0.5 > 0.5
+
+
+class TestMessageConditioner:
+    def test_matches_simple_gauge_spectrum(self):
+        message = np.diag([0.25, 1.0])
+
+        # no conditioning should return the original message directly
+        assert _get_message_conditioner()(message) is message
+
+        condition = _get_message_conditioner(power=0.5)
+        assert_allclose(condition(message), np.diag([0.5, 1.0]))
+
+        condition = _get_message_conditioner(power=1.0, smudge=0.1)
+
+        # the message spectrum is squared, so smudge acts on its square root
+        assert_allclose(condition(message), np.diag([0.6**2, 1.1**2]))
+        condition = _get_message_conditioner(power=0.5, smudge=0.1)
+        assert_allclose(condition(message), np.diag([0.6, 1.1]))
+
+    def test_properties_update_conditioner(self):
+        tn = qtn.TN_rand_tree(4, 2, 2, seed=1)
+        bp = qbp.D2BP(tn)
+        bp.touched.clear()
+
+        bp.power = 0.5
+        assert bp.power == 0.5
+        assert bp._message_conditioner is _get_message_conditioner(
+            0.5,
+            0.0,
+            bp.backend,
+        )
+        assert set(bp.touched) == set(bp.exprs)
+
+        bp.touched.clear()
+        bp.smudge = 0.1
+        assert bp.smudge == 0.1
+        assert bp._message_conditioner is _get_message_conditioner(
+            0.5,
+            0.1,
+            bp.backend,
+        )
+        assert set(bp.touched) == set(bp.exprs)
+
+
+@pytest.mark.parametrize("power", [0.75, 1.0])
+@pytest.mark.parametrize("smudge", [0.0, 0.33])
+def test_gauge_symmetric_with_conditioning(power, smudge):
+    tn = qtn.TN_rand_tree(
+        8,
+        3,
+        phys_dim=2,
+        max_degree=3,
+        seed=42,
+    )
+    bp = qbp.D2BP(tn, power=power, smudge=smudge)
+    bp.run(max_iterations=1000, tol=1e-10)
+    tn_before = bp.tn.copy()
+
+    tn_gauged = bp.gauge_symmetric(inplace=True)
+
+    assert tn_gauged is bp.tn
+    assert tn_gauged.distance_normalized(tn_before) == pytest.approx(
+        0.0,
+        abs=1e-7,
+    )
+    assert tn_gauged.distance_normalized(tn) == pytest.approx(
+        0.0,
+        abs=1e-7,
+    )
+
+    # check the updated messages are now symmetric and diagonal
+    for ix, tids in bp.tn.ind_map.items():
+        if len(tids) != 2:
+            continue
+        tida, tidb = tids
+        ma = bp.messages[ix, tida]
+        mb = bp.messages[ix, tidb]
+        assert ma == pytest.approx(mb, abs=1e-10)
+        assert ma == pytest.approx(np.diag(np.diag(ma)), abs=1e-10)
+
+    result = bp.iterate(tol=1e-10)
+    assert result["ncheck"] == len(bp.exprs)
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_gauge_all_belief_propagation(inplace):
+    tn = qtn.TN_rand_tree(
+        8,
+        3,
+        phys_dim=2,
+        max_degree=3,
+        seed=42,
+    )
+    tn_before = tn.copy()
+    messages = {}
+    info = {}
+
+    if inplace:
+        gauge = tn.gauge_all_belief_propagation_
+    else:
+        gauge = tn.gauge_all_belief_propagation
+
+    tn_gauged = gauge(
+        messages=messages,
+        max_iterations=1000,
+        tol=1e-10,
+        info=info,
+    )
+
+    assert (tn_gauged is tn) is inplace
+    assert info["converged"]
+    assert tn_gauged.distance_normalized(tn_before) == pytest.approx(
+        0.0,
+        abs=1e-7,
+    )
+
+    for ix, tids in tn_gauged.ind_map.items():
+        if len(tids) != 2:
+            continue
+        tida, tidb = tids
+        assert messages[ix, tida] == pytest.approx(
+            messages[ix, tidb],
+            abs=1e-10,
+        )

@@ -8,6 +8,7 @@ Release notes for `quimb`.
 **Breaking Changes:**
 
 - [`Circuit.uni`](#Circuit.uni): now returns the non-transposed unitary tensor network, so that ``circ.uni.to_dense()`` gives ``U`` acting on a state like ``U @ psi``. This was previously transposed and emitting a ``FutureWarning`` announcing the change; the warning is now removed. Use ``circ.get_uni(transposed=True)`` to recover the old transposed convention.
+- [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple): all arguments after ``max_iterations`` and ``tol`` (``smudge``, ``power``, ``damping``, ...) are now keyword-only.
 - the non-exact circuit simulators ([`CircuitMPS`](#CircuitMPS), [`CircuitPermMPS`](#CircuitPermMPS), [`CircuitMPSLazy`](#CircuitMPSLazy), [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate), [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate)) no longer subclass the exact [`Circuit`](#Circuit); they now compose the shared [`CircuitBase`](#CircuitBase). Use ``isinstance(circ, CircuitBase)`` rather than ``isinstance(circ, Circuit)`` to check for any circuit type. As a consequence these classes no longer expose exact-contraction-only methods that they previously inherited but which did not produce meaningful results (e.g. ``get_uni``, ``get_psi_simplified``, ``sample_gate_by_gate``); the methods they do support (``to_dense``, ``amplitude``, ``sample``, ``partial_trace``, ``local_expectation``, ``simulate_counts``, ``xeb``, where applicable) remain, with the MPS implementations now native: they operate directly on the current, possibly compressed, state, perform no exact-TN simplification and so take no ``simplify_*`` options, and the MPS simulators gain ``compute_marginal`` and ``sample_chaotic`` this way too. Methods a representation can never support (e.g. ``uni`` on the non-exact simulators) now uniformly raise ``NotImplementedError``, where some previously raised ``ValueError``.
 
 
@@ -25,10 +26,13 @@ Release notes for `quimb`.
 - [`CircuitMPSLazy`](#CircuitMPSLazy): add a MPS-based circuit simulator using lazily evaluated gates and periodic automated compression, performing better compared to `CircuitMPS` for long-range gates when using `src` compression method.
 - [`Circuit.from_openqasm3_str`](#Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](#Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](#Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
 - [`CircuitDense`](#CircuitDense): support controlled gates supplied via the ``controls=`` kwarg, by inserting the low-rank hyper tensor network representation of the gate and contracting it into the dense state (avoiding ever forming the full dense operator).
+- add [`gauge_d2bp`](#gauge_d2bp) and the convenience method [`TensorNetwork.gauge_all_belief_propagation`](#TensorNetwork.gauge_all_belief_propagation): gauge an arbitrary tensor network into the 'symmetric' gauge using dense 2-norm belief propagation, equivalent to simple update gauging with the singular values absorbed equally into both tensors, implemented via the new [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric), which inserts the full-rank oblique projectors associated with the current messages.
+- [`D2BP`](#D2BP): add ``power`` and ``smudge`` options for spectrally conditioning messages after each update, matching the effective ``power`` and ``smudge`` semantics of [`gauge_all_simple`](#TensorNetwork.gauge_all_simple) (the conditioner acts on the square root of the message spectrum). Both can also be set dynamically on an existing instance, automatically marking all messages for recomputation.
 
 
 **Internal:**
 
+- [`squared_op_to_reduced_factor`](#squared_op_to_reduced_factor): route the ``cholesky`` method through [`array_split`](#array_split) like the other methods (behavior preserving).
 - reorganize the `quimb.tensor.circuit` module into a package (`gates`, `qasm`, `core`, `exact`, `simple_update`, `mps`, `peps`, `pepo` submodules). The public import path `quimb.tensor.circuit.*` and every class's ``__module__`` are unchanged, so the relocation is behavior-preserving for users and pickles. `core` holds the new [`CircuitBase`](#CircuitBase) and `simple_update` a shared base for the PEPS/PEPO simple-update simulators (see the Breaking Changes above for the inheritance change).
 
 
@@ -55,6 +59,7 @@ Release notes for `quimb`.
 - [`TensorNetwork2DVector.compute_norm`](#TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
 - [`D2BP.partial_trace_loop_series_expansion`](#D2BP.partial_trace_loop_series_expansion): fix the loop series expansion for complex (hermitian) BP messages, which were inserted with the wrong `(ket, bra)` index ordering in `get_cluster_excited` (both boundary messages and inner excitation projectors), giving incorrect reduced density matrices for complex states ({issue}`380`).
 - [`D2BP.normalize_tensors`](#D2BP.normalize_tensors): keep the cached dual tensors in sync when rescaling, so that repeated reduced density matrix computations no longer drift ({issue}`381`).
+- [`D2BP.compress`](#D2BP.compress): when compressing inplace, rebuild the cached contraction expressions afterwards, so that subsequent message updates use the newly compressed tensor data rather than stale cached arrays.
 
 
 ## v1.14.0 (2026-05-10)

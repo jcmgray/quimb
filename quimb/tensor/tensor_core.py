@@ -7483,7 +7483,8 @@ class TensorNetwork:
         **canonize_opts,
     ):
         """Iterative gauge all the bonds in this tensor network with a basic
-        'canonization' strategy.
+        'canonization' strategy, equivalent to simple update style gauging with
+        `power = 0.5`.
         """
         tn = self if inplace else self.copy()
 
@@ -7521,6 +7522,7 @@ class TensorNetwork:
         self,
         max_iterations=5,
         tol=0.0,
+        *,
         smudge=1e-12,
         power=1.0,
         damping=0.0,
@@ -7541,6 +7543,10 @@ class TensorNetwork:
         will be updated inplace and *not* absorbed back into the tensor
         network, with the assumption that you are using/tracking them
         externally.
+
+        Note the default settings perform a small number of iterations
+        sufficient for conditioning a network, but not converging to a fixed
+        point suitable for cluster calculations for example.
 
         Parameters
         ----------
@@ -7572,6 +7578,12 @@ class TensorNetwork:
             - 'max_sdiff': the maximum singular value difference of the final
               sweep (``-1.0`` if no diffs were computed).
 
+        reduce_opts : dict, optional
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for the
+            reduction step. Values set here take precedence over any defaults.
+        compress_opts : dict, optional
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`. Values
+            set here take precedence over any defaults.
         progbar : bool, optional
             Whether to show a progress bar.
         inplace : bool, optional
@@ -7727,6 +7739,132 @@ class TensorNetwork:
 
     gauge_all_simple_ = functools.partialmethod(gauge_all_simple, inplace=True)
 
+    def gauge_all_belief_propagation(
+        self,
+        max_iterations=5,
+        tol=0.0,
+        *,
+        messages=None,
+        output_inds=None,
+        power=1.0,
+        smudge=0.0,
+        damping=0.0,
+        diis=False,
+        update="sequential",
+        normalize=None,
+        distance=None,
+        tol_abs=None,
+        tol_rolling_diff=None,
+        local_convergence=True,
+        optimize="auto-hq",
+        reduce_opts=None,
+        compress_opts=None,
+        inplace=False,
+        info=None,
+        progbar=False,
+        **contract_opts,
+    ):
+        """Gauge all bonds in this tensor network into a symmetric gauge using
+        dense 2-norm belief propagation. This is equivalent to simple update
+        gauging where the singular values are absorbed equally into both
+        tensors finally.
+
+        This is a convenience method for
+        :func:`~quimb.tensor.belief_propagation.d2bp.gauge_d2bp`.
+
+        Note the default settings perform a small number of iterations
+        sufficient for conditioning a network, but not converging to a fixed
+        point suitable for cluster calculations for example.
+
+        Parameters
+        ----------
+        messages : dict[(str, int), array_like], optional
+            The initial messages to use.
+        output_inds : set[str], optional
+            The indices to consider as output indices of the tensor network.
+        power : float, optional
+            The power used to condition the square-root message spectrum.
+            Each message eigenvalue ``el`` is transformed to
+            ``(sqrt(max(el, 0)) + smudge) ** (2 * power)``.
+        smudge : float, optional
+            The value added to the square-root message spectrum before
+            applying ``power`` and reconstructing the squared message.
+        max_iterations : int, optional
+            The maximum number of BP iterations.
+        tol : float, optional
+            The convergence tolerance for messages.
+        damping : float, optional
+            The damping parameter to use.
+        diis : bool or dict, optional
+            Whether to use direct inversion in the iterative subspace.
+        update : {'sequential', 'parallel'}, optional
+            Whether to update messages sequentially or in parallel.
+        normalize : str or callable, optional
+            How to normalize messages after each update.
+        distance : str or callable, optional
+            How to compute the distance between messages.
+        tol_abs : float, optional
+            The absolute convergence tolerance.
+        tol_rolling_diff : float, optional
+            The rolling mean convergence tolerance.
+        local_convergence : bool, optional
+            Whether to allow messages to locally converge.
+        optimize : str or PathOptimizer, optional
+            The path optimizer to use when contracting messages.
+        reduce_opts : dict, optional
+            Options supplied when converting squared messages to reduced
+            factors.
+        compress_opts : dict, optional
+            Options supplied when computing the symmetric oblique projectors.
+        inplace : bool, optional
+            Whether to gauge this tensor network in place.
+        info : dict, optional
+            Store information about the BP run in this dictionary.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Other options supplied to ``cotengra.array_contract``.
+
+        Returns
+        -------
+        TensorNetwork
+
+        See Also
+        --------
+        gauge_all_simple
+        """
+        from .belief_propagation import gauge_d2bp
+
+        return gauge_d2bp(
+            self,
+            messages=messages,
+            output_inds=output_inds,
+            power=power,
+            smudge=smudge,
+            max_iterations=max_iterations,
+            tol=tol,
+            damping=damping,
+            diis=diis,
+            update=update,
+            normalize=normalize,
+            distance=distance,
+            tol_abs=tol_abs,
+            tol_rolling_diff=tol_rolling_diff,
+            local_convergence=local_convergence,
+            optimize=optimize,
+            reduce_opts=reduce_opts,
+            compress_opts=compress_opts,
+            inplace=inplace,
+            info=info,
+            progbar=progbar,
+            **contract_opts,
+        )
+
+    gauge_all_belief_propagation_ = functools.partialmethod(
+        gauge_all_belief_propagation,
+        inplace=True,
+    )
+
     def gauge_all_random(
         self, max_iterations=1, unitary=True, seed=None, inplace=False
     ):
@@ -7772,21 +7910,29 @@ class TensorNetwork:
         Parameters
         ----------
         method : str, optional
-            The method to use for gauging. One of "canonize", "simple", or
-            "random". Default is "canonize".
+            The method to use for gauging. One of ``"canonize"``,
+            ``"simple"``, ``"random"``, ``"bp"``, or
+            ``"belief_propagation"``. Default is ``"canonize"``.
         gauge_opts : dict, optional
             Additional keyword arguments to pass to the chosen method.
 
         See Also
         --------
-        gauge_all_canonize, gauge_all_simple, gauge_all_random
+        gauge_all_canonize, gauge_all_simple, gauge_all_belief_propagation,
+        gauge_all_random
         """
-        check_opt("method", method, ("canonize", "simple", "random"))
+        check_opt(
+            "method",
+            method,
+            ("canonize", "simple", "random", "bp", "belief_propagation"),
+        )
 
         if method == "canonize":
             return self.gauge_all_canonize(**gauge_opts)
         if method == "simple":
             return self.gauge_all_simple(**gauge_opts)
+        if method in ("bp", "belief_propagation"):
+            return self.gauge_all_belief_propagation(**gauge_opts)
         if method == "random":
             return self.gauge_all_random(**gauge_opts)
 
@@ -7828,6 +7974,12 @@ class TensorNetwork:
             )
         elif method == "random":
             tn_loc.gauge_all_random_(**gauge_local_opts)
+        elif method in ("bp", "belief_propagation"):
+            tn_loc.gauge_all_belief_propagation_(
+                max_iterations=max_iterations, **gauge_local_opts
+            )
+        else:
+            raise ValueError(f"Unknown method {method}")
 
         return tn_loc
 
@@ -7843,6 +7995,31 @@ class TensorNetwork:
     ):
         """Iteratively gauge all bonds in the tagged sub tensor network
         according to one of several strategies.
+
+        Parameters
+        ----------
+        tags : str or sequence of str
+            The tags defining the initial local region.
+        which : {'all', 'any', '!all', '!any'}, optional
+            How to select tensors based on ``tags``.
+        max_distance : int, optional
+            The maximum graph distance from the initial tagged region to
+            include.
+        max_iterations : int or 'max_distance', optional
+            The maximum number of gauging iterations. If ``'max_distance'``,
+            use the value of ``max_distance``.
+        method : {'canonize', 'simple', 'random', 'bp',
+                  'belief_propagation'}, optional
+            The gauging strategy to use. ``'bp'`` and
+            ``'belief_propagation'`` are aliases.
+        inplace : bool, optional
+            Whether to gauge this tensor network in place.
+        gauge_local_opts
+            Additional options supplied to the selected gauging method.
+
+        Returns
+        -------
+        TensorNetwork
         """
         tn = self if inplace else self.copy()
         tids = self._get_tids_from_tags(tags, which)
@@ -9838,16 +10015,16 @@ class TensorNetwork:
         if mode == "oblique":
             # contract the reduced factors
             Rl = ltn.compute_reduced_factor(
-                "right",
-                None,
-                bix,
+                side="right",
+                left_inds=None,
+                right_inds=bix,
                 contract_opts=contract_opts,
                 reduce_opts=reduce_opts,
             )
             Rr = rtn.compute_reduced_factor(
-                "left",
-                bix,
-                None,
+                side="left",
+                left_inds=bix,
+                right_inds=None,
                 contract_opts=contract_opts,
                 reduce_opts=reduce_opts,
             )

@@ -79,7 +79,13 @@ update messages adjacent to messages which have changed.
 
 from .bp_common import combine_local_contractions, initialize_hyper_messages
 from .d1bp import D1BP, contract_d1bp
-from .d2bp import D2BP, compress_d2bp, contract_d2bp, sample_d2bp
+from .d2bp import (
+    D2BP,
+    compress_d2bp,
+    contract_d2bp,
+    gauge_d2bp,
+    sample_d2bp,
+)
 from .hd1bp import HD1BP, contract_hd1bp, sample_hd1bp
 from .hv1bp import HV1BP, contract_hv1bp, sample_hv1bp
 from .l1bp import L1BP, contract_l1bp
@@ -99,6 +105,7 @@ __all__ = (
     "D1BP",
     "D2BP",
     "gen_region_counts",
+    "gauge_d2bp",
     "HD1BP",
     "HV1BP",
     "initialize_hyper_messages",

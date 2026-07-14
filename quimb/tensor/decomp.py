@@ -3077,25 +3077,19 @@ def squared_op_to_reduced_factor(
                 "Operator is exactly low rank, but cholesky method "
                 "doesn't support truncation, so ignoring `max_bond`."
             )
+            keep = -1
 
-        lsqrt, _, rsqrt = cholesky_regularized(
-            x2,
-            absorb=absorb,
-            **kwargs,
-        )
+    elif method == "eigh":
+        kwargs.setdefault("positive", 1)
 
-    else:
-        if method == "eigh":
-            kwargs.setdefault("positive", 1)
-
-        lsqrt, _, rsqrt = array_split(
-            x2,
-            max_bond=keep,
-            cutoff=0.0,
-            absorb=absorb,
-            method=method,
-            **kwargs,
-        )
+    lsqrt, _, rsqrt = array_split(
+        x2,
+        max_bond=keep,
+        cutoff=0.0,
+        absorb=absorb,
+        method=method,
+        **kwargs,
+    )
 
     if right:
         return rsqrt
