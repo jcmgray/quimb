@@ -4805,7 +4805,13 @@ class TensorNetwork:
             return norm, ket, bra
         return norm
 
-    def norm(self, output_inds=None, squared=False, **contract_opts):
+    def norm(
+        self,
+        output_inds=None,
+        squared=False,
+        strip_exponent=False,
+        **contract_opts,
+    ):
         r"""Frobenius norm of this tensor network. Computed by exactly
         contracting the TN with its conjugate:
 
@@ -4815,12 +4821,40 @@ class TensorNetwork:
 
         where the trace is taken over all indices. Equivalent to the square
         root of the sum of squared singular values across any partition.
+
+        Parameters
+        ----------
+        output_inds : sequence of str, optional
+            If given, the indices of this tensor network to treat as output.
+            This is only needed for (hyper) tensor networks where the output
+            indices are not given simply by those that appear once.
+        squared : bool, optional
+            If ``True``, return the squared norm, avoiding the square root.
+        strip_exponent : bool, optional
+            If ``True``, return the exponent of the result, log10, as well as
+            the rescaled 'mantissa'. Useful for very large or small values.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        norm : scalar or (scalar, float)
+            The norm, or if ``strip_exponent=True``, the mantissa and
+            exponent separately.
         """
         tn_norm = self.make_norm(output_inds=output_inds, layer_tags=None)
-        norm2 = tn_norm.contract(output_inds=(), **contract_opts)
+        norm2 = tn_norm.contract(
+            output_inds=(), strip_exponent=strip_exponent, **contract_opts
+        )
         if squared:
             return norm2
-        return norm2**0.5
+
+        if strip_exponent:
+            mantissa, exponent = norm2
+            return mantissa**0.5, exponent * 0.5
+        else:
+            return norm2**0.5
 
     def make_overlap(
         self,

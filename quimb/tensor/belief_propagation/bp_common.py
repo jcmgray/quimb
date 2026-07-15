@@ -498,6 +498,7 @@ def combine_local_contractions(
     check_zero=True,
     mantissa=None,
     exponent=None,
+    power=1.0,
 ):
     """Combine a product of local contractions into a single value, avoiding
     overflow/underflow by accumulating the mantissa and exponent separately.
@@ -516,6 +517,9 @@ def combine_local_contractions(
         The initial mantissa to accumulate into.
     exponent : float, optional
         The initial exponent to accumulate into.
+    power : float, optional
+        An overall power to raise the final combined value to, applied after
+        the individual value powers. E.g. use 0.5 to take a square root.
 
     Returns
     -------
@@ -528,7 +532,7 @@ def combine_local_contractions(
         exponent = 0.0
 
     _abs = _log10 = None
-    for x, power in values:
+    for x, p in values:
         if _abs is None:
             # lazily get functions
             if backend is None:
@@ -549,8 +553,12 @@ def combine_local_contractions(
 
         # accumulate the mantissa and exponent separately,
         # accounting for the local power / counting factor
-        mantissa = mantissa * x_phase**power
-        exponent = exponent + power * _log10(x_mag)
+        mantissa = mantissa * x_phase**p
+        exponent = exponent + p * _log10(x_mag)
+
+    if power != 1.0:
+        mantissa = mantissa**power
+        exponent = exponent * power
 
     if strip_exponent:
         return mantissa, exponent

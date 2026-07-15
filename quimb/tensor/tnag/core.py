@@ -1211,7 +1211,12 @@ class TensorNetworkGen(TensorNetwork):
 
     flatten_ = functools.partialmethod(flatten, inplace=True)
 
-    def normalize_simple(self, gauges, **contract_opts):
+    def normalize_simple(
+        self,
+        gauges,
+        strip_exponent=False,
+        **contract_opts,
+    ):
         """Normalize this network using simple local gauges. After calling
         this, any tree-like sub network gauged with ``gauges`` will have
         2-norm 1. Inplace operation on both the tensor network and ``gauges``.
@@ -1220,25 +1225,37 @@ class TensorNetworkGen(TensorNetwork):
         ----------
         gauges : dict[str, array_like]
             The gauges to normalize with.
+        strip_exponent : bool, optional
+            If ``True``, return the exponent of the normalization factor,
+            log10, as well as the mantissa (which is always 1.0 here).
+            Useful for very large or small values.
+        contract_opts
+            Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.norm`.
+
+        Returns
+        -------
+        nfactor : scalar or (scalar, float)
+            The normalization factor stripped from the network, or if
+            ``strip_exponent=True``, its mantissa and exponent separately.
         """
         # normalize gauges
         for ix, g in gauges.items():
             gauges[ix] = g / do("linalg.norm", g)
 
-        nfactor = 1.0
-
         # normalize sites
+        exponent = 0.0
         for site in self.sites:
             tn_site = self.select(site)
             tn_site_gauged = tn_site.copy()
             tn_site_gauged.gauge_simple_insert(gauges)
-            lnorm = (tn_site_gauged.H | tn_site_gauged).contract(
-                all, **contract_opts
-            ) ** 0.5
+            lnorm = tn_site_gauged.norm(**contract_opts)
             tn_site /= lnorm
-            nfactor *= lnorm
+            exponent += do("log10", lnorm)
 
-        return nfactor
+        if strip_exponent:
+            return 1.0, exponent
+
+        return 10**exponent
 
     def get_local_sloops(
         self,
@@ -3011,12 +3028,50 @@ class TensorNetworkGenVector(TensorNetworkGen):
         autocomplete=False,
         autoreduce=True,
         gauges=None,
+        strip_exponent=False,
         optimize="auto",
         progbar=False,
         **contract_opts,
     ):
         """Compute the norm of this tensor network by expanding it in terms of
-        generalized loops of tensors.
+        generalized loop clusters of tensors. A converged set of simple update
+        style `gauges` should be supplied for this to be a good approximation.
+
+        Parameters
+        ----------
+        gloops : None, int, or sequence[sequence[node]], optional
+            The generalized loops to use. If an integer, generate loops up to
+            and including this size. If ``None`` the maximum loop size is set
+            as the smallest non-trivial loop found. If an explicit set of
+            loops is given, only these loops are considered.
+        autocomplete : bool, optional
+            Whether to automatically complete the local region graph by adding
+            all required intersecting regions automatically.
+        autoreduce : bool, optional
+            Whether to reduce any clusters with dangling bonds (which can
+            still be generated as intersecting regions of loops) to
+            generalized loops with dangling bonds removed. Should only be used
+            at a BP fixed point.
+        gauges : dict[str, array_like]
+            The store of gauge bonds, the keys being indices and the values
+            being the vectors. Only bonds present in this dictionary will be
+            gauged. These are required here, but not modified.
+        strip_exponent : bool, optional
+            If ``True``, return the exponent of the result, log10, as well as
+            the rescaled 'mantissa'. Useful for very large or small values.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            Supplied to
+            :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`.
+
+        Returns
+        -------
+        norm : scalar or (scalar, float)
+            The norm, or if ``strip_exponent=True``, the mantissa and
+            exponent separately.
         """
         from quimb.tensor.belief_propagation import (
             combine_local_contractions,
@@ -3035,10 +3090,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
             gloops = tuple(gloops)
 
         psi = self.copy()
+        # the normalization step acts inplace so take a copy from here
+        gauges = gauges.copy()
 
         # make all tree like norms 1.0 -> region intersections
         # which are tree like can thus be ignored
-        nfactor = psi.normalize_simple(gauges)
+        _, exponent = psi.normalize_simple(gauges, strip_exponent=True)
 
         if autoreduce:
             neighbors = self.get_site_neighbor_map()
@@ -3070,8 +3127,13 @@ class TensorNetworkGenVector(TensorNetworkGen):
             lni = (kr.H | kr).contract(optimize=optimize, **contract_opts)
             zvals.append((lni, C))
 
-        # XXX: handle .exponent
-        return (combine_local_contractions(zvals) * nfactor) ** 0.5
+        return combine_local_contractions(
+            zvals,
+            exponent=(psi.exponent + exponent) * 2,
+            power=0.5,
+            check_zero=False,
+            strip_exponent=strip_exponent,
+        )
 
     def compute_local_expectation_gloop_expand(
         self,
@@ -3171,6 +3233,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
                 **contract_opts,
             )
             tn = self / nfactor
+            # local contracts ignore exponent, so multiply it in here
+            tn.distribute_exponent()
             normalized = False
         else:
             tn = self

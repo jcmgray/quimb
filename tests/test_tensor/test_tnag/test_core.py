@@ -205,6 +205,18 @@ def test_normalize_simple():
         assert k.H @ k == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("strip_exponent", [False, True])
+def test_normalize_simple_tree_with_exponents(strip_exponent):
+    tn = qtn.TN_rand_tree(n=10, D=3, phys_dim=2, max_degree=3, seed=42)
+    # generate non trivial exponent attr
+    tn.equalize_norms_(1.0)
+    nex = tn.norm(strip_exponent=strip_exponent)
+    gauges = {}
+    tn.gauge_all_simple_(1000, 1e-12, gauges=gauges)
+    nge = tn.norm_gloop_expand(0, gauges=gauges, strip_exponent=strip_exponent)
+    assert nge == pytest.approx(nex)
+
+
 @pytest.mark.parametrize(
     "damping,power,smudge,fuse_multibonds",
     [
