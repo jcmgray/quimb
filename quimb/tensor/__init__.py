@@ -206,6 +206,17 @@ from .tn2d.tebd import (
     LocalHam2D,
     SimpleUpdate,
 )
+from .tn2dinf.core import (
+    PEPSInfinite2D,
+    TensorNetworkInfinite2DFlat,
+)
+from .tn2dinf.geometry import (
+    GeometryInfinite2D,
+)
+from .tn2dinf.tebd import (
+    LocalHamInfinite2D,
+    SimpleUpdateInfinite2D,
+)
 from .tn3d.core import (
     PEPS3D,
     TensorNetwork3D,
@@ -282,6 +293,7 @@ __all__ = (
     "Gate",
     "gen_2d_bonds",
     "gen_3d_bonds",
+    "GeometryInfinite2D",
     "get_contract_backend",
     "get_contract_strategy",
     "get_symbol",
@@ -311,6 +323,7 @@ __all__ = (
     "LocalHam2D",
     "LocalHam3D",
     "LocalHamGen",
+    "LocalHamInfinite2D",
     "LatticeBondMap",
     "MatrixProductOperator",
     "MatrixProductState",
@@ -349,6 +362,7 @@ __all__ = (
     "PEPO_product_operator",
     "PEPS",
     "PEPS3D",
+    "PEPSInfinite2D",
     "PTensor",
     "rand_phased",
     "rand_tensor",
@@ -359,6 +373,7 @@ __all__ = (
     "set_tensor_linop_backend",
     "SimpleUpdate",
     "SimpleUpdateGen",
+    "SimpleUpdateInfinite2D",
     "SpinHam",
     "SpinHam1D",
     "superop_TN_1D",
@@ -396,6 +411,7 @@ __all__ = (
     "TensorNetworkGen",
     "TensorNetworkGenOperator",
     "TensorNetworkGenVector",
+    "TensorNetworkInfinite2DFlat",
     "TN_classical_partition_function_from_edges",
     "TN_dimer_covering_from_edges",
     "TN_from_edges_and_fill_fn",

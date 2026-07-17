@@ -35,8 +35,16 @@ class NetworkPatch:
         return self._tids
 
     @property
+    def num_tensors(self):
+        return len(self._tids)
+
+    @property
     def inds(self):
         return self._inds
+
+    @property
+    def num_indices(self):
+        return len(self._inds)
 
     def __iter__(self):
         return itertools.chain(self._tids, self._inds)
@@ -438,6 +446,10 @@ def get_path_between_tids(tn, tida, tidb):
     """
     # expand from both points
     path_a0 = NetworkPath((tida,))
+
+    if tidb == tida:
+        return path_a0
+
     path_b0 = NetworkPath((tidb,))
     queue_a = collections.deque((path_a0,))
     queue_b = collections.deque((path_b0,))

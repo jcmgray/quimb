@@ -288,7 +288,12 @@ class LocalHamGen:
             else:
                 self.terms[k] = fn(x)
 
-    def get_auto_ordering(self, order="sort", **kwargs):
+    def get_auto_ordering(
+        self,
+        order="sort",
+        group=False,
+        **kwargs,
+    ):
         """Get an ordering of the terms to use with TEBD, for example. The
         default is to sort the coordinates then greedily group them into
         commuting sets.
@@ -299,24 +304,27 @@ class LocalHamGen:
             How to order the terms *before* greedily grouping them into
             commuting (non-coordinate overlapping) sets:
 
-                - ``'sort'`` will sort the coordinate pairs first.
-                - ``None`` will use the current order of terms which should
-                  match the order they were supplied to this ``LocalHam2D``
-                  instance.
-                - ``'random'`` will randomly shuffle the coordinate pairs
-                  before grouping them - *not* the same as returning a
-                  completely random order.
-                - ``'random-ungrouped'`` will randomly shuffle the coordinate
-                  pairs but *not* group them at all with respect to
-                  commutation.
+            - ``'sort'`` will sort the coordinate pairs first.
+            - ``None`` will use the current order of terms which should match
+              the order they were supplied to this ``LocalHam2D`` instance.
+            - ``'random'`` will randomly shuffle the coordinate pairs before
+              grouping them - *not* the same as returning a completely random
+              order.
+            - ``'random-ungrouped'`` will randomly shuffle the coordinate pairs
+              but *not* group them at all with respect to commutation. With
+              ``group=True`` the shuffled pairs are aggregated only with
+              commuting neighbors.
 
             Any other option will be passed as a strategy to
             :func:`networkx.coloring.greedy_color` to generate the ordering.
+        group : bool, optional
+            If ``True``, return a list of commuting layers (tuples of pairs),
+            otherwise return a flat list of pairs.
 
         Returns
         -------
-        list[tuple[node]]
-            Sequence of coordinate pairs.
+        list[tuple[node]] or list[tuple[tuple[node]]]
+            Sequence of coordinate pairs, or of layers of pairs if ``group``.
         """
         if order is None:
             pairs = self.terms
@@ -328,22 +336,35 @@ class LocalHamGen:
         elif order == "random-ungrouped":
             pairs = list(self.terms)
             random.shuffle(pairs)
-            return pairs
         else:
-            return edge_coloring(self.terms, order, group=False, **kwargs)
+            return edge_coloring(self.terms, order, group=group, **kwargs)
 
-        pairs = {x: None for x in pairs}
+        sequential = order == "random-ungrouped"
+        if sequential and not group:
+            # ungrouped -> the flattened layers are just the shuffled order
+            return pairs
 
+        pairs = dict.fromkeys(pairs)
+        ordering = []
+        layer = []
         cover = set()
-        ordering = list()
         while pairs:
             for pair in tuple(pairs):
-                ij1, ij2 = pair
-                if (ij1 not in cover) and (ij2 not in cover):
-                    ordering.append(pair)
+                sitea, siteb = pair
+                if (sitea not in cover) and (siteb not in cover):
+                    layer.append(pair)
                     pairs.pop(pair)
-                    cover.add(ij1)
-                    cover.add(ij2)
+                    cover.add(sitea)
+                    cover.add(siteb)
+                elif sequential:
+                    # random-ungrouped -> don't continue down list
+                    break
+            # checked every pair (or cut early), flush layer and restart
+            if group:
+                ordering.append(tuple(layer))
+            else:
+                ordering.extend(tuple(layer))
+            layer.clear()
             cover.clear()
 
         return ordering
@@ -948,7 +969,7 @@ class GateSimpleUpdateMixin:
         """Return a copy of the current gauges."""
         return self._gauges
 
-    def set_state(self, psi, gauges=None):
+    def set_state(self, psi: TensorNetworkGenVector, gauges=None):
         """Set the current state and possibly the gauges."""
 
         if isinstance(psi, (tuple, list)):
