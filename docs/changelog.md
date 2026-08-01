@@ -64,6 +64,7 @@ Release notes for `quimb`.
 - [`TensorNetworkGenVector.norm_gloop_expand`](#TensorNetworkGenVector.norm_gloop_expand): take the tensor network's ``exponent`` attribute into account, which was previously ignored, giving incorrect values for tensor networks with norms stripped into it (e.g. via [`equalize_norms`](#TensorNetwork.equalize_norms)).
 - [`D2BP.normalize_tensors`](#D2BP.normalize_tensors): keep the cached dual tensors in sync when rescaling, so that repeated reduced density matrix computations no longer drift ({issue}`381`).
 - [`D2BP.compress`](#D2BP.compress): when compressing inplace, rebuild the cached contraction expressions afterwards, so that subsequent message updates use the newly compressed tensor data rather than stale cached arrays.
+- [`TensorNetwork.isel`](#TensorNetwork.isel): fix for slice args.
 
 
 ## v1.14.0 (2026-05-10)

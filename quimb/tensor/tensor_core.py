@@ -2274,7 +2274,9 @@ class Tensor:
 
                 ax_to_sel[ax - num_reduced] = sel
 
-        if len(ax_to_sel) == 1:
+        if len(ax_to_sel) == 1 and not any(
+            isinstance(s, slice) for s in ax_to_sel.values()
+        ):
             # single selection, for maximum compatibility
             # (e.g. with torch.vmap) use `take`
             ((axis, sel),) = ax_to_sel.items()
@@ -2285,7 +2287,7 @@ class Tensor:
             )
 
         elif ax_to_sel:
-            # multiple axes selections
+            # multiple axes selections, or slice supplied
             data_loc = tuple(
                 ax_to_sel.get(ax, slice(None)) for ax in range(new.ndim)
             )
