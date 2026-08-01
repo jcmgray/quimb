@@ -28,8 +28,8 @@ from ..tnag.core import (
 
 
 def gen_3d_bonds(Lx, Ly, Lz, steppers=None, coo_filter=None, cyclic=False):
-    """Convenience function for tiling pairs of bond coordinates on a 3D
-    lattice given a function like ``lambda i, j, k: (i + 1, j + 1, k + 1)``.
+    """Generate pairs of bond coordinates on a 3D lattice given a function like
+    ``lambda i, j, k: (i + 1, j + 1, k + 1)``.
 
     Parameters
     ----------
@@ -39,13 +39,15 @@ def gen_3d_bonds(Lx, Ly, Lz, steppers=None, coo_filter=None, cyclic=False):
         The number of y-slices.
     Lz : int
         The number of z-slices.
-    steppers : callable or sequence of callable
-        Function(s) that take args ``(i, j, k)`` and generate another
-        coordinate, thus defining a bond. Only valid steps are taken. If not
-        given, defaults to nearest neighbor bonds.
-    coo_filter : callable
-        Function that takes args ``(i, j, k)`` and only returns ``True`` if
-        this is to be a valid starting coordinate.
+    steppers : callable or sequence of callable, optional
+        One or more functions that map ``(i, j, k)`` to a second coordinate.
+        Each valid pair of coordinates defines a bond. The default functions
+        generate nearest-neighbor bonds.
+    coo_filter : callable, optional
+        A function that returns ``True`` when ``(i, j, k)`` is a valid
+        starting coordinate. The default accepts every coordinate.
+    cyclic : bool or tuple[bool, bool, bool], optional
+        Whether the lattice is cyclic in the x, y, and z directions.
 
     Yields
     ------
@@ -119,14 +121,14 @@ def gen_3d_plaquette(coo0, steps):
     coo0 : tuple
         The coordinate of the first site in the plaquette.
     steps : tuple
-        The steps to take to generate the plaquette. Each element should be
-        one of ``('x+', 'x-', 'y+', 'y-', 'z+', 'z-')``.
+        The steps that generate the plaquette. Each element must be one of
+        ``('x+', 'x-', 'y+', 'y-', 'z+', 'z-')``.
 
     Yields
     ------
     coo : tuple
-        The coordinates of the sites in the plaquette, including the last
-        site which will be the same as the first.
+        The coordinates of the plaquette sites. The last coordinate equals the
+        first coordinate.
     """
     x, y, z = coo0
     smap = {"+": +1, "-": -1}
@@ -166,17 +168,17 @@ def gen_3d_plaquettes(Lx, Ly, Lz, tiling="1"):
         The tiling to use:
 
         - '1': plaquettes in a sparse checkerboard pattern, such that each edge
-            is covered by a maximum of one plaquette.
-        - '2': less sparse checkerboard pattern, such that each edge is
-            covered by a maximum of two plaquettes.
-        - '4' or 'full': dense tiling of plaquettes. All bulk edges will
-            be covered four times.
+          is covered by a maximum of one plaquette.
+        - '2': less sparse checkerboard pattern, such that each edge is covered
+          by a maximum of two plaquettes.
+        - '4' or 'full': dense tiling of plaquettes. Each bulk edge is covered
+          four times.
 
     Yields
     ------
     plaquette : tuple[tuple[int]]
-        The coordinates of the sites in each plaquette, including the last
-        site which will be the same as the first.
+        The coordinates of each plaquette. The last coordinate equals the first
+        coordinate.
     """
     if isinstance(tiling, int):
         tiling = str(tiling)
@@ -212,7 +214,22 @@ def gen_3d_plaquettes(Lx, Ly, Lz, tiling="1"):
 
 
 def gen_3d_strings(Lx, Ly, Lz):
-    """Generate all length-wise strings in a cubic 3D lattice."""
+    """Generate all straight strings that span a cubic 3D lattice.
+
+    Parameters
+    ----------
+    Lx : int
+        The number of x-slices.
+    Ly : int
+        The number of y-slices.
+    Lz : int
+        The number of z-slices.
+
+    Yields
+    ------
+    string : tuple[tuple[int, int, int], ...]
+        The coordinates of a string that spans one lattice direction.
+    """
     for x, y in itertools.product(range(Lx), range(Ly)):
         yield tuple((x, y, z) for z in range(Lz))
     for y, z in itertools.product(range(Ly), range(Lz)):
@@ -222,9 +239,10 @@ def gen_3d_strings(Lx, Ly, Lz):
 
 
 class Rotator3D:
-    """Object for rotating coordinates and various contraction functions so
-    that the core algorithms only have to written once, but nor does the actual
-    TN have to be modified.
+    """Map coordinates and contraction functions between lattice directions.
+
+    This mapping lets the core algorithms operate without modifying the tensor
+    network.
     """
 
     def __init__(self, tn, xrange, yrange, zrange, from_which):
@@ -482,25 +500,26 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     def combine(self, other, *, virtual=False, check_collisions=True):
-        """Combine this tensor network with another, returning a new tensor
-        network. If the two are compatible, cast the resulting tensor network
-        to a :class:`TensorNetwork3D` instance.
+        """Combine this tensor network with another tensor network.
+
+        Return a :class:`TensorNetwork3D` instance when the inputs are
+        compatible.
 
         Parameters
         ----------
         other : TensorNetwork3D or TensorNetwork
-            The other tensor network to combine with.
+            The tensor network to combine with this tensor network.
         virtual : bool, optional
-            Whether the new tensor network should copy all the incoming tensors
-            (``False``, the default), or view them as virtual (``True``).
+            If ``False``, copy the tensors from both inputs. If ``True``,
+            reference the input tensors as virtual tensors.
         check_collisions : bool, optional
-            Whether to check for index collisions between the two tensor
-            networks before combining them. If ``True`` (the default), any
-            inner indices that clash will be mangled.
+            Whether to check for index collisions before combining the tensor
+            networks. If ``True``, rename conflicting inner indices.
 
         Returns
         -------
         TensorNetwork3D or TensorNetwork
+            The combined tensor network.
         """
         new = super().combine(
             other, virtual=virtual, check_collisions=check_collisions
@@ -530,7 +549,22 @@ class TensorNetwork3D(TensorNetworkGen):
         return self._Lx * self._Ly * self._Lz
 
     def site_tag(self, i, j=None, k=None):
-        """The name of the tag specifiying the tensor at site ``(i, j, k)``."""
+        """Return the tag for a site.
+
+        Parameters
+        ----------
+        i : int or tuple[int, int, int]
+            The x-coordinate, or all three coordinates as a tuple.
+        j : int, optional
+            The y-coordinate. Required when ``i`` is not a coordinate tuple.
+        k : int, optional
+            The z-coordinate. Required when ``i`` is not a coordinate tuple.
+
+        Returns
+        -------
+        str
+            The site tag.
+        """
         if j is None:
             i, j, k = i
         if not isinstance(i, str):
@@ -543,7 +577,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def x_tag_id(self):
-        """The string specifier for tagging each x-slice of this 3D TN."""
+        """The format string for x-slice tags."""
         return self._x_tag_id
 
     def x_tag(self, i):
@@ -558,7 +592,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def y_tag_id(self):
-        """The string specifier for tagging each y-slice of this 3D TN."""
+        """The format string for y-slice tags."""
         return self._y_tag_id
 
     def y_tag(self, j):
@@ -573,7 +607,7 @@ class TensorNetwork3D(TensorNetworkGen):
 
     @property
     def z_tag_id(self):
-        """The string specifier for tagging each z-slice of this 3D TN."""
+        """The format string for z-slice tags."""
         return self._z_tag_id
 
     def z_tag(self, k):
@@ -587,8 +621,18 @@ class TensorNetwork3D(TensorNetworkGen):
         return tuple(map(self.z_tag, range(self.Lz)))
 
     def maybe_convert_coo(self, coo):
-        """Check if ``coo`` is a tuple of three ints and convert to the
-        corresponding site tag if so.
+        """Convert a coordinate triplet to its site tag.
+
+        Parameters
+        ----------
+        coo : object
+            The value to convert.
+
+        Returns
+        -------
+        str or object
+            The site tag, or the unchanged input if it is not a coordinate
+            triplet.
         """
         if not isinstance(coo, str):
             try:
@@ -599,9 +643,18 @@ class TensorNetwork3D(TensorNetworkGen):
         return coo
 
     def has_site(self, site):
-        """Whether ``site`` is a valid ``(i, j, k)`` coordinate of this 3D
-        tensor network, with ``0 <= i < Lx``, ``0 <= j < Ly`` and
-        ``0 <= k < Lz``.
+        """Check whether a value is a valid site coordinate.
+
+        Parameters
+        ----------
+        site : object
+            The value to check.
+
+        Returns
+        -------
+        bool
+            Whether ``site`` is an integer coordinate within the lattice
+            bounds.
         """
         if not isinstance(site, tuple) or len(site) != 3:
             return False
@@ -616,18 +669,16 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     def _get_tids_from_tags(self, tags, which="all"):
-        """This is the function that lets coordinates such as ``(i, j, k)`` be
-        used for many 'tag' based functions.
-        """
+        """Support coordinates in methods that select tensors by tag."""
         tags = self.maybe_convert_coo(tags)
         return super()._get_tids_from_tags(tags, which=which)
 
     def gen_site_coos(self):
-        """Generate coordinates for all the sites in this 3D TN."""
+        """Generate coordinates for all the sites in this 3D tensor network."""
         return product(range(self.Lx), range(self.Ly), range(self.Lz))
 
     def gen_bond_coos(self):
-        """Generate pairs of coordinates for all the bonds in this 3D TN."""
+        """Generate coordinate pairs for all bonds in this tensor network."""
         return gen_3d_bonds(
             self.Lx,
             self.Ly,
@@ -649,8 +700,8 @@ class TensorNetwork3D(TensorNetworkGen):
 
         Parameters
         ----------
-        coo : (int, int, int), optional
-            The coordinates to check.
+        coo : (int, int, int)
+            The coordinate to check.
         xrange, yrange, zrange : (int, int), optional
             The range of allowed values for the x, y, and z coordinates.
 
@@ -669,7 +720,7 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     def get_ranges_present(self):
-        """Return the range of site coordinates present in this TN.
+        """Return the range of site coordinates in this tensor network.
 
         Returns
         -------
@@ -697,11 +748,20 @@ class TensorNetwork3D(TensorNetworkGen):
         return (xmin, xmax), (ymin, ymax), (zmin, zmax)
 
     def is_cyclic_x(self, j=None, k=None, imin=None, imax=None):
-        """Check if the x dimension is cyclic (periodic), specifically whether
-        a bond exists between ``(imin, j, k)`` and ``(imax, j, k)``, with
-        default values of ``imin = 0`` and ``imax = Lx - 1``, and ``j`` and
-        ``k`` the center of the lattice. If ``imin`` and ``imax`` are adjacent
-        then this is considered False, since there is no 'extra' connectivity.
+        """Check for a periodic bond in the x direction.
+
+        Parameters
+        ----------
+        j, k : int, optional
+            The y- and z-coordinates. Each default is at the lattice center.
+        imin, imax : int, optional
+            The x-coordinates. The defaults are ``0`` and ``Lx - 1``.
+
+        Returns
+        -------
+        bool
+            Whether a bond connects ``(imin, j, k)`` and ``(imax, j, k)``. The
+            result is ``False`` when ``imin`` and ``imax`` are adjacent.
         """
         if imin is None:
             imin = 0
@@ -725,11 +785,20 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     def is_cyclic_y(self, k=None, i=None, jmin=None, jmax=None):
-        """Check if the y dimension is cyclic (periodic), specifically whether
-        a bond exists between ``(i, jmin, k)`` and ``(i, jmax, k)``, with
-        default values of ``jmin = 0`` and ``jmax = Ly - 1``, and ``i`` and
-        ``k`` the center of the lattice. If ``jmin`` and ``jmax`` are adjacent
-        then this is considered False, since there is no 'extra' connectivity.
+        """Check for a periodic bond in the y direction.
+
+        Parameters
+        ----------
+        k, i : int, optional
+            The z- and x-coordinates. Each default is at the lattice center.
+        jmin, jmax : int, optional
+            The y-coordinates. The defaults are ``0`` and ``Ly - 1``.
+
+        Returns
+        -------
+        bool
+            Whether a bond connects ``(i, jmin, k)`` and ``(i, jmax, k)``. The
+            result is ``False`` when ``jmin`` and ``jmax`` are adjacent.
         """
         if jmin is None:
             jmin = 0
@@ -752,11 +821,20 @@ class TensorNetwork3D(TensorNetworkGen):
         )
 
     def is_cyclic_z(self, i=None, j=None, kmin=None, kmax=None):
-        """Check if the z dimension is cyclic (periodic), specifically whether
-        a bond exists between ``(i, j, kmin)`` and ``(i, j, kmax)``, with
-        default values of ``kmin = 0`` and ``kmax = Lz - 1``, and ``i`` and
-        ``j`` the center of the lattice. If ``kmin`` and ``kmax`` are adjacent
-        then this is considered False, since there is no 'extra' connectivity.
+        """Check for a periodic bond in the z direction.
+
+        Parameters
+        ----------
+        i, j : int, optional
+            The x- and y-coordinates. Each default is at the lattice center.
+        kmin, kmax : int, optional
+            The z-coordinates. The defaults are ``0`` and ``Lz - 1``.
+
+        Returns
+        -------
+        bool
+            Whether a bond connects ``(i, j, kmin)`` and ``(i, j, kmax)``. The
+            result is ``False`` when ``kmin`` and ``kmax`` are adjacent.
         """
         if kmin is None:
             kmin = 0
@@ -795,23 +873,21 @@ class TensorNetwork3D(TensorNetworkGen):
         fuse_multibonds=True,
         inplace=False,
     ) -> "TensorNetwork3DFlat":
-        """Contract all tensors at each site together, yielding a single tensor
-        per site. By default, any multibonds between flattened sites will also
-        be fused together. If not already, the resulting tensor network will be
-        promoted to a :class:`TensorNetwork3DFlat`.
+        """Contract all tensors at each site into one tensor per site.
+
+        By default, also fuse multiple bonds between flattened sites.
 
         Parameters
         ----------
         fuse_multibonds : bool, optional
-            Whether to fuse any multibonds that are created by this process.
-            Defaults to ``True``.
+            Whether to fuse multiple bonds created by flattening.
         inplace : bool, optional
-            Whether to modify this tensor network inplace, or return a new
-            one. Defaults to ``False``.
+            Whether to modify this tensor network in place.
 
         Returns
         -------
         TensorNetwork3DFlat
+            The flattened tensor network.
         """
 
         tn = super().flatten(fuse_multibonds=fuse_multibonds, inplace=inplace)
@@ -838,33 +914,30 @@ class TensorNetwork3D(TensorNetworkGen):
         stepping_order="xyz",
         step_only=None,
     ):
-        """Helper function for generating pairs of cooordinates for all bonds
-        within a certain range, optionally specifying an order.
+        """Generate coordinate pairs for bonds in a lattice range.
 
         Parameters
         ----------
-        xrange, yrange, zrange : (int, int), optional
-            The range of allowed values for the x, y, and z coordinates.
+        xrange, yrange, zrange : tuple[int, int], optional
+            The inclusive coordinate ranges. The full lattice range is the
+            default.
         xreverse, yreverse, zreverse : bool, optional
-            Whether to reverse the order of the x, y, and z sweeps.
+            Whether to reverse each coordinate sweep.
         coordinate_order : str, optional
-            The order in which to sweep the x, y, and z coordinates. Earlier
-            dimensions will change slower. If the corresponding range has
-            size 1 then that dimension doesn't need to be specified.
+            The coordinate sweep order. Earlier coordinates change more slowly.
+            A direction can be omitted only when its range has length one.
         xstep, ystep, zstep : int, optional
-            When generating a bond, step in this direction to yield the
-            neighboring coordinate. By default, these follow ``xreverse``,
-            ``yreverse``, and ``zreverse`` respectively.
+            The step in each bond direction. Each default follows the
+            corresponding reverse option.
         stepping_order : str, optional
-            The order in which to step the x, y, and z coordinates to generate
-            bonds. Does not need to include all dimensions.
+            The order in which to generate bond directions.
         step_only : int, optional
-            Only perform the ith steps in ``stepping_order``, used to
-            interleave canonizing and compressing for example.
+            Generate only the direction at this position in ``stepping_order``.
 
         Yields
         ------
-        coo_a, coo_b : ((int, int, int), (int, int, int))
+        coo_a, coo_b : tuple[int, int, int]
+            The coordinates at the ends of each bond.
         """
         if xrange is None:
             xrange = (0, self.Lx - 1)
@@ -940,8 +1013,18 @@ class TensorNetwork3D(TensorNetworkGen):
         canonize_opts=None,
         **gen_pair_opts,
     ):
-        """Canonize every pair of tensors within a subrange, optionally
-        specifying a order to visit those pairs in.
+        """Canonize tensor pairs in a lattice range.
+
+        Parameters
+        ----------
+        xrange, yrange, zrange : tuple[int, int]
+            The inclusive coordinate ranges.
+        equalize_norms : bool or float, optional
+            The norm-equalization option passed to :meth:`canonize_between`.
+        canonize_opts : dict, optional
+            Additional options passed to :meth:`canonize_between`.
+        gen_pair_opts
+            Additional options passed to :meth:`gen_pairs`.
         """
         canonize_opts = ensure_dict(canonize_opts)
         canonize_opts.setdefault("equalize_norms", equalize_norms)
@@ -984,8 +1067,22 @@ class TensorNetwork3D(TensorNetworkGen):
         compress_opts=None,
         **gen_pair_opts,
     ):
-        """Compress every pair of tensors within a subrange, optionally
-        specifying a order to visit those pairs in.
+        """Compress tensor pairs in a lattice range.
+
+        Parameters
+        ----------
+        xrange, yrange, zrange : tuple[int, int]
+            The inclusive coordinate ranges.
+        max_bond : int, optional
+            The maximum bond dimension after compression.
+        cutoff : float, optional
+            The singular-value cutoff.
+        equalize_norms : bool or float, optional
+            The norm-equalization option passed to :meth:`compress_between`.
+        compress_opts : dict, optional
+            Additional options passed to :meth:`compress_between`.
+        gen_pair_opts
+            Additional options passed to :meth:`gen_pairs`.
         """
         compress_opts = ensure_dict(compress_opts)
         compress_opts.setdefault("absorb", "both")
@@ -1338,8 +1435,28 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **contract_boundary_opts,
     ):
-        """Unified entrypoint for contracting any rectangular patch of tensors
-        from any direction, with any boundary method.
+        """Contract a rectangular region from one boundary.
+
+        Parameters
+        ----------
+        xrange, yrange, zrange : tuple[int, int]
+            The inclusive bounds of the region.
+        from_which : {'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'}
+            The boundary from which to contract.
+        max_bond : int, optional
+            The maximum bond dimension after compression.
+        cutoff : float, optional
+            The singular-value cutoff.
+        mode : str, optional
+            The boundary-compression method.
+        equalize_norms : bool or float, optional
+            Whether to equalize tensor norms during contraction.
+        compress_opts : dict, optional
+            Additional options for compression.
+        inplace : bool, optional
+            Whether to modify this tensor network in place.
+        contract_boundary_opts
+            Additional options for the selected boundary-contraction method.
         """
         tn = self if inplace else self.copy()
 
@@ -1392,8 +1509,8 @@ class TensorNetwork3D(TensorNetworkGen):
         progbar=False,
         inplace=False,
     ):
-        """Unified handler for performing iterleaved contractions in a
-        sequence of inwards boundary directions.
+        """Unified handler for performing interleaved contractions in a
+        sequence of inward boundary directions.
         """
         tn = self if inplace else self.copy()
 
@@ -1600,14 +1717,13 @@ class TensorNetwork3D(TensorNetworkGen):
         **contract_boundary_opts,
     ):
         """Contract this 3D tensor network by sweeping a sequence of the 2D
-        boundaries inwards.
+        boundaries inward.
 
         Parameters
         ----------
-        max_bond : int
-            The maximum bond dimension to allow during the contraction. You
-            can set this to `None` to use cutoff based compression only but
-            this is not recommended for loopy compressions.
+        max_bond : int, optional
+            The maximum bond dimension. If ``None``, use only the cutoff for
+            compression. A finite value is recommended for networks with loops.
         cutoff : float, optional
             The cutoff to use when compressing the bonds.
         mode : {"peps", "projector3d", "l2bp3d", "projector", "l2bp",
@@ -1629,12 +1745,12 @@ class TensorNetwork3D(TensorNetworkGen):
             Whether to perform canonization/gauging while compressing. What
             this means depends on the mode.
         compress_opts : dict, optional
-            Low level arguments to pass to the individual compression routine.
+            Low-level options to pass to the individual compression routine.
         sequence : tuple[str, ...], optional
-            The sequence of boundaries to contract inwards. By default this
-            is chosen automatically as all three directions, but you can
-            specify a custom sequence with elements from {'xmin', 'xmax',
-            'ymin', 'ymax', 'zmin', 'zmax'}, which will be cycled through.
+            The boundary sequence. The default contains all three directions.
+            The allowed values are ``"xmin"``, ``"xmax"``, ``"ymin"``,
+            ``"ymax"``, ``"zmin"``, and ``"zmax"``. The sequence is applied
+            cyclically.
         xmin, xmax, ymin, ymax, zmin, zmax : int, optional
             The initial boundaries to start contracting from. By default
             these are chosen as the outermost boundaries which contain
@@ -1644,27 +1760,26 @@ class TensorNetwork3D(TensorNetworkGen):
             this is 1, meaning that the contraction stops when two opposing
             boundaries are adjacent.
         max_unfinished : int, optional
-            The maximum number of directions which are allowed to be not
-            finished (i.e. not reached max_separation) before stopping.
+            The maximum number of directions that can remain unfinished before
+            the contraction stops.
         around : ((int, int, int), ...), optional
-            A set of coordinates to contract around. The contraction will
-            stop once all these coordinates are within the current boundaries.
+            A set of coordinates to contract around. The contraction stops
+            when all coordinates are within the current boundaries.
         strip_exponent : bool, optional
             Whether to strip an overall exponent, log10, from the *final*
             contraction result. If ``True``, a tuple of ``(scalar, exponent)``
             is returned instead of a single scalar.
         equalize_norms : bool, float, or "auto", optional
-            Whether to try and keep the norms of all tensors roughly equal
-            during the contraction, accruing any overall factors, log10, into
-            the attribute ``tn.exponent``. By default (``"auto"``) this
-            follows ``strip_exponent``. If a specific float, this factor is
-            not redistributed at the end of the contraction.
+            Whether to keep tensor norms similar during contraction and store
+            the base-10 logarithm of the overall scale in ``tn.exponent``.
+            By default, ``"auto"`` follows ``strip_exponent``. A float
+            specifies the target norm and is not redistributed at the end.
         final_contract : bool, optional
             Whether to perform the final, exact contraction of the remaining
             tensors once the boundary contraction is finished. If ``around``
             is specified, this is automatically set to ``False``.
         final_contract_opts : dict, optional
-            Extra or custom options to pass to the final contraction step.
+            Additional options to pass to the final contraction step.
         optimize : str or list, optional
             The contraction path optimizer to use for the final contraction
             step, if performed. By default uses "auto-hq".
@@ -1672,6 +1787,8 @@ class TensorNetwork3D(TensorNetworkGen):
             Whether to show a progress bar of the boundary contraction.
         inplace : bool, optional
             Whether to perform the contraction in place or on a copy.
+        contract_boundary_opts
+            Additional options passed to :meth:`contract_boundary_from`.
         """
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
@@ -1728,12 +1845,11 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **kwargs,
     ):
-        """This is a special case of ``contract_boundary`` where we sweep a
-        PEPS in a *single* direction across the 3D lattice, compressing it by
-        treating first rows and then columns as MPS, which we can fully
-        canonicalize. This is one natural generalization of contracting a PEPS
-        by sweeping a MPS across it. It is perhaps not a very accurate
-        contraction method and is provided as a reference only.
+        """Contract this 3D tensor network with a PEPS-to-MPS sweep.
+
+        First contract one lattice direction to produce a 2D tensor network.
+        Then contract its rows and columns as matrix product states. This
+        method is primarily a reference method.
 
         Parameters
         ----------
@@ -1755,19 +1871,18 @@ class TensorNetwork3D(TensorNetworkGen):
             If ``mode=='peps'``, whether to interleave canonization and
             compression sweeps, or do all canonization then all compression.
         peps_opts : dict, optional
-            Extra or custom options to pass to the PEPS compression steps.
+            Additional options to pass to the PEPS compression steps.
         mps_opts : dict, optional
-            Extra or custom options to pass to the MPS compression steps.
+            Additional options to pass to the MPS compression steps.
         strip_exponent : bool, optional
             Whether to strip an overall exponent, log10, from the *final*
             contraction result. If ``True``, a tuple of ``(scalar, exponent)``
             is returned instead of a single scalar.
         equalize_norms : bool, float, or "auto", optional
-            Whether to try and keep the norms of all tensors roughly equal
-            during the contraction, accruing any overall factors, log10, into
-            the attribute ``tn.exponent``. By default (``"auto"``) this
-            follows ``strip_exponent``. If a specific float, this factor is
-            not redistributed at the end of the contraction.
+            Whether to keep tensor norms similar during contraction and store
+            the base-10 logarithm of the overall scale in ``tn.exponent``.
+            By default, ``"auto"`` follows ``strip_exponent``. A float
+            specifies the target norm and is not redistributed at the end.
         progbar : bool, optional
             Whether to show a progress bar of the boundary contraction.
         inplace : bool, optional
@@ -1929,13 +2044,13 @@ class TensorNetwork3D(TensorNetworkGen):
         inplace=False,
         **contract_boundary_opts,
     ):
-        """Contract this 3D tensor network using the 3D finite analog of the
-        CTMRG algorithm - https://arxiv.org/abs/cond-mat/9507087. The TN is
-        contracted sequentially in ``sequence`` directions by inserting oblique
-        projectors between boundary pairs, and then optionally contracting
-        these new effective sites. The algorithm stops when enough directions
-        have a length no larger than ``max_separation + 1``, and thus exact
-        contraction can be used.
+        """Contract this tensor network with finite 3D CTMRG.
+
+        See https://arxiv.org/abs/cond-mat/9507087. Insert oblique projectors
+        between boundary pairs in each direction in ``sequence``. Optionally
+        contract these projectors into effective sites. Stop when enough
+        directions have length at most ``max_separation + 1``. Then contract
+        the remaining tensor network exactly.
 
         Parameters
         ----------
@@ -1954,9 +2069,8 @@ class TensorNetwork3D(TensorNetworkGen):
             The method to perform the boundary contraction. Defaults to
             ``'projector'``.
         sequence : sequence of str, optional
-            Which directions to cycle through when performing the inwards
-            contractions, i.e. *from* that direction. Default is to contract
-            in all directions.
+            The boundaries from which to contract inward. The default contains
+            all directions.
         xmin : int, optional
             The initial bottom boundary row, defaults to 0.
         xmax : int, optional
@@ -1970,14 +2084,14 @@ class TensorNetwork3D(TensorNetworkGen):
         zmax : int, optional
             The initial back boundary layer, defaults to ``Lz - 1``.
         max_separation : int, optional
-            If ``around is None``, when any two sides become this far apart
-            simply contract the remaining tensor network.
+            A direction is complete when its boundaries are no farther apart
+            than this value.
         max_unfinished : int, optional
             The maximum number of directions that can be unfinished before the
             contraction terminates.
         around : None or sequence of (int, int, int), optional
-            If given, don't contract the cube of sites bounding these
-            coordinates.
+            Coordinates to preserve. Boundary contraction stops at the
+            rectangular region that contains these coordinates.
         strip_exponent : bool, optional
             Whether to strip an overall exponent, log10, from the *final*
             contraction result. If ``True``, a tuple of ``(scalar, exponent)``
@@ -1989,7 +2103,7 @@ class TensorNetwork3D(TensorNetworkGen):
             ``strip_exponent``.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the projection tensors. Note any
-            value in ``contract_opts`` will take precedence over this.
+            value in ``contract_opts`` takes precedence over this.
         contract_opts : dict, optional
             Explicit options for contracting the projectors to pass to
             :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
@@ -2238,7 +2352,7 @@ class TensorNetwork3D(TensorNetworkGen):
     ):
         """Coarse grain this tensor network in ``direction`` using HOTRG. This
         inserts oblique projectors between tensor pairs and then optionally
-        contracts them into new sites for form a lattice half the size.
+        contracts them into new sites to form a lattice half the size.
 
         Parameters
         ----------
@@ -2255,7 +2369,7 @@ class TensorNetwork3D(TensorNetworkGen):
             Additional options to pass to :meth:`gauge_all_simple_`.
         gauge_power : float, optional
             If `canonize=True`, the power to which to raise the computed bond
-            gauge weights when before computing the compressed projectors.
+            gauge weights before computing the compressed projectors.
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
@@ -2266,7 +2380,7 @@ class TensorNetwork3D(TensorNetworkGen):
             lattice. By default (``"auto"``) this follows ``strip_exponent``.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the projection tensors. Note any
-            value in ``contract_opts`` will take precedence over this.
+            value in ``contract_opts`` takes precedence over this.
         contract_opts : dict, optional
             Explicit options for contracting the projectors to pass to
             :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
@@ -2432,12 +2546,12 @@ class TensorNetwork3D(TensorNetworkGen):
     ):
         """Contract this tensor network using the finite version of HOTRG.
         See https://arxiv.org/abs/1201.1144v4 and
-        https://arxiv.org/abs/1905.02351 for the more optimal computaton of the
-        projectors used here. The TN is contracted sequentially in
-        ``sequence`` directions by inserting oblique projectors between tensor
-        pairs, and then optionally contracting these new effective sites. The
-        algorithm stops when only one direction has a length larger than 2, and
-        thus exact contraction can be used.
+        https://arxiv.org/abs/1905.02351 for the improved computation of
+        the projectors used here. The tensor network is contracted
+        sequentially in ``sequence`` directions by inserting oblique
+        projectors between tensor pairs. It can then contract the projectors
+        into new effective sites. The algorithm stops when at most one
+        direction has length greater than 2. It then contracts exactly.
 
         Parameters
         ----------
@@ -2452,7 +2566,7 @@ class TensorNetwork3D(TensorNetworkGen):
             Additional options to pass to :meth:`gauge_all_simple_`.
         gauge_power : float, optional
             If `canonize=True`, the power to which to raise the computed bond
-            gauge weights when before computing the compressed projectors.
+            gauge weights before computing the compressed projectors.
         sequence : tuple of str, optional
             The directions to contract in.  Default is to contract in all
             directions.
@@ -2476,7 +2590,7 @@ class TensorNetwork3D(TensorNetworkGen):
             follows ``strip_exponent``.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the projection tensors. Note any
-            value in ``contract_opts`` will take precedence over this.
+            value in ``contract_opts`` takes precedence over this.
         contract_opts : dict, optional
             Explicit options for contracting the projectors to pass to
             :meth:`~quimb.tensor.TensorNetwork.to_dense`. Values
@@ -2504,8 +2618,8 @@ class TensorNetwork3D(TensorNetworkGen):
         Returns
         -------
         TensorNetwork3D
-            The contracted tensor network, which will have no more than one
-            direction of length > 2.
+            The contracted tensor network. At most one direction has length
+            greater than 2.
 
         See Also
         --------
@@ -2605,7 +2719,18 @@ class TensorNetwork3D(TensorNetworkGen):
 
 
 def is_lone_coo(where):
-    """Check if ``where`` has been specified as a single coordinate triplet."""
+    """Check whether ``where`` is one coordinate triplet.
+
+    Parameters
+    ----------
+    where : sequence
+        The value to check.
+
+    Returns
+    -------
+    bool
+        Whether ``where`` is a coordinate triplet.
+    """
     return (len(where) == 3) and (isinstance(where[0], Integral))
 
 
@@ -2643,7 +2768,17 @@ def calc_cell_sizes(coo_groups, autogroup=True):
 
 
 def cell_to_sites(p):
-    """Turn a cell ``((i0, j0, k0), (di, dj, dk))`` into the sites it contains.
+    """Return the sites in a rectangular cell.
+
+    Parameters
+    ----------
+    p : tuple[tuple[int, int, int], tuple[int, int, int]]
+        The cell origin and cell size.
+
+    Returns
+    -------
+    tuple[tuple[int, int, int], ...]
+        The sites in the cell.
 
     Examples
     --------
@@ -2661,13 +2796,23 @@ def cell_to_sites(p):
 
 
 def sites_to_cell(sites):
-    """Get the minimum covering cell for ``sites``.
+    """Return the smallest rectangular cell that contains ``sites``.
+
+    Parameters
+    ----------
+    sites : iterable[tuple[int, int, int]]
+        The site coordinates.
+
+    Returns
+    -------
+    tuple[tuple[int, int, int], tuple[int, int, int]]
+        The cell origin and cell size.
 
     Examples
     --------
 
         >>> sites_to_cell([(1, 3, 3), (2, 2, 4)])
-        ((1, 2, 3) , (2, 2, 2))
+        ((1, 2, 3), (2, 2, 2))
     """
     imin = jmin = kmin = float("inf")
     imax = jmax = kmax = float("-inf")
@@ -2695,8 +2840,9 @@ def calc_cell_map(cells):
 
 
 class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
-    """Mixin class  for a 3D square lattice vector TN, i.e. one with a single
-    physical index per site.
+    """Mixin for 3D cubic-lattice vector tensor networks.
+
+    Each site has one physical index.
     """
 
     _EXTRA_PROPS = (
@@ -2731,7 +2877,20 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
         )
 
     def phys_dim(self, i=None, j=None, k=None):
-        """Get the size of the physical indices / a specific physical index."""
+        """Return the physical index dimension.
+
+        Parameters
+        ----------
+        i, j, k : int, optional
+            The coordinate of a physical index. If no complete coordinate is
+            given, use the first physical index that remains in the tensor
+            network.
+
+        Returns
+        -------
+        int
+            The physical index dimension.
+        """
         if (i is not None) and (j is not None) and (k is not None):
             pix = self.site_ind(i, j, k)
         else:
@@ -2749,8 +2908,29 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
         inplace=False,
         **compress_opts,
     ):
-        """Apply a gate ``G`` to sites ``where``, preserving the outer site
-        inds.
+        """Apply a gate to one or more sites.
+
+        Parameters
+        ----------
+        G : array_like
+            The gate array.
+        where : tuple[int, int, int] or sequence of tuple[int, int, int]
+            The site or sites on which to apply the gate.
+        contract : bool or str, optional
+            How to contract and compress the gate. See :meth:`gate_inds`.
+        tags : str or sequence of str, optional
+            Tags to add to the gate tensor.
+        info : dict, optional
+            A dictionary for optional contraction information.
+        inplace : bool, optional
+            Whether to modify this tensor network in place.
+        compress_opts
+            Additional options passed to :meth:`gate_inds`.
+
+        Returns
+        -------
+        TensorNetwork3DVector
+            The tensor network after applying the gate.
         """
         if self.has_site(where):
             where = (where,)
@@ -2772,9 +2952,7 @@ class TensorNetwork3DVector(TensorNetwork3D, TensorNetworkGenVector):
 
 
 class TensorNetwork3DFlat(TensorNetwork3D):
-    """Mixin class for a 3D square lattice tensor network with a single tensor
-    per site, for example, both PEPS and PEPOs.
-    """
+    """Mixin for 3D cubic-lattice tensor networks with one tensor per site."""
 
     _EXTRA_PROPS = (
         "_site_tag_id",
@@ -2788,33 +2966,30 @@ class TensorNetwork3DFlat(TensorNetwork3D):
 
 
 class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
-    r"""Projected Entangled Pair States object (3D).
+    r"""A 3D projected entangled-pair state.
 
     Parameters
     ----------
     arrays : sequence of sequence of sequence of array
-        The core tensor data arrays.
+        The tensor data arrays.
     shape : str, optional
-        Which order the dimensions of the arrays are stored in, the default
-        ``'urfdlbp'`` stands for ('up', 'right', 'front', down', 'left',
-        'behind', 'physical') meaning (x+, y+, z+, x-, y-, z-, physical)
-        respectively. Arrays on the edge of lattice are assumed to be missing
-        the corresponding dimension.
+        The index order in each array. The default ``"urfdlbp"`` means up,
+        right, front, down, left, back, and physical. Boundary arrays omit
+        dimensions for missing bonds.
     tags : set[str], optional
-        Extra global tags to add to the tensor network.
+        Global tags to add to the tensor network.
     site_ind_id : str, optional
-        String specifier for naming convention of site indices.
+        The format string for site indices.
     site_tag_id : str, optional
-        String specifier for naming convention of site tags.
-    x_tag_id : str, optional
-        String specifier for naming convention of x-slice tags.
-    y_tag_id : str, optional
-        String specifier for naming convention of y-slice tags.
-    z_tag_id : str, optional
-        String specifier for naming convention of z-slice tags.
+        The format string for site tags.
+    x_tag_id, y_tag_id, z_tag_id : str, optional
+        The format strings for slice tags.
     cyclic : None, bool, or tuple[bool, bool, bool], optional
-        Whether the lattice is cyclic in the x, y and z directions. If
-        ``None`` (default), infer from the array shapes.
+        Whether each lattice direction is cyclic. If ``None``, infer the
+        boundary conditions from the array shapes.
+    tn_opts
+        Additional options for
+        :class:`~quimb.tensor.tensor_core.TensorNetwork`.
     """
 
     _EXTRA_PROPS = (
@@ -2953,16 +3128,15 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         super().__init__(tensors, virtual=True, **tn_opts)
 
     def permute_arrays(self, shape="urfdlbp"):
-        """Permute the indices of each tensor in this PEPS3D to match
-        ``shape``. This doesn't change how the overall object interacts with
-        other tensor networks but may be useful for extracting the underlying
-        arrays consistently. This is an inplace operation.
+        """Permute each tensor to a specified index order.
+
+        This in-place operation changes only the array layout.
 
         Parameters
         ----------
         shape : str, optional
-            A permutation of ``'lrp'`` specifying the desired order of the
-            left, right, and physical indices respectively.
+            A permutation of ``"urfdlbp"`` for the up, right, front, down,
+            left, back, and physical indices.
         """
         steps = {
             "u": lambda i, j, k: (i + 1, j, k),
@@ -2999,11 +3173,13 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         shape="urfdlbp",
         **peps3d_opts,
     ):
-        """Create a 3D PEPS from a filling function with signature
-        ``fill_fn(shape)``.
+        """Create a 3D PEPS from a filling function.
 
         Parameters
         ----------
+        fill_fn : callable
+            A function with signature ``fill_fn(shape)`` that returns a tensor
+            array.
         Lx : int
             The number of x-slices.
         Ly : int
@@ -3014,16 +3190,19 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             The bond dimension.
         phys_dim : int, optional
             The physical index dimension.
+        cyclic : bool or tuple[bool, bool, bool], optional
+            Whether the lattice is cyclic in each direction.
         shape : str, optional
-            How to layout the indices of the tensors, the default is
-            ``(up, right, front, down, left, back, phys) == 'urfdlbp'``. This
-            is the order of the shape supplied to the filling function.
-        peps_opts
-            Supplied to :class:`~quimb.tensor.tn3d.core.PEPS3D`.
+            The tensor index order. The default ``"urfdlbp"`` means up, right,
+            front, down, left, back, and physical. This order determines the
+            shape passed to ``fill_fn``.
+        peps3d_opts
+            Additional options for :class:`PEPS3D`.
 
         Returns
         -------
-        psi : PEPS3D
+        PEPS3D
+            The new tensor network.
         """
         arrays = [
             [[None for _ in range(Lz)] for _ in range(Ly)] for _ in range(Lx)
@@ -3065,7 +3244,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         like="numpy",
         **peps3d_opts,
     ):
-        """Create an empty 3D PEPS.
+        """Create a 3D PEPS with zero-filled tensors.
 
         Parameters
         ----------
@@ -3077,18 +3256,17 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             The number of z-slices.
         bond_dim : int
             The bond dimension.
-        physical : int, optional
+        phys_dim : int, optional
             The physical index dimension.
+        like : array_like or str, optional
+            The array backend for the tensor data.
         peps3d_opts
-            Supplied to :class:`~quimb.tensor.tn3d.core.PEPS3D`.
+            Additional options for :class:`PEPS3D`.
 
         Returns
         -------
-        psi : PEPS3D
-
-        See Also
-        --------
-        PEPS3D.from_fill_fn
+        PEPS3D
+            The new tensor network.
         """
         return self.from_fill_fn(
             lambda shape: do("zeros", shape, like=like),
@@ -3111,7 +3289,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         like="numpy",
         **peps3d_opts,
     ):
-        """Create a 3D PEPS whose tensors are filled with ones.
+        """Create a 3D PEPS with one-filled tensors.
 
         Parameters
         ----------
@@ -3123,18 +3301,17 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             The number of z-slices.
         bond_dim : int
             The bond dimension.
-        physical : int, optional
+        phys_dim : int, optional
             The physical index dimension.
+        like : array_like or str, optional
+            The array backend for the tensor data.
         peps3d_opts
-            Supplied to :class:`~quimb.tensor.tn3d.core.PEPS3D`.
+            Additional options for :class:`PEPS3D`.
 
         Returns
         -------
-        psi : PEPS3D
-
-        See Also
-        --------
-        PEPS3D.from_fill_fn
+        PEPS3D
+            The new tensor network.
         """
         return self.from_fill_fn(
             lambda shape: do("ones", shape, like=like),
@@ -3160,7 +3337,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         seed=None,
         **peps3d_opts,
     ):
-        """Create a random (un-normalized) 3D PEPS.
+        """Create a random, unnormalized 3D PEPS.
 
         Parameters
         ----------
@@ -3172,22 +3349,23 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             The number of z-slices.
         bond_dim : int
             The bond dimension.
-        physical : int, optional
+        phys_dim : int, optional
             The physical index dimension.
+        dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+            The random distribution.
+        loc : float, optional
+            The additive offset for the random values.
         dtype : dtype, optional
-            The dtype to create the arrays with, default is real double.
+            The data type of the tensor arrays.
         seed : int, optional
-            A random seed.
-        peps_opts
-            Supplied to :class:`~quimb.tensor.tn3d.core.PEPS3D`.
+            The random seed.
+        peps3d_opts
+            Additional options for :class:`PEPS3D`.
 
         Returns
         -------
-        psi : PEPS3D
-
-        See Also
-        --------
-        PEPS3D.from_fill_fn
+        PEPS3D
+            The new tensor network.
         """
         if seed is not None:
             seed_rand(seed)

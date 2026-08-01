@@ -1479,8 +1479,7 @@ def tensor_gauge_simple_bond(
             old_gauge = 1.0
         sdiff = do("linalg.norm", old_gauge - new_gauge)
         info["sdiff"] = sdiff
-        if sdiff > info["max_sdiff"]:
-            info["max_sdiff"] = sdiff
+        info["max_sdiff"] = max(info["max_sdiff"], sdiff)
 
     # update inner gauge and undo outer gauges
     gauges[bond_ind] = new_gauge
@@ -1956,11 +1955,17 @@ class Tensor:
 
     """
 
-    __slots__ = ("_data", "_inds", "_tags", "_left_inds", "_owners")
+    __slots__ = (
+        "_data",
+        "_inds",
+        "_left_inds",
+        "_owners",
+        "_tags",
+    )
 
     def __init__(self, data=1.0, inds=(), tags=None, left_inds=None):
         # a new or copied Tensor always has no owners
-        self._owners = dict()
+        self._owners = {}
 
         # short circuit for copying / casting Tensor instances
         if isinstance(data, Tensor):
@@ -3832,7 +3837,7 @@ class Tensor:
         if self.size > 100:
             s += "data=..."
         else:
-            s += f"data={repr(self.data)}"
+            s += f"data={self.data!r}"
         s += "</details>"
         s += "</samp>"
         return s
@@ -4095,7 +4100,7 @@ class TensorNetwork:
         if isinstance(ts, TensorNetwork):
             self.tag_map = valmap(lambda tids: tids.copy(), ts.tag_map)
             self.ind_map = valmap(lambda tids: tids.copy(), ts.ind_map)
-            self.tensor_map = dict()
+            self.tensor_map = {}
             for tid, t in ts.tensor_map.items():
                 self.tensor_map[tid] = t if virtual else t.copy()
                 self.tensor_map[tid].add_owner(self, tid)
@@ -4109,9 +4114,9 @@ class TensorNetwork:
 
         # internal structure
         self._tid_counter = 0
-        self.tensor_map = dict()
-        self.tag_map = dict()
-        self.ind_map = dict()
+        self.tensor_map = {}
+        self.tag_map = {}
+        self.ind_map = {}
         self._inner_inds = oset()
         self._outer_inds = oset()
         self.exponent = 0.0
@@ -4344,7 +4349,9 @@ class TensorNetwork:
         self._link_inds(T.inds, tid)
 
     def add_tensor_network(self, tn, virtual=False, check_collisions=True):
-        """ """
+        """Add a tensor network into this one, possibly mangling its internal
+        indices.
+        """
         if check_collisions:  # add tensors individually
             # check for matching inner_indices -> need to re-index
             clash_ix = self._inner_inds & tn._inner_inds
@@ -5739,10 +5746,8 @@ class TensorNetwork:
         tids = self._get_tids_from_tags(tags, which="all")
         if len(tids) != 1:
             raise KeyError(
-                "'TensorNetwork.__setitem__' is meant for a single "
-                "existing tensor only - found {} with tag(s) '{}'.".format(
-                    len(tids), tags
-                )
+                "'TensorNetwork.__setitem__' is meant for a single existing "
+                f"tensor only - found {len(tids)} with tag(s) '{tags}'."
             )
 
         if not isinstance(tensor, Tensor):
@@ -6920,7 +6925,9 @@ class TensorNetwork:
         inplace=False,
         **gauge_simple_opts,
     ):
-        """ """
+        """Compress all bond in this network by running simple update style
+        gauging and then truncating in that basis everywhere simulteneously.
+        """
         if max_iterations < 1:
             raise ValueError("Must have at least one iteration to compress.")
 
@@ -7128,7 +7135,7 @@ class TensorNetwork:
     def get_tid_neighbor_map(self):
         """Get a mapping of each tensor id to the tensor ids of its neighbors."""
         neighbor_map = {tid: [] for tid in self.tensor_map}
-        for ix, tids in self.ind_map.items():
+        for tids in self.ind_map.values():
             for tida, tidb in itertools.combinations(tids, 2):
                 neighbor_map[tida].append(tidb)
                 neighbor_map[tidb].append(tida)
@@ -9575,14 +9582,15 @@ class TensorNetwork:
 
         # this checks whether certain TN classes have a manually specified
         #     contraction pattern (e.g. 1D along the line)
-        if self._CONTRACT_STRUCTURED:
-            if (tags is ...) or isinstance(tags, slice):
-                return self.contract_structured(
-                    tags,
-                    strip_exponent=strip_exponent,
-                    inplace=inplace,
-                    **kwargs,
-                )
+        if self._CONTRACT_STRUCTURED and (
+            (tags is ...) or isinstance(tags, slice)
+        ):
+            return self.contract_structured(
+                tags,
+                strip_exponent=strip_exponent,
+                inplace=inplace,
+                **kwargs,
+            )
 
         # contracting everything to single output
         if all_tags and not inplace:
@@ -10257,7 +10265,6 @@ class TensorNetwork:
             from .decomp import ldmul, rdmul, svd_truncated
             from .tensor_builder import rand_tensor
 
-            #
             max_bond = min(current_rank, max_bond)
 
             if callable(max_bond_oversample):
@@ -10793,7 +10800,7 @@ class TensorNetwork:
         """
         tn = self if inplace else self.copy()
 
-        for ix, tids in tn.ind_map.items():
+        for tids in tn.ind_map.values():
             if len(tids) != 2:
                 continue
             tid1, tid2 = tids
@@ -12157,7 +12164,7 @@ class TensorNetwork:
     def __str__(self):
         return (
             f"{self.__class__.__name__}([{os.linesep}"
-            + "".join(f"    {repr(t)},{os.linesep}" for t in self.tensors)
+            + "".join(f"    {t!r},{os.linesep}" for t in self.tensors)
             + f"], {self._repr_info_str()})"
         )
 
@@ -12250,7 +12257,7 @@ class TNLinearOperator(spla.LinearOperator):
             self._tensors = tuple(tns)
 
             if ldims is None or rdims is None:
-                ix_sz = dict(concat((zip(t.inds, t.shape) for t in tns)))
+                ix_sz = dict(concat(zip(t.inds, t.shape) for t in tns))
                 ldims = tuple(ix_sz[i] for i in left_inds)
                 rdims = tuple(ix_sz[i] for i in right_inds)
 
@@ -12270,7 +12277,7 @@ class TNLinearOperator(spla.LinearOperator):
         self._conj_linop = None
         self._adjoint_linop = None
         self._transpose_linop = None
-        self._contractors = dict()
+        self._contractors = {}
 
         super().__init__(dtype=self._tensors[0].dtype, shape=(ld, rd))
 
@@ -12474,7 +12481,13 @@ class PTensor(Tensor):
     PTensor
     """
 
-    __slots__ = ("_data", "_inds", "_tags", "_left_inds", "_owners")
+    __slots__ = (
+        "_data",
+        "_inds",
+        "_left_inds",
+        "_owners",
+        "_tags",
+    )
 
     def __init__(self, fn, params, inds=(), tags=None, left_inds=None):
         super().__init__(
@@ -12592,7 +12605,13 @@ class IsoTensor(Tensor):
     when its data is changed.
     """
 
-    __slots__ = ("_data", "_inds", "_tags", "_left_inds", "_owners")
+    __slots__ = (
+        "_data",
+        "_inds",
+        "_left_inds",
+        "_owners",
+        "_tags",
+    )
 
     def modify(self, **kwargs):
         kwargs.setdefault("left_inds", self.left_inds)
@@ -12605,7 +12624,7 @@ class IsoTensor(Tensor):
 
 
 # avoid circular imports by importing and attaching methods here
-from .gating import (  # noqa: E402
+from .gating import (
     tensor_network_gate_inds,
     tensor_network_gate_sandwich_inds,
 )
