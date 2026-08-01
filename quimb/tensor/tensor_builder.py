@@ -872,20 +872,19 @@ def TN_from_strings(
     if normalize:
         # normalize the tensor network, while it is still easy to contract
 
-        sign = 1
+        phase = 1
+        exponent = 0.0
         for tn_i in tn.subgraphs():
             # contract each subgraph/loop seperately
             tn_i = tn_i.rank_simplify(equalize_norms=1.0)
-            tn.exponent -= tn_i.exponent
-            z_i = tn_i.contract(**contract_opts)
-            sign *= do("sign", z_i)
-            tn.exponent -= do("log10", do("abs", z_i))
+            mantissa_i, exponent_i = tn_i.contract(
+                strip_exponent=True, **contract_opts
+            )
+            phase *= mantissa_i
+            exponent += exponent_i
 
-        if sign < 0:
-            # can multiply any tensor by -1 to flip global sign
-            tn.tensors[0].modify(apply=lambda x: sign * x)
-
-        # distribute collected exponent to all tensors
+        tn /= phase
+        tn.exponent -= exponent
         tn.equalize_norms_()
 
     if contract_sites:
