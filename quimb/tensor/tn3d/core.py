@@ -451,9 +451,8 @@ BOUNDARY_SEQUENCE_MAP = {
 
 
 def parse_boundary_sequence(sequence):
-    if isinstance(sequence, str):
-        if sequence in BOUNDARY_SEQUENCE_MAP:
-            return (sequence,)
+    if isinstance(sequence, str) and sequence in BOUNDARY_SEQUENCE_MAP:
+        return (sequence,)
     return tuple(BOUNDARY_SEQUENCE_MAP[s] for s in sequence)
 
 
@@ -1409,14 +1408,6 @@ class TensorNetwork3D(TensorNetworkGen):
             else:
                 equalize_norms = False
 
-        if progbar:
-            pbar = Progbar()
-            pbar.set_description(
-                f"contracting boundary, Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
-            )
-        else:
-            pbar = None
-
         # set default starting borders
         if any(d is None for d in (xmin, xmax, ymin, ymax, zmin, zmax)):
             (
@@ -1485,6 +1476,14 @@ class TensorNetwork3D(TensorNetworkGen):
                     target_check[direction](boundaries[direction])
                 )
             )
+
+        if progbar:
+            pbar = Progbar()
+            pbar.set_description(
+                f"contracting boundary, Lx={tn.Lx}, Ly={tn.Ly}, Lz={tn.Lz}"
+            )
+        else:
+            pbar = None
 
         sequence = [d for d in sequence if not _is_finished(d)]
         while sequence:
@@ -1723,8 +1722,11 @@ class TensorNetwork3D(TensorNetworkGen):
         canonize_interleave=True,
         peps_opts=None,
         mps_opts=None,
-        equalize_norms=False,
+        strip_exponent=False,
+        equalize_norms="auto",
+        progbar=False,
         inplace=False,
+        **kwargs,
     ):
         """This is a special case of ``contract_boundary`` where we sweep a
         PEPS in a *single* direction across the 3D lattice, compressing it by
@@ -1756,13 +1758,56 @@ class TensorNetwork3D(TensorNetworkGen):
             Extra or custom options to pass to the PEPS compression steps.
         mps_opts : dict, optional
             Extra or custom options to pass to the MPS compression steps.
-
+        strip_exponent : bool, optional
+            Whether to strip an overall exponent, log10, from the *final*
+            contraction result. If ``True``, a tuple of ``(scalar, exponent)``
+            is returned instead of a single scalar.
+        equalize_norms : bool, float, or "auto", optional
+            Whether to try and keep the norms of all tensors roughly equal
+            during the contraction, accruing any overall factors, log10, into
+            the attribute ``tn.exponent``. By default (``"auto"``) this
+            follows ``strip_exponent``. If a specific float, this factor is
+            not redistributed at the end of the contraction.
+        progbar : bool, optional
+            Whether to show a progress bar of the boundary contraction.
+        inplace : bool, optional
+            Whether to perform the contraction in place or on a copy.
+        kwargs
+            Additional options to pass to :meth:`contract_boundary` for the
+            PEPS compression steps.
         """
         from quimb.tensor.tn2d.core import TensorNetwork2D
 
         tn = self if inplace else self.copy()
 
+        if equalize_norms == "auto":
+            # if we are going to extract exponent at end, assume we
+            # should do it throughout the computation as well
+            if strip_exponent:
+                # but we won't redistribute norms (`True`) during contraction
+                equalize_norms = 1.0
+            else:
+                equalize_norms = False
+
+        peps_opts = kwargs | ensure_dict(peps_opts)
+        peps_opts.setdefault("max_bond", max_bond)
+        peps_opts.setdefault("cutoff", cutoff)
+        peps_opts.setdefault("canonize", canonize)
+        peps_opts.setdefault("equalize_norms", equalize_norms)
+        peps_opts.setdefault("progbar", progbar)
+
+        mps_opts = ensure_dict(mps_opts)
+        mps_opts.setdefault("max_bond", 2 * max_bond)
+        mps_opts.setdefault("cutoff", cutoff)
+        mps_opts.setdefault("sequence", ["b"])
+        mps_opts.setdefault("canonize", canonize)
+        mps_opts.setdefault("equalize_norms", equalize_norms)
+        mps_opts.setdefault("strip_exponent", strip_exponent)
+        mps_opts.setdefault("progbar", progbar)
+        mps_opts.setdefault("inplace", inplace)
+
         if from_which is None:
+            # choose to contract with the smallest area boundary plane
             plane_sizes = {
                 "xmin": tn.Ly * tn.Lz,
                 "ymin": tn.Lx * tn.Lz,
@@ -1776,12 +1821,6 @@ class TensorNetwork3D(TensorNetworkGen):
                 ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"),
             )
 
-        peps_opts = ensure_dict(peps_opts)
-        peps_opts.setdefault("max_bond", max_bond)
-        peps_opts.setdefault("cutoff", 0.0)
-        peps_opts.setdefault("canonize", canonize)
-        peps_opts.setdefault("equalize_norms", equalize_norms)
-
         if mode == "peps":
             # this specifies that we canonize <- and compress -> in one
             # direction then move on to the second direction (^ v), rather than
@@ -1792,12 +1831,11 @@ class TensorNetwork3D(TensorNetworkGen):
             peps_opts.setdefault("canonize_opts", {})
             peps_opts["canonize_opts"].setdefault("absorb", "right")
 
-        tn.contract_boundary_from_(
+        tn.contract_boundary_(
             mode=mode,
-            xrange=None,
-            yrange=None,
-            zrange=None,
-            from_which=from_which,
+            sequence=[from_which],
+            max_separation=0,
+            final_contract=False,
             **peps_opts,
         )
 
@@ -1810,14 +1848,6 @@ class TensorNetwork3D(TensorNetworkGen):
         tn.view_as_(
             TensorNetwork2D, Lx=tn.Lx, Ly=tn.Ly, site_tag_id=site_tag_id
         )
-
-        mps_opts = ensure_dict(mps_opts)
-        mps_opts.setdefault("max_bond", 2 * max_bond)
-        mps_opts.setdefault("cutoff", cutoff)
-        mps_opts.setdefault("sequence", ["b"])
-        mps_opts.setdefault("canonize", canonize)
-        mps_opts.setdefault("equalize_norms", equalize_norms)
-        mps_opts.setdefault("inplace", inplace)
 
         return tn.contract_boundary(**mps_opts)
 
@@ -2169,7 +2199,7 @@ class TensorNetwork3D(TensorNetworkGen):
             **contract_boundary_opts,
         )
 
-        for s in range(0, Ls[d] - bsz + 1):
+        for s in range(Ls[d] - bsz + 1):
             # the central non-boundary slice of tensors
             tags_s = tuple(map(plane_tags[d], range(s, s + bsz)))
             tn_s = parent_tn.select_any(tags_s, virtual=False)
@@ -2652,7 +2682,7 @@ def calc_cell_map(cells):
     # sort in descending total cell size
     cs = sorted(cells, key=lambda c: (-c[1][0] * c[1][1] * c[1][2], c))
 
-    mapping = dict()
+    mapping = {}
     for c in cs:
         sites = cell_to_sites(c)
         for site in sites:
@@ -3008,17 +3038,14 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             shp = []
 
             for which in shape:
-                if (which == "u") and (cyclicx or (i != Lx - 1)):  # up
-                    shp.append(bond_dim)
-                elif (which == "r") and (cyclicy or (j != Ly - 1)):  # right
-                    shp.append(bond_dim)
-                elif (which == "f") and (cyclicz or (k != Lz - 1)):  # front
-                    shp.append(bond_dim)
-                elif (which == "d") and (cyclicx or (i != 0)):  # down
-                    shp.append(bond_dim)
-                elif (which == "l") and (cyclicy or (j != 0)):  # left
-                    shp.append(bond_dim)
-                elif (which == "b") and (cyclicz or (k != 0)):  # back
+                if (
+                    ((which == "u") and (cyclicx or (i != Lx - 1)))  # up
+                    or ((which == "r") and (cyclicy or (j != Ly - 1)))  # right
+                    or ((which == "f") and (cyclicz or (k != Lz - 1)))  # front
+                    or ((which == "d") and (cyclicx or (i != 0)))  # down
+                    or ((which == "l") and (cyclicy or (j != 0)))  # left
+                    or ((which == "b") and (cyclicz or (k != 0)))  # back
+                ):
                     shp.append(bond_dim)
 
             shp.append(phys_dim)
@@ -3393,7 +3420,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
         else:
             items = terms.items()
 
-        expecs = dict()
+        expecs = {}
         for where, G in items:
             rho = self.partial_trace(
                 where,

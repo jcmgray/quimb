@@ -46,6 +46,7 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
+- [`TensorNetwork3D.contract_peps_sweep`](#TensorNetwork3D.contract_peps_sweep): correctly track norm exponents through both contraction stages, and support returning the mantissa and exponent separately with ``strip_exponent=True``.
 - [`TN_from_strings`](#TN_from_strings) and rand hidden loop TNs: fix ``normalize=True`` double applying the tensor network exponent, which produced incorrectly scaled tensor networks when normalization stripped a nonzero exponent.
 - [`CircuitDense`](#CircuitDense): fix `psi`, `partial_trace` and `local_expectation`, which raised ``ValueError`` because the contracted ``Dense1D`` view was not given its number of sites.
 - [`CircuitPermMPS`](#CircuitPermMPS): fix `amplitude`, `to_dense` and `local_expectation` returning incorrectly-labelled qubits under a non-trivial lazy permutation (only `sample` previously inverted the permutation back to logical qubit order).
