@@ -738,8 +738,8 @@ def tensor_network_ag_gate_simple(
         Whether to renormalise the singular after the gate is applied,
         before reinserting them into ``gauges``.
     smudge : float, optional
-        A small value to add to the gauges before multiplying them in and
-        inverting them to avoid numerical issues.
+        A small value, relative to the largest gauge value, to add before
+        multiplying the gauges in and inverting them.
     power : float, optional
         The power to raise the singular values to before multiplying them
         in and inverting them.
@@ -2299,8 +2299,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
             the initial tagged tensors, or just *any* of them (generating a
             larger region).
         smudge : float, optional
-            A small value to add to the gauges before multiplying them in and
-            inverting them to avoid numerical issues.
+            A small value, relative to the largest gauge value, to add before
+            multiplying the gauges in and inverting them.
         power : float, optional
             The power to raise the singular values to before multiplying them
             in and inverting them.
@@ -2387,8 +2387,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
             the initial tagged tensors, or just *any* of them (generating a
             larger region).
         smudge : float, optional
-            A small value to add to the gauges before multiplying them in and
-            inverting them to avoid numerical issues.
+            A small value, relative to the largest gauge value, to add before
+            multiplying the gauges in and inverting them.
         power : float, optional
             The power to raise the singular values to before multiplying them
             in and inverting them.

@@ -15,7 +15,7 @@ import operator
 import autoray as ar
 
 import quimb.tensor as qtn
-from quimb.utils import ensure_dict, oset
+from quimb.utils import check_opt, ensure_dict, oset
 
 from .bp_common import (
     BeliefPropagationCommon,
@@ -43,13 +43,13 @@ def _parse_global_gloops(tn, gloops=None):
 
 @functools.lru_cache(maxsize=128)
 def _get_message_conditioner(power=1.0, smudge=0.0, backend=None):
-    """Get a function to condition squared BP messages spectrally."""
+    """Get a function that conditions squared BP messages spectrally. Return
+    ``None`` if the function would do nothing."""
 
     if power == 1.0:
         if smudge == 0.0:
-
-            def conditioner(m):
-                return m
+            # trivial conditioning
+            return None
 
         else:
             if backend is None:
@@ -64,7 +64,8 @@ def _get_message_conditioner(power=1.0, smudge=0.0, backend=None):
             def conditioner(m):
                 el, ev = _eigh(m)
                 el = _clip(el, 0.0, None)
-                el = _sqrt(el) + smudge
+                el = _sqrt(el)
+                el = el + smudge * el[-1]
                 el = el**2
                 return ev @ qtn.decomp.ldmul(el, ar.dag(ev))
 
@@ -96,7 +97,8 @@ def _get_message_conditioner(power=1.0, smudge=0.0, backend=None):
             def conditioner(m):
                 el, ev = _eigh(m)
                 el = _clip(el, 0.0, None)
-                el = _sqrt(el) + smudge
+                el = _sqrt(el)
+                el = el + smudge * el[-1]
                 el = el ** (2 * power)
                 return ev @ qtn.decomp.ldmul(el, ar.dag(ev))
 
@@ -140,12 +142,15 @@ class D2BP(BeliefPropagationCommon):
         round only). Sequential generally helps convergence but parallel can
         possibly converge to differnt solutions.
     power : float, optional
-        The power used to condition the square-root message spectrum. Each
-        message eigenvalue ``el`` is transformed to
-        ``(sqrt(max(el, 0)) + smudge) ** (2 * power)``.
+        Condition each message with this power when D2BP inserts it as an
+        environment. D2BP transforms each square-root message eigenvalue
+        ``s = sqrt(max(el, 0))`` to ``(s + smudge * max(s)) ** (2 * power)``.
+        D2BP stores the raw messages, and keeps each conditioned copy after
+        it computes it.
     smudge : float, optional
-        The value added to the square-root message spectrum before applying
-        ``power`` and reconstructing the squared message.
+        Add this value to the square-root message spectrum before D2BP
+        applies ``power`` and squares the spectrum. It is relative to the
+        largest square-root message eigenvalue.
     normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
         How to normalize messages after each update. If None choose
         automatically. If a callable, it should take a message and return the
@@ -204,6 +209,7 @@ class D2BP(BeliefPropagationCommon):
         self.contract_opts = contract_opts
         self.contract_opts.setdefault("optimize", optimize)
         self.local_convergence = local_convergence
+        self._messages_conditioned = {}
         self._power = power
         self._smudge = smudge
         self._update_message_conditioner()
@@ -236,6 +242,8 @@ class D2BP(BeliefPropagationCommon):
             self._smudge,
             self.backend,
         )
+        # the conditioned copies are out of date
+        self._messages_conditioned.clear()
         if hasattr(self, "touched"):
             # all messages potentially need to be recomputed
             self.touched.update(self.exprs)
@@ -256,7 +264,7 @@ class D2BP(BeliefPropagationCommon):
 
     @property
     def smudge(self):
-        """The value added to the square-root message spectrum.
+        """The relative value added to the square-root message spectrum.
 
         Setting this marks all message expressions for recomputation.
         """
@@ -267,6 +275,71 @@ class D2BP(BeliefPropagationCommon):
         if smudge != self._smudge:
             self._smudge = smudge
             self._update_message_conditioner()
+
+    @property
+    def messages(self):
+        """The raw messages, keyed by ``(ix, tid)``: the message *to* tensor
+        ``tid`` along index ``ix``. If you change these directly, note that
+        D2BP keeps the conditioned copies separately. See
+        ``_get_message_conditioned`` and ``_messages_conditioned``.
+        """
+        return self._messages
+
+    @messages.setter
+    def messages(self, messages):
+        self._messages = messages
+        self._messages_conditioned.clear()
+
+    def _get_message_conditioned(self, key):
+        """Get the conditioned version of message ``key``, for insertion as
+        an environment. D2BP computes the copy only if it does not have one,
+        then keeps it.
+        """
+        if self._message_conditioner is None:
+            return self._messages[key]
+        try:
+            mc = self._messages_conditioned[key]
+        except KeyError:
+            mc = self._message_conditioner(self._messages[key])
+            self._messages_conditioned[key] = mc
+        return mc
+
+    def get_message(self, key, power=None, smudge=None):
+        """Get a message conditioned for insertion as an environment.
+
+        Parameters
+        ----------
+        key : tuple[str, int]
+            The directed message key ``(ix, tid)``.
+        power : float, optional
+            Condition the square-root message spectrum with this power. If
+            you do not supply it, use this instance's iteration power.
+        smudge : float, optional
+            Add this value to the square-root message spectrum. It is
+            relative to the largest square-root message eigenvalue. If you do
+            not supply it, use this instance's iteration smudge.
+
+        Returns
+        -------
+        array_like
+        """
+        if power is None:
+            power = self.power
+        if smudge is None:
+            smudge = self.smudge
+
+        if (power == self.power) and (smudge == self.smudge):
+            return self._get_message_conditioned(key)
+
+        m = self.messages[key]
+        conditioner = _get_message_conditioner(
+            power,
+            smudge,
+            self.backend,
+        )
+        if conditioner is None:
+            return m
+        return conditioner(m)
 
     def _init_tid(self, tid):
         """Setup any missing input messages and build contraction expressions
@@ -303,7 +376,6 @@ class D2BP(BeliefPropagationCommon):
                 k = self.tn._select_tids([tidn], virtual=False)
                 b = k.conj().reindex({ix: ixc})
                 m = (b | k).to_dense((ixc,), (ix,))
-                m = self._message_conditioner(m)
                 m = self._normalize_fn(m)
                 self.messages[ix, tid] = m
 
@@ -392,16 +464,14 @@ class D2BP(BeliefPropagationCommon):
         def _compute_m(key):
             expr, data = self.exprs[key]
             x, xc, *mkeys = data
-            ms = [self.messages[mkey] for mkey in mkeys]
+            # insert the conditioned (e.g. powered) input messages
+            ms = [self._get_message_conditioned(mkey) for mkey in mkeys]
 
             # contract update!
             m = expr(x, xc, *ms)
 
             # for stability enforce hermiticity
             m = m + ar.dag(m)
-
-            # possibly condition the message spectrum
-            m = self._message_conditioner(m)
 
             # finally normalize the message
             return self._normalize_fn(m)
@@ -427,6 +497,8 @@ class D2BP(BeliefPropagationCommon):
                 nconv += 1
             max_mdiff = max(max_mdiff, mdiff)
             self.messages[key] = new_m
+            # the conditioned copy is out of date
+            self._messages_conditioned.pop(key, None)
 
         if self.update == "parallel":
             new_messages = {}
@@ -509,6 +581,8 @@ class D2BP(BeliefPropagationCommon):
 
             self.messages[ix, tida] = _reshape(nml, ml.shape)
             self.messages[ix, tidb] = _reshape(nmr, mr.shape)
+            self._messages_conditioned.pop((ix, tida), None)
+            self._messages_conditioned.pop((ix, tidb), None)
 
     def local_tensor_contract(self, tid):
         """Contract the local region of the tensor at ``tid``."""
@@ -944,12 +1018,50 @@ class D2BP(BeliefPropagationCommon):
         cutoff=0.0,
         cutoff_mode="rsum2",
         renorm=0,
+        power=1.0,
+        smudge=0.0,
         reduce_opts=None,
         compress_opts=None,
         inplace=False,
         **kwargs,
     ):
-        """Compress the initial tensor network using the current messages."""
+        """Compress the tensor network using the current messages.
+
+        Parameters
+        ----------
+        max_bond : int
+            The maximum bond dimension to compress to.
+        cutoff : float, optional
+            A dynamic singular value cutoff to use when compressing.
+        cutoff_mode : str, optional
+            The mode for cutoff compression.
+        renorm : float, optional
+            Whether to renormalize the singular values when compressing.
+        power : float, optional
+            Condition the message spectra with this power before you compute
+            the reduced factors and projectors. This tempers the environment
+            weight. It is independent of the iteration ``power``.
+        smudge : float, optional
+            Add this value to the square-root message spectra before you
+            apply ``power``. It is relative to the largest square-root
+            eigenvalue of each message.
+        reduce_opts : dict, optional
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split` for the
+            reduction step. Values set here take precedence over any defaults.
+        compress_opts : dict, optional
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`. Values set
+            here take precedence over any defaults.
+        inplace : bool, optional
+            Whether to compress in place or return a new tensor network.
+        kwargs
+            Extra keyword arguments are combined into `compress_opts`, though
+            existing items in `compress_opts` take precedence over `kwargs`.
+
+        Returns
+        -------
+        TensorNetwork
+            The compressed tensor network.
+        """
         tn = self.tn if inplace else self.tn.copy()
 
         reduce_opts = ensure_dict(reduce_opts)
@@ -958,6 +1070,10 @@ class D2BP(BeliefPropagationCommon):
         compress_opts.setdefault("cutoff", cutoff)
         compress_opts.setdefault("cutoff_mode", cutoff_mode)
         compress_opts.setdefault("renorm", renorm)
+
+        conditioner = _get_message_conditioner(
+            power, smudge, backend=self.backend
+        )
 
         for ix, tids in tn.ind_map.items():
             if len(tids) != 2:
@@ -968,33 +1084,45 @@ class D2BP(BeliefPropagationCommon):
             ta = tn.tensor_map[tida]
             dim_bond = ta.ind_size(ix)
             dim_left = ta.size // dim_bond
-            ml = self.messages[ix, tidb]
-            Rl = qtn.decomp.squared_op_to_reduced_factor(
+            ml_raw = self.messages[ix, tidb]
+            ml = ml_raw if conditioner is None else conditioner(ml_raw)
+            Ra = qtn.decomp.squared_op_to_reduced_factor(
                 ml, dim_left, dim_bond, right=True, **reduce_opts
             )
 
             tb = tn.tensor_map[tidb]
             dim_right = tb.size // dim_bond
-            mr = self.messages[ix, tida].T
-            Rr = qtn.decomp.squared_op_to_reduced_factor(
+            mr_raw = self.messages[ix, tida].T
+            mr = mr_raw if conditioner is None else conditioner(mr_raw)
+            Rb = qtn.decomp.squared_op_to_reduced_factor(
                 mr, dim_bond, dim_right, right=False, **reduce_opts
             )
 
             # compute the compressors
-            Pl, Pr = qtn.decomp.compute_oblique_projectors(
-                Rl, Rr, **compress_opts
+            Pa, Pb = qtn.decomp.compute_oblique_projectors(
+                Ra, Rb, **compress_opts
             )
 
             # contract the compressors into the tensors
-            tn.tensor_map[tida].gate_(Pl.T, ix)
-            tn.tensor_map[tidb].gate_(Pr, ix)
+            tn.tensor_map[tida].gate_(Pa.T, ix)
+            tn.tensor_map[tidb].gate_(Pb, ix)
 
             # update messages with projections
             if inplace:
-                new_Ra = Rl @ Pl
-                new_Rb = Pr @ Rr
+                if conditioner is not None:
+                    # messages are stored raw, so project the raw factors
+                    Ra = qtn.decomp.squared_op_to_reduced_factor(
+                        ml_raw, dim_left, dim_bond, right=True, **reduce_opts
+                    )
+                    Rb = qtn.decomp.squared_op_to_reduced_factor(
+                        mr_raw, dim_bond, dim_right, right=False, **reduce_opts
+                    )
+                new_Ra = Ra @ Pa
+                new_Rb = Pb @ Rb
                 self.messages[ix, tidb] = ar.dag(new_Ra) @ new_Ra
                 self.messages[ix, tida] = new_Rb @ ar.dag(new_Rb)
+                self._messages_conditioned.pop((ix, tidb), None)
+                self._messages_conditioned.pop((ix, tida), None)
 
         if inplace:
             # tensor data has been modified
@@ -1002,7 +1130,7 @@ class D2BP(BeliefPropagationCommon):
 
         return tn
 
-    def gauge_symmetric(self, inplace=False, **kwargs):
+    def gauge_symmetric(self, power=1.0, smudge=0.0, inplace=False, **kwargs):
         """Gauge the tensor network symmetrically using the current messages.
 
         This applies the full-rank oblique projectors associated with each
@@ -1011,10 +1139,19 @@ class D2BP(BeliefPropagationCommon):
 
         Parameters
         ----------
+        power : float, optional
+            Condition the message spectra with this power before you compute
+            the projectors. This tempers the environment weight. It is
+            independent of the iteration ``power``.
+        smudge : float, optional
+            Add this value to the square-root message spectra before you
+            apply ``power``. It is relative to the largest square-root
+            eigenvalue of each message.
         inplace : bool, optional
             Whether to gauge the tensor network held by this BP instance.
         kwargs
-            Additional options supplied when computing the oblique projectors.
+            Additional options supplied to
+            :meth:`~quimb.tensor.belief_propagation.d2bp.D2BP.compress`.
 
         Returns
         -------
@@ -1023,9 +1160,17 @@ class D2BP(BeliefPropagationCommon):
         kwargs.setdefault("max_bond", None)
         kwargs.setdefault("cutoff", 0.0)
         kwargs.setdefault("absorb", "both")
-        return self.compress(inplace=inplace, **kwargs)
+        return self.compress(
+            power=power, smudge=smudge, inplace=inplace, **kwargs
+        )
 
-    def gauge_insert(self, tn, smudge=1e-12):
+    def gauge_insert(
+        self,
+        tn,
+        power=1.0,
+        smudge=1e-12,
+        return_gauges="inverse",
+    ):
         """Insert the sqrt of messages on the boundary of a part of the main BP
         TN.
 
@@ -1033,22 +1178,30 @@ class D2BP(BeliefPropagationCommon):
         ----------
         tn : TensorNetwork
             The tensor network to insert the messages into.
+        power : float, optional
+            Condition the smudged square-root message spectrum with this
+            power.
         smudge : float, optional
-            Smudge factor to avoid numerical issues, the eigenvalues of the
-            messages are clipped to be at least the largest eigenvalue times
-            this factor.
+            Add this value to the square-root message spectrum before this
+            method applies ``power``. It is relative to the largest
+            square-root message eigenvalue.
+        return_gauges : {"raw", "inverse", None}, optional
+            Whether to return the message factors applied, their inverses, or
+            nothing. The default is ``"inverse"``.
 
         Returns
         -------
-        list[tuple[Tensor, str, array_like]]
-            The sequence of tensors, indices and inverse gauges to apply to
-            reverse the gauges applied.
+        list[tuple[Tensor, str, array_like]] or None
+            If requested, the sequence of tensors, indices, and raw or inverse
+            message factors.
         """
-        outer = []
+        check_opt("return_gauges", return_gauges, ("raw", "inverse", None))
 
         _eigh = ar.get_lib_fn(self.backend, "linalg.eigh")
         _clip = ar.get_lib_fn(self.backend, "clip")
         _sqrt = ar.get_lib_fn(self.backend, "sqrt")
+
+        outer = [] if return_gauges is not None else None
 
         for ix in tn.outer_inds():
             # get the tensor and dangling index
@@ -1062,12 +1215,18 @@ class D2BP(BeliefPropagationCommon):
 
             # compute the 'square root' of the message
             s2, W = _eigh(m)
-            s2 = _clip(s2, s2[-1] * smudge, None)
-            s = _sqrt(s2)
+            s = _sqrt(_clip(s2, 0.0, None))
+            if smudge != 0.0:
+                s = s + smudge * s[-1]
+            if power != 1.0:
+                s = s**power
             msqrt = qtn.decomp.ldmul(s, ar.dag(W))
-            msqrt_inv = qtn.decomp.rddiv(W, s)
             t.gate_(msqrt, ix)
-            outer.append((t, ix, msqrt_inv))
+            if return_gauges == "raw":
+                outer.append((t, ix, msqrt))
+            elif return_gauges == "inverse":
+                msqrt_inv = qtn.decomp.rddiv(W, s)
+                outer.append((t, ix, msqrt_inv))
 
         return outer
 
@@ -1144,6 +1303,8 @@ class D2BP(BeliefPropagationCommon):
 
             self.messages[ix, tidb] = ma
             self.messages[ix, tida] = mb
+            self._messages_conditioned.pop((ix, tidb), None)
+            self._messages_conditioned.pop((ix, tida), None)
 
         # mark the sites as touched
         self.update_touched_from_tids(tida, tidb)
@@ -1366,6 +1527,115 @@ class D2BP(BeliefPropagationCommon):
         return rho
 
 
+def converge_d2bp(
+    tn,
+    *,
+    messages=None,
+    output_inds=None,
+    power=1.0,
+    smudge=0.0,
+    max_iterations=1000,
+    tol=5e-6,
+    damping=0.0,
+    diis=False,
+    update="sequential",
+    normalize=None,
+    distance=None,
+    tol_abs=None,
+    tol_rolling_diff=None,
+    local_convergence=True,
+    contract_every=None,
+    optimize="auto-hq",
+    inplace=False,
+    info=None,
+    progbar=False,
+    **contract_opts,
+):
+    """Construct and run dense 2-norm belief propagation, returning the
+    resulting instance.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network to form the 2-norm of and run BP on.
+    messages : dict[(str, int), array_like], optional
+        The initial messages to use.
+    output_inds : set[str], optional
+        The indices to consider as output indices of the tensor network.
+    power : float, optional
+        Condition each message with this power when D2BP inserts it into an
+        update contraction.
+    smudge : float, optional
+        Add this value to the square-root message spectrum before D2BP
+        applies ``power``. It is relative to the largest square-root message
+        eigenvalue.
+    max_iterations : int, optional
+        The maximum number of BP iterations.
+    tol : float, optional
+        The convergence tolerance for messages.
+    damping : float, optional
+        The damping parameter to use.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace.
+    update : {'sequential', 'parallel'}, optional
+        Whether to update messages sequentially or in parallel.
+    normalize : str or callable, optional
+        How to normalize messages after each update.
+    distance : str or callable, optional
+        How to compute the distance between messages.
+    tol_abs : float, optional
+        The absolute convergence tolerance.
+    tol_rolling_diff : float, optional
+        The rolling mean convergence tolerance.
+    local_convergence : bool, optional
+        Whether to allow messages to locally converge.
+    contract_every : int, optional
+        Compute and store the BP contraction every this many iterations.
+    optimize : str or PathOptimizer, optional
+        The path optimizer to use when contracting messages.
+    inplace : bool, optional
+        Whether the BP instance should use the input tensor network directly.
+    info : dict, optional
+        Store information about the BP run in this dictionary.
+    progbar : bool, optional
+        Whether to show a progress bar.
+    contract_opts
+        Other options supplied to ``cotengra.array_contract``.
+
+    Returns
+    -------
+    D2BP
+        The belief propagation instance after running to convergence or the
+        iteration limit.
+    """
+    bp = D2BP(
+        tn,
+        messages=messages,
+        output_inds=output_inds,
+        optimize=optimize,
+        damping=damping,
+        update=update,
+        power=power,
+        smudge=smudge,
+        normalize=normalize,
+        distance=distance,
+        local_convergence=local_convergence,
+        contract_every=contract_every,
+        inplace=inplace,
+        **contract_opts,
+    )
+    bp.run(
+        max_iterations=max_iterations,
+        tol=tol,
+        diis=diis,
+        tol_abs=tol_abs,
+        tol_rolling_diff=tol_rolling_diff,
+        info=info,
+        progbar=progbar,
+    )
+    return bp
+
+
 def contract_d2bp(
     tn,
     *,
@@ -1459,26 +1729,24 @@ def contract_d2bp(
     -------
     scalar or (scalar, float)
     """
-    bp = D2BP(
+    bp = converge_d2bp(
         tn,
         messages=messages,
         output_inds=output_inds,
+        max_iterations=max_iterations,
+        tol=tol,
+        diis=diis,
+        tol_abs=tol_abs,
+        tol_rolling_diff=tol_rolling_diff,
         optimize=optimize,
         local_convergence=local_convergence,
         damping=damping,
         update=update,
         normalize=normalize,
         distance=distance,
-        **contract_opts,
-    )
-    bp.run(
-        max_iterations=max_iterations,
-        diis=diis,
-        tol=tol,
-        tol_abs=tol_abs,
-        tol_rolling_diff=tol_rolling_diff,
         info=info,
         progbar=progbar,
+        **contract_opts,
     )
     return bp.contract(
         strip_exponent=strip_exponent,
@@ -1494,6 +1762,10 @@ def compress_d2bp(
     renorm=0,
     messages=None,
     output_inds=None,
+    power=1.0,
+    smudge=0.0,
+    gauge_power=1.0,
+    gauge_smudge=0.0,
     max_iterations=1000,
     tol=5e-6,
     damping=0.0,
@@ -1520,7 +1792,7 @@ def compress_d2bp(
     max_bond : int
         The maximum bond dimension to compress to.
     cutoff : float, optional
-        The cutoff to use when compressing.
+        A dynamic singular value cutoff to use when compressing.
     cutoff_mode : int, optional
         The cutoff mode to use when compressing.
     renorm : float, optional
@@ -1531,6 +1803,23 @@ def compress_d2bp(
     output_inds : set[str], optional
         The indices to consider as output (dangling) indices of the tn.
         Computed automatically if not specified.
+    power : float, optional
+        Condition each message with this power when D2BP inserts it into an
+        update contraction. D2BP transforms each square-root message
+        eigenvalue ``s = sqrt(max(el, 0))`` to
+        ``(s + smudge * max(s)) ** (2 * power)``. D2BP stores the raw
+        messages.
+    smudge : float, optional
+        Add this value to the square-root message spectrum before D2BP
+        applies ``power`` and squares the spectrum. It is relative to the
+        largest square-root message eigenvalue.
+    gauge_power : float, optional
+        Condition the converged message spectra with this power when
+        computing the compression projectors. This tempers the environment
+        weight. It is independent of ``power``.
+    gauge_smudge : float, optional
+        Add this value to the converged square-root message spectra before
+        applying ``gauge_power``. It is independent of ``smudge``.
     max_iterations : int, optional
         The maximum number of iterations to perform.
     tol : float, optional
@@ -1586,20 +1875,19 @@ def compress_d2bp(
     -------
     TensorNetwork
     """
-    bp = D2BP(
+    bp = converge_d2bp(
         tn,
         messages=messages,
         output_inds=output_inds,
         optimize=optimize,
         damping=damping,
         update=update,
+        power=power,
+        smudge=smudge,
         normalize=normalize,
         distance=distance,
         local_convergence=local_convergence,
         inplace=inplace,
-        **contract_opts,
-    )
-    bp.run(
         max_iterations=max_iterations,
         tol=tol,
         diis=diis,
@@ -1607,12 +1895,15 @@ def compress_d2bp(
         tol_rolling_diff=tol_rolling_diff,
         info=info,
         progbar=progbar,
+        **contract_opts,
     )
     return bp.compress(
         max_bond=max_bond,
         cutoff=cutoff,
         cutoff_mode=cutoff_mode,
         renorm=renorm,
+        power=gauge_power,
+        smudge=gauge_smudge,
         inplace=True,
     )
 
@@ -1624,6 +1915,8 @@ def gauge_d2bp(
     output_inds=None,
     power=1.0,
     smudge=0.0,
+    gauge_power=1.0,
+    gauge_smudge=0.0,
     max_iterations=1000,
     tol=5e-6,
     damping=0.0,
@@ -1655,12 +1948,22 @@ def gauge_d2bp(
     output_inds : set[str], optional
         The indices to consider as output indices of the tensor network.
     power : float, optional
-        The power used to condition the square-root message spectrum. Each
-        message eigenvalue ``el`` is transformed to
-        ``(sqrt(max(el, 0)) + smudge) ** (2 * power)``.
+        Condition each message with this power when D2BP inserts it into an
+        update contraction. D2BP transforms each square-root message
+        eigenvalue ``s = sqrt(max(el, 0))`` to
+        ``(s + smudge * max(s)) ** (2 * power)``. D2BP stores the raw
+        messages.
     smudge : float, optional
-        The value added to the square-root message spectrum before applying
-        ``power`` and reconstructing the squared message.
+        Add this value to the square-root message spectrum before D2BP
+        applies ``power`` and squares the spectrum. It is relative to the
+        largest square-root message eigenvalue.
+    gauge_power : float, optional
+        Condition the converged message spectra with this power when
+        computing the final gauging projectors. This tempers the environment
+        weight. It is independent of ``power``.
+    gauge_smudge : float, optional
+        Add this value to the converged square-root message spectra before
+        applying ``gauge_power``. It is independent of ``smudge``.
     max_iterations : int, optional
         The maximum number of BP iterations.
     tol : float, optional
@@ -1700,7 +2003,7 @@ def gauge_d2bp(
     -------
     TensorNetwork
     """
-    bp = D2BP(
+    bp = converge_d2bp(
         tn,
         messages=messages,
         output_inds=output_inds,
@@ -1713,9 +2016,6 @@ def gauge_d2bp(
         distance=distance,
         local_convergence=local_convergence,
         inplace=inplace,
-        **contract_opts,
-    )
-    bp.run(
         max_iterations=max_iterations,
         tol=tol,
         diis=diis,
@@ -1723,8 +2023,11 @@ def gauge_d2bp(
         tol_rolling_diff=tol_rolling_diff,
         info=info,
         progbar=progbar,
+        **contract_opts,
     )
     return bp.gauge_symmetric(
+        power=gauge_power,
+        smudge=gauge_smudge,
         reduce_opts=reduce_opts,
         compress_opts=compress_opts,
         inplace=True,

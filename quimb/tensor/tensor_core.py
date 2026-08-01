@@ -700,7 +700,8 @@ def tensor_canonize_bond(
         If supplied, a dict of bond gauges to perform the canonization with
         respect to.
     gauge_smudge : float, optional
-        If gauges are supplied, the smudge to use when gauging.
+        If gauges are supplied, the smudge to use when gauging, relative to
+        the largest gauge value.
     create_bond : bool, optional
         If ``True``, and there is no bond between the two tensors, create a
         new bond with size 1 before canonizing. Else raise an error.
@@ -914,7 +915,8 @@ def tensor_compress_bond(
         If supplied, a dict of bond gauges to perform the compression with
         respect to.
     gauge_smudge : float, optional
-        If gauges are supplied, the smudge to use when gauging.
+        If gauges are supplied, the smudge to use when gauging, relative to
+        the largest gauge value.
     create_bond : bool, optional
         If ``True``, and there is no bond between the two tensors, create a
         new bond with size 1 before compressing. Else raise an error.
@@ -1266,7 +1268,7 @@ def tensor_fuse_squeeze(
 @functools.lru_cache(maxsize=128)
 def _get_gauge_conditioner(power=1.0, smudge=1e-12):
     """Get a function closed over `power` and `smudge` for conditioning simple
-    update style gauges."""
+    update style gauges. The smudge is relative to the largest gauge value."""
     if power == 1.0:
         if smudge == 0.0:
 
@@ -1276,7 +1278,7 @@ def _get_gauge_conditioner(power=1.0, smudge=1e-12):
         else:
 
             def conditioner(g):
-                return g + smudge
+                return g + smudge * do("max", g)
 
     else:
         if smudge == 0.0:
@@ -1287,7 +1289,7 @@ def _get_gauge_conditioner(power=1.0, smudge=1e-12):
         else:
 
             def conditioner(g):
-                return (g + smudge) ** power
+                return (g + smudge * do("max", g)) ** power
 
     return conditioner
 
@@ -1327,7 +1329,8 @@ def tensor_gauge_simple_bond(
         ``renorm=True``, the new gauge is stored *unnormalized* (the raw
         singular values).
     smudge : float, optional
-        A small value to add to the singular values when gauging.
+        A small value, relative to the largest singular value, to add to the
+        singular values when gauging.
     power : float, optional
         A power to raise the singular values to when gauging.
     damping : float, optional
@@ -7589,7 +7592,8 @@ class TensorNetwork:
         tol : float, optional
             The convergence tolerance for the singular values.
         smudge : float, optional
-            A small value to add to the singular values when gauging.
+            A small value, relative to the largest singular value, to add to
+            the singular values when gauging.
         power : float, optional
             A power to raise the singular values to when gauging.
         damping : float, optional
@@ -7782,6 +7786,8 @@ class TensorNetwork:
         output_inds=None,
         power=1.0,
         smudge=0.0,
+        gauge_power=1.0,
+        gauge_smudge=0.0,
         damping=0.0,
         diis=False,
         update="sequential",
@@ -7817,12 +7823,22 @@ class TensorNetwork:
         output_inds : set[str], optional
             The indices to consider as output indices of the tensor network.
         power : float, optional
-            The power used to condition the square-root message spectrum.
-            Each message eigenvalue ``el`` is transformed to
-            ``(sqrt(max(el, 0)) + smudge) ** (2 * power)``.
+            Condition each message with this power when D2BP inserts it into
+            an update contraction. D2BP transforms each square-root message
+            eigenvalue ``s = sqrt(max(el, 0))`` to
+            ``(s + smudge * max(s)) ** (2 * power)``. D2BP stores the raw
+            messages.
         smudge : float, optional
-            The value added to the square-root message spectrum before
-            applying ``power`` and reconstructing the squared message.
+            Add this value to the square-root message spectrum before D2BP
+            applies ``power`` and squares the spectrum. It is relative to the
+            largest square-root message eigenvalue.
+        gauge_power : float, optional
+            Condition the converged message spectra with this power when
+            computing the final gauging projectors. This tempers the
+            environment weight. It is independent of ``power``.
+        gauge_smudge : float, optional
+            Add this value to the converged square-root message spectra
+            before applying ``gauge_power``. It is independent of ``smudge``.
         max_iterations : int, optional
             The maximum number of BP iterations.
         tol : float, optional
@@ -7875,6 +7891,8 @@ class TensorNetwork:
             output_inds=output_inds,
             power=power,
             smudge=smudge,
+            gauge_power=gauge_power,
+            gauge_smudge=gauge_smudge,
             max_iterations=max_iterations,
             tol=tol,
             damping=damping,
@@ -8074,6 +8092,7 @@ class TensorNetwork:
         remove=False,
         smudge=0.0,
         power=1.0,
+        return_gauges="raw",
     ):
         """Insert the simple update style bond gauges found in ``gauges`` if
         they are present in this tensor network. The gauges inserted are also
@@ -8088,43 +8107,49 @@ class TensorNetwork:
         remove : bool, optional
             Whether to remove the gauges from the store after inserting them.
         smudge : float, optional
-            A small value to add to the gauge vectors to avoid singularities
-            when inserting.
+            A small value, relative to the largest gauge value, to add to the
+            gauge vectors to avoid singularities when inserting.
         power : float, optional
             A power to raise the gauge vectors to when inserting.
+        return_gauges : {"raw", "inverse", None}, optional
+            Whether to return the gauge vectors that were applied, their
+            inverses, or nothing. The default is ``"raw"``.
 
         Returns
         -------
-        outer : list[(Tensor, str, array_like)]
-            The sequence of gauges applied to outer indices, each a tuple of
-            the tensor, the index and the gauge vector.
-        inner : list[((Tensor, Tensor), str, array_like)]
-            The sequence of gauges applied to inner indices, each a tuple of
-            the two inner tensors, the inner bond and the gauge vector applied.
+        (outer, inner) or None
+            If requested, the outer and inner gauge records. Each record
+            contains the tensor or tensors, index, and either the gauge vector
+            applied or its inverse.
         """
+        check_opt(
+            "return_gauges",
+            return_gauges,
+            ("raw", "inverse", None),
+        )
         if remove:
             _get = gauges.pop
         else:
             _get = gauges.get
+        conditioner = _get_gauge_conditioner(power=power, smudge=smudge)
 
         # absorb outer gauges fully into single tensor
-        outer = []
+        outer = [] if return_gauges is not None else None
         for ix in self.outer_inds():
             g = _get(ix, None)
             if g is None:
                 continue
 
-            if smudge != 0.0:
-                g = g + smudge * do("max", g)
-            if power != 1.0:
-                g = g**power
+            g = conditioner(g)
 
             (t,) = self._inds_get(ix)
             t.multiply_index_diagonal_(ix, g)
-            outer.append((t, ix, g))
+            if return_gauges is not None:
+                gr = g if return_gauges == "raw" else g**-1
+                outer.append((t, ix, gr))
 
         # absorb inner gauges half and half into both tensors
-        inner = []
+        inner = [] if return_gauges is not None else None
         for ix in self.inner_inds():
             g = _get(ix, None)
             if g is None:
@@ -8133,14 +8158,75 @@ class TensorNetwork:
             tl, tr = self._inds_get(ix)
             tl.multiply_index_diagonal_(ix, g)
             tr.multiply_index_diagonal_(ix, g)
-            inner.append(((tl, tr), ix, g))
+            if return_gauges is not None:
+                gr = g if return_gauges == "raw" else g**-1
+                inner.append(((tl, tr), ix, gr))
 
-        return outer, inner
+        if return_gauges is not None:
+            return outer, inner
+
+    def gauge_insert(
+        self,
+        gauges,
+        smudge=0.0,
+        power=1.0,
+        return_gauges=None,
+    ):
+        """Insert either simple-update gauges or dense 2-norm belief
+        propagation messages into this tensor network.
+
+        Parameters
+        ----------
+        gauges : Mapping[str, array_like] or D2BP
+            Simple-update gauge vectors, or a dense 2-norm belief propagation
+            instance that supplies boundary messages.
+        smudge : float, optional
+            Add this relative value to the gauge or square-root message
+            spectrum before insertion.
+        power : float, optional
+            Condition the gauge or square-root message spectrum with this
+            power.
+        return_gauges : {"raw", "inverse", None}, optional
+            Whether to return the factors applied, their inverses, or nothing.
+            This method always passes the option on, so the default here is
+            ``None`` for both gauge types. The methods it calls keep their own
+            defaults: ``"raw"`` for ``gauge_simple_insert`` and ``"inverse"``
+            for ``D2BP.gauge_insert``.
+
+        Returns
+        -------
+        object or None
+            The gauge records from the insertion method it calls, if you ask
+            for them.
+        """
+        if isinstance(gauges, collections.abc.Mapping):
+            return self.gauge_simple_insert(
+                gauges,
+                smudge=smudge,
+                power=power,
+                return_gauges=return_gauges,
+            )
+
+        from .belief_propagation.d2bp import D2BP
+
+        if isinstance(gauges, D2BP):
+            return gauges.gauge_insert(
+                self,
+                smudge=smudge,
+                power=power,
+                return_gauges=return_gauges,
+            )
+
+        raise TypeError("`gauges` must be a mapping or a D2BP instance.")
 
     @staticmethod
     def gauge_simple_remove(outer=None, inner=None):
         """Remove the simple update style bond gauges inserted by
         ``gauge_simple_insert``.
+
+        This method inverts every gauge it receives. Supply the records from
+        ``return_gauges="raw"``, not the records from
+        ``return_gauges="inverse"``.
         """
         while outer:
             t, ix, g = outer.pop()
@@ -8172,7 +8258,8 @@ class TensorNetwork:
             being the vectors. Only bonds present in this dictionary will be
             gauged.
         smudge : float, optional
-            A small value to add to the gauge vectors to avoid singularities.
+            A small value, relative to the largest gauge value, to add to the
+            gauge vectors to avoid singularities.
         power : float, optional
             A power to raise the gauge vectors to when inserting.
         ungauge_outer : bool, optional
@@ -8768,8 +8855,8 @@ class TensorNetwork:
             The keys should be indices and the values singular value vectors.
             Only bonds present in this dictionary will be gauged.
         gauge_smudge : float, optional
-            If using simple update style gauging, add a small value to the
-            singular values to avoid singularities.
+            If using simple update style gauging, add a small value relative
+            to the largest singular value to avoid singularities.
         callback_pre_contract : callable, optional
             A function to call before contracting a pair of tensors. It should
             have signature `fn(tn, (tid1, tid2))`.
@@ -9832,6 +9919,9 @@ class TensorNetwork:
         side,
         left_inds,
         right_inds,
+        gauges=None,
+        gauge_smudge=0.0,
+        gauge_power=1.0,
         optimize="auto-hq",
         contract_opts=None,
         reduce_opts=None,
@@ -9855,6 +9945,18 @@ class TensorNetwork:
             The indices forming the left side of the operator.
         right_inds : sequence of str
             The indices forming the right side of the operator.
+        gauges : Mapping[str, array_like] or D2BP, optional
+            Simple-update gauge vectors, or a dense 2-norm belief propagation
+            instance that supplies its messages as squared environments. This
+            method absorbs vector gauges into a copy of the local tensor
+            network. It puts conditioned gauges on the contracted boundary,
+            and raw square roots on the internal and open indices.
+        gauge_smudge : float, optional
+            For simple-update gauges, add this relative value before this
+            method applies ``gauge_power``. For D2BP messages, add it to the
+            square-root message spectrum.
+        gauge_power : float, optional
+            Condition the contracted boundary environments with this power.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the squared operator. Note any
             value in ``contract_opts`` will take precedence over this.
@@ -9900,17 +10002,81 @@ class TensorNetwork:
             ixmap = {ix: rand_uuid() for ix in right_inds}
             lix = ixmap.values()
             rix = ixmap.keys()
+            env_inds = left_inds
+            open_inds = right_inds
         else:  # 'left'
             # form X @ dag(X) --> right_inds are contracted
             ixmap = {ix: rand_uuid() for ix in left_inds}
             lix = ixmap.keys()
             rix = ixmap.values()
+            env_inds = right_inds
+            open_inds = left_inds
 
         # note: problem is hermitian but we still need to get
         # lix and rix correct way round for blocksparse arrays
 
+        tn = self
+        bra_map = dict(ixmap)
+        environment_tensors = []
+        if gauges:
+            from .belief_propagation.d2bp import D2BP
+
+            if isinstance(gauges, collections.abc.Mapping):
+                # use diagonal simple update style gauges as environment
+                tn = self.copy()
+                conditioner = _get_gauge_conditioner(
+                    power=gauge_power,
+                    smudge=gauge_smudge,
+                )
+
+                for ix in tn.ind_map:
+                    g = gauges.get(ix, None)
+                    if g is None:
+                        continue
+                    if ix in env_inds:
+                        # 'external' index, possibly condition
+                        g = conditioner(g)
+                        (t,) = tn._inds_get(ix)
+                        t.multiply_index_diagonal_(ix, g)
+                    elif ix in open_inds:
+                        # 'output' index, treat as one side of bond
+                        (t,) = tn._inds_get(ix)
+                        t.multiply_index_diagonal_(ix, g**0.5)
+                    else:
+                        # 'inner' index, absorb equally
+                        tl, tr = tn._inds_get(ix)
+                        # TODO: just mult g**1 into one side?
+                        g = g**0.5
+                        tl.multiply_index_diagonal_(ix, g)
+                        tr.multiply_index_diagonal_(ix, g)
+
+            elif isinstance(gauges, D2BP):
+                # use belief propagation messages as environment
+                for ix in env_inds:
+                    (tid,) = self.ind_map[ix]
+                    try:
+                        m = gauges.get_message(
+                            (ix, tid),
+                            power=gauge_power,
+                            smudge=gauge_smudge,
+                        )
+                    except KeyError:
+                        # output indices have no associated message
+                        continue
+
+                    bix = rand_uuid()
+                    bra_map[ix] = bix
+                    environment_tensors.append(Tensor(m, inds=(bix, ix)))
+
+            else:
+                raise TypeError(
+                    "`gauges` must be a mapping or a D2BP instance."
+                )
+
         # contract to dense array
-        tnd = self.reindex(ixmap).conj_() & self
+        tnd = tn.reindex(bra_map).conj_() & tn
+        for tm in environment_tensors:
+            tnd |= tm
         XX = tnd.to_dense(lix, rix, **contract_opts)
 
         return squared_op_to_reduced_factor(
@@ -9976,6 +10142,17 @@ class TensorNetwork:
             The tag(s) to add to the new left projection tensor.
         new_rtags : str or sequence of str, optional
             The tag(s) to add to the new right projection tensor.
+        gauges : Mapping[str, array_like] or D2BP, optional
+            Simple-update gauge vectors to absorb into copies of the local
+            regions, or a dense 2-norm belief propagation instance that
+            supplies its messages as boundary environments when this method
+            constructs the projectors.
+        gauge_smudge : float, optional
+            Add this value to the boundary environments before this method
+            constructs the projectors. It is relative to the largest gauge or
+            square-root message eigenvalue.
+        gauge_power : float, optional
+            Condition the contracted boundary environments with this power.
         optimize : str or PathOptimizer, optional
             How to optimize the contraction of the projection tensors. Note any
             value in ``contract_opts`` will take precedence over this.
@@ -10026,9 +10203,13 @@ class TensorNetwork:
         ltn = tn.select(ltags, which=select_which, virtual=False)
         rtn = tn.select(rtags, which=select_which, virtual=False)
 
-        if gauges is not None:
-            (ltn | rtn).gauge_simple_insert(
-                gauges, smudge=gauge_smudge, power=gauge_power
+        if (mode == "nystrom") and gauges:
+            # nystrom does not use compute_reduced_factor
+            (ltn | rtn).gauge_insert(
+                gauges,
+                smudge=gauge_smudge,
+                power=gauge_power,
+                return_gauges=None,
             )
 
         # get the connecting indices and corresponding sizes
@@ -10052,6 +10233,9 @@ class TensorNetwork:
                 side="right",
                 left_inds=None,
                 right_inds=bix,
+                gauges=gauges,
+                gauge_smudge=gauge_smudge,
+                gauge_power=gauge_power,
                 contract_opts=contract_opts,
                 reduce_opts=reduce_opts,
             )
@@ -10059,12 +10243,16 @@ class TensorNetwork:
                 side="left",
                 left_inds=bix,
                 right_inds=None,
+                gauges=gauges,
+                gauge_smudge=gauge_smudge,
+                gauge_power=gauge_power,
                 contract_opts=contract_opts,
                 reduce_opts=reduce_opts,
             )
 
             # then form the 'oblique' projectors
             Pl, Pr = compute_oblique_projectors(Rl, Rr, **compress_opts)
+
         elif mode == "nystrom":
             from .decomp import ldmul, rdmul, svd_truncated
             from .tensor_builder import rand_tensor
@@ -10085,7 +10273,9 @@ class TensorNetwork:
                     dist="rademacher",
                 )
             tml = ltn.contract(
-                all, optimize="auto-hq", output_inds=(ixbl, *bix)
+                all,
+                output_inds=(ixbl, *bix),
+                **contract_opts,
             )
 
             ixbr = rand_uuid()
@@ -10096,11 +10286,13 @@ class TensorNetwork:
                     dist="rademacher",
                 )
             tmr = rtn.contract(
-                all, optimize="auto-hq", output_inds=(*bix, ixbr)
+                all,
+                output_inds=(*bix, ixbr),
+                **contract_opts,
             )
 
-            Ml = tml.to_dense((ixbl,), bix, **contract_opts)
-            Mr = tmr.to_dense(bix, (ixbr,), **contract_opts)
+            Ml = tml.to_dense((ixbl,), bix)
+            Mr = tmr.to_dense(bix, (ixbr,))
 
             U, s, VH = svd_truncated(Ml @ Mr, absorb=None, **compress_opts)
             sqi = s**-0.5

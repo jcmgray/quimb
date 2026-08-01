@@ -132,3 +132,6 @@ quimb/_version.py
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# local development notes
+.notes

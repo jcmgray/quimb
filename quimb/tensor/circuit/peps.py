@@ -65,8 +65,8 @@ class CircuitPEPSSimpleUpdate(CircuitSimpleUpdate):
         after every gate, e.g. for the near-identity gates of imaginary time
         evolution.
     gauge_smudge : float, optional
-        Small value added to the gauges before they are multiplied in and
-        inverted, for numerical stability with very small singular values.
+        Small value, relative to the largest gauge value, added before the
+        gauges are multiplied in and inverted.
     equilibrate_every : int, optional
         If given, automatically call :meth:`equilibrate` after every this many
         gates have been applied.

@@ -21,6 +21,7 @@ from quimb.tensor import (
     tensor_contract,
     tensor_direct_product,
 )
+from quimb.tensor.tensor_core import _get_gauge_conditioner
 
 requires_autograd = pytest.mark.skipif(
     importlib.util.find_spec("autograd") is None,
@@ -30,6 +31,53 @@ requires_cotengra = pytest.mark.skipif(
     importlib.util.find_spec("cotengra") is None,
     reason="cotengra not installed",
 )
+
+
+def test_gauge_conditioner_relative_smudge():
+    g = np.array([0.2, 2.0])
+    condition = _get_gauge_conditioner(power=0.5, smudge=0.1)
+    expected = np.array([0.4, 2.2]) ** 0.5
+    assert_allclose(condition(g), expected)
+    assert_allclose(condition(9 * g), 3 * expected)
+
+
+def test_gauge_insert_simple_return_modes():
+    tn = TensorNetwork(
+        [
+            rand_tensor((2, 3), inds=("a", "x"), seed=1),
+            rand_tensor((3, 2), inds=("x", "b"), seed=2),
+        ]
+    )
+    gauges = {
+        "a": np.array([0.5, 1.0]),
+        "x": np.array([0.4, 0.7, 1.0]),
+        "b": np.array([0.6, 1.0]),
+    }
+
+    expected = tn.copy()
+    expected.gauge_simple_insert(gauges)
+
+    inserted = tn.copy()
+    assert inserted.gauge_insert(gauges, return_gauges=None) is None
+    assert inserted.distance_normalized(expected) == pytest.approx(
+        0.0,
+        abs=1e-12,
+    )
+
+    restored = tn.copy()
+    outer, inner = restored.gauge_insert(
+        gauges,
+        return_gauges="inverse",
+    )
+    for t, ix, ginv in outer:
+        t.multiply_index_diagonal_(ix, ginv)
+    for (tl, tr), ix, ginv in inner:
+        tl.multiply_index_diagonal_(ix, ginv)
+        tr.multiply_index_diagonal_(ix, ginv)
+    assert restored.distance_normalized(tn) == pytest.approx(
+        0.0,
+        abs=1e-7,
+    )
 
 
 class TestBasicTensorOperations:
@@ -2010,6 +2058,57 @@ class TestTensorNetwork:
         assert tn_other.num_tensors == 6
         d = tn_other.distance(tn)
         assert d == pytest.approx(d1)
+
+    @pytest.mark.parametrize(
+        "gauge_power,gauge_smudge",
+        [(1.0, 0.0), (0.5, 0.1)],
+    )
+    def test_insert_compressor_with_simple_gauges(
+        self,
+        gauge_power,
+        gauge_smudge,
+    ):
+        peps = qtn.PEPS.rand(4, 4, 2, dtype="complex128", seed=42)
+        ltags = (peps.site_tag(1, 1), peps.site_tag(2, 1))
+        rtags = (peps.site_tag(1, 2), peps.site_tag(2, 2))
+        pair = peps.select_any(ltags + rtags, virtual=False)
+        geometry_hash = pair.geometry_hash()
+        gauges = {
+            ix: np.linspace(0.4, 1.3, peps.ind_size(ix))
+            for ix in peps.inner_inds()
+        }
+
+        # construct the previous explicit simple-gauge reference
+        pair_gauged = pair.copy()
+        pair_gauged.gauge_simple_insert(
+            gauges,
+            smudge=gauge_smudge,
+            power=gauge_power,
+        )
+        reference = pair.copy()
+        pair_gauged.insert_compressor_between_regions_(
+            ltags,
+            rtags,
+            max_bond=2,
+            cutoff=0.0,
+            insert_into=reference,
+        )
+
+        direct = pair.insert_compressor_between_regions(
+            ltags,
+            rtags,
+            max_bond=2,
+            cutoff=0.0,
+            gauges=gauges,
+            gauge_smudge=gauge_smudge,
+            gauge_power=gauge_power,
+        )
+
+        assert pair.geometry_hash() == geometry_hash
+        assert direct.distance_normalized(reference) == pytest.approx(
+            0.0,
+            abs=1e-6,
+        )
 
 
 class TestTensorNetworkSimplifications:
