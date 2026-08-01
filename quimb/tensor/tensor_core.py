@@ -2209,6 +2209,54 @@ class Tensor:
         """
         self.set_params(tree_map(fn, self.get_params()))
 
+    def to(
+        self,
+        like=None,
+        *,
+        backend=None,
+        dtype=None,
+        device=None,
+        inplace=False,
+    ) -> "Tensor":
+        """Convert the backend arrays of this tensor to a target backend, dtype
+        and/or device. All three can be specified together in a single string
+        such as ``"torch-float32-cuda:0"``, in any order, or explicitly via the
+        keyword arguments, which take precedence. Unspecified properties are
+        left unchanged, and non-array leaves are passed through untouched. Note
+        that, matching ``torch.nn.Module.to`` semantics, only floating point
+        and complex arrays are cast when a ``dtype`` is given, so that e.g.
+        integer index arrays are preserved.
+
+        Parameters
+        ----------
+        like : str or array, optional
+            The conversion target. If a string, a dash separated specifier like
+            ``"backend-dtype-device"``, with each part optional. If an array,
+            the backend, dtype and device to target are inferred from it.
+        backend : str, optional
+            Explicit target backend, taking precedence over ``like``.
+        dtype : str or dtype, optional
+            Explicit target dtype, taking precedence over ``like``. Only
+            applied to floating point and complex arrays.
+        device : str or device-like, optional
+            Explicit target device, taking precedence over ``like``.
+        inplace : bool, optional
+            Whether to modify the arrays inplace on this Tensor or not.
+
+        Returns
+        -------
+        Tensor
+        """
+        from autoray import to
+
+        t = self if inplace else self.copy()
+        params = t.get_params()
+        params = to(params, like, backend=backend, device=device, dtype=dtype)
+        t.set_params(params)
+        return t
+
+    to_ = functools.partialmethod(to, inplace=True)
+
     def isel(self, selectors, inplace=False):
         """Select specific values for some dimensions/indices of this tensor,
         thereby removing them. Analogous to __getitem__ syntax like
@@ -5249,6 +5297,54 @@ class TensorNetwork:
         """
         for t in self:
             t.apply_to_arrays(fn)
+
+    def to(
+        self,
+        like=None,
+        *,
+        backend=None,
+        dtype=None,
+        device=None,
+        inplace=False,
+    ) -> "TensorNetwork":
+        """Convert the backend arrays of this tensor network to a target
+        backend, dtype and/or device. All three can be specified together in a
+        single string such as ``"torch-float32-cuda:0"``, in any order, or
+        explicitly via the keyword arguments, which take precedence.
+        Unspecified properties are left unchanged, and non-array leaves are
+        passed through untouched. Note that, matching ``torch.nn.Module.to``
+        semantics, only floating point and complex arrays are cast when a
+        ``dtype`` is given, so that e.g. integer index arrays are preserved.
+
+        Parameters
+        ----------
+        like : str or array, optional
+            The conversion target. If a string, a dash separated specifier like
+            ``"backend-dtype-device"``, with each part optional. If an array,
+            the backend, dtype and device to target are inferred from it.
+        backend : str, optional
+            Explicit target backend, taking precedence over ``like``.
+        dtype : str or dtype, optional
+            Explicit target dtype, taking precedence over ``like``. Only
+            applied to floating point and complex arrays.
+        device : str or device-like, optional
+            Explicit target device, taking precedence over ``like``.
+        inplace : bool, optional
+            Whether to modify the arrays inplace on this Tensor or not.
+
+        Returns
+        -------
+        TensorNetwork
+        """
+        from autoray import to
+
+        tn = self if inplace else self.copy()
+        params = tn.get_params()
+        params = to(params, like, backend=backend, device=device, dtype=dtype)
+        tn.set_params(params)
+        return tn
+
+    to_ = functools.partialmethod(to, inplace=True)
 
     # ----------------- selecting and splitting the network ----------------- #
 

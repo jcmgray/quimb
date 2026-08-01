@@ -3,7 +3,7 @@
 Release notes for `quimb`.
 
 
-## v1.14.1 (unreleased)
+## v1.15.0 (unreleased)
 
 **Breaking Changes:**
 
@@ -31,6 +31,7 @@ Release notes for `quimb`.
 - [`D2BP`](#D2BP): add ``power`` and relative ``smudge`` conditioning, [`converge_d2bp`](#converge_d2bp), and support its messages as projector environments, including ``canonize='bp'`` in [`tensor_network_ag_compress_projector`](#tensor_network_ag_compress_projector).
 - [`TensorNetwork.norm`](#TensorNetwork.norm): add a ``strip_exponent`` option for returning the norm as a separate mantissa and log10 exponent, useful for very large or small values.
 - [`TensorNetworkGenVector.norm_gloop_expand`](#TensorNetworkGenVector.norm_gloop_expand): add a ``strip_exponent`` option, and no longer modify the supplied ``gauges`` (a copy is taken instead). Supported by a new ``strip_exponent`` option on [`TensorNetworkGen.normalize_simple`](#TensorNetworkGen.normalize_simple) for returning the normalization factor as a separate mantissa and log10 exponent, and an overall ``power`` option on [`combine_local_contractions`](#combine_local_contractions).
+- add [`Tensor.to`][#Tensor.to] and [`TensorNetwork.to`][#TensorNetwork.to] for conveniently switching backends, dtype and devices (requires autoray v0.9.0+).
 
 
 **Internal:**
