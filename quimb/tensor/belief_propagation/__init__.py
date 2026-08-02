@@ -79,7 +79,14 @@ update messages adjacent to messages which have changed.
 
 from .bp_common import combine_local_contractions, initialize_hyper_messages
 from .d1bp import D1BP, contract_d1bp
-from .d2bp import D2BP, compress_d2bp, contract_d2bp, sample_d2bp
+from .d2bp import (
+    D2BP,
+    compress_d2bp,
+    contract_d2bp,
+    converge_d2bp,
+    gauge_d2bp,
+    sample_d2bp,
+)
 from .hd1bp import HD1BP, contract_hd1bp, sample_hd1bp
 from .hv1bp import HV1BP, contract_hv1bp, sample_hv1bp
 from .l1bp import L1BP, contract_l1bp
@@ -87,6 +94,13 @@ from .l2bp import L2BP, compress_l2bp, contract_l2bp
 from .regions import RegionGraph, gen_region_counts
 
 __all__ = (
+    "D1BP",
+    "D2BP",
+    "HD1BP",
+    "HV1BP",
+    "L1BP",
+    "L2BP",
+    "RegionGraph",
     "combine_local_contractions",
     "compress_d2bp",
     "compress_l2bp",
@@ -96,15 +110,10 @@ __all__ = (
     "contract_hv1bp",
     "contract_l1bp",
     "contract_l2bp",
-    "D1BP",
-    "D2BP",
+    "converge_d2bp",
+    "gauge_d2bp",
     "gen_region_counts",
-    "HD1BP",
-    "HV1BP",
     "initialize_hyper_messages",
-    "L1BP",
-    "L2BP",
-    "RegionGraph",
     "sample_d2bp",
     "sample_hd1bp",
     "sample_hv1bp",

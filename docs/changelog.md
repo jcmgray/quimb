@@ -3,11 +3,13 @@
 Release notes for `quimb`.
 
 
-## v1.14.1 (unreleased)
+## v1.15.0 (unreleased)
 
 **Breaking Changes:**
 
 - [`Circuit.uni`](#Circuit.uni): now returns the non-transposed unitary tensor network, so that ``circ.uni.to_dense()`` gives ``U`` acting on a state like ``U @ psi``. This was previously transposed and emitting a ``FutureWarning`` announcing the change; the warning is now removed. Use ``circ.get_uni(transposed=True)`` to recover the old transposed convention.
+- [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple): all arguments after ``max_iterations`` and ``tol`` (``smudge``, ``power``, ``damping``, ...) are now keyword-only.
+- simple update style gauging: ``smudge`` and ``gauge_smudge`` are now *relative* to the largest gauge value. These options add ``smudge * max(g)`` to the gauge vector, where they previously added ``smudge``. This affects [`tensor_gauge_simple_bond`](#tensor_gauge_simple_bond), [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple), [`TensorNetwork.gauge_simple_insert`](#TensorNetwork.gauge_simple_insert), [`TensorNetwork.gauge_simple_temp`](#TensorNetwork.gauge_simple_temp), [`tensor_canonize_bond`](#tensor_canonize_bond), [`tensor_compress_bond`](#tensor_compress_bond), [`TensorNetwork.contract_compressed`](#TensorNetwork.contract_compressed), [`tensor_network_ag_gate_simple`](#tensor_network_ag_gate_simple), [`TensorNetworkGenVector.get_cluster`](#TensorNetworkGenVector.get_cluster), [`TensorNetworkGenVector.partial_trace_cluster`](#TensorNetworkGenVector.partial_trace_cluster), and [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate). Results do not change when the gauges are normalized so that ``max(g) == 1``, which is the usual case. They do change for unnormalized gauges.
 - the non-exact circuit simulators ([`CircuitMPS`](#CircuitMPS), [`CircuitPermMPS`](#CircuitPermMPS), [`CircuitMPSLazy`](#CircuitMPSLazy), [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate), [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate)) no longer subclass the exact [`Circuit`](#Circuit); they now compose the shared [`CircuitBase`](#CircuitBase). Use ``isinstance(circ, CircuitBase)`` rather than ``isinstance(circ, Circuit)`` to check for any circuit type. As a consequence these classes no longer expose exact-contraction-only methods that they previously inherited but which did not produce meaningful results (e.g. ``get_uni``, ``get_psi_simplified``, ``sample_gate_by_gate``); the methods they do support (``to_dense``, ``amplitude``, ``sample``, ``partial_trace``, ``local_expectation``, ``simulate_counts``, ``xeb``, where applicable) remain, with the MPS implementations now native: they operate directly on the current, possibly compressed, state, perform no exact-TN simplification and so take no ``simplify_*`` options, and the MPS simulators gain ``compute_marginal`` and ``sample_chaotic`` this way too. Methods a representation can never support (e.g. ``uni`` on the non-exact simulators) now uniformly raise ``NotImplementedError``, where some previously raised ``ValueError``.
 
 
@@ -29,22 +31,29 @@ Release notes for `quimb`.
 - [`CircuitMPSLazy`](#CircuitMPSLazy): add a MPS-based circuit simulator using lazily evaluated gates and periodic automated compression, performing better compared to `CircuitMPS` for long-range gates when using `src` compression method.
 - [`Circuit.from_openqasm3_str`](#Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](#Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](#Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
 - [`CircuitDense`](#CircuitDense): support controlled gates supplied via the ``controls=`` kwarg, by inserting the low-rank hyper tensor network representation of the gate and contracting it into the dense state (avoiding ever forming the full dense operator).
+- add [`gauge_d2bp`](#gauge_d2bp) and the convenience method [`TensorNetwork.gauge_all_belief_propagation`](#TensorNetwork.gauge_all_belief_propagation): gauge an arbitrary tensor network into the 'symmetric' gauge using dense 2-norm belief propagation, equivalent to simple update gauging with the singular values absorbed equally into both tensors, implemented via the new [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric), which inserts the full-rank oblique projectors associated with the current messages.
+- [`D2BP`](#D2BP): add ``power`` and relative ``smudge`` conditioning, [`converge_d2bp`](#converge_d2bp), and support its messages as projector environments, including ``canonize='bp'`` in [`tensor_network_ag_compress_projector`](#tensor_network_ag_compress_projector).
+- [`TensorNetwork.norm`](#TensorNetwork.norm): add a ``strip_exponent`` option for returning the norm as a separate mantissa and log10 exponent, useful for very large or small values.
+- [`TensorNetworkGenVector.norm_gloop_expand`](#TensorNetworkGenVector.norm_gloop_expand): add a ``strip_exponent`` option, and no longer modify the supplied ``gauges`` (a copy is taken instead). Supported by a new ``strip_exponent`` option on [`TensorNetworkGen.normalize_simple`](#TensorNetworkGen.normalize_simple) for returning the normalization factor as a separate mantissa and log10 exponent, and an overall ``power`` option on [`combine_local_contractions`](#combine_local_contractions).
+- add [`Tensor.to`](#Tensor.to) and [`TensorNetwork.to`](#TensorNetwork.to) for conveniently switching backends, dtype and devices (requires autoray v0.9.0+).
+- [`D1BP.contract_gloop_expand`](#D1BP.contract_gloop_expand): caches normalized contractions and adds all singleton regions. It can also remove dangling tensors from regions. These operations do not modify the target tensor network.
 
 
 **Internal:**
 
+- [`squared_op_to_reduced_factor`](#squared_op_to_reduced_factor): route the ``cholesky`` method through [`array_split`](#array_split) like the other methods (behavior preserving).
 - reorganize the `quimb.tensor.circuit` module into a package (`gates`, `qasm`, `core`, `exact`, `simple_update`, `mps`, `peps`, `pepo` submodules). The public import path `quimb.tensor.circuit.*` and every class's ``__module__`` are unchanged, so the relocation is behavior-preserving for users and pickles. `core` holds the new [`CircuitBase`](#CircuitBase) and `simple_update` a shared base for the PEPS/PEPO simple-update simulators (see the Breaking Changes above for the inheritance change).
 
 
 **Docs:**
 
-- sphinx-autoapi: only document objects at the actual location, e.g. `Tensor`
-  at `quimb.tensor.tensor_core` rather than also at `quimb.tensor`. Use
-  matching `#` e.g. [Tensor](#Tensor) as short forms in the docs now.
+- sphinx-autoapi: only document objects at the actual location, e.g. `Tensor` at `quimb.tensor.tensor_core` rather than also at `quimb.tensor`. Use matching `#` e.g. [Tensor](#Tensor) as short forms in the docs now.
 
 
 **Bug fixes:**
 
+- [`TensorNetwork3D.contract_peps_sweep`](#TensorNetwork3D.contract_peps_sweep): correctly track norm exponents through both contraction stages, and support returning the mantissa and exponent separately with ``strip_exponent=True``.
+- [`TN_from_strings`](#TN_from_strings) and rand hidden loop TNs: fix ``normalize=True`` double applying the tensor network exponent, which produced incorrectly scaled tensor networks when normalization stripped a nonzero exponent.
 - [`CircuitDense`](#CircuitDense): fix `psi`, `partial_trace` and `local_expectation`, which raised ``ValueError`` because the contracted ``Dense1D`` view was not given its number of sites.
 - [`CircuitPermMPS`](#CircuitPermMPS): fix `amplitude`, `to_dense` and `local_expectation` returning incorrectly-labelled qubits under a non-trivial lazy permutation (only `sample` previously inverted the permutation back to logical qubit order).
 - [`CircuitPermMPS`](#CircuitPermMPS) and [`CircuitMPSLazy`](#CircuitMPSLazy): fix `copy()`, which returned unusable copies missing the subclass attributes such as the qubit ordering and the lazy compression bookkeeping ({issue}`387`).
@@ -58,7 +67,10 @@ Release notes for `quimb`.
 - [`PEPS`](#PEPS), [`PEPO`](#PEPO), and [`PEPS3D`](#PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.
 - [`TensorNetwork2DVector.compute_norm`](#TensorNetwork2DVector.compute_norm): ensure we always return a scalar rather than unwrapped tensor network.
 - [`D2BP.partial_trace_loop_series_expansion`](#D2BP.partial_trace_loop_series_expansion): fix the loop series expansion for complex (hermitian) BP messages, which were inserted with the wrong `(ket, bra)` index ordering in `get_cluster_excited` (both boundary messages and inner excitation projectors), giving incorrect reduced density matrices for complex states ({issue}`380`).
+- [`TensorNetworkGenVector.norm_gloop_expand`](#TensorNetworkGenVector.norm_gloop_expand): take the tensor network's ``exponent`` attribute into account, which was previously ignored, giving incorrect values for tensor networks with norms stripped into it (e.g. via [`equalize_norms`](#TensorNetwork.equalize_norms)).
 - [`D2BP.normalize_tensors`](#D2BP.normalize_tensors): keep the cached dual tensors in sync when rescaling, so that repeated reduced density matrix computations no longer drift ({issue}`381`).
+- [`D2BP.compress`](#D2BP.compress): when compressing inplace, rebuild the cached contraction expressions afterwards, so that subsequent message updates use the newly compressed tensor data rather than stale cached arrays.
+- [`TensorNetwork.isel`](#TensorNetwork.isel): fix for slice args.
 
 
 ## v1.14.0 (2026-05-10)

@@ -153,6 +153,14 @@ class TestGenericTN:
         assert set(ket.outer_inds()) == {f"k{i}" for i in range(n)}
         assert ket.max_bond() == D
 
+    def test_TN_from_strings_normalize_with_exponent(self):
+        tn = qtn.TN_from_strings(
+            [(0, 1, 2, 0)],
+            fill_fn=lambda shape: np.full(shape, 1e20),
+            normalize=True,
+        )
+        assert tn.contract() == pytest.approx(1.0)
+
     @pytest.mark.parametrize("Lx", [3])
     @pytest.mark.parametrize("Ly", [2, 4])
     @pytest.mark.parametrize("beta", [0.13, 0.44])

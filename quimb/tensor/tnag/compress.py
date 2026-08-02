@@ -21,6 +21,8 @@ def tensor_network_ag_compress_projector(
     site_tags=None,
     canonize=True,
     canonize_opts=None,
+    power=1.0,
+    smudge=0.0,
     lazy=False,
     equalize_norms=False,
     optimize="auto-hq",
@@ -28,6 +30,7 @@ def tensor_network_ag_compress_projector(
     reduce_opts=None,
     compress_opts=None,
     gauge_power=1.0,
+    gauge_smudge=0.0,
     inplace=False,
     **kwargs,
 ):
@@ -49,10 +52,21 @@ def tensor_network_ag_compress_projector(
         The tags to use to group the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
         tensor per site.
-    canonize : bool, optional
-        Whether to pseudo canonicalize the initial tensor network.
-    canonize_opts
-        Supplied to :meth:`~quimb.tensor.tensor_core.TensorNetwork.gauge_all`.
+    canonize : bool or {'layered', 'bp'}, optional
+        How to pseudo canonicalize the initial tensor network. ``True`` gauges
+        the whole network with simple update. ``'layered'`` gauges each tensor
+        layer separately. ``'bp'`` uses dense 2-norm belief propagation
+        messages as the projector environments.
+    canonize_opts : dict, optional
+        Options for the canonicalization method you select. If
+        ``canonize='bp'``, this function supplies them to
+        :func:`~quimb.tensor.belief_propagation.d2bp.converge_d2bp`.
+    power : float, optional
+        Condition the messages with this power during BP iteration, if
+        ``canonize='bp'``.
+    smudge : float, optional
+        Add this relative value to the message spectra during BP iteration,
+        if ``canonize='bp'``.
     lazy : bool, optional
         Whether to leave the computed projectors uncontracted, default: False.
     optimize : str, optional
@@ -73,6 +87,12 @@ def tensor_network_ag_compress_projector(
         :meth:`~quimb.tensor.tensor_core.TensorNetwork.insert_compressor_between_regions_`
         when inserting projectors. Values set here take precedence over any
         defaults.
+    gauge_power : float, optional
+        Condition the gauge or message environments with this power when this
+        function constructs the projectors.
+    gauge_smudge : float, optional
+        Add this relative value to the gauge or message environments when this
+        function constructs the projectors.
     inplace : bool, optional
         Whether to perform the compression inplace.
     kwargs
@@ -83,14 +103,14 @@ def tensor_network_ag_compress_projector(
     -------
     TensorNetwork
     """
-    contract_opts = ensure_dict(contract_opts)
-    contract_opts.setdefault("optimize", optimize)
-
     reduce_opts = ensure_dict(reduce_opts)
 
     compress_opts = kwargs | ensure_dict(compress_opts)
     compress_opts.setdefault("max_bond", max_bond)
     compress_opts.setdefault("cutoff", cutoff)
+
+    contract_opts = ensure_dict(contract_opts)
+    contract_opts.setdefault("optimize", optimize)
 
     tn = tn if inplace else tn.copy()
 
@@ -99,11 +119,26 @@ def tensor_network_ag_compress_projector(
 
     edges, _ = create_lazy_edge_map(tn, site_tags)
 
-    if canonize:
-        # XXX: use belief propagation messages for speed here?
+    if canonize == "bp":
+        from ..belief_propagation.d2bp import converge_d2bp
 
+        canonize_opts = ensure_dict(canonize_opts)
+        canonize_opts.setdefault("power", power)
+        canonize_opts.setdefault("smudge", smudge)
+        canonize_opts.setdefault("optimize", optimize)
+        canonize_opts.setdefault("max_iterations", 5)
+        canonize_opts.setdefault("tol", 0.0)
+        canonize_opts["inplace"] = False
+
+        bp = converge_d2bp(tn, **canonize_opts)
+        tn_calc = bp.tn
+        gauges = bp
+
+    elif canonize:
         # optionally precondition the uncontracted network
         canonize_opts = ensure_dict(canonize_opts)
+        canonize_opts.setdefault("power", power)
+        canonize_opts.setdefault("smudge", smudge)
         gauges = canonize_opts.pop("gauges", {})
 
         if canonize == "layered":
@@ -151,14 +186,14 @@ def tensor_network_ag_compress_projector(
             reduce_opts=reduce_opts,
             compress_opts=compress_opts,
             gauge_power=gauge_power,
+            gauge_smudge=gauge_smudge,
         )
 
     if not lazy:
         # then contract each site with all surrounding projectors
         for st in site_tags:
-            tn.contract_(st, **contract_opts)
+            tn.contract_(st, equalize_norms=equalize_norms, **contract_opts)
 
-    # XXX: do better than simply waiting til the end to equalize norms
     if equalize_norms is True:
         tn.equalize_norms_()
     elif equalize_norms:
@@ -620,9 +655,11 @@ def tensor_network_ag_compress(
         The tags to use to group the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
         tensor per site.
-    canonize : bool, optional
+    canonize : bool or str, optional
         Whether to perform canonicalization, pseudo or otherwise depending on
-        the method, before compressing.
+        the method, before compressing. The ``'projector'`` method also accepts
+        ``'layered'``, which gauges each layer with simple update, and
+        ``'bp'``, which uses dense 2-norm belief propagation environments.
     optimize : str, optional
         The contraction path optimizer to use.
     equalize_norms : bool or float, optional

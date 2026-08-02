@@ -73,6 +73,13 @@ class Test3DManualContract:
         f = -qu.log(Z) / (L**3 * beta)
         assert f == pytest.approx(fex, rel=1e-3)
 
+    def test_contract_peps_sweep_strip_exponent(self):
+        tn = qtn.TN3D_classical_ising_partition_function(3, 3, 3, beta=0.3)
+        tn.multiply_each_(1e20)
+        z = tn.contract_peps_sweep(max_bond=8, strip_exponent=True)
+        z_exact = tn.contract(all, strip_exponent=True)
+        assert z == pytest.approx(z_exact)
+
     @pytest.mark.parametrize("dims", [(10, 4, 3), (4, 3, 10), (3, 10, 4)])
     def test_contract_boundary_stopping_criterion(self, dims):
         tn = qtn.TN3D_from_fill_fn(
