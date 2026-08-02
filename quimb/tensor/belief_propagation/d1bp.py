@@ -8,6 +8,8 @@ This is the simplest version of belief propagation, and is useful for
 simple investigations.
 """
 
+import itertools
+
 import autoray as ar
 
 from quimb.tensor import Tensor, TensorNetwork, rand_uuid
@@ -260,6 +262,38 @@ class D1BP(BeliefPropagationCommon):
                 self.sign = tsgn * self.sign
                 self.exponent = tlog + self.exponent
 
+    def get_normalized_tn(self):
+        """Get a normalized copy of the target tensor network.
+
+        This method rescales each tensor so its local BP contraction is one.
+        It uses the current messages. It returns the normalization scale
+        separately. It does not modify the target network, the messages, or
+        the scale in this instance.
+
+        Returns
+        -------
+        tn : TensorNetwork
+            The normalized copy of the target tensor network.
+        sign : scalar
+            The phase or sign of the normalization scale.
+        exponent : float
+            The base-10 exponent of the normalization scale.
+        """
+        tn = self.tn.copy()
+        tn.exponent = 0.0
+        sign = self.sign
+        exponent = self.exponent
+
+        for tid, t in tn.tensor_map.items():
+            tval = self.local_tensor_contract(tid)
+            tabs = ar.do("abs", tval)
+            tsgn = tval / tabs
+            t /= tsgn * tabs
+            sign = tsgn * sign
+            exponent = ar.do("log10", tabs) + exponent
+
+        return tn, sign, exponent
+
     def get_gauged_tn(self):
         """Gauge the original TN by inserting the BP-approximated transfer
         matrix eigenvectors, which may be complex. The BP-contraction of this
@@ -282,7 +316,7 @@ class D1BP(BeliefPropagationCommon):
             tng._insert_gauge_tids(U, tida, tidb, Uinv)
         return tng
 
-    def get_cluster(self, tids):
+    def get_cluster(self, tids, tn=None):
         """Get the region of tensors given by `tids`, with the messages
         on the border contracted in, removing those dangling indices.
 
@@ -290,13 +324,19 @@ class D1BP(BeliefPropagationCommon):
         ----------
         tids : sequence of int
             The tensor ids forming a region.
+        tn : TensorNetwork, optional
+            The tensor network from which to select the region. The boundary
+            messages always come from this D1BP instance.
 
         Returns
         -------
         TensorNetwork
         """
+        if tn is None:
+            tn = self.tn
+
         # take copy as we are going contract messages in
-        tnr = self.tn._select_tids(tids, virtual=False)
+        tnr = tn._select_tids(tids, virtual=False)
         oixr = tnr.outer_inds()
         for ix in oixr:
             # get the tensor this index belongs to
@@ -507,15 +547,55 @@ class D1BP(BeliefPropagationCommon):
         self,
         gloops=None,
         autocomplete=True,
+        autoreduce=True,
         strip_exponent=False,
         check_zero=True,
         optimize="auto-hq",
         combine="prod",
+        info=None,
+        progbar=False,
         **contract_opts,
     ):
         """Contract the tensor network using generalized loop cluster
         expansion.
+
+        Parameters
+        ----------
+        gloops : int or iterable of tuples, optional
+            The generalized loops to use, or an integer to automatically
+            generate all loops up to that size.
+        autocomplete : bool, optional
+            Whether to add intersecting regions required to complete the
+            region graph.
+        autoreduce : bool, optional
+            Whether to remove dangling tensors from each region. Use this
+            option only at a BP fixed point.
+        strip_exponent : bool, optional
+            Whether to return the mantissa and base-10 exponent separately.
+        check_zero : bool, optional
+            Whether to return zero early when combining a product containing
+            a zero contraction.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        combine : {'prod', 'sum'}, optional
+            Whether to combine region contractions as a product or sum.
+        info : dict, optional
+            A cache for normalized scalar contractions and the tensor-neighbor
+            map. Reuse it only while the tensor network and BP messages remain
+            unchanged.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_opts
+            These options configure :meth:`TensorNetwork.contract`.
+
+        Returns
+        -------
+        scalar or (scalar, float)
+            The generalized loop expansion estimate. The method can return
+            the base-10 exponent separately.
         """
+        from quimb.tensor.tnag.core import gloop_remove_dangling
+
         from .regions import gen_region_counts
 
         if isinstance(gloops, int):
@@ -529,32 +609,67 @@ class D1BP(BeliefPropagationCommon):
         else:
             gloops = tuple(gloops)
 
-        if combine == "sum":
-            # make sure each contraction has the same BP-scaled environment
-            self.normalize_message_pairs()
-            self.normalize_tensors()
+        # normalize boundary overlaps and local tensor contractions to one
+        self.normalize_message_pairs()
+        tn, sign, exponent = self.get_normalized_tn()
+
+        if info is None:
+            info = {}
+        contractions = info.setdefault("contractions", {})
+
+        if autoreduce:
+            try:
+                neighbors = info["neighbors"]
+            except KeyError:
+                neighbors = info["neighbors"] = self.tn.get_tid_neighbor_map()
+        else:
+            neighbors = None
+
+        region_counts = gen_region_counts(
+            itertools.chain(gloops, ((tid,) for tid in self.tn.tensor_map)),
+            autocomplete=autocomplete,
+        )
+
+        if progbar:
+            import tqdm
+
+            region_counts = tqdm.tqdm(region_counts)
 
         zvals = []
-        for r, c in gen_region_counts(gloops, autocomplete=autocomplete):
-            # XXX: autoreduce intersecting clusters to gloops?
-            tnr = self.get_cluster(r)
-            zr = tnr.contract(optimize=optimize, **contract_opts)
+        for region, counting_factor in region_counts:
+            if autoreduce:
+                region = gloop_remove_dangling(region, neighbors)
+            else:
+                region = frozenset(region)
 
-            zvals.append((zr, c))
+            if len(region) <= 1:
+                # region has been trivially reduced to normalized local BP
+                if combine == "sum":
+                    zvals.append((1.0, counting_factor))
+                continue
+
+            try:
+                zr = contractions[region]
+            except KeyError:
+                tnr = self.get_cluster(region, tn=tn)
+                zr = tnr.contract(optimize=optimize, **contract_opts)
+                contractions[region] = zr
+
+            zvals.append((zr, counting_factor))
 
         if combine == "sum":
-            mantissa = self.sign * sum(zr * cr for zr, cr in zvals)
+            mantissa = sign * sum(zr * cr for zr, cr in zvals)
             if strip_exponent:
-                return mantissa, self.exponent
-            return mantissa * 10**self.exponent
+                return mantissa, exponent
+            return mantissa * 10**exponent
 
         return combine_local_contractions(
             zvals,
             backend=self.backend,
             strip_exponent=strip_exponent,
             check_zero=check_zero,
-            mantissa=self.sign,
-            exponent=self.exponent,
+            mantissa=sign,
+            exponent=exponent,
         )
 
 
