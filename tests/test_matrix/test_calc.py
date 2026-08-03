@@ -550,6 +550,26 @@ class TestTraceDistance:
             > 1 - 1e-10
         )
 
+    @pytest.mark.parametrize("seed", range(5))
+    def test_isherm_matches_svd(self, seed):
+        p1 = qu.rand_rho(2**3, seed=seed)
+        p2 = qu.rand_rho(2**3, seed=seed + 100)
+        assert_allclose(
+            qu.trace_distance(p1, p2, isherm=True),
+            qu.trace_distance(p1, p2, isherm=False),
+        )
+
+    def test_isherm_matches_eigenvalues(self):
+        # trace distance of commuting states is set by their eigenvalues
+        el1 = np.array([0.5, 0.3, 0.15, 0.05])
+        el2 = np.array([0.1, 0.4, 0.25, 0.25])
+        U = qu.rand_uni(4, seed=42)
+        p1 = U @ np.diag(el1) @ U.H
+        p2 = U @ np.diag(el2) @ U.H
+        assert_allclose(
+            qu.trace_distance(p1, p2), 0.5 * np.abs(el1 - el2).sum()
+        )
+
 
 class TestDecomp:
     @pytest.mark.parametrize("qtype", ["ket", "dop"])

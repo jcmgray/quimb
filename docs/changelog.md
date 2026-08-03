@@ -33,6 +33,7 @@ Release notes for `quimb`.
 - [`TensorNetworkGenVector.norm_gloop_expand`](#TensorNetworkGenVector.norm_gloop_expand): add a ``strip_exponent`` option, and no longer modify the supplied ``gauges`` (a copy is taken instead). Supported by a new ``strip_exponent`` option on [`TensorNetworkGen.normalize_simple`](#TensorNetworkGen.normalize_simple) for returning the normalization factor as a separate mantissa and log10 exponent, and an overall ``power`` option on [`combine_local_contractions`](#combine_local_contractions).
 - add [`Tensor.to`](#Tensor.to) and [`TensorNetwork.to`](#TensorNetwork.to) for conveniently switching backends, dtype and devices (requires autoray v0.9.0+).
 - [`D1BP.contract_gloop_expand`](#D1BP.contract_gloop_expand): caches normalized contractions and adds all singleton regions. It can also remove dangling tensors from regions. These operations do not modify the target tensor network.
+- [`trace_distance`](#trace_distance): compute the trace norm from the absolute eigenvalues of the difference of the two states rather than its singular values, which is valid since that difference is hermitian, and faster, increasingly so with dimension. A new ``isherm=False`` option restores the previous singular value based computation.
 
 
 **Internal:**

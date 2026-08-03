@@ -1007,7 +1007,7 @@ def quantum_discord(
 
 
 @zeroify
-def trace_distance(p1, p2):
+def trace_distance(p1, p2, isherm=True):
     r"""Trace distance between two states:
 
     .. math::
@@ -1031,6 +1031,10 @@ def trace_distance(p1, p2):
         The first state.
     p2 : ket or density operator
         The second state.
+    isherm : bool, optional
+        Whether to assume the difference of the states is hermitian, as it is
+        for any valid pair, in which case the faster eigendecomposition is
+        used for the trace norm rather than the SVD.
 
     Returns
     -------
@@ -1044,7 +1048,9 @@ def trace_distance(p1, p2):
 
     # Otherwise do full calculation
     return 0.5 * norm(
-        (p1 if p1_is_op else dop(p1)) - (p2 if p2_is_op else dop(p2)), "tr"
+        (p1 if p1_is_op else dop(p1)) - (p2 if p2_is_op else dop(p2)),
+        "tr",
+        isherm=isherm,
     )
 
 
