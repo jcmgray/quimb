@@ -27,7 +27,7 @@ from .regions import gen_region_counts
 
 
 def _parse_global_gloops(tn, gloops=None):
-    if isinstance(gloops, int):
+    if isinstance(gloops, (int, str)):
         max_size = gloops
         gloops = None
     else:
@@ -708,33 +708,33 @@ class D2BP(BeliefPropagationCommon):
         bms = []
         ems = []
 
-        for ix, tids in stn.ind_map.items():
+        for ix, ix_tids in stn.ind_map.items():
             if ix in self.output_inds:
                 # physical traced index
                 if ix in partial_trace_map:
-                    (tid,) = tids
+                    (tid,) = ix_tids
                     bixmaps[tid][ix] = partial_trace_map[ix]
 
             elif ix in exclude:
                 # excluded bond -> simply rename bra
                 bix = qtn.rand_uuid()
-                for tid in tids:
+                for tid in ix_tids:
                     bixmaps[tid][ix] = bix
 
             elif ix in stn._inner_inds:
                 # internal index
-                for tid in tids:
+                for tid in ix_tids:
                     kix = qtn.rand_uuid()
                     bix = qtn.rand_uuid()
                     kixmaps[tid][ix] = kix
                     bixmaps[tid][ix] = bix
                     # store labels for excitation projector, (bra, ket)
                     exc_ixs.setdefault(ix, {})[tid] = (bix, kix)
-                ems.append((ix, tids))
+                ems.append((ix, ix_tids))
 
             else:
                 # boundary index
-                (tid,) = tids
+                (tid,) = ix_tids
                 kix = qtn.rand_uuid()
                 bix = qtn.rand_uuid()
                 kixmaps[tid][ix] = kix
@@ -758,8 +758,8 @@ class D2BP(BeliefPropagationCommon):
 
         # add inner exitation projector message tensors
         with ar.backend_like(self.backend):
-            for ix, tids in ems:
-                tidl, tidr = tids
+            for ix, ix_tids in ems:
+                tidl, tidr = ix_tids
                 ml = self.messages[ix, tidl]
                 mr = self.messages[ix, tidr]
 
@@ -794,9 +794,10 @@ class D2BP(BeliefPropagationCommon):
 
         Parameters
         ----------
-        gloops : int or iterable of tuples, optional
-            The gloop sizes to use. If an integer, then generate all gloop
-            sizes up to this size. If a tuple, then use these gloops.
+        gloops : None, int, "min" or iterable of tuples, optional
+            The generalized loops to use, an integer to generate all loops up
+            to that size, or ``None``/``"min"`` for the automatic size, see
+            :func:`~quimb.tensor.networking.gen_gloops`.
         multi_excitation_correct : bool, optional
             Whether to use the multi-excitation correction. If ``True``, then
             the free energy is refined iteratively until self consistent.
@@ -859,10 +860,10 @@ class D2BP(BeliefPropagationCommon):
         ----------
         where : sequence[hashable]
             The sites to from the reduced density matrix of.
-        gloops : int or iterable of tuples, optional
-            The generalized loops to use, or an integer to automatically
-            generate all up to a certain size. If none use the smallest non-
-            trivial size.
+        gloops : None, int, "min" or iterable of tuples, optional
+            The generalized loops to use, an integer to generate all loops up
+            to that size, or ``None``/``"min"`` for the automatic size, see
+            :func:`~quimb.tensor.networking.gen_gloops`.
         normalized : bool, optional
             Whether to normalize the final density matrix.
         grow_from : {'alldangle', 'all', 'any'}, optional
@@ -1445,10 +1446,10 @@ class D2BP(BeliefPropagationCommon):
         ----------
         where : sequence[hashable]
             The sites to from the reduced density matrix of.
-        gloops : int or iterable of tuples, optional
-            The generalized loops to use, or an integer to automatically
-            generate all up to a certain size. If none use the smallest non-
-            trivial size.
+        gloops : None, int, "min" or iterable of tuples, optional
+            The generalized loops to use, an integer to generate all loops up
+            to that size, or ``None``/``"min"`` for the automatic size, see
+            :func:`~quimb.tensor.networking.gen_gloops`.
         combine : {'sum', 'prod'}, optional
             How to combine the contributions from each generalized loop. If
             'sum', use coefficient weighted addition. If 'prod', use power

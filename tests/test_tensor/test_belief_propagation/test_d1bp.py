@@ -101,6 +101,18 @@ class TestGloopExpand:
             assert np.array_equal(bp.messages[key], message)
         assert sign * 10**exponent == pytest.approx(z_bp)
 
+    @pytest.mark.parametrize(
+        "method", ["contract_gloop_expand", "contract_loop_series_expansion"]
+    )
+    def test_default_gloops_use_the_automatic_size(self, method):
+        # the default `gloops=None` means generate them, not an empty supply
+        _, bp = _get_gloop_bp()
+        z_auto = getattr(bp, method)()
+        _, bp = _get_gloop_bp()
+        z_min = getattr(bp, method)(gloops="min")
+        # the only loop here is the 4-cycle, so both sizes agree
+        assert z_auto == pytest.approx(z_min)
+
     def test_singleton_completion_for_product_and_sum(self):
         _, bp = _get_gloop_bp()
         gloop = (0, 1, 2, 3)

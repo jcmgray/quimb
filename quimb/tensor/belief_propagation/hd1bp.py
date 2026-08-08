@@ -405,12 +405,39 @@ class HD1BP(BeliefPropagationCommon):
         progbar=False,
         **contract_otps,
     ):
+        """Contract the hyper tensor network using generalized loop cluster
+        expansion.
+
+        Parameters
+        ----------
+        gloops : None, int, "min" or iterable of tuples, optional
+            The generalized loops to use, an integer to generate all loops up
+            to that size, or ``None``/``"min"`` for the automatic size, see
+            :func:`~quimb.tensor.networking.gen_gloops`.
+        strip_exponent : bool, optional
+            Whether to return the mantissa and base-10 exponent separately.
+        check_zero : bool, optional
+            Whether to return zero early when combining a product containing
+            a zero contraction.
+        optimize : str or PathOptimizer, optional
+            The contraction path optimizer to use.
+        progbar : bool, optional
+            Whether to show a progress bar.
+        contract_otps
+            These options configure :meth:`TensorNetwork.contract`.
+
+        Returns
+        -------
+        scalar or (scalar, float)
+            The generalized loop expansion estimate. The method can return
+            the base-10 exponent separately.
+        """
         from .regions import gen_region_counts
 
         # if we normalized messages we can ignore all index-only regions
         self.normalize_messages()
 
-        if isinstance(gloops, int):
+        if (gloops is None) or isinstance(gloops, (int, str)):
             gloops = tuple(self.tn.gen_gloops(gloops))
 
         region_counts = gen_region_counts(gloops)
