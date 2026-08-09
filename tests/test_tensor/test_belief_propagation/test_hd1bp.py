@@ -42,6 +42,19 @@ def test_contract_with_exponent(dtype):
     assert bp.contract() == pytest.approx(Zex, rel=1e-5)
 
 
+def test_gloop_expand_default_gloops_use_the_automatic_size():
+    # the default `gloops=None` means generate them, not an empty supply
+    tn = qtn.TN2D_from_fill_fn(
+        lambda s: qu.randn(s, dist="uniform", loc=0.5), 3, 3, 2
+    )
+    bp = qbp.HD1BP(tn)
+    bp.run(tol=1e-12)
+    z_auto = bp.contract_gloop_expand()
+    # every site is in a plaquette, so covering agrees with the smallest size
+    assert z_auto == pytest.approx(bp.contract_gloop_expand(gloops="min"))
+    assert z_auto == pytest.approx(bp.contract_gloop_expand(gloops=4))
+
+
 @pytest.mark.parametrize("damping", [0.0, 0.1])
 @pytest.mark.parametrize("diis", [False, True])
 def test_contract_normal(damping, diis):

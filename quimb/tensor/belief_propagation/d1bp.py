@@ -390,9 +390,10 @@ class D1BP(BeliefPropagationCommon):
 
         Parameters
         ----------
-        gloops : int or iterable of tuples, optional
-            The gloop sizes to use. If an integer, then generate all gloop
-            sizes up to this size. If a tuple, then use these gloops.
+        gloops : None, int, "min" or iterable of tuples, optional
+            The generalized loops to use, an integer to generate all loops up
+            to that size, or ``None``/``"min"`` for the automatic size, see
+            :func:`~quimb.tensor.networking.gen_gloops`.
         multi_excitation_correct : bool, optional
             Whether to use the multi-excitation correction. If ``True``, then
             the free energy is refined iteratively until self consistent.
@@ -413,7 +414,7 @@ class D1BP(BeliefPropagationCommon):
         # accrues BP estimate into self.sign and self.exponent
         self.normalize_tensors()
 
-        if isinstance(gloops, int):
+        if (gloops is None) or isinstance(gloops, (int, str)):
             gloops = tuple(self.tn.gen_gloops(max_size=gloops))
         else:
             gloops = tuple(gloops)
@@ -561,9 +562,10 @@ class D1BP(BeliefPropagationCommon):
 
         Parameters
         ----------
-        gloops : int or iterable of tuples, optional
-            The generalized loops to use, or an integer to automatically
-            generate all loops up to that size.
+        gloops : None, int, "min" or iterable of tuples, optional
+            The generalized loops to use, an integer to generate all loops up
+            to that size, or ``None``/``"min"`` for the automatic size, see
+            :func:`~quimb.tensor.networking.gen_gloops`.
         autocomplete : bool, optional
             Whether to add intersecting regions required to complete the
             region graph.
@@ -598,7 +600,7 @@ class D1BP(BeliefPropagationCommon):
 
         from .regions import gen_region_counts
 
-        if isinstance(gloops, int):
+        if isinstance(gloops, (int, str)):
             max_size = gloops
             gloops = None
         else:

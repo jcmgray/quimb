@@ -1397,10 +1397,14 @@ class TensorNetworkGen(TensorNetwork):
 
         Parameters
         ----------
-        max_size : None or int
-            Set the maximum number of tensors that can appear in a loop. If
-            ``None``, wait until any valid loop is found and set that as the
-            maximum size.
+        max_size : None, int or "min"
+            The maximum number of tensors that can appear in a loop. If
+            ``None``, grow the loops until every target site, i.e. ``sites``
+            or every site, appears in at least one loop, then use that size.
+            Targets outside the 2-core never appear in a loop and are
+            ignored, with a warning if ``sites`` was given or the network is
+            tree like. If ``"min"``, instead use the size of the first valid
+            loop found.
         sites : None or sequence[hashable]
             If supplied, only consider loops containing these sites.
         grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
@@ -1410,7 +1414,8 @@ class TensorNetworkGen(TensorNetwork):
             in ``sites``. If 'alldangle' or 'anydangle', the sites are allowed
             to be dangling, i.e. 1-degree connected. This is useful for
             computing local expectations where the operator insertion breaks
-            the loop assumption locally.
+            the loop assumption locally. Any loop covers a dangling target,
+            so with these ``max_size=None`` acts like ``"min"``.
         num_joins : int, optional
             If larger than 1, repeatedly generate larger loops by joining
             together the initial set (individually those with size up to
@@ -1717,16 +1722,15 @@ class TensorNetworkGen(TensorNetwork):
         Parameters
         ----------
         tids : sequence[int], optional
-            The tensor ids to consider. Either this or ``where`` must be
-            supplied.
+            The tensor ids to consider. Either this or ``where`` must be given.
         where : sequence[hashable], optional
             The sites to consider. Either this or ``tids`` must be supplied.
         info : dict
             A dictionary to store information across different calls.
-        gloops : None, int, or sequence of sequence of hashable, optional
-            The gloops to consider. If ``None``, auto generate local gloops
-            up to the smallest non-trivial cluster size. If an integer,
-            generate gloops locally with up to that size. If a sequence of
+        gloops : None, int, "min" or sequence of sequence of hashable, optional
+            The gloops to consider. If an integer, generate gloops locally up
+            to that size. If ``None`` or ``"min"``, generate them locally with
+            the automatic size, see :meth:`gen_gloops_sites`. If a sequence of
             sequences, use those gloops.
         grow_from : {"all", "any"}, optional
             Whether to generate gloops that originally contain all or just
@@ -1741,19 +1745,23 @@ class TensorNetworkGen(TensorNetwork):
         if tids is None and where is None:
             raise ValueError("Either `tids` or `where` must be supplied.")
 
-        if isinstance(gloops, int):
+        if isinstance(gloops, (int, str)):
             max_size = gloops
             gloops = None
-            if strict_size is True:
-                # generate gloops up to size `max_loop_length`, but filter out
-                # any which are larger once the target size are included
-                strict_size = max_size
         else:
             max_size = None
-            if strict_size is True:
+
+        if strict_size is True:
+            # filter out clusters larger than `max_size` once the target
+            # sites are included, only possible if it is known up front
+            if isinstance(max_size, int):
+                strict_size = max_size
+            else:
                 warnings.warn(
-                    "If manually supplying a set of gloops, `strict_size` "
-                    "should be an integer, not a boolean - ignoring.",
+                    "`strict_size=True` requires an integer `gloops` size, "
+                    "since the size is otherwise only known once the gloops "
+                    "are generated - ignoring. Supply an integer "
+                    "`strict_size` to filter by a specific size.",
                 )
                 strict_size = False
 
@@ -1838,8 +1846,16 @@ class TensorNetworkGen(TensorNetwork):
             clusters = (r0, *map(frozenset, gloops))
 
         if strict_size:
-            # only allow clusters below max_size *including* base region
-            clusters = (r0, *(r for r in clusters if len(r) <= strict_size))
+            # only allow clusters below max_size *including* base region,
+            # which is kept regardless of its size
+            clusters = (
+                r0,
+                *(
+                    r
+                    for r in clusters
+                    if (r != r0) and (len(r) <= strict_size)
+                ),
+            )
 
         return clusters
 
@@ -1940,21 +1956,23 @@ def gloop_remove_dangling(sites, neighbors, where=()):
     -------
     frozenset[hashable]
     """
-    sites = list(sites)
-    i = 0
-    while i < len(sites):
-        # check next site
-        site = sites[i]
-        # can only reduce non target sites
-        if site not in where:
-            num_neighbors = sum(nsite in sites for nsite in neighbors[site])
-            if num_neighbors < 2:
-                # dangling -> remove!
-                sites.pop(i)
-                # back to beginning
-                i = -1
-        i += 1
-    return frozenset(sites)
+    region = set(sites)
+    # TODO: count bonds not neighbors, to match how a gloop is defined,
+    # which differs for multibonds and hyper indices
+    while True:
+        for site in region:
+            # can only reduce non target sites
+            if site not in where:
+                num_neighbs = sum(nsite in region for nsite in neighbors[site])
+                if num_neighbs < 2:
+                    # dangling -> remove and start again
+                    region.discard(site)
+                    break
+        else:
+            # checked all without finding anything
+            break
+
+    return frozenset(region)
 
 
 def sloop_remove_dangling(path, neighbor_inds, where_tids):
@@ -2469,7 +2487,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             G,
             axes=(
                 tuple(range(2 * ng)),
-                tuple(range(ng, 2 * ng)) + tuple(range(0, ng)),
+                tuple(range(ng, 2 * ng)) + tuple(range(ng)),
             ),
         )
 
@@ -3187,11 +3205,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The operator to compute the expectation of.
         where : node or sequence[node]
             The sites to compute the expectation at.
-        gloops : None, int, or sequence[sequence[node]], optional
+        gloops : None, int, "min" or sequence[sequence[node]], optional
             The generalized loops to use. If an integer, generate loops up to
-            and including this size. If ``None`` the maximum loop size is set
-            as the smallest non-trivial loop found. If an explicit set of
-            loops is given, only these loops are considered.
+            and including this size. If ``None``, grow them until every site
+            appears in at least one loop and use that size, or if ``"min"``,
+            until the first valid loop is found. If an explicit set of loops
+            is given, use only those.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
@@ -3317,6 +3336,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         gauges=None,
         strip_exponent=False,
         optimize="auto",
+        info=None,
         progbar=False,
         **contract_opts,
     ):
@@ -3326,11 +3346,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
 
         Parameters
         ----------
-        gloops : None, int, or sequence[sequence[node]], optional
+        gloops : None, int, "min" or sequence[sequence[node]], optional
             The generalized loops to use. If an integer, generate loops up to
-            and including this size. If ``None`` the maximum loop size is set
-            as the smallest non-trivial loop found. If an explicit set of
-            loops is given, only these loops are considered.
+            and including this size. If ``None``, grow them until every site
+            appears in at least one loop and use that size, or if ``"min"``,
+            until the first valid loop is found. If an explicit set of loops
+            is given, use only those.
         autocomplete : bool, optional
             Whether to automatically complete the local region graph by adding
             all required intersecting regions automatically.
@@ -3348,6 +3369,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             the rescaled 'mantissa'. Useful for very large or small values.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use.
+        info : dict, optional
+            A cache for the cluster contractions and the site neighbor map,
+            which makes repeated calls with different sets of loops much
+            cheaper. Reuse it only while the tensor network and gauges remain
+            the same.
         progbar : bool, optional
             Whether to show a progress bar.
         contract_opts
@@ -3365,7 +3391,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             gen_region_counts,
         )
 
-        if isinstance(gloops, int):
+        if isinstance(gloops, (int, str)):
             max_size = gloops
             gloops = None
         else:
@@ -3384,8 +3410,14 @@ class TensorNetworkGenVector(TensorNetworkGen):
         # which are tree like can thus be ignored
         _, exponent = psi.normalize_simple(gauges, strip_exponent=True)
 
+        info = info if info is not None else {}
+        contractions = info.setdefault("contractions", {})
+
         if autoreduce:
-            neighbors = self.get_site_neighbor_map()
+            try:
+                neighbors = info["neighbors"]
+            except KeyError:
+                neighbors = info["neighbors"] = self.get_site_neighbor_map()
         else:
             neighbors = None
 
@@ -3407,11 +3439,18 @@ class TensorNetworkGenVector(TensorNetworkGen):
                     # region is tree like -> contributes 1.0
                     continue
 
-            tags = tuple(map(psi.site_tag, region))
-            kr = psi.select(tags, which="any", virtual=False)
-            kr.gauge_simple_insert(gauges)
+            try:
+                # have already computed this cluster, e.g. with other gloops
+                lni = contractions[region]
+            except KeyError:
+                tags = tuple(map(psi.site_tag, region))
+                # take copy as inserting gauges
+                kr = psi.select(tags, which="any", virtual=False)
+                kr.gauge_simple_insert(gauges)
+                lni = contractions[region] = (kr.H | kr).contract(
+                    optimize=optimize, **contract_opts
+                )
 
-            lni = (kr.H | kr).contract(optimize=optimize, **contract_opts)
             zvals.append((lni, C))
 
         return combine_local_contractions(
@@ -3448,11 +3487,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
         terms : dict[node or tuple[node], array_like]
             The terms to compute the expectation of, with keys being the
             site(s) and values being the local operators as plain arrays.
-        gloops : None, int, or sequence[sequence[node]], optional
+        gloops : None, int, "min" or sequence[sequence[node]], optional
             The generalized loops to use. If an integer, generate loops up to
-            and including this size. If ``None`` the maximum loop size is set
-            as the smallest non-trivial loop found. If an explicit set of
-            loops is given, only these loops are considered.
+            and including this size. If ``None``, grow them until every site
+            appears in at least one loop and use that size, or if ``"min"``,
+            until the first valid loop is found. If an explicit set of loops
+            is given, use only those.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
@@ -3517,6 +3557,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
                 autoreduce=autoreduce,
                 gauges=gauges,
                 optimize=optimize,
+                info=info,
                 **contract_opts,
             )
             tn = self / nfactor

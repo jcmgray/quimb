@@ -6,6 +6,7 @@ import collections
 import functools
 import itertools
 import math
+import warnings
 
 from ..utils import oset, unique
 
@@ -15,7 +16,7 @@ class NetworkPatch:
     both the tensor identifies (`tids`) and indices (`inds`) it contains.
     """
 
-    __slots__ = ("_tids", "_inds", "_key")
+    __slots__ = ("_inds", "_key", "_tids")
 
     def __init__(self, tids, inds):
         self._tids = oset(tids)
@@ -901,7 +902,7 @@ def connected_bipartitions(tn):
         of tids.
     """
     # first we generate all connected subgraphs of size 1 ... N-1
-    pairs = dict()
+    pairs = {}
     for pa in map(frozenset, tn.gen_patches(tn.num_tensors - 1)):
         # complementary subgraph (may not be connected)
         pairs[pa] = frozenset(tid for tid in tn.tensor_map if tid not in pa)
@@ -917,14 +918,52 @@ def connected_bipartitions(tn):
     return tuple(connected_bipartitions)
 
 
+def _get_two_core_tids(tn):
+    """Get the tids of the 2-core of ``tn``: the largest sub network in which
+    every tensor has at least two bonds. I.e. all dangling tensors are removed.
+    A tid outside the 2-core can never appear in a generalized loop.
+    """
+    live = set(tn.tensor_map)
+    # number of live tensors on each index, more than one is a bond
+    ix_count = {ix: len(tids) for ix, tids in tn.ind_map.items()}
+    nbonds = {
+        tid: sum(ix_count[ix] > 1 for ix in t.inds)
+        for tid, t in tn.tensor_map.items()
+    }
+
+    queue = [tid for tid, n in nbonds.items() if n < 2]
+    while queue:
+        tid = queue.pop()
+        if tid not in live:
+            continue
+        live.discard(tid)
+        for ix in tn.tensor_map[tid].inds:
+            ix_count[ix] -= 1
+            if ix_count[ix] == 1:
+                # no longer a bond -> the last tensor on it loses one
+                (ntid,) = (t for t in tn.ind_map[ix] if t in live)
+                nbonds[ntid] -= 1
+                if nbonds[ntid] < 2:
+                    queue.append(ntid)
+
+    return live
+
+
 def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
+    # whether the caller named the targets, or wants loops everywhere
+    targeted = tids is not None
+
     if tids is None:
         # find loops everywhere
-        tids = tn.tensor_map.keys()
+        tids = tuple(tn.tensor_map)
         grow_from = "any"
     elif isinstance(tids, int):
         # handle single tid region
         tids = (tids,)
+
+    if not tids:
+        # no targets -> no gloops
+        return
 
     if grow_from in ("all", "alldangle"):
         # take `tids` as single initial region
@@ -941,12 +980,59 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
     else:
         dangle_tids = set()
 
+    if (max_size == "min") or ((max_size is None) and dangle_tids):
+        # the first, and thus smallest, valid gloop sets the maximum size,
+        # which any region does for a dangling target, so covering matches
+
+        # TODO: for dangling targets, resolve the size with them not exempt,
+        # so that they sit within a real loop
+
+        mode = "min"
+        max_size = None
+    elif max_size is None:
+        # grow until every target tid is covered by at least one gloop
+
+        # TODO: add a mode taking the smallest gloop per target instead of a
+        # single size, so one awkward region does not enlarge every other
+
+        mode = "cover"
+        remaining = set(tids)
+        # TODO: cache this via an `info` dict, it is recomputed every call
+        # only tids in the 2-core can appear in a gloop, so cover at most those
+        uncoverable = remaining - _get_two_core_tids(tn)
+        if uncoverable:
+            if targeted:
+                warnings.warn(
+                    f"The tensors {tuple(sorted(uncoverable))} are outside the "
+                    "2-core, and so can never appear in a generalized loop, "
+                    "ignoring them when choosing the maximum size."
+                )
+            remaining -= uncoverable
+            if not remaining:
+                # no target can appear in a gloop
+                if not targeted:
+                    warnings.warn(
+                        "The tensor network is fully tree like, so it has no "
+                        "generalized loops."
+                    )
+                return
+    elif isinstance(max_size, str):
+        raise ValueError(
+            f"`max_size` must be None, an int or 'min', not {max_size}."
+        )
+    else:
+        mode = "fixed"
+
     # cache neighbors for speed
     tid2inds = {}
     seen = set()
 
     while queue:
         region = queue.popleft()
+
+        if (max_size is not None) and (len(region) > max_size):
+            # queue is ordered by size -> nothing valid left
+            break
 
         inds_once = set()
         inds_more = set()
@@ -988,9 +1074,16 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
 
         if valid_gloop:
             # valid region: no node is connected by a single bond only
-            if max_size is None:
+            if mode == "cover":
+                remaining.difference_update(region)
+                if not remaining:
+                    # everything covered -> finish this size shell only
+                    max_size = len(region)
+                    mode = "fixed"
+            elif mode == "min":
                 # automatically set maximum region size
                 max_size = len(region)
+                mode = "fixed"
             yield tuple(sorted(region))
 
         if (max_size is None) or len(region) < max_size:
@@ -1019,10 +1112,13 @@ def gen_gloops(
     ----------
     tn : TensorNetwork
         The tensor network to find loops in.
-    max_size : None or int
-        Set the maximum number of tensors that can appear in a region. If
-        ``None``, wait until any valid region is found and set that as the
-        maximum size.
+    max_size : None, int or "min"
+        The maximum number of tensors that can appear in a region. If
+        ``None``, grow the regions until every target tid, i.e. ``tids`` or
+        every tid, appears in at least one loop, then use that size. Targets
+        outside the 2-core never appear in a loop and are ignored, with a
+        warning if ``tids`` was given or the network is tree like. If
+        ``"min"``, instead use the size of the first valid region found.
     tids : None or sequence of int, optional
         If supplied, only yield loops containing these tids, see
         ``grow_from``.
@@ -1033,7 +1129,8 @@ def gen_gloops(
         in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to
         be dangling, i.e. 1-degree connected. This is useful for computing
         local expectations where the operator insertion breaks the loop
-        assumption locally.
+        assumption locally. Any region covers a dangling target, so with
+        these ``max_size=None`` acts like ``"min"``.
     num_joins : int, optional
         If larger than 1, repeatedly generate larger loops by joining together
         the initial set (individually with size up to ``max_size``) of
@@ -1156,10 +1253,11 @@ def get_loop_union(
         The tensor network to find the loop union region in.
     tids : sequence of int
         The tensor ids to consider.
-    max_size : None or int, optional
+    max_size : None, int or "min", optional
         The maximum number of tensors that can appear in the region. If
-        ``None``, wait until any valid region is found and set that as the
-        maximum size.
+        ``None``, grow the regions until every tid in ``tids`` appears in at
+        least one loop, then use that size. If ``"min"``, instead use the
+        size of the first valid region found. See :func:`gen_gloops`.
     grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
         Only if ``tids`` is specified, this determines how to filter
         loops. If 'all', only take loops containing *all* of the tids

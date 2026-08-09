@@ -1,3 +1,5 @@
+import warnings
+
 import autoray as ar
 import pytest
 from numpy.testing import assert_allclose
@@ -349,6 +351,70 @@ def test_local_expectation_gloop_expand(grow_from):
         G, where, gloops=gloops, gauges=gauges, grow_from=grow_from
     )
     assert o_ex == pytest.approx(o_cl, rel=0.4, abs=0.01)
+
+
+class TestGetLocalGloops:
+    @pytest.mark.parametrize("gloops", [None, "min", 4])
+    def test_specs_agree_on_covered_lattice(self, gloops):
+        # every site of a PEPS is in a plaquette -> the automatic size, 'min'
+        # and the explicit size all give the same clusters
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        clusters = peps.get_local_gloops(where=[(1, 1)], gloops=gloops)
+        assert sorted(map(len, clusters)) == [1, 4, 4, 4, 4]
+
+    @pytest.mark.parametrize("gloops", [None, "min", 4])
+    def test_strict_size_keeps_base_region_once(self, gloops):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        clusters = peps.get_local_gloops(
+            where=[(1, 1)], gloops=gloops, strict_size=True
+        )
+        assert len(clusters) == len(set(clusters)) == 5
+
+    def test_strict_size_keeps_oversized_base_region(self):
+        # the base region is kept even when it exceeds `strict_size`
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        where = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 2)]
+        clusters = peps.get_local_gloops(
+            where=where, gloops=4, grow_from="any", strict_size=True
+        )
+        assert len(clusters) == len(set(clusters))
+        assert frozenset(where) in clusters
+
+    def test_strict_size_accepts_an_integer_size(self):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            peps.get_local_gloops(where=[(1, 1)], gloops=4, strict_size=True)
+
+    @pytest.mark.parametrize("gloops", [None, "min", "supplied"])
+    def test_strict_size_warns_without_an_integer_size(self, gloops):
+        # only an integer size is known before the gloops are generated
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        if gloops == "supplied":
+            gloops = tuple(peps.gen_gloops_sites(4))
+        with pytest.warns(UserWarning, match="requires an integer"):
+            peps.get_local_gloops(
+                where=[(1, 1)], gloops=gloops, strict_size=True
+            )
+
+    @pytest.mark.parametrize(
+        "grow_from,gloops,expected",
+        [
+            ("all", None, [2, 4, 4]),
+            ("all", "min", [2, 4, 4]),
+            ("all", 4, [2, 4, 4]),
+            # the automatic size does not expand when the targets can dangle
+            ("alldangle", None, [2, 2]),
+            ("alldangle", "min", [2, 2]),
+            ("alldangle", 4, [2, 2, 4, 4]),
+        ],
+    )
+    def test_dangle_modes_ignore_covering(self, grow_from, gloops, expected):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        clusters = peps.get_local_gloops(
+            where=[(1, 1), (1, 2)], gloops=gloops, grow_from=grow_from
+        )
+        assert sorted(map(len, clusters)) == expected
 
 
 # ------------------------- long range gating tests ------------------------- #
