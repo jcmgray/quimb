@@ -26,7 +26,7 @@ Release notes for `quimb`.
 - add [`LatticeBondMap`](#LatticeBondMap): helper for consistently assigning lattice bond indices across ordinary and periodic boundaries, use it in PEPS, PEPO, PEPS3D, scalar 2D/3D lattice tensor-network construction, and classical Ising tensor-network construction.
 - [`eigh_truncated`](#eigh_truncated): add a ``shift`` option for optional diagonal regularization.
 - [`CircuitMPSLazy`](#CircuitMPSLazy): add a MPS-based circuit simulator using lazily evaluated gates and periodic automated compression, performing better compared to `CircuitMPS` for long-range gates when using `src` compression method.
-- [`Circuit.from_openqasm3_str`](#Circuit.from_openqasm3_str), [`Circuit.from_openqasm3_file`](#Circuit.from_openqasm3_file), and [`Circuit.from_openqasm3_url`](#Circuit.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
+- [`CircuitBase.from_openqasm3_str`](#CircuitBase.from_openqasm3_str), [`CircuitBase.from_openqasm3_file`](#CircuitBase.from_openqasm3_file), and [`CircuitBase.from_openqasm3_url`](#CircuitBase.from_openqasm3_url): add OpenQASM 3 parsing with custom gates, register broadcasting, and symbolic input tracking.
 - [`CircuitDense`](#CircuitDense): support controlled gates supplied via the ``controls=`` kwarg, by inserting the low-rank hyper tensor network representation of the gate and contracting it into the dense state (avoiding ever forming the full dense operator).
 - add [`gauge_d2bp`](#gauge_d2bp) and the convenience method [`TensorNetwork.gauge_all_belief_propagation`](#TensorNetwork.gauge_all_belief_propagation): gauge an arbitrary tensor network into the 'symmetric' gauge using dense 2-norm belief propagation, equivalent to simple update gauging with the singular values absorbed equally into both tensors, implemented via the new [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric), which inserts the full-rank oblique projectors associated with the current messages.
 - [`D2BP`](#D2BP): add ``power`` and relative ``smudge`` conditioning, [`converge_d2bp`](#converge_d2bp), and support its messages as projector environments, including ``canonize='bp'`` in [`tensor_network_ag_compress_projector`](#tensor_network_ag_compress_projector).
@@ -265,7 +265,7 @@ Other enhancements:
 
 **Breaking Changes**
 
-- move belief propagation to [`quimb.tensor.belief_propagation`](#belief_propagation)
+- move belief propagation to [`quimb.tensor.belief_propagation`](#quimb.tensor.belief_propagation)
 - calling [`tn.contract()`](#TensorNetwork.contract) when an non-zero value has been accrued into `tn.exponent` now automatically re-absorbs that exponent.
 - binary tensor operations that would previously have errored now will align and broadcast
 
@@ -328,7 +328,7 @@ Other enhancements:
 **Enhancements:**
 
 - add [`Circuit.sample_gate_by_gate`](#Circuit.sample_gate_by_gate) and related methods [`Circuit.reordered_gates_dfs_clustered`](#Circuit.reordered_gates_dfs_clustered) and [`Circuit.get_qubit_distances`](#Circuit.get_qubit_distances) for sampling a circuit using the 'gate by gate' method introduced in https://arxiv.org/abs/2112.08499.
-- add [`Circuit.draw`](#Circuit.draw) for drawing a very simple circuit schematic.
+- add [`CircuitBase.draw`](#CircuitBase.draw) for drawing a very simple circuit schematic.
 - [`Circuit`](#Circuit): by default turn on `simplify_equalize_norms` and use a `group_size=10` for sampling. This should result in faster and more stable sampling.
 - [`Circuit`](#Circuit): use `numpy.random.default_rng` for random number generation.
 - add [`qtn.circ_a2a_rand`](#circ_a2a_rand) for generating random all-to-all circuits.
@@ -417,7 +417,7 @@ Other enhancements:
 
 **Bug fixes:**
 
-- [`Circuit.apply_gate_raw`](#Circuit.apply_gate_raw): fix kwarg bug ({pull}`226`)
+- [`CircuitBase.apply_gate_raw`](#CircuitBase.apply_gate_raw): fix kwarg bug ({pull}`226`)
 - fix for retrieving `opt_einsum.PathInfo` for single scalar contraction ({issue}`231`)
 
 
@@ -620,7 +620,7 @@ Other enhancements:
   [Tensor.idxmax](#Tensor.idxmax) for finding the index of the
   minimum/maximum element.
 - 2D and 3D classical partition function TN builders: allow output indices.
-- [`quimb.tensor.belief_propagation`](#belief_propagation):
+- [`quimb.tensor.belief_propagation`](#quimb.tensor.belief_propagation):
   add various 1-norm/2-norm dense/lazy BP algorithms.
 
 **Bug fixes:**
@@ -642,7 +642,7 @@ Other enhancements:
 
 **Enhancements:**
 
-- add OpenQASM 2.0 parsing support: [`Circuit.from_openqasm2_file`](#Circuit.from_openqasm2_file),
+- add OpenQASM 2.0 parsing support: [`CircuitBase.from_openqasm2_file`](#CircuitBase.from_openqasm2_file),
 - [`Circuit`](#Circuit): add RXX, RYY, CRX, CRY, CRZ, toffoli, fredkin, givens gates
 - truncate TN pretty html reprentation to 100 tensors for performance
 - add [`Tensor.sum_reduce`](#Tensor.sum_reduce) and [`Tensor.vector_reduce`](#Tensor.vector_reduce)
@@ -666,11 +666,11 @@ Other enhancements:
 
 - add {func}`.MPS_COPY`.
 - add 'density matrix' and 'zip-up' MPO-MPS algorithms.
-- add `drop_tags` option to {meth}`.tensor.tensor_contract`
+- add `drop_tags` option to {func}`.tensor_core.tensor_contract`
 - {meth}`.compress_all_simple`, allow cutoff.
 - add structure checking debug methods: {meth}`.Tensor.check` and
   {meth}`.TensorNetwork.check`.
-- add several direction contraction utility functions: {func}`.get_symbol`,
+- add several direction contraction utility functions: [`get_symbol`](https://cotengra.readthedocs.io/en/latest/autoapi/cotengra/utils/index.html#cotengra.utils.get_symbol),
   {func}`.inds_to_eq` and {func}`.array_contract`.
 
 **Bug fixes:**
@@ -688,7 +688,7 @@ Other enhancements:
 **Enhancements**
 
 - refactor 'isometrize' methods including new "cayley", "householder" and
-  "torch_householder" methods. See {func}`.isometrize`.
+  "torch_householder" methods. See {func}`.decomp.isometrize`.
 - add {meth}`.TensorNetwork.compute_reduced_factor`
   and {meth}`.TensorNetwork.insert_compressor_between_regions`
   methos, for some RG style algorithms.
@@ -780,7 +780,7 @@ Other enhancements:
 - add {meth}`.TensorNetwork.inds_size`
 - add {meth}`.TensorNetwork.get_hyperinds`
 - add {meth}`.TensorNetwork.outer_size`
-- improve {meth}`.TensorNetwork.group_inds`
+- improve {func}`.tensor_core.group_inds`
 - refactor tensor decompositiona and 'isometrization' methods
 - begin supporting pytree specifications in `TNOptimizer`, e.g. for constants
 - add `experimental` submodule for new sharing features
@@ -830,8 +830,8 @@ Other enhancements:
 - Add {meth}`.TensorNetwork1DFlat.compress_site` for compressing around single sites of MPS etc.
 - Add {func}`.MPS_ghz_state` and {func}`.MPS_w_state` for building bond dimension 2 open boundary MPS reprentations of those states.
 - Various changes in conjunction with [autoray](https://github.com/jcmgray/autoray) to improve the agnostic-ness of tensor network operations with respect to the backend array type.
-- Add {func}`.new_bond` on top of {meth}`.Tensor.new_ind` and {meth}`.Tensor.expand_ind` for more graph orientated construction of tensor networks, see {ref}`tn-creation-graph-style`.
-- Add the {func}`.fsim` gate.
+- Add {func}`.tensor_core.new_bond` on top of {meth}`.Tensor.new_ind` and {meth}`.Tensor.expand_ind` for more graph orientated construction of tensor networks, see {ref}`tn-creation-graph-style`.
+- Add the {func}`.operators.fsim` gate.
 - Make the parallel number generation functions use new `numpy 1.17+` functionality rather than `randomgen` (which can still be used as the underlying bit generator) ({pull}`50`)
 - TN: rename `contraction_complexity` to {meth}`.TensorNetwork.contraction_width`.
 - TN: update {meth}`.TensorNetwork.rank_simplify`, to handle hyper-edges.
@@ -864,9 +864,9 @@ Other enhancements:
 
 - Added {func}`.kraus_op` for general, noisy quantum operations
 - Added {func}`.projector` for constructing projectors from observables
-- Added {func}`.measure` for measuring and collapsing quantum states
+- Added {func}`.calc.measure` for measuring and collapsing quantum states
 - Added {func}`.cprint` pretty printing states in computational basis
-- Added {func}`.simulate_counts` for simulating computational basis counts
+- Added {func}`.calc.simulate_counts` for simulating computational basis counts
 - TN: Add {meth}`.TensorNetwork.rank_simplify`
 - TN: Add {meth}`.TensorNetwork.isel`
 - TN: Add {meth}`.TensorNetwork.cut_iter`
