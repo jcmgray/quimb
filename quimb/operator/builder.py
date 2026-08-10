@@ -46,7 +46,7 @@ _OPCOMPLEX = {
 }
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def get_mat(op, dtype=None):
     if dtype is None:
         if any(
@@ -175,7 +175,7 @@ def simplify_single_site_ops(coeff, ops):
         return 0, None
 
     # find the reference operator that maps to this matrix
-    for op in _OPMAP.keys():
+    for op in _OPMAP:
         ref_mat = get_mat(op)
         ref_coeff = ref_mat.flat[np.argmax(np.abs(ref_mat))]
         if (
@@ -265,7 +265,7 @@ def simplify(terms, atol=1e-12, site_to_reg=None):
     return terms_simplified
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def get_pauli_decomp(op, atol=1e-12, use_zx=False):
     """Decompose the given operator (specified as a label) into a sum of
     Pauli components.
@@ -1449,12 +1449,11 @@ class SparseOperatorBuilder:
             # - must be single input node
             for e in G.edges(current_node):
                 cand_node = e[1]
-                if G.in_degree(cand_node) <= 1:
-                    if G.edges[e]["op"] == op:
-                        G.edges[e]["weight"] += 1
-                        edges_to_terms.setdefault(e, set()).add(t)
-                        terms_to_edges.setdefault(t, set()).add(e)
-                        return cand_node
+                if (G.in_degree(cand_node) <= 1) and (G.edges[e]["op"] == op):
+                    G.edges[e]["weight"] += 1
+                    edges_to_terms.setdefault(e, set()).add(t)
+                    terms_to_edges.setdefault(t, set()).add(e)
+                    return cand_node
 
         def create_new():
             # create a new rail at the next register
@@ -1567,12 +1566,12 @@ class SparseOperatorBuilder:
                 xycoords="data",
                 xytext=p1,
                 textcoords="data",
-                arrowprops=dict(
-                    arrowstyle="->",
-                    color=color,
-                    alpha=0.75,
-                    linewidth=width,
-                ),
+                arrowprops={
+                    "arrowstyle": "->",
+                    "color": color,
+                    "alpha": 0.75,
+                    "linewidth": width,
+                },
             )
             p_middle = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
             ax.text(
