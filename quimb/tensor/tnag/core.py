@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import random
 import warnings
 from collections import defaultdict
 from operator import add, mul
@@ -11,11 +12,15 @@ from autoray import dag, do
 from ...utils import LRU, check_opt, deprecated, ensure_dict
 from ...utils import progbar as Progbar
 from ..contraction import get_symbol
+from ..networking import NetworkPath
 from ..tensor_core import (
+    Tensor,
     TensorNetwork,
     oset,
     rand_uuid,
     tags_to_oset,
+    tensor_canonize_bond,
+    tensor_gauge_simple_bond,
 )
 
 
@@ -712,9 +717,13 @@ def tensor_network_ag_gate_simple(
     G,
     where,
     gauges,
+    *,
+    max_bond=None,
+    cutoff=1e-10,
     renorm=True,
     smudge=1e-12,
     power=1.0,
+    path=None,
     info=None,
     inplace=False,
     **gate_opts,
@@ -734,6 +743,10 @@ def tensor_network_ag_gate_simple(
     gauges : dict[str, array_like]
         The store of gauge bonds, the keys being indices and the values
         being the vectors. Only keys present in this dictionary will be used.
+    max_bond : int, optional
+        The maximum bond dimension to keep when applying the gate.
+    cutoff : float, optional
+        The singular value cutoff to use when applying the gate.
     renorm : bool, optional
         Whether to renormalise the singular after the gate is applied,
         before reinserting them into ``gauges``.
@@ -761,8 +774,14 @@ def tensor_network_ag_gate_simple(
 
     site_tags = tuple(map(tn.site_tag, where))
     tids = tn._get_tids_from_tags(site_tags, "any")
+    nsites = len(tids)
 
-    if len(tids) == 1:
+    if nsites > 2:
+        raise NotImplementedError(
+            "Only gates acting on 1 or 2 sites are currently supported."
+        )
+
+    if nsites == 1:
         # gate acts on a single tensor
         return tensor_network_ag_gate(
             tn,
@@ -772,6 +791,28 @@ def tensor_network_ag_gate_simple(
             inplace=True,
         )
 
+    tida, tidb = tids
+    ta = tn.tensor_map[tida]
+    tb = tn.tensor_map[tidb]
+    if not ta.bonds(tb):
+        # disconnected: assume long range gating
+        return tensor_network_ag_gate_simple_long_range(
+            tn,
+            G=G,
+            where=where,
+            gauges=gauges,
+            max_bond=max_bond,
+            cutoff=cutoff,
+            renorm=renorm,
+            smudge=smudge,
+            power=power,
+            path=path,
+            info=info,
+            inplace=True,
+            **gate_opts,
+        )
+
+    # else nearest neighbor two site gate
     gate_opts.setdefault("absorb", None)
     gate_opts.setdefault("contract", "reduce-split")
     tn_where = tn._select_tids(tids)
@@ -791,6 +832,8 @@ def tensor_network_ag_gate_simple(
             where=where,
             info=info,
             inplace=True,
+            max_bond=max_bond,
+            cutoff=cutoff,
             **gate_opts,
         )
 
@@ -799,6 +842,227 @@ def tensor_network_ag_gate_simple(
         if renorm:
             s = s / do("linalg.norm", s)
         gauges[ix] = s
+
+    return tn
+
+
+def tensor_network_ag_gate_simple_long_range(
+    self,
+    G,
+    where,
+    gauges,
+    *,
+    max_bond=None,
+    cutoff=1e-10,
+    renorm=True,
+    smudge=1e-12,
+    power=1.0,
+    path=None,
+    info=None,
+    reduce_opts=None,
+    compress_opts=None,
+    inplace=False,
+    **kwargs,
+):
+    """Apply a gate to this tensor network at sites ``where`` that are *not*
+    nearest neighbors, using simple update style gauging. The gate is split
+    into a matrix-product operator and applied along a path of sites connecting
+    the two, which is then locally recompressed, with the new singular values
+    reinserted into ``gauges``. This is the long range fallback for
+    :func:`tensor_network_ag_gate_simple`.
+
+    Parameters
+    ----------
+    G : array_like
+        The gate array to apply, should match or be factorable into the shape
+        ``(*phys_dims, *phys_dims)``.
+    where : sequence[node]
+        The two sites to apply the gate to.
+    gauges : dict[str, array_like]
+        The store of gauge bonds, the keys being indices and the values
+        being the vectors. Only keys present in this dictionary will be used.
+    max_bond : int, optional
+        The maximum bond dimension to keep when applying the gate.
+    cutoff : float, optional
+        The singular value cutoff to use when applying the gate.
+    renorm : bool, optional
+        Whether to renormalise the singular values after the gate is applied,
+        before reinserting them into ``gauges``.
+    smudge : float, optional
+        A small value to add to the gauges before multiplying them in and
+        inverting them to avoid numerical issues.
+    power : float, optional
+        The power to raise the singular values to before multiplying them
+        in and inverting them.
+    path : None, "random", int, NetworkPath or sequence[node], optional
+        The path of sites to route the gate along. ``None`` chooses an
+        arbitrary shortest path, ``"random"`` a random shortest path, an
+        ``int`` cyclically selects one of the shortest paths, and a sequence
+        of sites uses that path explicitly.
+    reduce_opts : dict, optional
+        Supplied to the reduced factorization of each path tensor.
+    compress_opts : dict, optional
+        Supplied to the bond compressions along the path.
+
+    Returns
+    -------
+    TensorNetworkGen
+    """
+    from ..gating import maybe_factor_gate
+
+    if not inplace:
+        warnings.warn(
+            "Even with `inplace=False`, the supplied `gauges` dict is still "
+            "modified in place - this is currently the only way to access the "
+            "updated bond gauge."
+        )
+
+    tn = self if inplace else self.copy()
+
+    reduce_opts = ensure_dict(reduce_opts)
+    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("cutoff", cutoff)
+
+    cooa, coob = where
+
+    # first figure out path between the sites
+    inda = tn.site_ind(cooa)
+    indb = tn.site_ind(coob)
+    (tida,) = tn._get_tids_from_inds(inda)
+    (tidb,) = tn._get_tids_from_inds(indb)
+
+    if path is None:
+        # choose arbitrary shortest path
+        path_tids = tn.get_path_between_tids(tida, tidb).tids
+    elif isinstance(path, str) and path == "random":
+        # randomly choose one of the shortest paths, if there are multiple
+        paths = list(tn.gen_all_paths_between_tids(tida, tidb))
+        path_tids = random.choice(paths).tids
+    elif isinstance(path, int):
+        # cyclically choose one of the shortest paths
+        paths = list(tn.gen_all_paths_between_tids(tida, tidb))
+        path_tids = paths[path % len(paths)].tids
+    elif isinstance(path, NetworkPath):
+        # use the supplied path
+        path_tids = path.tids
+    else:
+        # assume path is sequence of sites
+        path_tids = tuple(
+            next(iter(tn._get_tids_from_tags(site))) for site in path
+        )
+
+    # outer inds for the MPO like string
+    uix = [inda, indb]
+    lix = [rand_uuid() for _ in uix]
+
+    # temporary tags to use along the path
+    tags = [f"__TMP{i}__" for i in range(len(path_tids))]
+
+    # now factor gate array
+    # ... first into a full Tensor
+    #     uix
+    #    │   │
+    #    GGGGG
+    #    │   │
+    #     lix
+    G = maybe_factor_gate(G, uix, tn=tn)
+    tG = Tensor(G, inds=(*uix, *lix))
+
+    # then split spatially
+    #    uix[0] uix[1]
+    #        │   │
+    #        G───G
+    #        │   │
+    #    lix[0] lix[1]
+    bond_G = rand_uuid()
+    tG = tG.split(
+        left_inds=[uix[0], lix[0]],
+        right_inds=[uix[1], lix[1]],
+        ltags=tags[0],
+        rtags=tags[-1],
+        bond_ind=bond_G,
+    )
+
+    tn_path = tn._select_tids(path_tids)
+
+    # gauge
+    outer, _ = tn_path.gauge_simple_insert(gauges, smudge=smudge, power=power)
+
+    tngated = tn_path.copy()
+    for tid, tag in zip(path_tids, tags):
+        tngated.tensor_map[tid].add_tag(tag)
+
+    # apply gate lazily to string
+    #    │   bond_G  │
+    #    G───────────G
+    #    │           │
+    #    │  │  │  │  │
+    #   ─○──○──○──○──○─
+    tngated.gate_inds_with_tn_([inda, indb], tG, lix, uix)
+
+    # contract in
+    #    │  │  │  │  │
+    #   ─●──●──●──●──●─
+    #    ╰───────────╯bond_G
+    for tag in (tags[0], tags[-1]):
+        tngated.contract_tags_(tag)
+
+    # canonicalize right sweep
+    #    │  │  │  │  │
+    #   ─▷━━▷━━●──●──●─
+    #          ╰─────╯bond_G
+    for i in range(len(tags) - 1):
+        ta = tngated[tags[i]]
+        tb = tngated[tags[i + 1]]
+        tensor_canonize_bond(
+            ta,
+            tb,
+            # swap gate bond along until end
+            swap_inds=None if i == len(tags) - 2 else bond_G,
+            # since multibonds are fused, this specifies to keep
+            # the names of the original state bond indices
+            bond_ind=tn_path.ind_map,
+        )
+
+    # compression left sweep, storing and using gauges
+    #    │   │   │   │   │
+    #   ─●━•━◁━•━◁━•━◁━•━◁─
+    #      s   s   s   s  ... singular value gauge weights
+    gauges_string = {}
+    for i in range(len(tags) - 1, 0, -1):
+        ta = tngated[tags[i - 1]]
+        tb = tngated[tags[i]]
+        tensor_gauge_simple_bond(
+            ta,
+            tb,
+            gauges=gauges_string,
+            smudge=smudge,
+            power=power,
+            renorm=renorm,
+            reduced="right",
+            reduce_opts=reduce_opts,
+            compress_opts=compress_opts,
+            info=info,
+        )
+
+    # optionally record the new singular values for each string bond
+    if info is not None:
+        for ix, s in gauges_string.items():
+            info["singular_values", ix] = s
+
+    # update tensors in original network
+    for tid, tag in zip(path_tids, tags):
+        tnew = tngated[tag]
+        told = tn_path.tensor_map[tid]
+        tnew.transpose_like_(told)
+        told.modify(data=tnew.data)
+
+    # update new gauges along string
+    gauges.update(gauges_string)
+
+    # ungauge outer indices
+    tn_path.gauge_simple_remove(outer)
 
     return tn
 
@@ -1094,6 +1358,29 @@ class TensorNetworkGen(TensorNetwork):
             )
             for tid in self.tensor_map
         }
+
+    def get_path_between_sites(self, sitea, siteb):
+        """Get a path of sites between ``sitea`` and ``siteb``. This is a simple
+        wrapper around :meth:`~quimb.tensor.networking.get_path_between_tids`
+        that works with the sites rather than ``tids``.
+
+        Parameters
+        ----------
+        sitea : hashable
+            The first site.
+        siteb : hashable
+            The second site.
+
+        Returns
+        -------
+        Path
+            A path object containing the sites along the path.
+        """
+        tid2site = self._get_tid_to_site_map()
+        (tida,) = self._get_tids_from_tags(self.site_tag(sitea))
+        (tidb,) = self._get_tids_from_tags(self.site_tag(siteb))
+        path = self.get_path_between_tids(tida, tidb)
+        return tuple(tid2site[tid] for tid in path.tids)
 
     def gen_gloops_sites(
         self,
