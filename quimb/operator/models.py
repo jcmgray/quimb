@@ -174,7 +174,7 @@ def fermi_hubbard_from_edges(
     t=1.0,
     U=1.0,
     mu=0.0,
-    order=None,
+    order="interleaved",
     sector=None,
     symmetry=None,
     hilbert_space=None,
@@ -226,12 +226,18 @@ def fermi_hubbard_from_edges(
         The chemical potential. Default is 0.0. If a tuple it specifies the up
         and down spin chemical potentials respectively. A dict or callable can
         be supplied to have site-dependent chemical potentials.
-    order : callable or sequence of hashable objects, optional
-        If provided, use this to order the sites. If a callable, it should be a
-        sorting key. If a sequence, it should be a permutation of the sites,
-        and ``key=order.index`` will be used.
-    sector : {None, str, int, ((int, int), (int, int))}, optional
+    order : str, callable or sequence of hashable objects, optional
+        How to order the sites, which sets the Jordan-Wigner strings. The
+        default, "interleaved", alternates the spins at each coordinate,
+        making the on-site interaction local at the cost of one extra Z
+        per hopping term. Pass "blocked" to place all of one spin then all
+        of the other. If a callable, it should be a sorting key. If a
+        sequence, it should be a permutation of the sites.
+    sector : {None, str, int, dict, (int, int), \
+              ((int, int), (int, int))}, optional
         The sector of the Hilbert space. If None, no sector is assumed.
+        For U1U1 the filling of each spin can be given as
+        ``{"↑": ka, "↓": kb}`` or simply ``(ka, kb)``.
     symmetry : {None, "Z2", "U1", "U1U1"}, optional
         The symmetry of the Hilbert space if any. If `None` and a `sector` is
         provided, the symmetry will be inferred from the sector if possible.
@@ -257,6 +263,7 @@ def fermi_hubbard_from_edges(
         hilbert_space = HilbertSpace(
             sites=[(s, coo) for s in "↑↓" for coo in sites],
             order=order,
+            species=lambda site: site[0],
             sector=sector,
             symmetry=symmetry,
         )

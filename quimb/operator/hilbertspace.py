@@ -46,26 +46,101 @@ def valid_u1_sector(sector, nsites):
     return isinstance(sector, int) and (0 <= sector <= nsites)
 
 
-def valid_u1u1_sector(sector, nsites):
-    """Check if the given sector is valid for U1U1 symmetry."""
+def parse_u1u1_sector(sector, nsites, species_regs=None):
+    """Parse a U1U1 sector into the ``((na, ka), (nb, kb))`` form, where
+    ``na`` and ``nb`` are the number of sites of each species, and ``ka`` and
+    ``kb`` their fillings. Three forms are accepted:
+
+    - ``{speciesa: ka, speciesb: kb}``: the fillings keyed by species label
+    - ``(ka, kb)``: the fillings alone, paired with the species in sorted
+      label order
+    - ``((na, ka), (nb, kb))``: the sizes and fillings given explicitly
+
+    The first two require ``species_regs``, since they name no sizes.
+
+    Parameters
+    ----------
+    sector : dict, tuple[int] or ((int, int), (int, int))
+        The sector to parse.
+    nsites : int
+        The total number of sites.
+    species_regs : dict[hashable, tuple[int]], optional
+        The registers of each species, keyed by species label, in sorted label
+        order. If not given, only the explicit form can be parsed.
+
+    Returns
+    -------
+    sector : ((int, int), (int, int)) or None
+        The parsed sector, or None if it is not a valid U1U1 sector.
+    """
+    if isinstance(sector, dict):
+        if (species_regs is None) or (sector.keys() != species_regs.keys()):
+            return None
+        # order by species label, as `species_regs` already is
+        sector = tuple(
+            (len(species_regs[label]), sector[label]) for label in species_regs
+        )
+
+    elif isinstance(sector, (tuple, list)) and all(
+        isinstance(k, int) for k in sector
+    ):
+        if (species_regs is None) or (len(sector) != len(species_regs)):
+            return None
+        sector = tuple(
+            (len(regs), k) for regs, k in zip(species_regs.values(), sector)
+        )
+
     try:
         (na, ka), (nb, kb) = sector
-        return (
-            isinstance(na, int)
-            and isinstance(ka, int)
-            and isinstance(nb, int)
-            and isinstance(kb, int)
-            and (na + nb == nsites)
-            and (na >= 0)
-            and (nb >= 0)
-            and (0 <= ka <= na)
-            and (0 <= kb <= nb)
-        )
     except (TypeError, ValueError):
-        return False
+        return None
+
+    valid = (
+        isinstance(na, int)
+        and isinstance(ka, int)
+        and isinstance(nb, int)
+        and isinstance(kb, int)
+        and (na + nb == nsites)
+        and (na >= 0)
+        and (nb >= 0)
+        and (0 <= ka <= na)
+        and (0 <= kb <= nb)
+    )
+
+    return ((na, ka), (nb, kb)) if valid else None
 
 
-def parse_symmetry_and_sector(nsites, sector=None, symmetry=None):
+def parse_species(sites, species):
+    """Group ordered sites by species.
+
+    Parameters
+    ----------
+    sites : sequence of hashable
+        The sites, in register order.
+    species : callable or dict[hashable, hashable] or None
+        How to get the species label of each site. If None, return None.
+
+    Returns
+    -------
+    species_regs : dict[hashable, tuple[int]] or None
+        The registers of each species, keyed by species label, in sorted
+        label order.
+    """
+    if species is None:
+        return None
+
+    get = species if callable(species) else species.__getitem__
+
+    groups = {}
+    for reg, site in enumerate(sites):
+        groups.setdefault(get(site), []).append(reg)
+
+    return {label: tuple(groups[label]) for label in sorted(groups)}
+
+
+def parse_symmetry_and_sector(
+    nsites, sector=None, symmetry=None, species_regs=None
+):
     if sector is None:
         return None, None
 
@@ -78,7 +153,7 @@ def parse_symmetry_and_sector(nsites, sector=None, symmetry=None):
         elif isinstance(sector, int):
             symmetry = "U1"
 
-        elif valid_u1u1_sector(sector, nsites):
+        elif parse_u1u1_sector(sector, nsites, species_regs) is not None:
             symmetry = "U1U1"
 
         else:
@@ -110,16 +185,19 @@ def parse_symmetry_and_sector(nsites, sector=None, symmetry=None):
         sector = int(sector)
 
     elif symmetry == "U1U1":
-        if not valid_u1u1_sector(sector, nsites):
-            raise ValueError(
+        parsed = parse_u1u1_sector(sector, nsites, species_regs)
+        if parsed is None:
+            msg = (
                 f"Invalid `sector` {sector} for `symmetry` "
                 f"{symmetry} and nsites={nsites}."
             )
-        # convert to tuple of ints
-        sector = (
-            (int(sector[0][0]), int(sector[0][1])),
-            (int(sector[1][0]), int(sector[1][1])),
-        )
+            if species_regs is None:
+                msg += (
+                    " Note the `{species: filling}` and `(ka, kb)` forms "
+                    "need `species` to be supplied as well."
+                )
+            raise ValueError(msg)
+        sector = parsed
 
     return symmetry, sector
 
@@ -172,6 +250,48 @@ def parse_sites_dims(sites, dims):
     return parsed_sites, parsed_dims, dims_used
 
 
+ORDER_PRESETS = {
+    # all sites of one species, then all of the next: ↑0 ↑1 ↑2 ↓0 ↓1 ↓2
+    "blocked": lambda site: (site[0], site[1:]),
+    # species alternating at each position: ↑0 ↓0 ↑1 ↓1 ↑2 ↓2
+    "interleaved": lambda site: (site[1:], site[0]),
+}
+
+
+def parse_order_preset(sites, order):
+    """Get the sorting key for a named ordering preset, checking that the
+    sites are labelled in the ``(species, ...)`` form the presets require.
+
+    Parameters
+    ----------
+    sites : sequence of hashable
+        The sites the ordering will be applied to.
+    order : str
+        The name of the preset, one of ``ORDER_PRESETS``.
+
+    Returns
+    -------
+    callable
+        A sorting key function.
+    """
+    try:
+        key = ORDER_PRESETS[order]
+    except KeyError:
+        raise ValueError(
+            f"Unknown ordering preset {order!r}, should be one of "
+            f"{tuple(ORDER_PRESETS)}."
+        ) from None
+
+    for site in sites:
+        if not isinstance(site, tuple) or len(site) < 2:
+            raise ValueError(
+                f"The {order!r} ordering needs sites labelled as tuples of "
+                f"(species, ...), but got {site!r}."
+            )
+
+    return key
+
+
 class HilbertSpace:
     """Take a set of 'sites' (any sequence of sortable, hashable objects), and
     map this into a 'register' or linearly indexed range, optionally using a
@@ -207,14 +327,28 @@ class HilbertSpace:
         same dimension. If a sequence, it should be the same length as `sites`.
         You can also provide the dimensions as part of the `sites` argument
         by passing a dict, in which case this argument is ignored.
-    order : bool, sequence[hashable] or callable, optional
+    order : bool, str, sequence[hashable] or callable, optional
         How to order the sites. If `None` or `False` (default), the sites are
         kept in the order supplied. If `True`, the sites are sorted. If a
-        sequence, it should be a permutation of the sites, and this will be
-        used to order them. If a callable, it should be a sorting key function
-        which will be used to order the sites.
-    sector : {None, str, int, ((int, int), (int, int))}, optional
-        The sector of the Hilbert space. If None, no sector is assumed.
+        string, it should name one of ``ORDER_PRESETS``: "blocked" groups the
+        sites into a contiguous block per species, "interleaved" alternates the
+        species at each position. Both require sites labelled as
+        ``(species, ...)`` tuples, and take the species blocks in sorted order.
+        If a sequence, it should be a permutation of the sites, and this will
+        be used to order them. If a callable, it should be a sorting key
+        function which will be used to order the sites.
+    species : callable or dict[hashable, hashable], optional
+        The species of each site, i.e. which conserved charge its occupation
+        counts towards, given either as a function of the site or a mapping
+        from site to species label. Required for the ``{species: filling}`` and
+        ``(ka, kb)`` forms of a U1U1 ``sector``.
+    sector : {None, str, int, dict, (int, int), ((int, int), (int, int))}, \
+             optional
+        The sector of the Hilbert space. If None, no sector is assumed. For
+        U1U1 the filling of each species can be given as ``{species: filling}``
+        or, in sorted species label order, as ``(ka, kb)``, both of which need
+        ``species``. The explicit ``((na, ka), (nb, kb))`` form does not, but
+        assumes the species occupy contiguous blocks of registers.
     symmetry : {None, "Z2", "U1", "U1U1"}, optional
         The symmetry of the Hilbert space if any. If `None` and a `sector` is
         provided, the symmetry will be inferred from the sector if possible.
@@ -225,6 +359,7 @@ class HilbertSpace:
         sites,
         dims=2,
         order=None,
+        species=None,
         sector=None,
         symmetry=None,
     ):
@@ -232,13 +367,18 @@ class HilbertSpace:
             sites=sites,
             dims=dims,
         )
-        self.set_ordering(order)
+        self._set_ordering(order)
+
+        self._species = species
+        self._species_regs = parse_species(self._sites, species)
 
         self._symmetry, self._sector = parse_symmetry_and_sector(
             nsites=self.nsites,
             sector=sector,
             symmetry=symmetry,
+            species_regs=self._species_regs,
         )
+        self._build_blocked_perm()
 
         # lazily computed:
         # size of the Hilbert space
@@ -250,6 +390,71 @@ class HilbertSpace:
         # storage for pascal table
         self._pt = None
 
+        self._build_config_maps()
+
+    def _build_blocked_perm(self):
+        """Build the permutation between the register ordering and the blocked
+        ordering, which groups each species into a contiguous block, and is
+        what U1U1 enumerates configurations in. The two coincide unless the
+        species are interleaved among the registers. This depends on the
+        ordering and species alone, not the symmetry, since a sector can be
+        supplied per call, and the coupling map is built once for all of them.
+        """
+        self._blocked_perm = None
+        self._blocked_perm_inv = None
+
+        if self._species_regs is not None:
+            # blocked index i holds register perm[i]
+            perm = [
+                reg for regs in self._species_regs.values() for reg in regs
+            ]
+            if perm != sorted(perm):
+                self._blocked_perm = np.array(perm, dtype=np.int64)
+                self._blocked_perm_inv = np.argsort(self._blocked_perm)
+
+        # only the default sector's mappings are permuted here, a sector
+        # supplied per call is handled by whoever uses it
+        self._blocked_default = self.needs_blocking and (
+            self._symmetry == "U1U1"
+        )
+
+    @property
+    def needs_blocking(self):
+        """Whether the species are interleaved among the registers, so that
+        the blocked ordering differs from the register ordering.
+        """
+        return self._blocked_perm is not None
+
+    def _flatconfig_to_blocked(self, flatconfig):
+        """Permute a flat configuration from register order into the blocked
+        ordering, along the last axis. Only the default sector's mappings are
+        permuted, so this is a no-op unless that sector is U1U1.
+        """
+        if not self._blocked_default:
+            return flatconfig
+        return flatconfig[..., self._blocked_perm]
+
+    def _flatconfig_from_blocked(self, flatconfig):
+        """Permute a flat configuration from the blocked ordering back into
+        register order. The inverse of ``_flatconfig_to_blocked``.
+        """
+        if not self._blocked_default:
+            return flatconfig
+        return flatconfig[..., self._blocked_perm_inv]
+
+    def site_to_blocked_reg(self, site):
+        """Convert a site to its index in the blocked ordering, which matches
+        its register unless the species are interleaved.
+        """
+        reg = self._mapping[site]
+        if self._blocked_perm_inv is None:
+            return reg
+        return int(self._blocked_perm_inv[reg])
+
+    def _build_config_maps(self):
+        """Build the rank <-> flat configuration mappings. These depend on the
+        ordering, so are only built once it is fixed.
+        """
         if self._dims_used == {2}:
             # all qubit hilbert space
 
@@ -320,17 +525,19 @@ class HilbertSpace:
                 strides=self.get_strides(),
             )
 
-    def set_ordering(self, order):
-        """Set the ordering of the sites in this Hilbert space.
+    def _set_ordering(self, order):
+        """Set the ordering of the sites in this Hilbert space. Only called at
+        construction, since the ordering is immutable thereafter.
 
         Parameters
         ----------
-        order : bool, sequence[hashable] or callable, optional
+        order : bool, str, sequence[hashable] or callable, optional
             How to order the sites. If `None` or `False` (default), the sites
             are kept in the order supplied. If `True`, the sites are sorted. If
-            a sequence, it should be a permutation of the sites, and this will
-            be used to order them. If a callable, it should be a sorting key
-            function which will be used to order the sites.
+            a string, it should name one of ``ORDER_PRESETS``. If a sequence,
+            it should be a permutation of the sites, and this will be used to
+            order them. If a callable, it should be a sorting key function
+            which will be used to order the sites.
         """
         if order is None or order is False:
             # no sorting
@@ -338,6 +545,10 @@ class HilbertSpace:
         elif order is True:
             # default sorting
             sites = sorted(self._sites)
+        elif isinstance(order, str):
+            # named preset, sorting key based on site species
+            key = parse_order_preset(self._sites, order)
+            sites = sorted(self._sites, key=key)
         elif not callable(order):
             # assume sequence given directly
             key = {s: i for i, s in enumerate(order)}.get
@@ -357,6 +568,39 @@ class HilbertSpace:
         # reset invalidated lazily computed values
         self._sizes = None
         self._strides = None
+
+    def set_ordering(self, order):
+        """Deprecated: the ordering of a ``HilbertSpace`` is immutable."""
+        raise TypeError(
+            "The ordering of a HilbertSpace is immutable, use `with_ordering` "
+            "to get a new HilbertSpace with a different ordering."
+        )
+
+    def with_ordering(self, order):
+        """Get a new ``HilbertSpace`` with the same sites, dimensions, symmetry
+        and sector, but a different ordering.
+
+        Parameters
+        ----------
+        order : bool, str, sequence[hashable] or callable, optional
+            How to order the sites. If `None` or `False`, the sites are kept in
+            the current order. If `True`, the sites are sorted. If a string, it
+            should be one of the ordering presets, "blocked" or "interleaved".
+            If a sequence, it should be a permutation of the sites, and this
+            will be used to order them. If a callable, it should be a sorting
+            key function which will be used to order the sites.
+
+        Returns
+        -------
+        HilbertSpace
+        """
+        return self.__class__(
+            sites={s: self._dims[s] for s in self._sites},
+            order=order,
+            species=self._species,
+            sector=self._sector,
+            symmetry=self._symmetry,
+        )
 
     @classmethod
     def from_edges(cls, edges, order=None):
@@ -414,6 +658,7 @@ class HilbertSpace:
                 nsites=self.nsites,
                 sector=sector,
                 symmetry=symmetry,
+                species_regs=self._species_regs,
             )
         else:
             # use defaults
@@ -501,6 +746,7 @@ class HilbertSpace:
                 nsites=self.nsites,
                 sector=sector,
                 symmetry=symmetry,
+                species_regs=self._species_regs,
             )
         else:
             # use defaults
@@ -570,7 +816,7 @@ class HilbertSpace:
             A flat configuration, with the occupation number or spin state of
             each site in the order given by this ``HilbertSpace``.
         """
-        return self._rank_to_flatconfig(rank)
+        return self._flatconfig_from_blocked(self._rank_to_flatconfig(rank))
 
     def flatconfig_to_rank(self, flatconfig):
         """Convert a flat configuration into a rank (linear index).
@@ -587,7 +833,9 @@ class HilbertSpace:
             The rank (linear index) of the flat configuration in the Hilbert
             space.
         """
-        return self._flatconfig_to_rank(flatconfig)
+        return self._flatconfig_to_rank(
+            self._flatconfig_to_blocked(flatconfig)
+        )
 
     def config_to_flatconfig(self, config):
         """Turn a configuration into a flat configuration, assuming the order
@@ -691,7 +939,7 @@ class HilbertSpace:
             each site in the order given by this ``HilbertSpace``.
         """
         r = self.rand_rank(seed=seed)
-        return self._rank_to_flatconfig(r)
+        return self.rank_to_flatconfig(r)
 
     def rand_config(self, seed=None):
         """Get a random configuration.
