@@ -850,7 +850,7 @@ class SparseOperatorBuilder:
             dtype = self._dtype
         return calc_dtype_cached(dtype, self.iscomplex)
 
-    def get_coupling_map(self, dtype=None):
+    def get_coupling_map(self, dtype=None, blocked=False):
         """Build and cache the coupling map for the specified dtype.
 
         Parameters
@@ -858,6 +858,10 @@ class SparseOperatorBuilder:
         dtype : numpy.dtype, optional
             The data type of the coefficients. If not provided, will be
             automatically determined based on the terms in the operator.
+        blocked : bool, optional
+            Whether to label the sites by their index in the blocked ordering,
+            which groups each species contiguously, rather than by their
+            register. Only the U1U1 kernels enumerate configurations that way.
 
         Returns
         -------
@@ -865,16 +869,19 @@ class SparseOperatorBuilder:
             The operator defined as tuple of flat arrays.
         """
         dtype = self.get_dtype(dtype)
+        # without interleaved species the two orderings coincide
+        blocked = blocked and self.hilbert_space.needs_blocking
 
         try:
-            coupling_map = self._coupling_maps[dtype]
+            coupling_map = self._coupling_maps[dtype, blocked]
         except KeyError:
+            hs = self.hilbert_space
             coupling_map = build_coupling_numba(
                 self._get_terms_final(),
-                self.site_to_reg,
+                hs.site_to_blocked_reg if blocked else self.site_to_reg,
                 dtype=dtype,
             )
-            self._coupling_maps[dtype] = coupling_map
+            self._coupling_maps[dtype, blocked] = coupling_map
 
         return coupling_map
 
@@ -900,6 +907,7 @@ class SparseOperatorBuilder:
         """
         dtype = self.get_dtype(dtype)
         coupling_map = self.get_coupling_map(dtype=dtype)
+        # no sector is involved, so this stays in the register ordering
         return configcore.flatconfig_coupling_numba(
             flatconfig,
             coupling_map=coupling_map,
@@ -1037,10 +1045,13 @@ class SparseOperatorBuilder:
             The total number of basis states.
         """
         dtype = self.get_dtype(dtype)
-        coupling_map = self.get_coupling_map(dtype=dtype)
         d = self.hilbert_space.get_size(sector, symmetry)
         sector_nb, symmetry_nb = self.hilbert_space.get_sector_numba(
             sector=sector, symmetry=symmetry
+        )
+        # only U1U1 (symmetry 3) enumerates in the blocked ordering
+        coupling_map = self.get_coupling_map(
+            dtype=dtype, blocked=symmetry_nb == 3
         )
         kwargs = {
             "coupling_map": coupling_map,
@@ -1218,7 +1229,10 @@ class SparseOperatorBuilder:
         )
 
         kwargs = {
-            "coupling_map": self.get_coupling_map(dtype=dtype),
+            # only U1U1 (symmetry 3) enumerates in the blocked ordering
+            "coupling_map": self.get_coupling_map(
+                dtype=dtype, blocked=symmetry_nb == 3
+            ),
             "sector": sector_nb,
             "symmetry": symmetry_nb,
         }
@@ -1714,13 +1728,14 @@ class SparseOperatorBuilder:
         dims = [2] * self.nsites
         for ops, coeff in self._get_terms_final().items():
             if not ops:
-                ops = [("I", 0)]
-
-            mats = []
-            inds = []
-            for op, reg in ops:
-                mats.append(get_mat(op))
-                inds.append(reg)
+                # all identity term, place directly on the first register
+                mats, inds = [get_mat("I")], [0]
+            else:
+                mats = []
+                inds = []
+                for op, site in ops:
+                    mats.append(get_mat(op))
+                    inds.append(self.site_to_reg(site))
 
             Aterm = coeff * ikron(mats, dims, inds, **ikron_opts)
 

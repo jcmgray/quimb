@@ -105,3 +105,45 @@ def test_fermi_hubbard_hex():
     # solve for groundstate
     energy = qu.groundenergy(H)
     assert energy == pytest.approx(-8.67415949)
+
+
+class TestFermiHubbardOrdering:
+    edges = ((0, 1), (1, 2), (2, 3))
+
+    def test_default_is_interleaved(self):
+        sob = qop.fermi_hubbard_from_edges(self.edges)
+        assert sob.hilbert_space.sites[:4] == (
+            ("↑", 0),
+            ("↓", 0),
+            ("↑", 1),
+            ("↓", 1),
+        )
+
+    @pytest.mark.parametrize(
+        "sector", [(2, 2), {"↑": 2, "↓": 2}, ((4, 2), (4, 2))]
+    )
+    def test_species_supplied_so_terse_sectors_work(self, sector):
+        # the builder knows the species, so no extra argument is needed
+        sob = qop.fermi_hubbard_from_edges(self.edges, U=2.0, mu=0.3)
+        assert sob.hilbert_space.get_size(sector) == 36
+        assert qu.groundenergy(
+            sob.build_sparse_matrix(sector=sector)
+        ) == pytest.approx(-4.07594281)
+
+    def test_ordering_does_not_change_the_physics(self):
+        es = []
+        for order in ("blocked", "interleaved"):
+            sob = qop.fermi_hubbard_from_edges(
+                self.edges, U=2.0, mu=0.3, order=order
+            )
+            es.append(qu.groundenergy(sob.build_sparse_matrix(sector=(2, 2))))
+        assert es[0] == pytest.approx(es[1])
+
+    def test_interleaved_gives_a_smaller_mpo(self):
+        # the reason interleaved is the default: the on-site interaction is
+        # register local, so the bond dimension stops growing with length
+        edges = [(i, i + 1) for i in range(9)]
+        blocked = qop.fermi_hubbard_from_edges(edges, order="blocked")
+        interleaved = qop.fermi_hubbard_from_edges(edges)
+        assert interleaved.build_mpo().max_bond() == 7
+        assert blocked.build_mpo().max_bond() > 7

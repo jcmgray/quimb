@@ -3,7 +3,27 @@
 Release notes for `quimb`.
 
 
-## v1.15.0 (unreleased)
+## v1.15.1 (unreleased)
+
+**Breaking Changes:**
+
+- [`HilbertSpace`](#HilbertSpace): the site ordering is now immutable. ``set_ordering`` raises ``TypeError``, use the new [`with_ordering`](#HilbertSpace.with_ordering) to get a new space ordered differently.
+- [`fermi_hubbard_from_edges`](#fermi_hubbard_from_edges): default to ``order="interleaved"``, alternating the spins at each coordinate rather than blocking them. This makes the on-site interaction register local, so the MPO bond dimension no longer grows with system size, at the cost of one extra Jordan-Wigner Z per hopping term (~10% slower matvec). The register layout changes, so anything keyed by rank or flatconfig needs rebuilding. Pass ``order="blocked"`` for the old layout.
+
+
+**Enhancements:**
+
+- [`HilbertSpace`](#HilbertSpace): support ``U1U1`` sectors whatever the ordering, rather than only when each species occupies a contiguous block of registers. A new ``species`` argument says which conserved charge each site counts towards, which also allows the shorter sector forms ``{species: filling}`` and ``(ka, kb)`` alongside the explicit ``((na, ka), (nb, kb))``.
+- [`HilbertSpace`](#HilbertSpace): ``order`` accepts the presets ``"blocked"``, grouping the sites into one contiguous block per species, and ``"interleaved"``, alternating the species at each position.
+
+
+**Bug fixes:**
+
+- [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register rather than its site label as the ``ikron`` index, which silently gave the wrong matrix whenever the two differed, i.e. for any non-identity ordering or non-integer site labels.
+- [`HilbertSpace`](#HilbertSpace): reordering the sites left the rank to configuration mappings using the previous ordering, which for mixed dimension spaces decoded ranks into invalid configurations. The ordering is now immutable, see the breaking change above.
+
+
+## v1.15.0 (2026-08-10)
 
 **Breaking Changes:**
 
