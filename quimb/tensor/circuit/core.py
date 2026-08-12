@@ -136,14 +136,13 @@ class CircuitBase:
 
         if self._ket_site_ind_id == self._bra_site_ind_id:
             raise ValueError(
-                "The 'ket' and 'bra' site ind ids clash : '{}' and '{}".format(
-                    self._ket_site_ind_id, self._bra_site_ind_id
-                )
+                "The 'ket' and 'bra' site ind ids clash : "
+                f"'{self._ket_site_ind_id}' and '{self._bra_site_ind_id}"
             )
 
         self._sample_n_gates = -1
-        self._storage = dict()
-        self._sampled_conditionals = dict()
+        self._storage = {}
+        self._sampled_conditionals = {}
         self._named_params = {}
         self._named_param_exprs = {}
 
@@ -196,6 +195,19 @@ class CircuitBase:
                 obj = self.to_backend(obj)
 
         return obj
+
+    def _maybe_convert_gate_array(self, G):
+        """Convert a raw gate array, if converting eagerly, caching by array
+        id so shared gate arrays are only converted once.
+        """
+        if not self.convert_eager:
+            return G
+
+        key = id(G)
+        if key not in self._backend_gate_cache:
+            # cache the original too, so its id cannot be recycled
+            self._backend_gate_cache[key] = (G, self._maybe_convert(G))
+        return self._backend_gate_cache[key][1]
 
     def apply_to_arrays(self, fn):
         """Apply a function to all the arrays in the circuit."""
@@ -604,13 +616,7 @@ class CircuitBase:
 
         else:
             # gate supplied as a matrix/tensor
-            G = gate.array
-
-            if self.convert_eager:
-                key = id(G)
-                if key not in self._backend_gate_cache:
-                    self._backend_gate_cache[key] = self._maybe_convert(G)
-                G = self._backend_gate_cache[key]
+            G = self._maybe_convert_gate_array(gate.array)
 
             # apply the gate to the TN!
             self._psi.gate_(G, gate.qubits, tags=tags, **opts)
@@ -1312,15 +1318,10 @@ class CircuitBase:
 
         d = Drawing(
             figsize=figsize,
-            presets=dict(
-                wire=dict(
-                    color=drawcolor,
-                    linewidth=linewidth,
-                ),
-                gate=dict(
-                    radius=radius,
-                ),
-            ),
+            presets={
+                "wire": {"color": drawcolor, "linewidth": linewidth},
+                "gate": {"radius": radius},
+            },
         )
 
         depths = {}

@@ -170,6 +170,17 @@ class TestBasicTensorOperations:
         a.conj_()
         assert_allclose(data.conj(), a.data)
 
+    def test_gate_transpose(self):
+        t = qtn.rand_tensor([2, 3], inds="ab", dtype=complex, seed=42)
+        G = qu.rand_matrix(2, dtype=complex, seed=42)
+        assert_allclose(t.gate(G, "a").data, G @ t.data)
+        assert_allclose(t.gate(G, "a", transpose=True).data, G.T @ t.data)
+
+        # `transposed` is the deprecated spelling
+        with pytest.warns(FutureWarning):
+            td = t.gate(G, "a", transposed=True)
+        assert_allclose(td.data, G.T @ t.data)
+
     def test_fuse(self):
         a = Tensor(np.random.rand(2, 3, 4, 5), "abcd", tags={"blue"})
         b = a.fuse({"bra": ["a", "c"], "ket": "bd"})
@@ -318,9 +329,7 @@ class TestBasicTensorOperations:
         assert sum(tn ^ all for tn in pp.cut_iter(*bnds)) == pytest.approx(1.0)
         assert pp ^ all == pytest.approx(1.0)
 
-    @pytest.mark.parametrize(
-        "method", ["qr", "svd", "exp", "cayley", "mgs", "svd"]
-    )
+    @pytest.mark.parametrize("method", ["qr", "svd", "exp", "cayley", "mgs"])
     def test_isometrize(self, method):
         t = rand_tensor((2, 3, 4), "abc")
         assert t.H @ t != pytest.approx(3.0)
@@ -1430,7 +1439,7 @@ class TestTensorNetwork:
 
     @pytest.mark.parametrize("absorb", ["both", "left", "right"])
     def test_tensor_compress_bond_reduced_modes(self, absorb):
-        kws = dict(max_bond=4, absorb=absorb)
+        kws = {"max_bond": 4, "absorb": absorb}
 
         A = rand_tensor((3, 4, 5), "abc", tags="A")
         B = rand_tensor((5, 6), "cd", tags="B")
@@ -1632,7 +1641,7 @@ class TestTensorNetwork:
             # tensors two-away from center should now be isometries
             for far_tg in ["L2", "R2", "U2"]:
                 if far_tg != tg:
-                    ttn[far_tg].H @ ttn[far_tg] == pytest.approx(2)
+                    assert ttn[far_tg].H @ ttn[far_tg] == pytest.approx(2)
 
     def test_tn_split_tensor(self):
         mps = MPS_rand_state(4, 3)
@@ -2042,7 +2051,7 @@ class TestTensorNetwork:
             ["A", "B"],
             ["C", "D"],
             max_bond=4,
-            reduce_opts=dict(method=method_reduce),
+            reduce_opts={"method": method_reduce},
         )
         assert tn.geometry_hash() == gh
         assert tn_other.num_tensors == 6
@@ -2183,8 +2192,8 @@ class TestTensorNetworkAsLinearOperator:
         tn_lo = tn.aslinearoperator(("a", "b"), ("c", "d"), optimize=optimize)
         tn_d = tn.to_dense(["a", "b"], ["c", "d"])
 
-        u, s, v = qu.svds(tn_lo, k=5, backend="scipy")
-        ud, sd, vd = qu.svds(tn_d, k=5, backend="scipy")
+        _u, s, _v = qu.svds(tn_lo, k=5, backend="scipy")
+        _ud, sd, _vd = qu.svds(tn_d, k=5, backend="scipy")
 
         assert_allclose(s, sd)
 

@@ -29,6 +29,7 @@ def _tensor_network_gate_inds_basic(
     contract,
     isparam,
     info,
+    transpose=False,
     **compress_opts,
 ):
     tags = tags_to_oset(tags)
@@ -38,21 +39,20 @@ def _tensor_network_gate_inds_basic(
         # useful short circuit  as it maintains the index structure exactly
         (ix,) = inds
         (t,) = tn._inds_get(ix)
-        t.gate_(G, ix)
+        t.gate_(G, ix, transpose=transpose)
         t.add_tag(tags)
         return tn
 
     # new indices to join old physical sites to new gate
     bnds = [rand_uuid() for _ in range(ng)]
     reindex_map = dict(zip(inds, bnds))
+    gix = (*bnds, *inds) if transpose else (*inds, *bnds)
 
     # tensor representing the gate
     if isparam:
-        TG = PTensor.from_parray(
-            G, inds=(*inds, *bnds), tags=tags, left_inds=bnds
-        )
+        TG = PTensor.from_parray(G, inds=gix, tags=tags, left_inds=bnds)
     else:
-        TG = Tensor(G, inds=(*inds, *bnds), tags=tags, left_inds=bnds)
+        TG = Tensor(G, inds=gix, tags=tags, left_inds=bnds)
 
     if contract is False:
         # we just attach gate to the network, no contraction:
@@ -227,12 +227,15 @@ def _tensor_network_gate_inds_lazy_split(
     ng,
     tags,
     contract,
+    transpose=False,
     **compress_opts,
 ):
+    # lix: new outer indices, rix: indices joined to the network
     lix = [f"l{i}" for i in range(ng)]
     rix = [f"r{i}" for i in range(ng)]
+    gix = rix + lix if transpose else lix + rix
 
-    TG = Tensor(data=G, inds=lix + rix, tags=tags, left_inds=rix)
+    TG = Tensor(data=G, inds=gix, tags=tags, left_inds=rix)
 
     # check if we should split multi-site gates (which may result in an easier
     #     tensor network to contract if we use compression)
@@ -332,6 +335,8 @@ def tensor_network_gate_inds(
     G,
     inds,
     contract=False,
+    dagger=False,
+    transpose=False,
     tags=None,
     info=None,
     inplace=False,
@@ -374,6 +379,12 @@ def tensor_network_gate_inds(
         gates they use the ``contract=True`` option which also maintains the
         structure of the TN. See below for a pictorial description of each
         method.
+    dagger : bool, optional
+        Whether to apply the conjugate transpose of the gate instead, i.e.
+        ``G† @ x``.
+    transpose : bool, optional
+        Whether to apply the transpose of the gate instead, i.e. ``G^T @ x``,
+        with no conjugation. Implied by ``dagger``.
     tags : str or sequence of str, optional
         Tags to add to the new gate tensor.
     info : None or dict, optional
@@ -471,6 +482,16 @@ def tensor_network_gate_inds(
         contract = False
 
     isparam = isinstance(G, PArray)
+
+    if dagger:
+        # G† = conjugate, then transpose
+        if isparam:
+            G = G.copy()
+            G.add_function(ar.conj)
+        else:
+            G = ar.conj(G)
+        transpose = True
+
     if isparam:
         if contract == "auto-split-gate":
             # simply don't split
@@ -488,12 +509,21 @@ def tensor_network_gate_inds(
             raise ValueError(f"`contract='{contract}'` invalid for >2 sites.")
 
         _tensor_network_gate_inds_lazy_split(
-            tn, G, inds, ng, tags, contract, **compress_opts
+            tn, G, inds, ng, tags, contract, transpose, **compress_opts
         )
     else:
         # no splitting of the *gate on its own* involved
         _tensor_network_gate_inds_basic(
-            tn, G, inds, ng, tags, contract, isparam, info, **compress_opts
+            tn,
+            G,
+            inds,
+            ng,
+            tags,
+            contract,
+            isparam,
+            info,
+            transpose,
+            **compress_opts,
         )
 
     return tn
@@ -501,13 +531,14 @@ def tensor_network_gate_inds(
 
 def _tensor_network_gate_sandwich_inds_eager_split(
     tn,
-    G,
-    Gconj,
+    Gu,
+    Gl,
     inds_upper,
     inds_lower,
     contract,
     tags,
     info,
+    transpose=False,
     **compress_opts,
 ):
     new_upper = [rand_uuid() for _ in inds_upper]
@@ -516,8 +547,12 @@ def _tensor_network_gate_sandwich_inds_eager_split(
     reindex_map.update(dict(zip(inds_lower, new_lower)))
 
     # wrap the gates as tensors
-    TGu = Tensor(G, inds=(*inds_upper, *new_upper))
-    TGl = Tensor(Gconj, inds=(*inds_lower, *new_lower))
+    if transpose:
+        TGu = Tensor(Gu, inds=(*new_upper, *inds_upper))
+        TGl = Tensor(Gl, inds=(*new_lower, *inds_lower))
+    else:
+        TGu = Tensor(Gu, inds=(*inds_upper, *new_upper))
+        TGl = Tensor(Gl, inds=(*inds_lower, *new_lower))
 
     # get the two tensors to be gated
     kixl, kixr = inds_upper
@@ -525,11 +560,11 @@ def _tensor_network_gate_sandwich_inds_eager_split(
     tl, tr = tn._inds_get(kixl, bixl, kixr, bixr)
     bnds_l, (bix,), bnds_r = group_inds(tl, tr)
 
-    # NOTE: disabled for block sparse, where reduced split is always important
-    # for keeping charge distributions across tensors stable
-    if ((len(bnds_l) <= 3) and (len(bnds_r) <= 3)) and not isblocksparse(G):
+    if ((len(bnds_l) <= 3) and (len(bnds_r) <= 3)) and not isblocksparse(Gu):
         # reduce split is likely redundant (i.e. contracting pair
         # and splitting just as cheap as performing QR reductions)
+        # NOTE: disabled for block sparse, where reduced split is always
+        # important for keeping charge distributions across tensors stable
         contract = "split"
 
     if contract == "split":
@@ -645,6 +680,8 @@ def tensor_network_gate_sandwich_inds(
     inds_upper,
     inds_lower,
     contract=False,
+    dagger=False,
+    transpose=False,
     tags=None,
     tags_upper=None,
     tags_lower=None,
@@ -668,6 +705,12 @@ def tensor_network_gate_sandwich_inds(
         How to apply the gate, see
         :meth:`~quimb.tensor.gating.tensor_network_gate_inds` for details and
         pictorial representations.
+    dagger : bool, optional
+        Whether to apply the reversed sandwich ``G† @ x @ G`` instead, e.g. for
+        Heisenberg evolution.
+    transpose : bool, optional
+        Whether to sandwich with the transpose of the gate instead, i.e.
+        ``G^T @ x @ conj(G)``. Implied by ``dagger``.
     tags : str or sequence of str, optional
         Tags to add to both new gate tensors.
     tags_upper : str or sequence of str, optional
@@ -697,6 +740,10 @@ def tensor_network_gate_sandwich_inds(
     G = maybe_factor_gate(G, inds_upper, xp, tn)
     Gconj = xp.conj(G)
 
+    # for G† the arrays swap sides, then both simply have reversed wiring
+    Gu, Gl = (Gconj, G) if dagger else (G, Gconj)
+    transpose = dagger or transpose
+
     tags = tags_to_oset(tags)
     tags_upper = tags | tags_to_oset(tags_upper)
     tags_lower = tags | tags_to_oset(tags_lower)
@@ -705,25 +752,27 @@ def tensor_network_gate_sandwich_inds(
         # need to combine both gates before splitting
         _tensor_network_gate_sandwich_inds_eager_split(
             tn,
-            G=G,
-            Gconj=Gconj,
+            Gu=Gu,
+            Gl=Gl,
             inds_upper=inds_upper,
             inds_lower=inds_lower,
             contract=contract,
             tags=tags | tags_upper | tags_lower,
             info=info,
+            transpose=transpose,
             **compress_opts,
         )
     else:
         for G_ul, inds_ul, tags_ul in (
-            (G, inds_upper, tags_upper),
-            (Gconj, inds_lower, tags_lower),
+            (Gu, inds_upper, tags_upper),
+            (Gl, inds_lower, tags_lower),
         ):
             tensor_network_gate_inds(
                 tn,
                 G=G_ul,
                 inds=inds_ul,
                 contract=contract,
+                transpose=transpose,
                 tags=tags_ul,
                 info=info,
                 inplace=True,
