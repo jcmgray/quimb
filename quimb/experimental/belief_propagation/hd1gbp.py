@@ -1,3 +1,4 @@
+import autoray as ar
 import numpy as np
 
 from quimb.tensor import Tensor, TensorNetwork, tensor_contract
@@ -158,7 +159,8 @@ class HD1GBP(BeliefPropagationCommon):
             )
         else:
             # output uniform distribution
-            m = Tensor()
+            data = ar.do("ones", (), like=self.tn._get_any_tensor().data)
+            m = Tensor(data=data)
 
         # normalize
         m.modify(apply=self._normalize_fn)
