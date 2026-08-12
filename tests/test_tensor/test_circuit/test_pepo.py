@@ -11,7 +11,7 @@ class TestCircuitPEPOSimpleUpdate:
         # a gate/observable array may be stored as a (2, 2, ..., 2) tensor;
         # collapse it to a square matrix for the dense reference
         A = np.asarray(a, dtype=complex)
-        d = int(round(A.size**0.5))
+        d = round(A.size**0.5)
         return A.reshape(d, d)
 
     @classmethod
@@ -36,7 +36,7 @@ class TestCircuitPEPOSimpleUpdate:
                 )
             for i in range(layer % 2, N - 1, 2):
                 # SU4 gate arrays are stored as (2, 2, 2, 2) tensors, which
-                # exercises the matrix-reshape daggering during evolution
+                # exercises the dagger rewiring during evolution
                 gates.append(
                     qtn.Gate(
                         "SU4",
@@ -86,6 +86,38 @@ class TestCircuitPEPOSimpleUpdate:
         v = circ.local_expectation(qu.pauli("Z"), 0)
         r = self._exact(2, 0, qu.pauli("Z"), [gate])
         assert complex(v) == pytest.approx(r, abs=1e-9)
+
+    @pytest.mark.parametrize("convert_eager", [True, False])
+    def test_to_backend(self, convert_eager):
+        pytest.importorskip("torch")
+
+        def to_backend(x):
+            import torch
+
+            return torch.tensor(np.asarray(x), dtype=torch.complex128)
+
+        edges = [(0, 1), (1, 2)]
+        gates = self._chain_gates(3, depth=2, seed=7)
+
+        circ = qtn.CircuitPEPOSimpleUpdate(edges=edges, max_bond=8)
+        circ.apply_gates(gates)
+        ref = circ.local_expectation(qu.pauli("Z"), 1)
+
+        circ_t = qtn.CircuitPEPOSimpleUpdate(
+            edges=edges,
+            max_bond=8,
+            to_backend=to_backend,
+            convert_eager=convert_eager,
+        )
+        circ_t.apply_gates(gates)
+
+        # the operator is only built at expectation time, so the conversion
+        # has to reach it there
+        op = circ_t.get_evolved_operator(qu.pauli("Z"), 1)
+        assert op.backend == ("torch" if convert_eager else "numpy")
+
+        v = circ_t.local_expectation(qu.pauli("Z"), 1)
+        assert complex(v) == pytest.approx(complex(ref), abs=1e-10)
 
     def test_geometry_inferred_from_gates(self):
         rng = np.random.default_rng(1)
@@ -214,7 +246,7 @@ class TestCircuitPEPOSimpleUpdate:
         circ = qtn.CircuitPEPOSimpleUpdate(edges=[(0, 1)], max_bond=4)
         circ.apply_gate(qtn.Gate("H", params=(), qubits=[0]))
         with pytest.raises(NotImplementedError):
-            circ.psi
+            _ = circ.psi
         with pytest.raises(NotImplementedError):
             circ.sample(10)
         with pytest.raises(NotImplementedError):

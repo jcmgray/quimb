@@ -2471,6 +2471,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         where,
         dims=None,
         method="direct",
+        transpose=False,
         info=None,
         inplace=False,
         **compress_opts,
@@ -2500,6 +2501,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             is passed to
             :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`
             and controls how the compression of the subsection is performed.
+        transpose : bool, optional
+            Whether to apply the transpose of the gate instead, i.e.
+            ``G^T @ x``.
         info : dict, optional
             If supplied, will be used to infer and store various extra
             information. Currently, the key "cur_orthog" is used to store the
@@ -2528,6 +2532,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             mpo,
             where=where,
             method=method,
+            transpose=transpose,
             info=info,
             inplace=inplace,
             inplace_mpo=True,
