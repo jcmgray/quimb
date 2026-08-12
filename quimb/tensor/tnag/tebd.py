@@ -186,11 +186,29 @@ class LocalHamGen:
         """The number of sites in the system."""
         return len(self.sites)
 
+    def keys(self):
+        """Iterate over all terms in the hamiltonian. This is mostly for
+        convenient compatibility with ``compute_local_expectation``.
+        """
+        return self.terms.keys()
+
+    def values(self):
+        """Iterate over all terms in the hamiltonian. This is mostly for
+        convenient compatibility with ``compute_local_expectation``.
+        """
+        return self.terms.values()
+
     def items(self):
         """Iterate over all terms in the hamiltonian. This is mostly for
         convenient compatibility with ``compute_local_expectation``.
         """
         return self.terms.items()
+
+    def __iter__(self):
+        """Iterate over all terms in the hamiltonian. This is mostly for
+        convenient compatibility with ``compute_local_expectation``.
+        """
+        return iter(self.terms)
 
     def _convert_from_qarray_cached(self, x):
         cache = self._op_cache["convert_from_qarray"]
