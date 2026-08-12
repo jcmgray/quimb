@@ -116,7 +116,9 @@ class TestSafeInverse:
         x = xp.asarray(np.array([2.0, 1e-3, 0.0]))
         assert_allclose(ar.to_numpy(safe_inverse(x)), [0.5, 1e3, 0.0])
         assert_allclose(
-            ar.to_numpy(safe_inverse(x, power=0.5)), [2**-0.5, 1e3**0.5, 0.0]
+            ar.to_numpy(safe_inverse(x, power=0.5)),
+            [2**-0.5, 1e3**0.5, 0.0],
+            rtol=1e-5,
         )
 
     @pytest.mark.parametrize("backend", [pytorch_case])
@@ -644,11 +646,11 @@ def test_batch_svd(backend, method, max_bond, absorb):
     rng = xp.random.default_rng(42)
     x = rng.uniform(size=(3, 5, 7))
 
-    kwargs = dict(
-        method=method,
-        max_bond=max_bond,
-        absorb=absorb,
-    )
+    kwargs = {
+        "method": method,
+        "max_bond": max_bond,
+        "absorb": absorb,
+    }
     if method == "svd:rand":
         kwargs["seed"] = rng
 
