@@ -55,6 +55,115 @@ def test_trim_singular_vals():
     assert _compute_number_svals_to_keep_numba(s, 5.02, 3) == 1
 
 
+class TestSafeInverse:
+    def test_matches_exact_inverse_away_from_zero(self):
+        from quimb.tensor.decomp import safe_inverse
+
+        x = np.array([3.0, 1.0, 1e-3])
+        assert_allclose(safe_inverse(x), 1 / x, rtol=1e-14)
+        assert_allclose(safe_inverse(x, power=0.5), x**-0.5, rtol=1e-14)
+
+    def test_zeros_map_to_zero(self):
+        from quimb.tensor.decomp import safe_inverse
+
+        x = np.array([2.0, 0.0, 0.0])
+        assert_allclose(safe_inverse(x), [0.5, 0.0, 0.0])
+        assert_allclose(safe_inverse(x, power=0.5), [2**-0.5, 0.0, 0.0])
+        # all zero, no scale to normalize by
+        assert_allclose(safe_inverse(np.zeros(3)), np.zeros(3))
+        assert_allclose(safe_inverse(np.zeros(3), power=0.5), np.zeros(3))
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("scale", [1e-20, 1.0, 1e20])
+    def test_no_overflow_at_extreme_scales(self, dtype, scale):
+        # squaring x directly over- or underflows at these scales
+        from quimb.tensor.decomp import safe_inverse
+
+        x = np.array([1.0, 1e-3, 0.0], dtype=dtype) * scale
+        xinv = safe_inverse(x)
+        assert np.isfinite(xinv).all()
+        assert_allclose(xinv[:2], 1 / x[:2], rtol=1e-5)
+        xisqrt = safe_inverse(x, power=0.5)
+        assert np.isfinite(xisqrt).all()
+        assert_allclose(xisqrt[:2], x[:2] ** -0.5, rtol=1e-5)
+
+    def test_batched_damps_per_vector(self):
+        from quimb.tensor.decomp import safe_inverse
+
+        # second row is tiny only relative to the first, not to itself
+        x = np.array([[1.0, 1e-30], [1e-30, 1e-60]])
+        xinv = safe_inverse(x)
+        # damped rather than 1e30, and bounded by 1 / (2 * eps)
+        assert xinv[0, 1] < 0.5 / np.finfo(x.dtype).eps
+        assert xinv[1, 0] == pytest.approx(1e30)
+
+    @pytest.mark.parametrize("cutoff", [None, 1e-8])
+    def test_numba_matches_generic(self, cutoff):
+        from quimb.tensor.decomp import safe_inverse, safe_inverse_numba
+
+        rng = np.random.default_rng(42)
+        x = np.sort(rng.uniform(size=(3, 4, 5)))[..., ::-1]
+        x[1, 2, 3:] = 0.0
+        assert_allclose(safe_inverse_numba(x, cutoff), safe_inverse(x, cutoff))
+
+    @pytest.mark.parametrize(
+        "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+    )
+    def test_backends(self, backend):
+        from quimb.tensor.decomp import safe_inverse
+
+        xp = ar.get_namespace(backend)
+        x = xp.asarray(np.array([2.0, 1e-3, 0.0]))
+        assert_allclose(ar.to_numpy(safe_inverse(x)), [0.5, 1e3, 0.0])
+        assert_allclose(
+            ar.to_numpy(safe_inverse(x, power=0.5)), [2**-0.5, 1e3**0.5, 0.0]
+        )
+
+    @pytest.mark.parametrize("backend", [pytorch_case])
+    def test_backend_specific_dtype(self, backend):
+        # numpy has no bfloat16, the cutoff must come from torch's finfo
+        from quimb.tensor.decomp import safe_inverse
+
+        xp = ar.get_namespace(backend)
+        eps = xp.finfo(xp.bfloat16).eps
+        x = xp.asarray([1.0, eps], dtype=xp.bfloat16)
+        # the entry right at the cutoff is damped to half its inverse
+        xinv = ar.to_numpy(safe_inverse(x).to(xp.float32))
+        assert xinv[1] == pytest.approx(0.5 / eps, rel=0.05)
+
+    def test_lazy(self):
+        # lazy arrays have neither `finfo` nor `keepdims`
+        from quimb.tensor.decomp import safe_inverse
+
+        x = ar.lazy.array(np.array([2.0, 1e-3, 0.0]))
+        assert_allclose(safe_inverse(x).compute(), [0.5, 1e3, 0.0])
+
+
+@pytest.mark.parametrize("absorb", ["both", None, "left", "right"])
+def test_oblique_projectors_exactly_low_rank(absorb):
+    # with cutoff=0.0 the zero singular values are kept, so must not blow up
+    from quimb.tensor.decomp import compute_oblique_projectors
+
+    rng = np.random.default_rng(0)
+    d, rank = 12, 5
+    Rl = np.hstack([rng.standard_normal((d, rank)), np.zeros((d, d - rank))])
+    Rr = np.vstack([rng.standard_normal((rank, d)), np.zeros((d - rank, d))])
+
+    out = compute_oblique_projectors(
+        Rl, Rr, max_bond=None, cutoff=0.0, absorb=absorb
+    )
+    if absorb is None:
+        Pl, s, Pr = out
+        P = (Pl * s) @ Pr
+    else:
+        Pl, Pr = out
+        P = Pl @ Pr
+
+    assert np.isfinite(P).all()
+    # inserting the projectors should be the identity on the non-null space
+    assert_allclose(Rl @ P @ Rr, Rl @ Rr, atol=1e-12)
+
+
 def test_sgn_convention():
     from quimb.tensor.decomp import sgn
 

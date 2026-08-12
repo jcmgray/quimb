@@ -2,8 +2,7 @@
 
 Release notes for `quimb`.
 
-
-## v1.15.1 (unreleased)
+## v1.16.0 (unreleased)
 
 **Breaking Changes:**
 
@@ -21,6 +20,7 @@ Release notes for `quimb`.
 
 - [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register rather than its site label as the ``ikron`` index, which silently gave the wrong matrix whenever the two differed, i.e. for any non-identity ordering or non-integer site labels.
 - [`HilbertSpace`](#HilbertSpace): reordering the sites left the rank to configuration mappings using the previous ordering, which for mixed dimension spaces decoded ranks into invalid configurations. The ordering is now immutable, see the breaking change above.
+- [`compute_oblique_projectors`](#compute_oblique_projectors): damp the inverse singular values at a scale of ``max(s) * eps``, rather than dividing by them directly. Exactly rank deficient environments, which keep zero singular values when ``cutoff=0.0``, previously gave ``inf`` or ``nan`` projectors. The same damping is applied by the shared diagonal division helpers, and so also by [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges='inverse'``.
 
 
 ## v1.15.0 (2026-08-10)
@@ -85,7 +85,6 @@ Release notes for `quimb`.
 - [`CircuitMPS`](#CircuitMPS) (and subclasses): raise `NotImplementedError` for `schrodinger_contract`, which is not defined for the approximate MPS simulators and previously failed with an internal `IndexError` ({issue}`387`).
 - [`CircuitDense`](#CircuitDense): `get_uni` now raises a clear `ValueError` like `uni`, rather than failing confusingly, as the unitary is not extractable from the eagerly contracted state.
 - [`Circuit.get_rdm_lightcone_simplified`](#Circuit.get_rdm_lightcone_simplified): check the storage cache is still valid before reading it, like `get_psi_simplified`, fixing `partial_trace` and `local_expectation` silently returning stale results from before later gates were applied ({issue}`398`).
-
 - [`tensor_network_1d_compress_src`](#tensor_network_1d_compress_src) and [`tensor_network_1d_compress_srcmps`](#tensor_network_1d_compress_srcmps): call [`enforce_1d_like`](#enforce_1d_like) like the other 1D compression methods, fixing compression of tensor networks with long range (site skipping) bonds, e.g. from lazily applied long range gates.
 - [`enforce_1d_like`](#enforce_1d_like): fix the identity string insertion for long range bonds when the supplied ``site_tags`` order the two tensors in reverse (e.g. with ``sweep_reverse=True``), which previously wired the identities to the wrong sites.
 - [`PEPS`](#PEPS), [`PEPO`](#PEPO), and [`PEPS3D`](#PEPS3D): fix periodic construction for length-1 and length-2 cyclic dimensions so normal and periodic bonds remain distinct, including bond-dimension-1 cyclic tensors.

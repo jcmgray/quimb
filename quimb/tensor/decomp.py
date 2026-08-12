@@ -388,7 +388,7 @@ def parse_split_opts(
 
     # finally we check which options to inject based on method capabilities
     signature = inspect.signature(_SPLIT_FNS[method])
-    opts = dict()
+    opts = {}
 
     if "absorb" in signature.parameters:
         opts["absorb"] = absorb
@@ -397,7 +397,7 @@ def parse_split_opts(
             # no singular value options should be supplied
             raise ValueError(
                 "You can't return the singular values separately when "
-                "`method='{}'`.".format(method)
+                f"`method='{method}'`."
             )
 
     if "max_bond" in signature.parameters:
@@ -497,17 +497,76 @@ def dag_numba(x):
     return np.conjugate(x.T)
 
 
-def safe_inverse(s, cutoff):
-    return s / (s**2 + cutoff**2)
+def safe_inverse(x, cutoff=None, power=1.0):
+    """Compute ``x**-power`` elementwise, damping entries at or below
+    ``cutoff`` so that (near) zeros map to zero rather than infinity. The
+    damped form ``x / (x**(power + 1) + cutoff**(power + 1))`` is smooth, and
+    thus gradient friendly, with a finite derivative at zero, and matches
+    ``x**-power`` to relative accuracy ``(cutoff / x)**(power + 1)``.
+
+    Parameters
+    ----------
+    x : array_like
+        The values to invert, assumed non-negative, e.g. singular values. The
+        last axis is the vector axis, any others are treated as batch dims.
+    cutoff : float or None, optional
+        The scale below which to damp entries towards zero. If ``None``, take
+        ``max(x) * eps``, the smallest scale resolvable given the largest
+        entry.
+    power : float, optional
+        The (positive) power to invert to, e.g. ``0.5`` for an inverse square
+        root. Note the damping is always relative to ``x`` itself, not
+        ``x**power``.
+
+    Returns
+    -------
+    array_like
+    """
     # NOTE: other options, possibly less gradient friendly
-    # return 1 / s
-    # return 1 / (s + (s == 0.0))
-    # return np.where(s > cutoff, 1 / np.maximum(s, cutoff), 0.0)
+    # return 1 / x
+    # return 1 / (x + (x == 0.0))
+    # return np.where(x > cutoff, 1 / np.maximum(x, cutoff), 0.0)
+    xp = get_namespace(x)
+
+    # work in units of xmax so powers can't over- or underflow
+    xmax = xp.expand_dims(xp.max(x, axis=-1), -1)
+    xmax = xp.where(xmax > 0.0, xmax, 1.0)
+    if cutoff is None:
+        try:
+            # backend finfo, which knows about e.g. torch's bfloat16
+            c = xp.finfo(x.dtype).eps
+        except (ImportError, TypeError, ValueError):
+            # no finfo or no concrete dtype, e.g. lazy: assume double
+            c = np.finfo(np.float64).eps
+    else:
+        c = cutoff / xmax
+
+    y = x / xmax
+    q = power + 1.0
+    return y / ((y**q + c**q) * xmax**power)
 
 
 @njit  # pragma: no cover
-def safe_inverse_numba(s, cutoff):
-    return s / (s**2 + cutoff**2)
+def safe_inverse_numba(x, cutoff=None):
+    # see `safe_inverse`, numba has no axis aware `max`, so we loop manually
+    shape = x.shape
+    d = shape[-1]
+    xf = np.ascontiguousarray(x).reshape(-1, d)
+    out = np.empty_like(xf)
+    eps = np.finfo(x.dtype).eps
+    for i in range(xf.shape[0]):
+        xi = xf[i]
+        xmax = np.max(xi)
+        if xmax <= 0.0:
+            xmax = 1.0
+        if cutoff is None:
+            c = eps
+        else:
+            c = cutoff / xmax
+        for j in range(d):
+            y = xi[j] / xmax
+            out[i, j] = y / ((y * y + c * c) * xmax)
+    return out.reshape(shape)
 
 
 # some convenience functions for multiplying diagonals
@@ -529,12 +588,15 @@ def rddiv(x, d):
     """Right-multiplication of a matrix by a vector representing an inverse
     diagonal.
     """
-    return x / d[..., None, :]
+    dinv = safe_inverse(d)
+    return x * dinv[..., None, :]
 
 
+@rddiv.register("numpy")
 @njit  # pragma: no cover
 def rddiv_numba(x, d):
-    return x / d[None, :]
+    dinv = safe_inverse_numba(d)
+    return x * dinv[..., None, :]
 
 
 @compose
@@ -553,12 +615,15 @@ def lddiv(d, x):
     """Left-multiplication of a matrix by a vector representing an inverse
     diagonal.
     """
-    return x / d[..., :, None]
+    dinv = safe_inverse(d)
+    return x * dinv[..., :, None]
 
 
+@lddiv.register("numpy")
 @njit  # pragma: no cover
 def lddiv_numba(d, x):
-    return x / d[..., :, None]
+    dinv = safe_inverse_numba(d)
+    return x * dinv[..., :, None]
 
 
 @compose
@@ -718,7 +783,7 @@ def _trim_and_renorm_svd_result(
             # batch -> take maximum bond needed for any single batch
             n_chi = xp.max(n_chi)
 
-        n_chi = max(n_chi, 1)
+        n_chi = max(int(n_chi), 1)
         if max_bond > 0:
             # need to take both cutoff and max bond into account
             n_chi = min(n_chi, max_bond)
@@ -766,6 +831,7 @@ def svd_truncated(
     absorb=get_Usq_sqVH,
     renorm=0,
     info=None,
+    **kwargs,
 ):
     """Singular value decomposition of raw 2d array ``x``, with optional
     truncation based on `max_bond` and/or dynamically on `cutoff`.
@@ -811,7 +877,8 @@ def svd_truncated(
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
     xp = get_namespace(x)
-    U, s, VH = xp.linalg.svd(x)
+    U, s, VH = xp.linalg.svd(x, **kwargs)
+
     return _trim_and_renorm_svd_result(
         U,
         s,
@@ -2771,7 +2838,7 @@ def _similarity_compress_svd_numba(X, max_bond, renorm, asymm):
 
 def _similarity_compress_biorthog(X, max_bond, renorm):
     xp = get_namespace(X)
-    U, s, VH = xp.linalg.svd(X)
+    U, _s, VH = xp.linalg.svd(X)
 
     B = U[:, :max_bond]
     AH = VH[:max_bond, :]
@@ -2795,7 +2862,7 @@ def _similarity_compress_biorthog(X, max_bond, renorm):
 
 @njit  # pragma: no cover
 def _similarity_compress_biorthog_numba(X, max_bond, renorm):
-    U, s, VH = np.linalg.svd(X)
+    U, _s, VH = np.linalg.svd(X)
 
     B = U[:, :max_bond]
     AH = VH[:max_bond, :]
@@ -2918,7 +2985,7 @@ def isometrize_modified_gram_schmidt(A):
     Q = []
     for j in range(A.shape[1]):
         q = A[:, j]
-        for i in range(0, j):
+        for i in range(j):
             rij = xp.tensordot(xp.conj(Q[i]), q, 1)
             q = q - rij * Q[i]
         Q.append(q / xp.linalg.norm(q))
@@ -3175,16 +3242,18 @@ def compute_oblique_projectors(
     )
 
     if absorb is None:
-        Pl = Rr @ rddiv(dag(VHt), st)
-        Pr = lddiv(st, dag(Ut)) @ Rl
+        st_inv = safe_inverse(st)
+        Pl = Rr @ rdmul(dag(VHt), st_inv)
+        Pr = ldmul(st_inv, dag(Ut)) @ Rl
         return Pl, st, Pr
 
     elif absorb == get_Usq_sqVH:
-        st_sqrt = get_namespace(st).sqrt(st)
+        # note we damp based on st, not sqrt(st), to match the other branches
+        st_sqrt_inv = safe_inverse(st, power=0.5)
 
         # then form the 'oblique' projectors
-        Pl = Rr @ rddiv(dag(VHt), st_sqrt)
-        Pr = lddiv(st_sqrt, dag(Ut)) @ Rl
+        Pl = Rr @ rdmul(dag(VHt), st_sqrt_inv)
+        Pr = ldmul(st_sqrt_inv, dag(Ut)) @ Rl
 
     elif absorb == get_Us_VH:
         Pl = Rr @ dag(VHt)
