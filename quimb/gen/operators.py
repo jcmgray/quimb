@@ -1333,13 +1333,13 @@ def ham_heis_2D(
 
     # generate neighbouring pair coordinates
     def gen_pairs():
-        for i, j in sites:
-            above, right = (i + 1) % n, (j + 1) % m
+        for a, b in sites:
+            above, right = (a + 1) % n, (b + 1) % m
             # ignore wraparound coordinates if not cyclic
             if cyclic or above != 0:
-                yield ((i, j), (above, j))
+                yield ((a, b), (above, b))
             if cyclic or right != 0:
-                yield ((i, j), (i, right))
+                yield ((a, b), (a, right))
 
     # generate all pairs of coordinates and directions
     pairs_ss = tuple(itertools.product(gen_pairs(), js))
@@ -1461,7 +1461,7 @@ def zspin_projector(n, sz=0, stype="csr", dtype=float):
             raise ValueError(
                 f"{s} is not a valid spin half subspace for {n} spins."
             )
-        k = int(round(k))
+        k = round(k)
         # Size of subspace
         p += comb(n, k, exact=True)
         # Find all computational basis states with correct number of 0s and 1s

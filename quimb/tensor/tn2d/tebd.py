@@ -296,7 +296,7 @@ class LocalHam2D(LocalHamGen):
         for xs, ys, n, lbl_x0, lbl_y0, nrm in data:
             ax.plot(xs, ys, c=colors[n], linewidth=2 * nrm**0.5)
             if show_norm:
-                label = "{:.3f}".format(nrm)
+                label = f"{nrm:.3f}"
                 ax.text(lbl_x0, lbl_y0, label, c=colors[n], fontsize=fontsize)
 
         # create legend
@@ -532,7 +532,6 @@ class TEBD2D(
 
 
 def conditioner(tn, value=None, sweeps=2, balance_bonds=True):
-    """ """
     if balance_bonds:
         for _ in range(sweeps - 1):
             tn.balance_bonds_()
@@ -762,8 +761,8 @@ def gate_full_update_als(
     overlap = bra_plq | target
     norm_plq = bra_plq | env | ket_plq
 
-    xs = dict()
-    x_previous = dict()
+    xs = {}
+    x_previous = {}
     previous_cost = None
 
     with contract_strategy(optimize):
@@ -798,9 +797,9 @@ def gate_full_update_als(
                 else:
                     # use scipy sparse linalg solvers
                     if solver in ("lsqr", "lsmr"):
-                        solver_opts = dict(atol=tol, btol=tol)
+                        solver_opts = {"atol": tol, "btol": tol}
                     else:
-                        solver_opts = dict(tol=tol)
+                        solver_opts = {"tol": tol}
 
                     # use current site as initial guess (iterate over site ind)
                     x0 = x_previous.get(site, b)
@@ -1125,7 +1124,7 @@ class FullUpdate(TEBD2D):
         if fit_opts is not None:
             bad_opts = set(fit_opts) - set(self.fit_opts)
             if bad_opts:
-                raise ValueError("Invalid fit option(s): {}".format(bad_opts))
+                raise ValueError(f"Invalid fit option(s): {bad_opts}")
             self.fit_opts.update(fit_opts)
 
         self.pre_normalize = bool(pre_normalize)
@@ -1197,7 +1196,7 @@ class FullUpdate(TEBD2D):
         # useful to store the bra that went into making the norm
         norm, _, self._bra = self._psi.make_norm(return_all=True)
 
-        envs = dict()
+        envs = {}
         for x_bsz, y_bsz in calc_plaquette_sizes(self.ham.terms):
             envs.update(
                 norm.compute_plaquette_environments(

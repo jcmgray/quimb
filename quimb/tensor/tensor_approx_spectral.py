@@ -20,7 +20,6 @@ def construct_lanczos_tridiag_MPO(
     v0_opts=None,
     k_min=10,
 ):
-    """ """
     if initial_bond_dim is None:
         initial_bond_dim = 8
     if max_bond is None:

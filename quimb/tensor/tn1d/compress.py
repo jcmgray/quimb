@@ -2180,9 +2180,10 @@ def _tn1d_fit_sum_sweep_2site(
                 elif lind_id is not None and rind_id is None:
                     if tfiknew.data.duals[lind_id]:
                         tfiknew.data.phase_flip(lind_id, inplace=True)
-                elif lind_id is None and rind_id is not None:
-                    if tfiknew.data.duals[rind_id]:
-                        tfiknew.data.phase_flip(rind_id, inplace=True)
+                elif (lind_id is None and rind_id is not None) and (
+                    tfiknew.data.duals[rind_id]
+                ):
+                    tfiknew.data.phase_flip(rind_id, inplace=True)
 
             # sum into fitted tensor
             if tfinew is None:

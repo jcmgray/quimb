@@ -24,7 +24,7 @@ from ..gen.rand import (
     random_seed_fn,
 )
 from ..utils import concat, deprecated, unique
-from .array_ops import asarray, do, reshape, sensibly_scale
+from .array_ops import asarray, reshape, sensibly_scale
 from .contraction import array_contract
 from .tensor_core import (
     COPY_tensor,
@@ -347,7 +347,7 @@ def compute_string_edge_frequencies(strings):
     """
     counts = collections.defaultdict(int)
     for s in strings:
-        for cooa, coob in zip(s, s[1:]):
+        for cooa, coob in itertools.pairwise(s):
             counts[tuple(sorted((cooa, coob)))] += 1
         counts[tuple(sorted((s[0], s[-1])))] += 1
     return counts
@@ -5784,8 +5784,8 @@ def _ham_mbl(
     # generate noise, potentially in all directions, each with own strength
     for i in range(L):
         dh_r_xyzs = zip(dhds, rs[:, i], "XYZ")
-        for dh, r, xyz in dh_r_xyzs:
-            H[i] += dh * r, xyz
+        for dhd, r, xyz in dh_r_xyzs:
+            H[i] += dhd * r, xyz
 
     return H
 

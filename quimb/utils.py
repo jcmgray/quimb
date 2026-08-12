@@ -141,11 +141,8 @@ if FOUND_TQDM:
         """
 
         def __init__(self, *args, total=100, **kwargs):
-            """ """
             kwargs.setdefault("ascii", True)
-            super(continuous_progbar, self).__init__(
-                total=total, unit="%", **kwargs
-            )
+            super().__init__(total=total, unit="%", **kwargs)
 
             if len(args) == 2:
                 self.start, self.stop = args

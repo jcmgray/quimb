@@ -10,7 +10,7 @@ from .tensor_core import Tensor, TensorNetwork
 
 
 class Placeholder:
-    __slots__ = ("shape", "dtype")
+    __slots__ = ("dtype", "shape")
 
     def __init__(self, x):
         self.shape = getattr(x, "shape", None)

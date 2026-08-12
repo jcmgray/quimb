@@ -63,7 +63,7 @@ def edge_coloring(
 
     if group:
         return tuple(
-            tuple(tuple(tuple(sorted(edge)) for edge in coloring[color]))
+            tuple(tuple(sorted(edge)) for edge in coloring[color])
             for color in sorted(coloring)
         )
     else:
@@ -144,7 +144,7 @@ class LocalHamGen:
 
         # parse one site terms
         if H1 is None:
-            H1s = dict()
+            H1s = {}
         elif hasattr(H1, "shape"):
             # set a default site term
             H1s = {None: H1}
@@ -257,7 +257,7 @@ class LocalHamGen:
                 G = do(
                     "fuse",
                     G,
-                    range(0, ndim_G // 2),
+                    range(ndim_G // 2),
                     range(ndim_G // 2, ndim_G),
                 )
 
@@ -330,10 +330,7 @@ class LocalHamGen:
             pairs = self.terms
         elif order == "sort":
             pairs = sorted(self.terms)
-        elif order == "random":
-            pairs = list(self.terms)
-            random.shuffle(pairs)
-        elif order == "random-ungrouped":
+        elif order == "random" or order == "random-ungrouped":
             pairs = list(self.terms)
             random.shuffle(pairs)
         else:
@@ -424,7 +421,7 @@ class LocalHamGen:
         G = nx.Graph()
         seen = set()
         n = 0
-        edge_labels = dict()
+        edge_labels = {}
         for where in ordering:
             site_a, site_b = where
             if (site_a in seen) or (site_b in seen):
@@ -461,7 +458,7 @@ class LocalHamGen:
             edge_labels=edge_labels,
             font_size=fontsize,
             font_color=(0.5, 0.5, 0.5),
-            bbox=dict(alpha=0),
+            bbox={"alpha": 0},
             ax=ax,
         )
         nx.draw_networkx_labels(
@@ -550,7 +547,7 @@ class TEBDSweepMixin:
         self._n = 0
         self.taus = array.array("d")
         self.keep_best = bool(keep_best)
-        self.best = dict(energy=float("inf"), state=None, it=None)
+        self.best = {"energy": float("inf"), "state": None, "it": None}
         self.stop = False
 
     @property
@@ -695,9 +692,8 @@ class TEBDSweepMixin:
                 pbar.update()
                 self._set_progbar_description(pbar)
 
-                if self.callback is not None:
-                    if self.callback(self):
-                        break
+                if (self.callback is not None) and self.callback(self):
+                    break
 
                 if self.stop:
                     # maybe stop post sweep
@@ -725,19 +721,16 @@ class TEBDSweepMixin:
         """Perform any computations required before the sweep (and energy
         computation). For the basic update is nothing.
         """
-        pass
 
     def postgate(self, where):
         """Perform any computations required after each gate. For the basic
         update this is nothing.
         """
-        pass
 
     def postlayer(self):
         """Perform any computations required after each layer of commuting
         gates. For the basic update this is nothing.
         """
-        pass
 
     def postsweep(self):
         """Perform any computations required after the sweep (but before

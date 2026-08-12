@@ -924,9 +924,9 @@ class DMRG:
         n, bsz = self.L, self.bsz
 
         direction, begin, sweep = {
-            ("R", False): ("right", "left", range(0, n - bsz + 1)),
+            ("R", False): ("right", "left", range(n - bsz + 1)),
             ("L", False): ("left", "right", range(n - bsz, -1, -1)),
-            ("R", True): ("right", "left", range(0, n)),
+            ("R", True): ("right", "left", range(n)),
             ("L", True): ("left", "right", range(n - 1, -1, -1)),
         }[direction, self.cyclic]
 
@@ -1010,7 +1010,6 @@ class DMRG:
 
     def _compute_post_sweep(self):
         """Compute this after each sweep."""
-        pass
 
     def _print_post_sweep(self, converged, verbosity=0):
         """Print this after each sweep."""
@@ -1096,11 +1095,7 @@ class DMRG:
             )
 
             # if last sweep was in opposite direction no need to canonize
-            canonize = (
-                False
-                if direction + previous_direction in {"LR", "RL"}
-                else True
-            )
+            canonize = not (direction + previous_direction in {"LR", "RL"})
 
             # need to manually expand bond dimension for DMRG1
             if self.bsz == 1:
@@ -1427,8 +1422,8 @@ class DMRGX(DMRG):
             ](bra=self._b)
 
         direction, begin, sweep = {
-            "R": ("right", "left", range(0, self.L - self.bsz + 1)),
-            "L": ("left", "right", reversed(range(0, self.L - self.bsz + 1))),
+            "R": ("right", "left", range(self.L - self.bsz + 1)),
+            "L": ("left", "right", reversed(range(self.L - self.bsz + 1))),
         }[direction]
 
         eff_opts = {"begin": begin, "bsz": self.bsz, "cyclic": self.cyclic}

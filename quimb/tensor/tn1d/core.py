@@ -672,8 +672,6 @@ class TensorNetwork1DVector(TensorNetwork1D, TensorNetworkGenVector):
             where = self.gen_sites_present()
         elif isinstance(where, slice):
             where = self.slice2sites(where)
-        else:
-            where = where
 
         return super().reindex_sites(new_id, where, inplace=inplace)
 
@@ -1057,8 +1055,8 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         self.insert_gauge(y, stop, stop - 1, tol=inv_tol)
 
         if bra is not None:
-            for i in (start - 1, start, stop, stop - 1):
-                bra[i].modify(data=self[i].data.conj())
+            for j in (start - 1, start, stop, stop - 1):
+                bra[j].modify(data=self[j].data.conj())
 
     def shift_orthogonality_center(
         self,
@@ -1845,7 +1843,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         MatrixProductState
         """
         if set(shape) - set("lrp"):
-            raise ValueError("Invalid shape string: {}".format(shape))
+            raise ValueError(f"Invalid shape string: {shape}")
 
         # check for site varying physical dimensions
         if isinstance(phys_dim, Integral):
@@ -3421,7 +3419,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         # the sequence of sites in each of the 'environment' sections
         envm = range(max(sysa) + 1, min(sysb))
-        envl = range(0, min(sysa))
+        envl = range(min(sysa))
         envr = range(max(sysb) + 1, N)
 
         # spread norm, and if not cyclic put in mixed canonical form, taking

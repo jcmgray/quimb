@@ -56,13 +56,13 @@ class ArrayInfo:
     """Simple container for recording size and dtype information about arrays."""
 
     __slots__ = (
-        "shape",
-        "size",
         "dtype",
+        "equivalent_complex_type",
+        "equivalent_real_type",
         "iscomplex",
         "real_size",
-        "equivalent_real_type",
-        "equivalent_complex_type",
+        "shape",
+        "size",
     )
 
     def __init__(self, array):
@@ -353,7 +353,7 @@ def parse_network_to_backend(
 
     if tags | shared_tags:
         # opt_in
-        if not (tags & shared_tags) == shared_tags:
+        if (tags & shared_tags) != shared_tags:
             tags = tags | shared_tags
             warnings.warn(
                 "TNOptimizer warning, some `shared_tags` are missing"
@@ -1592,13 +1592,13 @@ class TNOptimizer:
                 func=fun,
                 x0=self.vectorizer.vector,
                 niter=nhop,
-                minimizer_kwargs=dict(
-                    jac=jac,
-                    hessp=self.vectorized_hessp if hessp else None,
-                    method=self._method,
-                    bounds=self.bounds,
-                    options=dict(maxiter=n, **options),
-                ),
+                minimizer_kwargs={
+                    "jac": jac,
+                    "hessp": self.vectorized_hessp if hessp else None,
+                    "method": self._method,
+                    "bounds": self.bounds,
+                    "options": dict(maxiter=n, **options),
+                },
                 T=temperature,
             )
             self.vectorizer.vector[:] = self.res.x
@@ -1665,10 +1665,10 @@ class TNOptimizer:
 
         if tol == 0.0:
             # assume no stopping criteria
-            ftol_rel == 0.0 if ftol_rel is None else ftol_rel
-            ftol_abs == 0.0 if ftol_abs is None else ftol_abs
-            xtol_rel == 0.0 if xtol_rel is None else xtol_rel
-            xtol_abs == 0.0 if xtol_abs is None else xtol_abs
+            ftol_rel = 0.0 if ftol_rel is None else ftol_rel
+            ftol_abs = 0.0 if ftol_abs is None else ftol_abs
+            xtol_rel = 0.0 if xtol_rel is None else xtol_rel
+            xtol_abs = 0.0 if xtol_abs is None else xtol_abs
 
         elif (tol is not None) and (ftol_rel is None):
             # assume relative loss tolerance is specified
@@ -1793,9 +1793,10 @@ class TNOptimizer:
                 x = opt.ask()
                 loss = self.vectorized_value(*x.args, **x.kwargs)
                 opt.tell(x, loss)
-                if self.loss_target is not None:
-                    if self.loss < self.loss_target:
-                        break
+                if (self.loss_target is not None) and (
+                    self.loss < self.loss_target
+                ):
+                    break
 
         except KeyboardInterrupt:
             pass

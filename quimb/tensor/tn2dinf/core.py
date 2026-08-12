@@ -4,6 +4,7 @@ subpackage ``__init__`` for the shared vocabulary.
 """
 
 import functools
+import itertools
 
 from autoray import do
 
@@ -797,7 +798,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             **gate_opts,
         )
 
-        for sa, sb in zip(path[:-1], path[1:]):
+        for sa, sb in itertools.pairwise(path):
             itn._sync_site(sa)
             bix = itn.get_bond_ind(sa, sb)
             bond_type = itn.get_bond_type(sa, sb)
@@ -943,7 +944,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             fragment, fragment_gauges = self.fragment, gauges
         else:
             where_sites = set()
-            for where, _ in terms.items():
+            for where in terms:
                 where_sites.update(ensure_inf_2d_sites(where))
             fragment, fragment_gauges = self.build_fragment_with_gauges(
                 self._region_sites(where_sites, max_distance), gauges
@@ -1055,7 +1056,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         float or dict[bond_type, float]
         """
         where_sites = set()
-        for where, _ in terms.items():
+        for where in terms:
             where_sites.update(ensure_inf_2d_sites(where))
         fragment, fragment_gauges = self.build_fragment_with_gauges(
             self._gloop_region(where_sites, gloops), gauges

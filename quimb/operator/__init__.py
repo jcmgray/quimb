@@ -18,11 +18,11 @@ from .models import (
 )
 
 __all__ = (
+    "HilbertSpace",
+    "SparseOperatorBuilder",
     "fermi_hubbard_from_edges",
     "fermi_hubbard_spinless_from_edges",
     "get_mat",
     "heisenberg_from_edges",
-    "HilbertSpace",
     "rand_operator",
-    "SparseOperatorBuilder",
 )

@@ -118,7 +118,6 @@ def seed_rand(seed):
     """See the random number generators, by instantiating a new set of bit
     generators with a 'seed sequence'.
     """
-    global _RG_HANDLER
     return _RG_HANDLER.set_seed(seed)
 
 
@@ -131,12 +130,10 @@ def set_rand_bitgen(bitgen):
     bitgen : {'PCG64', 'SFC64', 'MT19937', 'Philox', str}
         Which bit generator to use.
     """
-    global _RG_HANDLER
     return _RG_HANDLER.set_bitgen(bitgen)
 
 
 def _get_rgens(num_threads):
-    global _RG_HANDLER
     return _RG_HANDLER.get_rgens(num_threads)
 
 
@@ -279,7 +276,11 @@ choice = random_seed_fn(_choice)
 
 @random_seed_fn
 def rand_rademacher(shape, scale=1, loc=0.0, dtype=float):
-    """ """
+    """Generate random numbers from the Rademacher distribution, i.e. uniform
+    over the set {-1, 1} for real numbers, and {-1, 1, -i, i} for complex
+    numbers. The output is scaled and shifted by the ``scale`` and ``loc``
+    parameters.
+    """
     if np.issubdtype(dtype, np.floating):
         entries = loc + np.array([1.0, -1.0]) * scale
         need2convert = dtype not in (float, np.float64)
@@ -419,7 +420,7 @@ def rand_matrix(
             # take special care to avoid duplicates
             if seed is not None:
                 random.seed(seed)
-            ijs = random.sample(range(0, d**2), k=nnz)
+            ijs = random.sample(range(d**2), k=nnz)
         else:
             ijs = _randint(0, d * d, size=nnz)
 

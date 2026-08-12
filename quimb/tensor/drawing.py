@@ -609,7 +609,7 @@ def parse_dict_to_tids_or_inds(spec, tn, default="__NONE__"):
     a dictionary with only sinlge tids and inds as keys. If a tag or set of
     tags are given as a key, all matching tensor tids will receive the value.
     """
-    #
+
     if (spec is not None) and (not isinstance(spec, dict)):
         # assume new default value for everything
         return collections.defaultdict(lambda: spec)
@@ -733,7 +733,7 @@ def _draw_matplotlib(
     if title is not None:
         ax.set_title(str(title), color=label_color)
 
-    for _, edge_data in edges.items():
+    for edge_data in edges.values():
         cooa, coob = edge_data["coos"]
         edge_colors = edge_data["color"]
         edge_sizes = edge_data["edge_size"]
@@ -755,12 +755,12 @@ def _draw_matplotlib(
             offsets = None
 
         for m in range(multiplicity):
-            line_opts = dict(
-                cooa=cooa,
-                coob=coob,
-                linewidth=edge_sizes[m],
-                color=edge_colors[m],
-            )
+            line_opts = {
+                "cooa": cooa,
+                "coob": coob,
+                "linewidth": edge_sizes[m],
+                "color": edge_colors[m],
+            }
 
             arrowhead, reverse = {
                 (False, False): (None, False),  # no arrow
@@ -776,26 +776,26 @@ def _draw_matplotlib(
                 )
 
             if labels[m]:
-                line_opts["text"] = dict(
-                    text=labels[m],
-                    fontsize=edge_data["label_fontsize"],
-                    color=edge_data["label_color"],
-                    fontfamily=edge_data["label_fontfamily"],
-                )
+                line_opts["text"] = {
+                    "text": labels[m],
+                    "fontsize": edge_data["label_fontsize"],
+                    "color": edge_data["label_color"],
+                    "fontfamily": edge_data["label_fontfamily"],
+                }
             if label_lefts[m]:
-                line_opts["text_left"] = dict(
-                    text=label_lefts[m],
-                    fontsize=edge_data["label_fontsize"] + 3,
-                    color=edge_data["label_color"],
-                    fontfamily=edge_data["label_fontfamily"],
-                )
+                line_opts["text_left"] = {
+                    "text": label_lefts[m],
+                    "fontsize": edge_data["label_fontsize"] + 3,
+                    "color": edge_data["label_color"],
+                    "fontfamily": edge_data["label_fontfamily"],
+                }
             if label_rights[m]:
-                line_opts["text_right"] = dict(
-                    text=label_rights[m],
-                    fontsize=edge_data["label_fontsize"] + 3,
-                    color=edge_data["label_color"],
-                    fontfamily=edge_data["label_fontfamily"],
-                )
+                line_opts["text_right"] = {
+                    "text": label_rights[m],
+                    "fontsize": edge_data["label_fontsize"] + 3,
+                    "color": edge_data["label_color"],
+                    "fontfamily": edge_data["label_fontfamily"],
+                }
 
             if multiplicity > 1:
                 d.line_offset(offset=offsets[m], **line_opts)
@@ -803,15 +803,15 @@ def _draw_matplotlib(
                 d.line(shorten=shorten, **line_opts)
 
     # draw the tensors
-    for _, node_data in nodes.items():
-        patch_opts = dict(
-            coo=node_data["coo"],
-            radius=node_data["size"],
-            facecolor=node_data["color"],
-            edgecolor=node_data["outline_color"],
-            linewidth=node_data["outline_size"],
-            hatch=node_data["hatch"],
-        )
+    for node_data in nodes.values():
+        patch_opts = {
+            "coo": node_data["coo"],
+            "radius": node_data["size"],
+            "facecolor": node_data["color"],
+            "edgecolor": node_data["outline_color"],
+            "linewidth": node_data["outline_size"],
+            "hatch": node_data["hatch"],
+        }
         marker = node_data["marker"]
 
         if "multi_colors" in node_data:
@@ -1098,15 +1098,15 @@ def _draw_plotly(G, **kwargs):
     fig.update_layout(
         width=100 * kwargs["figsize"][0],
         height=100 * kwargs["figsize"][1],
-        margin=dict(l=10, r=10, b=10, t=10),
+        margin={"l": 10, "r": 10, "b": 10, "t": 10},
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
-        scene=dict(
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            zaxis=dict(visible=False),
-        ),
+        scene={
+            "xaxis": {"visible": False},
+            "yaxis": {"visible": False},
+            "zaxis": {"visible": False},
+        },
     )
 
     for i in range(len(edge_source["x0"])):
@@ -1114,21 +1114,21 @@ def _draw_plotly(G, **kwargs):
         y0, y1 = edge_source["y0"][i], edge_source["y1"][i]
         xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
         *rgb, alpha = edge_source["color"][i]
-        edge_kwargs = dict(
-            x=[x0, xm, x1],
-            y=[y0, ym, y1],
-            opacity=alpha,
-            line=dict(
-                color=to_rgba_str(rgb, 1.0),
-                width=edge_source["edge_size"][i],
-            ),
-            customdata=[[edge_source["ind"][i], edge_source["ind_size"][i]]]
+        edge_kwargs = {
+            "x": [x0, xm, x1],
+            "y": [y0, ym, y1],
+            "opacity": alpha,
+            "line": {
+                "color": to_rgba_str(rgb, 1.0),
+                "width": edge_source["edge_size"][i],
+            },
+            "customdata": [[edge_source["ind"][i], edge_source["ind_size"][i]]]
             * 2,
             # show ind and ind_size on hover:
-            hovertemplate="%{customdata[0]}<br>size: %{customdata[1]}",
-            mode="lines",
-            name="",
-        )
+            "hovertemplate": "%{customdata[0]}<br>size: %{customdata[1]}",
+            "mode": "lines",
+            "name": "",
+        }
         if "z0" in edge_source:
             z0, z1 = edge_source["z0"][i], edge_source["z1"][i]
             zm = (z0 + z1) / 2
@@ -1139,29 +1139,29 @@ def _draw_plotly(G, **kwargs):
         else:
             fig.add_trace(go.Scatter(**edge_kwargs))
 
-    node_kwargs = dict(
-        x=node_source["x"],
-        y=node_source["y"],
-        marker=dict(
-            opacity=1.0,
-            color=list(map(to_rgba_str, node_source["color"])),
-            size=[300 * s for s in node_source["size"]],
-            line=dict(
-                color=list(map(to_rgba_str, node_source["outline_color"])),
-                width=2,
-            ),
-        ),
-        customdata=list(
+    node_kwargs = {
+        "x": node_source["x"],
+        "y": node_source["y"],
+        "marker": {
+            "opacity": 1.0,
+            "color": list(map(to_rgba_str, node_source["color"])),
+            "size": [300 * s for s in node_source["size"]],
+            "line": {
+                "color": list(map(to_rgba_str, node_source["outline_color"])),
+                "width": 2,
+            },
+        },
+        "customdata": list(
             zip(node_source["tid"], node_source["shape"], node_source["tags"])
         ),
-        hovertemplate=(
+        "hovertemplate": (
             "tid: %{customdata[0]}<br>"
             "shape: %{customdata[1]}<br>"
             "tags: %{customdata[2]}"
         ),
-        mode="markers",
-        name="",
-    )
+        "mode": "markers",
+        "name": "",
+    }
     if "z" in node_source:
         node_kwargs["z"] = node_source["z"]
         fig.add_trace(go.Scatter3d(**node_kwargs))
@@ -1350,7 +1350,7 @@ def layout_pygraphviz(
     if pos0 is not None:
         fixed = fixed or set()
         for node, coo in pos0.items():
-            pos = ",".join((f"{w:f}" for w in coo))
+            pos = ",".join(f"{w:f}" for w in coo)
             pin = "true" if node in fixed else "false"
             aG.add_node(str(node), pos=pos, pin=pin)
 
@@ -1416,7 +1416,7 @@ def get_positions(
         iterations = 0
 
     if fix is None:
-        fix = dict()
+        fix = {}
     else:
         fix = parse_dict_to_tids_or_inds(fix, tn)
         # find range with which to scale spectral points with
@@ -1541,7 +1541,7 @@ def get_colors(color, custom_colors=None, alpha=None):
     from ..schematic import auto_colors
 
     if color is None:
-        return dict()
+        return {}
 
     if isinstance(color, str):
         color = (color,)
@@ -1635,7 +1635,7 @@ def choose_squarest_grid(x):
     if p.is_integer():
         m = n = int(p)
     else:
-        m = int(round(p))
+        m = round(p)
         p = int(p)
         n = p if m * p >= x else p + 1
     return m, n

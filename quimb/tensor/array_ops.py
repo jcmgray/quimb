@@ -48,7 +48,7 @@ def asarray(array):
 
         # is some kind of python container or element -> iterate or return
         try:
-            return list(_nd_py_iter(sub) for sub in x)
+            return [_nd_py_iter(sub) for sub in x]
         except TypeError:
             return x
 
@@ -592,7 +592,7 @@ class PArray:
     PTensor
     """
 
-    __slots__ = ("_fn", "_params", "_data", "_shape", "_shape_fn_id")
+    __slots__ = ("_data", "_fn", "_params", "_shape", "_shape_fn_id")
 
     def __init__(self, fn, params, shape=None):
         self.fn = fn

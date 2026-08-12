@@ -17,9 +17,7 @@ def is_inf_2d_site(site):
     if not isinstance(cell, tuple) or len(cell) != 2:
         return False
     x, y = cell
-    if not isinstance(x, int) or not isinstance(y, int):
-        return False
-    return True
+    return not (not isinstance(x, int) or not isinstance(y, int))
 
 
 def ensure_inf_2d_sites(where):
@@ -557,7 +555,7 @@ def _half_grid(rmax):
     """
     return [
         (dx, dy)
-        for dx in range(0, rmax + 1)
+        for dx in range(rmax + 1)
         for dy in range(-rmax, rmax + 1)
         if (dx, dy) > (0, 0)
     ]
