@@ -60,6 +60,18 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
         ``cutoff`` and ``renorm``. This is the single source of truth for the
         compression options; ``max_bond`` and ``cutoff`` are also exposed as
         properties.
+    dtype : str, optional
+        If given, ensure the evolved operator tensors are cast to this data
+        type.
+    to_backend : callable, optional
+        If given, apply this function to the operator tensors and gate arrays
+        to convert them to a particular array backend.
+    convert_eager : bool, optional
+        Whether to apply the ``dtype`` and ``to_backend`` conversions to the
+        freshly built operator, the observable, and each gate array as it is
+        applied. The backwards evolution contracts every gate immediately, so
+        there is no lazy stage to defer the conversion to, and ``False`` thus
+        leaves all arrays as supplied.
 
     Attributes
     ----------
@@ -94,6 +106,9 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
         cutoff=1e-10,
         gate_contract="reduce-split",
         gate_opts=None,
+        dtype=None,
+        to_backend=None,
+        convert_eager=True,
         **circuit_opts,
     ):
         # geometry from explicit `edges`, or inferred from the two-site `gates`
@@ -111,6 +126,10 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
         circuit_opts.setdefault("tag_gate_numbers", False)
         circuit_opts.setdefault("tag_gate_rounds", False)
         circuit_opts.setdefault("tag_gate_labels", False)
+
+        circuit_opts.setdefault("dtype", dtype)
+        circuit_opts.setdefault("to_backend", to_backend)
+        circuit_opts.setdefault("convert_eager", convert_eager)
 
         super().__init__(len(self._sites), None, gate_opts, **circuit_opts)
 
@@ -231,9 +250,14 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
             phys_dim=2,
             site_ind_id=("k{}", "b{}"),
         )
+        if self.convert_eager:
+            # match the gate arrays the operator will be evolved with
+            op = self._maybe_convert(op)
+            G = self._maybe_convert(G)
+
         # inject the observable on the upper indices (G acting on identity)
         contract = True if len(where) == 1 else self.gate_opts["contract"]
-        op.gate_upper_(np.asarray(G), where, contract=contract)
+        op.gate_upper_(G, where, contract=contract)
         return op
 
     def get_evolved_operator(self, G, where, *, max_bond=None, cutoff=None):
@@ -273,13 +297,9 @@ class CircuitPEPOSimpleUpdate(CircuitSimpleUpdate):
             if support.isdisjoint(gate_where):
                 continue
             support.update(gate_where)
-            # dagger as a matrix (reshape first): for a two-qubit tensor with
-            # indices (ket0, ket1, bra0, bra1) a plain transpose is wrong, the
-            # matrix conjugate-transpose gives the correct (bra, bra, ket, ket)
-            arr = np.asarray(gate.array)
-            dim = int(round(arr.size**0.5))
-            g_dag = arr.reshape(dim, dim).conj().T
-            op.gate_simple_(g_dag, gate_where, gauges, **opts)
+            # undo the gate U, i.e. G -> U† G U
+            U = self._maybe_convert_gate_array(gate.array)
+            op.gate_simple_(U, gate_where, gauges, dagger=True, **opts)
 
         op.gauge_simple_insert(gauges)
         return op

@@ -109,7 +109,7 @@ def _compress_between_full_env_exact_tids(
         **fit_opts,
     )
 
-    ta.gate_(Pl, bix, transposed=True)
+    ta.gate_(Pl, bix, transpose=True)
     tb.gate_(Pr, bix)
 
     return tn

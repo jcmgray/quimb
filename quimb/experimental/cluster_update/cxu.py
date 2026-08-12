@@ -132,7 +132,7 @@ def compress_between_tids_bondenv_exact(
     )
 
     # absorb the projectors to compress the tn!
-    ta.gate_(Pl, "kl", transposed=True)
+    ta.gate_(Pl, "kl", transpose=True)
     tb.gate_(Pr, "kr")
 
     # reconnect bond
@@ -681,7 +681,7 @@ def compress_between_tids_bondenv_gloop_expand(
     )
 
     # absorb the projectors to compress the tn!
-    ta.gate_(Pl, bix, transposed=True)
+    ta.gate_(Pl, bix, transpose=True)
     tb.gate_(Pr, bix)
 
     if maybe_svals is not None:

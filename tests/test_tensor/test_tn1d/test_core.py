@@ -478,14 +478,20 @@ class TestMatrixProductState:
     )
     @pytest.mark.parametrize("cyclic", [True, False])
     @pytest.mark.parametrize(
-        "sysa", [range(0, 10), range(10, 20), range(20, 30), range(0, 30)]
+        "sysa", [range(10), range(10, 20), range(20, 30), range(30)]
     )
     @pytest.mark.parametrize(
         "sysb", [range(30, 40), range(40, 50), range(50, 60), range(30, 60)]
     )
     def test_partial_trace_compress(self, method, cyclic, sysa, sysb):
         k = qtn.MPS_rand_state(60, 5, cyclic=cyclic)
-        kws = dict(sysa=sysa, sysb=sysb, eps=1e-6, method=method, verbosity=2)
+        kws = {
+            "sysa": sysa,
+            "sysb": sysb,
+            "eps": 1e-6,
+            "method": method,
+            "verbosity": 2,
+        }
         rhoc_ab = k.partial_trace_compress(**kws)
         assert set(rhoc_ab.outer_inds()) == {"kA", "kB", "bA", "bB"}
         inds = ["kA", "kB"], ["bA", "bB"]
@@ -749,7 +755,7 @@ class TestMatrixProductState:
         if renorm:
             assert t.H @ t == pytest.approx(1.0)
         else:
-            0.0 < t.H @ t < 1.0
+            assert 0.0 < t.H @ t < 1.0
 
     def test_measure_known_outcome(self):
         mps = qtn.MPS_computational_state("010101")
@@ -776,6 +782,14 @@ class TestMatrixProductState:
         assert Gpsi.distance_normalized(
             psi.gate(G, where, contract=False)
         ) == pytest.approx(0.0, abs=1e-6)
+
+    @pytest.mark.parametrize("where", [(0, 1), (7, 2, 4)])
+    def test_gate_non_local_transpose(self, where):
+        psi = qtn.MPS_rand_state(8, 3, dtype="complex128")
+        G = qu.rand_uni(2 ** len(where))
+        Gpsi = psi.gate_nonlocal(G, where=where, transpose=True)
+        ref = psi.gate(qu.qarray(G).T, where, contract=False)
+        assert Gpsi.distance_normalized(ref) == pytest.approx(0.0, abs=1e-6)
 
     def test_sample_configuration(self):
         psi = qtn.MPS_rand_state(10, 7)

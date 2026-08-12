@@ -3078,8 +3078,9 @@ class Tensor:
         G,
         ind,
         preserve_inds=True,
-        transposed=False,
+        transpose=False,
         inplace=False,
+        transposed=None,
     ):
         r"""Gate this tensor - contract a matrix into one of its indices without
         changing its indices. Unlike ``contract``, ``G`` is a raw array and the
@@ -3089,7 +3090,7 @@ class Tensor:
 
             x \leftarrow G x
 
-        or if ``transposed=True``:
+        or if ``transpose=True``:
 
         .. math::
 
@@ -3104,9 +3105,11 @@ class Tensor:
         preserve_inds : bool, optional
             If ``True``, the order of the indices is preserved, otherwise the
             gated index will be left at the first axis, avoiding a transpose.
-        transposed : bool, optional
-            If ``True``, the gate is effectively transpose and applied, or
+        transpose : bool, optional
+            If ``True``, the gate is effectively transposed and applied, or
             equivalently, contracted to its left rather than right.
+        transposed : bool, optional
+            Deprecated alias for ``transpose``.
 
         Returns
         -------
@@ -3133,11 +3136,19 @@ class Tensor:
             -4.108910576149794
 
         """
+        if transposed is not None:
+            warnings.warn(
+                "`transposed` has been renamed to `transpose`, for "
+                "consistency with the other gating methods.",
+                FutureWarning,
+            )
+            transpose = transposed
+
         t = self if inplace else self.copy()
 
         ax = t.inds.index(ind)
 
-        if transposed:
+        if transpose:
             new_data = do("tensordot", G, t.data, ((0,), (ax,)))
         else:
             new_data = do("tensordot", G, t.data, ((1,), (ax,)))

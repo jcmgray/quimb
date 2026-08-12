@@ -218,12 +218,7 @@ class CircuitPEPSSimpleUpdate(CircuitSimpleUpdate):
         opts.pop("contract", None)
         opts.pop("propagate_tags", None)
 
-        G = gate.array
-        if self.convert_eager:
-            key = id(G)
-            if key not in self._backend_gate_cache:
-                self._backend_gate_cache[key] = self._maybe_convert(G)
-            G = self._backend_gate_cache[key]
+        G = self._maybe_convert_gate_array(gate.array)
 
         self._psi.gate_simple_(G, where, self.gauges, **opts)
         self._gates.append(gate)

@@ -527,6 +527,8 @@ def tensor_network_ag_gate(
     *,
     which=None,
     contract=False,
+    dagger=False,
+    transpose=False,
     tags=None,
     tags_upper=None,
     tags_lower=None,
@@ -567,6 +569,12 @@ def tensor_network_ag_gate(
 
         X \rightarrow X G_\mathrm{where}^T
 
+    In each case :math:`G` is replaced by :math:`G^\dagger` if ``dagger``, or
+    by :math:`G^T` if ``transpose``. For example the default operator mode with
+    ``dagger=True`` becomes
+    :math:`X \rightarrow G^\dagger_\mathrm{where} X G_\mathrm{where}`, as
+    required for Heisenberg evolution.
+
 
     Parameters
     ----------
@@ -594,6 +602,12 @@ def tensor_network_ag_gate(
                 'swap-split-gate', 'auto-split-gate'}, optional
         How to apply the gate, see
         :meth:`~quimb.tensor.gating.tensor_network_gate_inds`.
+    dagger : bool, optional
+        Whether to apply the conjugate transpose of the gate instead, e.g. for
+        a sandwich this gives ``G† @ X @ G``.
+    transpose : bool, optional
+        Whether to apply the transpose of the gate instead, with no
+        conjugation. Implied by ``dagger``.
     tags : str or sequence of str, optional
         Tags to add to the new gate tensor(s).
     tags_upper : str or sequence of str, optional
@@ -687,6 +701,8 @@ def tensor_network_ag_gate(
             inds_upper,
             inds_lower,
             contract=contract,
+            dagger=dagger,
+            transpose=transpose,
             tags=tags,
             tags_upper=tags_upper,
             tags_lower=tags_lower,
@@ -698,6 +714,8 @@ def tensor_network_ag_gate(
             G,
             inds,
             contract=contract,
+            dagger=dagger,
+            transpose=transpose,
             tags=tags,
             info=info,
             **compress_opts,
@@ -718,6 +736,8 @@ def tensor_network_ag_gate_simple(
     where,
     gauges,
     *,
+    dagger=False,
+    transpose=False,
     max_bond=None,
     cutoff=1e-10,
     renorm=True,
@@ -743,6 +763,12 @@ def tensor_network_ag_gate_simple(
     gauges : dict[str, array_like]
         The store of gauge bonds, the keys being indices and the values
         being the vectors. Only keys present in this dictionary will be used.
+    dagger : bool, optional
+        Whether to apply the conjugate transpose of the gate instead, see
+        :func:`tensor_network_ag_gate`.
+    transpose : bool, optional
+        Whether to apply the transpose of the gate instead, see
+        :func:`tensor_network_ag_gate`.
     max_bond : int, optional
         The maximum bond dimension to keep when applying the gate.
     cutoff : float, optional
@@ -788,6 +814,8 @@ def tensor_network_ag_gate_simple(
             G=G,
             where=where,
             contract=True,
+            dagger=dagger,
+            transpose=transpose,
             inplace=True,
         )
 
@@ -801,6 +829,8 @@ def tensor_network_ag_gate_simple(
             G=G,
             where=where,
             gauges=gauges,
+            dagger=dagger,
+            transpose=transpose,
             max_bond=max_bond,
             cutoff=cutoff,
             renorm=renorm,
@@ -830,6 +860,8 @@ def tensor_network_ag_gate_simple(
             tn_where,
             G=G,
             where=where,
+            dagger=dagger,
+            transpose=transpose,
             info=info,
             inplace=True,
             max_bond=max_bond,
@@ -852,6 +884,8 @@ def tensor_network_ag_gate_simple_long_range(
     where,
     gauges,
     *,
+    dagger=False,
+    transpose=False,
     max_bond=None,
     cutoff=1e-10,
     renorm=True,
@@ -881,6 +915,12 @@ def tensor_network_ag_gate_simple_long_range(
     gauges : dict[str, array_like]
         The store of gauge bonds, the keys being indices and the values
         being the vectors. Only keys present in this dictionary will be used.
+    dagger : bool, optional
+        Whether to apply the conjugate transpose of the gate instead, see
+        :func:`tensor_network_ag_gate`.
+    transpose : bool, optional
+        Whether to apply the transpose of the gate instead, see
+        :func:`tensor_network_ag_gate`.
     max_bond : int, optional
         The maximum bond dimension to keep when applying the gate.
     cutoff : float, optional
@@ -967,7 +1007,12 @@ def tensor_network_ag_gate_simple_long_range(
     #    │   │
     #     lix
     G = maybe_factor_gate(G, uix, tn=tn)
-    tG = Tensor(G, inds=(*uix, *lix))
+    if dagger:
+        # G† = conjugate, then transpose
+        G = do("conj", G)
+        transpose = True
+    gix = (*lix, *uix) if transpose else (*uix, *lix)
+    tG = Tensor(G, inds=gix)
 
     # then split spatially
     #    uix[0] uix[1]
@@ -4339,11 +4384,13 @@ class TensorNetworkGenOperator(TensorNetworkGen):
     def gate_sandwich_with_op_lazy(
         self,
         A,
+        dagger=False,
         inplace=False,
     ):
         r"""Act lazily with the operator tensor network ``A``, which should
         have matching structure, on this operator tensor network (``B``), like
-        :math:`B \rightarrow A B A^\dagger`. The returned tensor network will
+        :math:`B \rightarrow A B A^\dagger`, or if ``dagger=True`` like
+        :math:`B \rightarrow A^\dagger B A`. The returned tensor network will
         have the same structure as this one, but with the operator gated in
         lazily, i.e. uncontracted.
 
@@ -4352,6 +4399,9 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         A : TensorNetworkGenOperator
             The operator tensor network to gate with, or apply to this tensor
             network.
+        dagger : bool, optional
+            Whether to apply the reversed sandwich :math:`A^\dagger B A`
+            instead, e.g. for Heisenberg evolution.
         inplace : bool, optional
             Whether to perform the gate operation inplace on this tensor
 
@@ -4360,8 +4410,12 @@ class TensorNetworkGenOperator(TensorNetworkGen):
         TensorNetworkGenOperator
         """
         B = self if inplace else self.copy()
-        B.gate_upper_with_op_lazy_(A)
-        B.gate_lower_with_op_lazy_(A.conj(), transpose=True)
+        if dagger:
+            B.gate_upper_with_op_lazy_(A.conj(), transpose=True)
+            B.gate_lower_with_op_lazy_(A)
+        else:
+            B.gate_upper_with_op_lazy_(A)
+            B.gate_lower_with_op_lazy_(A.conj(), transpose=True)
         return B
 
     gate_sandwich_with_op_lazy_ = functools.partialmethod(

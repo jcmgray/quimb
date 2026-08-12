@@ -1,3 +1,4 @@
+import itertools
 import warnings
 
 import autoray as ar
@@ -21,19 +22,24 @@ import quimb.tensor as qtn
     ],
 )
 @pytest.mark.parametrize("where", [[1], [2, 3]])
-def test_gate_sandwich_basic_mpo(contract, where):
+@pytest.mark.parametrize("dagger", [False, True])
+def test_gate_sandwich_basic_mpo(contract, where, dagger):
     # apply arbitrary complex 2-site gate to random complex MPO
     mpo = qtn.MPO_rand(5, 3, dtype=complex, seed=42)
     G = qu.rand_matrix(2 ** len(where), seed=42)
     # construct reference by densifying
     A = mpo.to_dense()
     IGI = qu.ikron(G, [mpo.phys_dim()] * mpo.nsites, where)
-    GAG = IGI @ A @ IGI.H
+    if dagger:
+        GAG = IGI.H @ A @ IGI
+    else:
+        GAG = IGI @ A @ IGI.H
     # apply gate via tensor network method
     gmpo = mpo.gate_sandwich(
         G,
         where=where,
         contract=contract,
+        dagger=dagger,
         tags="GATE",
         tags_upper="KET",
         tags_lower="BRA",
@@ -141,6 +147,45 @@ def test_tensor_network_apply_op_op(which_A, which_B, contract, inplace):
     assert_allclose(AB.to_dense(), C)
 
 
+@pytest.mark.parametrize("which", ["upper", "lower"])
+def test_gate_upper_lower_transpose(which):
+    mpo = qtn.MPO_rand(4, 3, dtype=complex, seed=42)
+    G = qu.rand_matrix(4, seed=42)
+    A = qu.qarray(mpo.to_dense())
+    IG = qu.ikron(G, [2] * 4, [1, 2])
+
+    # 'lower' applies X @ G^T by default, so transpose gives plain X @ G
+    if which == "upper":
+        expected = IG.T @ A
+    else:
+        expected = A @ IG
+
+    gmpo = mpo.gate(G, where=[1, 2], which=which, transpose=True)
+    assert_allclose(gmpo.to_dense(), expected)
+
+
+@pytest.mark.parametrize("where", [[1], [2, 3]])
+def test_gate_simple_sandwich_dagger(where):
+    # dagger should match daggering the gate matrix by hand
+    mpo = qtn.MPO_rand(5, 3, dtype=complex, seed=42)
+    G = qu.rand_uni(2 ** len(where), seed=42)
+
+    gauges = {}
+    mpo.gauge_all_simple_(100, 1e-13, gauges=gauges)
+
+    expected = mpo.copy()
+    gauges_expected = dict(gauges)
+    expected.gate_simple_(
+        qu.dag(G), where, gauges_expected, cutoff=0.0, max_bond=None
+    )
+    expected.gauge_simple_insert(gauges_expected)
+
+    mpo.gate_simple_(G, where, gauges, dagger=True, cutoff=0.0, max_bond=None)
+    mpo.gauge_simple_insert(gauges)
+
+    assert_allclose(mpo.to_dense(), expected.to_dense())
+
+
 def test_gate_with_op_lazy():
     A = qtn.MPO_rand(5, 3, dtype=complex)
     x = qtn.MPS_rand_state(5, 3, dtype=complex)
@@ -149,11 +194,16 @@ def test_gate_with_op_lazy():
     assert_allclose(x.to_dense(), y)
 
 
-def test_gate_sandwich_with_op_lazy():
+@pytest.mark.parametrize("dagger", [False, True])
+def test_gate_sandwich_with_op_lazy(dagger):
     B = qtn.MPO_rand(5, 3, dtype=complex)
     A = qtn.MPO_rand(5, 3, dtype=complex)
-    y = A.to_dense() @ B.to_dense() @ A.to_dense().conj().T
-    B.gate_sandwich_with_op_lazy_(A)
+    Ad = A.to_dense()
+    if dagger:
+        y = Ad.conj().T @ B.to_dense() @ Ad
+    else:
+        y = Ad @ B.to_dense() @ Ad.conj().T
+    B.gate_sandwich_with_op_lazy_(A, dagger=dagger)
     assert_allclose(B.to_dense(), y)
 
 
@@ -235,14 +285,14 @@ def test_gauge_all_simple_options(damping, power, smudge, fuse_multibonds):
     psi = qtn.PEPS.rand(2, 2, bond_dim=3, cyclic=True, seed=10)
     norm0 = psi.norm()
 
-    opts = dict(
-        max_iterations=1000,
-        tol=1e-11,
-        damping=damping,
-        power=power,
-        smudge=smudge,
-        fuse_multibonds=fuse_multibonds,
-    )
+    opts = {
+        "max_iterations": 1000,
+        "tol": 1e-11,
+        "damping": damping,
+        "power": power,
+        "smudge": smudge,
+        "fuse_multibonds": fuse_multibonds,
+    }
 
     psig = psi.copy()
     psig.gauge_all_simple_(**opts)
@@ -487,6 +537,32 @@ def test_against_dense_no_truncation(where, D):
     assert out.distance_normalized(ref) == pytest.approx(0.0, abs=1e-6)
 
 
+@pytest.mark.parametrize("mode", ["dagger", "transpose"])
+def test_long_range_dagger_transpose(mode):
+    psi, gauges = make_state()
+    G = qu.rand_uni(4, seed=10)
+
+    # should match supplying the modified gate directly
+    Gmod = qu.dag(G) if mode == "dagger" else qu.qarray(G).T
+    ref = exact_gated(psi, gauges, Gmod, (1, 4))
+
+    qtn.tnag.core.tensor_network_ag_gate_simple_long_range(
+        psi,
+        G,
+        (1, 4),
+        gauges,
+        dagger=(mode == "dagger"),
+        transpose=(mode == "transpose"),
+        max_bond=None,
+        cutoff=0.0,
+        renorm=False,
+        inplace=True,
+    )
+    out = physical_state(psi, gauges)
+
+    assert out.distance_normalized(ref) == pytest.approx(0.0, abs=1e-6)
+
+
 def test_peps_long_range_no_truncation():
     # 5x3 PEPS, gate on a vertical pair two sites apart: the path runs
     # (1, 1)-(2, 1)-(3, 1), with the rest of the lattice as environment
@@ -540,7 +616,7 @@ def test_monotonic_fidelity_increasing_max_bond():
         infids.append(infidelity(ref, physical_state(psi, gauges)))
 
     # infidelity should (weakly) decrease as more bond dimension is retained
-    for ihi, ilo in zip(infids, infids[1:]):
+    for ihi, ilo in itertools.pairwise(infids):
         assert ilo <= ihi + 1e-10
 
     # and with no cap we recover the exact gated state
