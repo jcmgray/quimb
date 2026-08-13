@@ -1,9 +1,16 @@
+import importlib
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
+
+requires_symmray = pytest.mark.skipif(
+    importlib.util.find_spec("symmray") is None,
+    reason="symmray not installed",
+)
 
 
 class TestGeometries:
@@ -124,6 +131,73 @@ class TestMPSSpecificStates:
         mps = qtn.MPS_computational_state("01+-")
         assert_allclose(
             mps.to_dense(), qu.up() & qu.down() & qu.plus() & qu.minus()
+        )
+
+    # (1, True) is degenerate: the lone tensor would trace its own bond
+    @pytest.mark.parametrize("L,cyclic", [(1, False), (5, False), (5, True)])
+    def test_product_state(self, L, cyclic):
+        psis = [qu.rand_ket(2) for _ in range(L)]
+        mps = qtn.MPS_product_state(psis, cyclic=cyclic)
+        assert mps.L == L
+        assert mps.cyclic is cyclic
+        assert all(d == 1 for d in mps.bond_sizes())
+        assert_allclose(mps.to_dense(), qu.kron(*psis))
+
+    @requires_symmray
+    @pytest.mark.parametrize(
+        "symmetry,chargemap,charges",
+        [
+            ("Z2", {0: 2, 1: 2}, [0, 1, 0, 1]),
+            ("U1", {0: 2, 1: 2}, [0, 1, 0, 1]),
+            (
+                "U1U1",
+                {(0, 0): 2, (1, 0): 2, (0, 1): 2, (1, 1): 2},
+                [(0, 0), (1, 0), (0, 1), (1, 1)],
+            ),
+        ],
+    )
+    def test_product_state_blocksparse(self, symmetry, chargemap, charges):
+        import symmray as sr
+
+        # each vector spans the full physical index but has definite charge,
+        # so only that one sector is occupied
+        def rand_vecs(seed0):
+            return [
+                sr.utils.get_rand(
+                    symmetry,
+                    (chargemap,),
+                    duals=(False,),
+                    charge=c,
+                    seed=seed0 + j,
+                )
+                for j, c in enumerate(charges)
+            ]
+
+        avs, bvs = rand_vecs(0), rand_vecs(100)
+        mpsa = qtn.MPS_product_state(avs)
+        mpsb = qtn.MPS_product_state(bvs)
+        L = len(charges)
+
+        # the two ends of each bond must have opposite duals, else they are
+        # not contractible
+        for i in range(L - 1):
+            bond = mpsa.bond(i, i + 1)
+            ta, tb = mpsa[i], mpsa[i + 1]
+            ia = ta.data.indices[ta.inds.index(bond)]
+            ib = tb.data.indices[tb.inds.index(bond)]
+            # right bonds are dual, left bonds are not
+            assert ia.dual is True
+            assert ib.dual is False
+            assert ia.matches(ib)
+
+        # the overlap of two product states factorizes over the sites, which
+        # pins down the charge flow the new bonds impose
+        overlaps = [
+            np.vdot(a.to_dense(), b.to_dense()) for a, b in zip(avs, bvs)
+        ]
+        assert mpsa.H @ mpsb == pytest.approx(np.prod(overlaps))
+        assert mpsa.H @ mpsa == pytest.approx(
+            np.prod([np.linalg.norm(a.to_dense()) ** 2 for a in avs])
         )
 
 

@@ -18,9 +18,12 @@ Release notes for `quimb`.
 - [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate): support `dtype`, `to_backend` and `convert_eager`, like [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate). Since the operator is built lazily, at expectation time, the conversion is applied there: to the freshly built identity PEPO, the observable, and each gate array as it is applied during the backwards evolution.
 - [`HilbertSpace`](#HilbertSpace): support ``U1U1`` sectors whatever the ordering, rather than only when each species occupies a contiguous block of registers. A new ``species`` argument says which conserved charge each site counts towards, which also allows the shorter sector forms ``{species: filling}`` and ``(ka, kb)`` alongside the explicit ``((na, ka), (nb, kb))``.
 - [`HilbertSpace`](#HilbertSpace): ``order`` accepts the presets ``"blocked"``, grouping the sites into one contiguous block per species, and ``"interleaved"``, alternating the species at each position.
+- add [`MatrixProductState.from_product`](#MatrixProductState.from_product), which [`MPS_product_state`](#MPS_product_state) now simply calls. It accepts block sparse (e.g. `symmray`) single site vectors, giving each new bond index an explicit dualness, ``False`` on the left and ``True`` on the right, so that the two ends of every bond are contractible.
 
 
 **Bug fixes:**
+
+- [`MPS_product_state`](#MPS_product_state): reshape the single site vectors backend agnostically, rather than calling the ``x.reshape(*shape)`` ndarray method convention, which raised ``TypeError`` for array libraries taking the array API style single shape tuple.
 
 - [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register rather than its site label as the ``ikron`` index, which silently gave the wrong matrix whenever the two differed, i.e. for any non-identity ordering or non-integer site labels.
 - [`HilbertSpace`](#HilbertSpace): reordering the sites left the rank to configuration mappings using the previous ordering, which for mixed dimension spaces decoded ranks into invalid configurations. The ordering is now immutable, see the breaking change above.

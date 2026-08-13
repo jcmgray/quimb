@@ -1986,6 +1986,57 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         return mps
 
+    @classmethod
+    def from_product(cls, arrays, cyclic=False, **mps_opts):
+        """Create a ``MatrixProductState`` of bond dimension 1 from a sequence
+        of single site vectors, i.e. a product state.
+
+        Parameters
+        ----------
+        arrays : sequence of 1D array_like
+            The single-site vectors.
+        cyclic : bool, optional
+            Generate a MPS with periodic boundary conditions or not, default
+            open boundary conditions.
+        mps_opts
+            Supplied to :class:`~quimb.tensor.tn1d.core.MatrixProductState`.
+
+        Returns
+        -------
+        MatrixProductState
+
+        Examples
+        --------
+
+            >>> mps = MatrixProductState.from_product(
+            ...     [qu.up(), qu.down(), qu.up()]
+            ... )
+            >>> mps.show()
+             1 1
+            o-o-o
+            | | |
+        """
+        arrays = tuple(arrays)
+        L = len(arrays)
+        arrays_expanded = []
+
+        for i, array in enumerate(arrays):
+            x = ops.asarray(array)
+            has_l = (i > 0) or cyclic
+            has_r = (i < L - 1) or cyclic
+            if ops.isblocksparse(x):
+                # need explicit duals so they match up in pairs
+                if has_r:
+                    x = x.expand_dims(0, dual=True)
+                if has_l:
+                    x = x.expand_dims(0, dual=False)
+            else:
+                shape = (1,) * (has_l + has_r) + (-1,)
+                x = reshape(x, shape)
+            arrays_expanded.append(x)
+
+        return cls(tuple(arrays_expanded), shape="lrp", **mps_opts)
+
     def add_MPS(self, other, inplace=False, **kwargs):
         """Add another MatrixProductState to this one."""
         return tensor_network_ag_sum(self, other, inplace=inplace, **kwargs)

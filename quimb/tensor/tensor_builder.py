@@ -24,7 +24,7 @@ from ..gen.rand import (
     random_seed_fn,
 )
 from ..utils import concat, deprecated, unique
-from .array_ops import asarray, reshape, sensibly_scale
+from .array_ops import reshape, sensibly_scale
 from .contraction import array_contract
 from .tensor_core import (
     COPY_tensor,
@@ -4235,30 +4235,7 @@ def MPS_product_state(arrays, cyclic=False, **mps_opts):
     -------
     MatrixProductState
     """
-    arrays = tuple(arrays)
-    L = len(arrays)
-
-    if L == 1:
-        if cyclic:
-            shapes = [(1, 1, -1)]
-        else:
-            shapes = [(-1,)]
-    else:
-        shapes = []
-        for i in range(L):
-            shape = []
-            if (i > 0) or cyclic:
-                shape.append(1)
-            if (i < L - 1) or cyclic:
-                shape.append(1)
-            shape.append(-1)
-            shapes.append(tuple(shape))
-
-    mps_arrays = (
-        asarray(array).reshape(*shape) for array, shape in zip(arrays, shapes)
-    )
-
-    return MatrixProductState(mps_arrays, shape="lrp", **mps_opts)
+    return MatrixProductState.from_product(arrays, cyclic=cyclic, **mps_opts)
 
 
 def MPS_computational_state(binary, dtype="float64", cyclic=False, **mps_opts):
