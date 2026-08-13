@@ -28,6 +28,7 @@ Release notes for `quimb`.
 - [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register rather than its site label as the ``ikron`` index, which silently gave the wrong matrix whenever the two differed, i.e. for any non-identity ordering or non-integer site labels.
 - [`HilbertSpace`](#HilbertSpace): reordering the sites left the rank to configuration mappings using the previous ordering, which for mixed dimension spaces decoded ranks into invalid configurations. The ordering is now immutable, see the breaking change above.
 - [`compute_oblique_projectors`](#compute_oblique_projectors): damp the inverse singular values at a scale of ``max(s) * eps``, rather than dividing by them directly. Exactly rank deficient environments, which keep zero singular values when ``cutoff=0.0``, previously gave ``inf`` or ``nan`` projectors. The same damping is applied by the shared diagonal division helpers, and so also by [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges='inverse'``.
+- SRC compression: fix bug where svd rather than qr was used by default to orthogonalize the sketched columns
 
 
 ## v1.15.0 (2026-08-10)

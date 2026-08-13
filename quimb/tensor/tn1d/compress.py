@@ -1132,6 +1132,7 @@ def _do_sweep_compress_from_low_rank_left_envs(
     TensorNetwork
     """
     project_opts = ensure_dict(project_opts)
+    project_opts.setdefault("method", "qr")
     project_opts.setdefault("absorb", "lorthog")
 
     # we sweep in from the right
@@ -1323,7 +1324,8 @@ def tensor_network_1d_compress_src(
         Whether to sweep in the reverse direction, resulting in a left
         canonical form instead of right canonical.
     canonize : bool, optional
-        Whether to pseudo canonicalize the initial tensor network.
+        Whether to pseudo canonicalize the initial tensor network. This is
+        always effectively ``True`` for the SRC method, and so ignored.
     equalize_norms : bool or float, optional
         Whether to equalize the norms of the tensors after compression. If an
         explicit value is given, then the norms will be set to that value, and
@@ -1662,7 +1664,7 @@ def tensor_network_1d_compress_srcmps(
         take precedence over any defaults.
     project_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
-        orthogonal projectors. The method should product a left isometry, for
+        orthogonal projectors. The method should produce a left isometry, for
         example ``method="svd:eig"``. Values set here take precedence over
         defaults.
     inplace : bool, optional
@@ -1845,7 +1847,7 @@ def tensor_network_1d_compress_srcmps_oversample(
         take precedence over any defaults.
     project_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` when forming the
-        orthogonal projectors in the SRC step. The method should product a left
+        orthogonal projectors in the SRC step. The method should produce a left
         isometry, for example ``method="svd:eig"``. Values set here take
         precedence over defaults.
     compress_opts : dict, optional
