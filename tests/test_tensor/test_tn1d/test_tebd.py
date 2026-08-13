@@ -229,6 +229,45 @@ class TestTEBD:
         assert dr < 1e-3 < di
 
 
+class TestTrotterGatesVsTEBD:
+    """The gate sequence from ``LocalHam1D.get_trotter_gates`` should
+    reproduce the schedule ``TEBD`` performs by hand.
+    """
+
+    @pytest.mark.parametrize("fuse_adjacent", [True, False])
+    @pytest.mark.parametrize("imag", [False, True])
+    @pytest.mark.parametrize("L", [5, 6])
+    def test_matches_tebd_order2(self, L, imag, fuse_adjacent):
+        dt, steps = 0.05, 4
+        ham = qtn.ham_1d_heis(L)
+        psi0 = qtn.MPS_neel_state(L, dtype=complex)
+
+        tebd = qtn.TEBD(psi0, ham, dt=dt, imag=imag, progbar=False)
+        tebd.split_opts.update(cutoff=0.0, max_bond=2**L)
+        tebd.update_to(steps * dt, dt=dt, order=2)
+
+        x = -dt if imag else -1j * dt
+        psi = psi0.copy()
+        for g in ham.get_trotter_gates(
+            x, order=2, steps=steps, fuse_adjacent=fuse_adjacent
+        ):
+            psi.gate_split_(g.U, g.where, cutoff=0.0, max_bond=2**L)
+
+        # TEBD renormalizes each sweep during imaginary time evolution
+        psi.normalize()
+        assert abs(qu.expec(tebd.pt.to_dense(), psi.to_dense())) == approx(1)
+
+    def test_canonical_center_only_turns_around_between_layers(self):
+        L = 8
+        ham = qtn.ham_1d_heis(L)
+        gates = ham.get_trotter_gates(-1j * 0.05, order=2, steps=3)
+        for layer in {g.layer for g in gates}:
+            sites = [g.where[0] for g in gates if g.layer == layer]
+            assert (sites == sorted(sites)) or (
+                sites == sorted(sites, reverse=True)
+            )
+
+
 def test_OTOC_local():
     L = 10
     psi0 = qtn.MPS_computational_state("0" * L, cyclic=True)

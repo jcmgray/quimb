@@ -75,6 +75,99 @@ def edge_coloring(
         )
 
 
+def trotter_schedule(nlayers, order=2):
+    r"""Get the sequence of layer applications making up a single Trotter step
+    of a product formula of the given order, for a hamiltonian split into
+    ``nlayers`` groups of commuting terms.
+
+    Parameters
+    ----------
+    nlayers : int
+        The number of commuting layers the hamiltonian is split into.
+    order : {2, 1, 4}, optional
+        The order of the product formula. Order 1 applies each layer once,
+        order 2 is the symmetric (palindromic) formula, and order 4 the
+        standard Suzuki recursion built from five order 2 steps.
+
+    Returns
+    -------
+    list[tuple[int, float]]
+        Pairs of layer index and the fraction of the overall exponent to
+        apply that layer with, in the order they should be applied.
+
+    Examples
+    --------
+    >>> trotter_schedule(2, order=2)
+    [(0, 0.5), (1, 1.0), (0, 0.5)]
+    """
+    if order == 1:
+        return [(k, 1.0) for k in range(nlayers)]
+
+    if order == 2:
+        if nlayers == 0:
+            return []
+        return [
+            *((k, 0.5) for k in range(nlayers - 1)),
+            (nlayers - 1, 1.0),
+            *((k, 0.5) for k in reversed(range(nlayers - 1))),
+        ]
+
+    if order == 4:
+        # suzuki recursion: S4(x) = S2(sx)^2 S2((1 - 4s)x) S2(sx)^2
+        s = 1 / (4 - 4 ** (1 / 3))
+        order2 = trotter_schedule(nlayers, order=2)
+        return [
+            (k, frac * f)
+            for f in (s, s, 1 - 4 * s, s, s)
+            for k, frac in order2
+        ]
+
+    raise ValueError(f"Unsupported Trotter order: {order}.")
+
+
+class TrotterGate:
+    """A single local gate within a Trotterized product formula, as generated
+    by :meth:`LocalHamGen.get_trotter_gates`. It unpacks as the pair ``U,
+    where``, matching the argument order of the gate application methods, so
+    that ``for U, where in gates: psi.gate_(U, where)`` works. The remaining
+    information is available as attributes.
+
+    Attributes
+    ----------
+    U : array
+        The gate itself, ``expm(frac * x * H_where)``.
+    where : tuple[node]
+        The sites the gate acts on.
+    frac : float
+        The fraction of the overall exponent ``x`` this gate applies.
+    layer : int
+        Which layer of the sequence this gate belongs to. Gates sharing a
+        layer act on disjoint sites and commute.
+    step : int
+        Which Trotter step this gate belongs to. A gate fused across a step
+        boundary is labelled with the earlier step.
+    """
+
+    __slots__ = ("U", "frac", "layer", "step", "where")
+
+    def __init__(self, U, where, frac, layer, step):
+        self.U = U
+        self.where = where
+        self.frac = frac
+        self.layer = layer
+        self.step = step
+
+    def __iter__(self):
+        # so that `U, where = gate` and `for U, where in gates` work
+        return iter((self.U, self.where))
+
+    def __repr__(self):
+        return (
+            f"TrotterGate(where={self.where}, frac={self.frac}, "
+            f"layer={self.layer}, step={self.step})"
+        )
+
+
 class LocalHamGen:
     """Representation of a local hamiltonian defined on a general graph. This
     combines all two site and one site terms into a single interaction per
@@ -383,6 +476,107 @@ class LocalHamGen:
             cover.clear()
 
         return ordering
+
+    def get_trotter_gates(
+        self,
+        x,
+        order=2,
+        steps=1,
+        ordering="sort",
+        fuse_adjacent=True,
+        alternate=True,
+    ):
+        r"""Get the sequence of local gates for a Trotter approximation to
+        :math:`\exp(x H)` of the given order, repeated ``steps`` times. The
+        terms are grouped into layers of commuting (non site overlapping)
+        gates, then each layer is exponentiated for the fraction of ``x`` the
+        product formula calls for.
+
+        Parameters
+        ----------
+        x : float or complex
+            The overall exponent, such that the sequence approximates
+            ``expm(x * H)``. Note this does **not** include the imaginary
+            prefactor of the Schrodinger equation, so real ``x`` corresponds to
+            imaginary time evolution, and ``x = -1j * t`` to real time.
+        order : {2, 1, 4}, optional
+            The order of the product formula. Order 1 applies each layer once
+            per step, order 2 is the symmetric (palindromic) formula, and order
+            4 the standard Suzuki recursion built from five order 2 steps.
+        steps : int, optional
+            How many Trotter steps to generate, each of exponent ``x``. Note
+            the total exponent is thus ``steps * x``.
+        ordering : str, None or sequence[sequence[tuple[node]]], optional
+            How to group the terms into commuting layers. A string or ``None``
+            is passed to
+            :meth:`~quimb.tensor.tnag.tebd.LocalHamGen.get_auto_ordering`, else
+            an explicit sequence of layers of pairs can be given.
+        fuse_adjacent : bool, optional
+            Whether to merge consecutive applications of the same layer into a
+            single gate. For order 2 this means the half layers appear only at
+            the very start and end of the whole sequence, rather than at every
+            step boundary. The merged gate is taken directly from the cached
+            local exponential at the summed fraction, not by multiplying the
+            two separate gates.
+        alternate : bool, optional
+            Whether to flip the direction the pairs within each layer are
+            iterated over, every other layer. Gates within a layer commute so
+            this changes nothing numerically, but it keeps, for example, an MPS
+            canonical center sweeping back and forth rather than jumping back
+            each layer.
+
+        Returns
+        -------
+        tuple[TrotterGate]
+            Each gate unpacks as the pair ``U, where``, with ``frac``,
+            ``layer`` and ``step`` available as attributes.
+
+        Examples
+        --------
+        Real time evolve an MPS by ``t = 1.0`` in 100 steps::
+
+            >>> import quimb as qu
+            >>> import quimb.tensor as qtn
+            >>> H = qtn.LocalHam1D(L=16, H2=qu.ham_heis(2))
+            >>> psi = qtn.MPS_neel_state(16, dtype=complex)
+            >>> for U, where in H.get_trotter_gates(-1j * 0.01, steps=100):
+            ...     psi.gate_split_(U, where, cutoff=1e-8)
+
+        See Also
+        --------
+        get_gate_expm, get_auto_ordering
+        """
+        if isinstance(ordering, str) or ordering is None:
+            layers = self.get_auto_ordering(ordering, group=True)
+        else:
+            layers = tuple(tuple(layer) for layer in ordering)
+
+        # repeat the single step schedule, tracking which step each entry is in
+        single = trotter_schedule(len(layers), order)
+        schedule = [
+            [k, frac, step] for step in range(steps) for k, frac in single
+        ]
+
+        if fuse_adjacent:
+            fused = []
+            for entry in schedule:
+                if fused and (fused[-1][0] == entry[0]):
+                    # same layer again, just accumulate the fraction
+                    fused[-1][1] += entry[1]
+                else:
+                    fused.append(entry)
+            schedule = fused
+
+        gates = []
+        for layer, (k, frac, step) in enumerate(schedule):
+            wheres = layers[k]
+            if alternate and (layer % 2 == 1):
+                wheres = reversed(wheres)
+            for where in wheres:
+                U = self.get_gate_expm(where, frac * x)
+                gates.append(TrotterGate(U, where, frac, layer, step))
+
+        return tuple(gates)
 
     def __repr__(self):
         s = "<LocalHamGen(nsites={}, num_terms={})>"

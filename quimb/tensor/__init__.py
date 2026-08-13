@@ -241,7 +241,9 @@ from .tnag.tebd import (
     LocalHamGen,
     SimpleUpdateGen,
     TEBDGen,
+    TrotterGate,
     edge_coloring,
+    trotter_schedule,
 )
 
 __all__ = (
@@ -363,6 +365,7 @@ __all__ = (
     "TensorNetworkGenOperator",
     "TensorNetworkGenVector",
     "TensorNetworkInfinite2DFlat",
+    "TrotterGate",
     "align_TN_1D",
     "array_contract",
     "bonds",
@@ -443,6 +446,7 @@ __all__ = (
     "tensor_network_gate_sandwich_inds",
     "tensor_network_sum",
     "tensor_split",
+    "trotter_schedule",
     "unpack",
 )
 
