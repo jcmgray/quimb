@@ -104,6 +104,13 @@ line-length = 79
 target-version = "py311"
 lint.ignore = ["E741"]
 
+# diagnostics are too strict for now, disable to still use as lsp
+[tool.pyright]
+typeCheckingMode = "off"
+
+[tool.ty.rules]
+all = "ignore"
+
 # ---------------------------------- pixi ----------------------------------- #
 
 [tool.pixi.workspace]
