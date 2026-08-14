@@ -857,6 +857,30 @@ class TestPEPO:
         d = U.to_qarray().shape[0]
         assert_allclose(U.to_qarray(), np.eye(d))
 
+    def test_build_pepo_propagator_trotterized_accuracy(self):
+        ham = qtn.LocalHam2D(2, 2, qu.rand_herm(4, seed=42))
+        dims = [2] * 4
+        sites = {(0, 0): 0, (0, 1): 1, (1, 0): 2, (1, 1): 3}
+        Hd = sum(
+            qu.pkron(t, dims, [sites[coo] for coo in w])
+            for w, t in ham.items()
+        )
+
+        errs = []
+        for x in (0.02, 0.01):
+            U = ham.build_pepo_propagator_trotterized(x)
+            errs.append(np.linalg.norm(U.to_qarray() - qu.expm(x * Hd)))
+
+        # first order: halving x should quarter the error
+        assert errs[0] / errs[1] == pytest.approx(4, rel=0.15)
+
+    def test_build_pepo_propagator_trotterized_order(self):
+        # only check the plumbing, higher order pepos get expensive fast
+        ham = qtn.LocalHam2D(2, 2, qu.rand_herm(4, seed=42))
+        U1 = ham.build_pepo_propagator_trotterized(0.1, order=1)
+        U2 = ham.build_pepo_propagator_trotterized(0.1, order=2)
+        assert U2.max_bond() > U1.max_bond()
+
 
 class TestMisc:
     def test_calc_plaquette_sizes(self):
