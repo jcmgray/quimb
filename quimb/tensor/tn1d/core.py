@@ -683,6 +683,9 @@ class TensorNetwork1DVector(TensorNetwork1D, TensorNetworkGenVector):
             i = i % self.L
         return self.site_ind_id.format(i)
 
+    def _site_phys_inds(self, i):
+        return (self.site_ind(i),)
+
     @functools.wraps(gate_TN_1D)
     def gate(self, *args, inplace=False, **kwargs):
         return gate_TN_1D(self, *args, inplace=inplace, **kwargs)
@@ -745,6 +748,9 @@ class TensorNetwork1DOperator(TensorNetwork1D, TensorNetworkGenOperator):
         "_lower_ind_id",
         "_L",
     )
+
+    def _site_phys_inds(self, i):
+        return (self.upper_ind(i), self.lower_ind(i))
 
     def reindex_lower_sites(self, new_id, where=None, inplace=False):
         """Update the lower site index labels to a new string specifier.
@@ -1618,6 +1624,118 @@ class TensorNetwork1DFlat(TensorNetwork1D):
         lo, ro = self.count_canonized()
         return lo, self.L - ro - 1
 
+    @convert_cur_orthog
+    def swap_sites_with_compress(
+        self, i, j, info=None, inplace=False, **compress_opts
+    ):
+        """Swap the physical spaces of sites ``i`` and ``j``, compressing the
+        bond between them. If the sites are not adjacent, this happens through
+        a sequence of adjacent swaps.
+
+        Parameters
+        ----------
+        i : int
+            The first site to swap.
+        j : int
+            The second site to swap.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        info : dict, optional
+            If supplied, use and update the ``"cur_orthog"`` entry.
+        inplace : bool, optional
+            Perform the swap in place.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        tn = self if inplace else self.copy()
+
+        i, j = sorted((i, j))
+        if i + 1 != j:
+            tn.swap_site_to_(j, i, info=info, **compress_opts)
+            tn.swap_site_to_(i + 1, j, info=info, **compress_opts)
+            return tn
+
+        tn.canonicalize_((i, j), info=info)
+
+        phys_inds_i = tn._site_phys_inds(i)
+        phys_inds_j = tn._site_phys_inds(j)
+        Ti, Tj = tn[i], tn[j]
+        _, unshared = Ti.filter_bonds(Tj)
+
+        Tij = Ti @ Tj
+        left_inds = [ix for ix in unshared if ix not in phys_inds_i]
+        left_inds.extend(phys_inds_j)
+        set_default_compress_mode(compress_opts, tn.cyclic)
+        sTi, sTj = Tij.split(left_inds, get="tensors", **compress_opts)
+
+        sTi.reindex_(dict(zip(phys_inds_j, phys_inds_i))).transpose_like_(Ti)
+        Ti.modify(data=sTi.data)
+        sTj.reindex_(dict(zip(phys_inds_i, phys_inds_j))).transpose_like_(Tj)
+        Tj.modify(data=sTj.data)
+
+        absorb = compress_opts.get("absorb", None)
+        if absorb == "left":
+            info["cur_orthog"] = (i, i)
+        elif absorb == "right":
+            info["cur_orthog"] = (j, j)
+
+        return tn
+
+    swap_sites_with_compress_ = functools.partialmethod(
+        swap_sites_with_compress,
+        inplace=True,
+    )
+
+    @convert_cur_orthog
+    def swap_site_to(
+        self,
+        i,
+        f,
+        info=None,
+        inplace=False,
+        **compress_opts,
+    ):
+        r"""Move the physical space at site ``i`` to site ``f`` using
+        compressed adjacent swaps::
+
+                  i       f
+            0 1 2 3 4 5 6 7 8 9      0 1 2 4 5 6 7 3 8 9
+            o-o-o-x-o-o-o-o-o-o      >->->->->->->-x-<-<
+            | | | | | | | | | |  ->  | | | | | | | | | |
+
+        Parameters
+        ----------
+        i : int
+            The initial site.
+        f : int
+            The final site.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        info : dict, optional
+            If supplied, use and update the ``"cur_orthog"`` entry.
+        inplace : bool, optional
+            Perform the swaps in place.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+        """
+        tn = self if inplace else self.copy()
+
+        if i == f:
+            return tn
+        if i < f:
+            compress_opts.setdefault("absorb", "right")
+            js = range(i, f)
+        else:
+            compress_opts.setdefault("absorb", "left")
+            js = range(i - 1, f - 1, -1)
+
+        for j in js:
+            tn.swap_sites_with_compress_(j, j + 1, info=info, **compress_opts)
+
+        return tn
+
+    swap_site_to_ = functools.partialmethod(swap_site_to, inplace=True)
+
     def as_cyclic(self, inplace=False):
         """Convert this flat, 1D, TN into cyclic form by adding a dummy bond
         between the first and last sites.
@@ -2131,129 +2249,6 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         )
 
     gate_split_ = functools.partialmethod(gate_split, inplace=True)
-
-    @convert_cur_orthog
-    def swap_sites_with_compress(
-        self, i, j, info=None, inplace=False, **compress_opts
-    ):
-        """Swap sites ``i`` and ``j`` by contracting, then splitting with the
-        physical indices swapped. If the sites are not adjacent, this will
-        happen multiple times.
-
-        Parameters
-        ----------
-        i : int
-            The first site to swap.
-        j : int
-            The second site to swap.
-        cur_orthog : int, sequence of int, or 'calc'
-            If known, the current orthogonality center.
-        info : dict, optional
-            If supplied, will be used to infer and store various extra
-            information. Currently, the key "cur_orthog" is used to store the
-            current orthogonality center. Its input value can be ``"calc"``, a
-            single site, or a pair of sites representing the min/max range,
-            inclusive. It will be updated to the actual range after.
-        inplace : bond, optional
-            Perform the swaps inplace.
-        compress_opts
-            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
-        """
-        mps = self if inplace else self.copy()
-
-        i, j = sorted((i, j))
-        if i + 1 != j:
-            mps.swap_site_to_(j, i, info=info)
-            # first site is now at j + 1, move back up
-            mps.swap_site_to_(i + 1, j, info=info)
-            return mps
-
-        mps.canonicalize_((i, j), info=info)
-
-        # get site tensors and indices
-        ix_i, ix_j = map(mps.site_ind, (i, j))
-        Ti, Tj = mps[i], mps[j]
-        _, unshared = Ti.filter_bonds(Tj)
-
-        # split the contracted tensor, swapping the site indices
-        Tij = Ti @ Tj
-        lix = [i for i in unshared if i != ix_i] + [ix_j]
-        set_default_compress_mode(compress_opts, self.cyclic)
-        sTi, sTj = Tij.split(lix, get="tensors", **compress_opts)
-
-        # reindex and transpose the tensors to directly update original tensors
-        sTi.reindex_({ix_j: ix_i}).transpose_like_(Ti)
-        Ti.modify(data=sTi.data)
-        sTj.reindex_({ix_i: ix_j}).transpose_like_(Tj)
-        Tj.modify(data=sTj.data)
-
-        absorb = compress_opts.get("absorb", None)
-        if absorb == "left":
-            info["cur_orthog"] = (i, i)
-        elif absorb == "right":
-            info["cur_orthog"] = (j, j)
-
-        return mps
-
-    swap_sites_with_compress_ = functools.partialmethod(
-        swap_sites_with_compress,
-        inplace=True,
-    )
-
-    @convert_cur_orthog
-    def swap_site_to(
-        self,
-        i,
-        f,
-        info=None,
-        inplace=False,
-        **compress_opts,
-    ):
-        r"""Swap site ``i`` to site ``f``, compressing the bond after each
-        swap::
-
-                  i       f
-            0 1 2 3 4 5 6 7 8 9      0 1 2 4 5 6 7 3 8 9
-            o-o-o-x-o-o-o-o-o-o      >->->->->->->-x-<-<
-            | | | | | | | | | |  ->  | | | | | | | | | |
-
-
-        Parameters
-        ----------
-        i : int
-            The site to move.
-        f : int
-            The new location for site ``i``.
-        info : dict, optional
-            If supplied, will be used to infer and store various extra
-            information. Currently, the key "cur_orthog" is used to store the
-            current orthogonality center. Its input value can be ``"calc"``, a
-            single site, or a pair of sites representing the min/max range,
-            inclusive. It will be updated to the actual range after.
-        inplace : bond, optional
-            Perform the swaps inplace.
-        compress_opts
-            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
-        """
-        mps = self if inplace else self.copy()
-
-        if i == f:
-            return mps
-        if i < f:
-            compress_opts.setdefault("absorb", "right")
-            js = range(i, f)
-        if f < i:
-            compress_opts.setdefault("absorb", "left")
-            js = range(i - 1, f - 1, -1)
-
-        for j in js:
-            mps.swap_sites_with_compress(
-                j, j + 1, info=info, inplace=True, **compress_opts
-            )
-
-        return mps
-
-    swap_site_to_ = functools.partialmethod(swap_site_to, inplace=True)
 
     @convert_cur_orthog
     def gate_with_auto_swap(
@@ -4348,6 +4343,109 @@ class MatrixProductOperator(TensorNetwork1DOperator, TensorNetwork1DFlat):
             mpo.add_tag(tags)
 
         return mpo
+
+    @convert_cur_orthog
+    def gate_sandwich_with_auto_swap(
+        self,
+        G,
+        where,
+        dagger=False,
+        info=None,
+        swap_back=True,
+        strip_exponent=False,
+        contract="split",
+        inplace=False,
+        **compress_opts,
+    ):
+        """Apply a two-site gate sandwich while maintaining the canonical
+        form, automatically swapping non-adjacent sites together first.
+
+        Parameters
+        ----------
+        G : array
+            The gate, with shape ``(d**2, d**2)`` for physical dimension
+            ``d`` or the equivalent rank-4 tensor shape.
+        where : (int, int)
+            The sites to apply the gate to. Their order specifies the order of
+            the gate's physical dimensions.
+        dagger : bool, optional
+            Apply ``Gdag @ O @ G`` rather than ``G @ O @ Gdag``. Use this for
+            Heisenberg picture evolution.
+        cur_orthog : int, sequence of int, or 'calc'
+            If known, the current orthogonality center.
+        info : dict, optional
+            If supplied, use and update the ``"cur_orthog"`` entry.
+        swap_back : bool, optional
+            Whether to restore the original site ordering after applying the
+            gate.
+        strip_exponent : bool, optional
+            Normalize the final orthogonality-center tensor and accumulate its
+            scale in the tensor-network exponent.
+        contract : {'split', 'reduce-split'}, optional
+            How to contract and split the gated pair.
+        inplace : bool, optional
+            Perform the operation in place.
+        compress_opts
+            Supplied to :func:`~quimb.tensor.tensor_core.tensor_split`.
+
+        Returns
+        -------
+        MatrixProductOperator
+            The gated MPO.
+        """
+        if contract not in ("split", "reduce-split"):
+            raise ValueError("`contract` must be 'split' or 'reduce-split'.")
+
+        mpo = self if inplace else self.copy()
+        i, j = where
+        if i == j:
+            raise ValueError("`where` must contain two distinct sites.")
+
+        if i > j:
+            i, j = j, i
+            gate_where = (i + 1, i)
+            compress_opts.setdefault("absorb", "left")
+        else:
+            gate_where = (i, i + 1)
+            compress_opts.setdefault("absorb", "right")
+
+        absorb = compress_opts["absorb"]
+        if absorb not in ("left", "right"):
+            raise ValueError("`absorb` must be 'left' or 'right'.")
+
+        need_to_swap = i + 1 != j
+        if need_to_swap:
+            mpo.swap_site_to_(j, i + 1, info=info, **compress_opts)
+
+        mpo.canonicalize_((i, i + 1), info=info)
+        mpo.gate_sandwich_(
+            G,
+            where=gate_where,
+            contract=contract,
+            dagger=dagger,
+            info=info,
+            **compress_opts,
+        )
+
+        if absorb == "left":
+            center = gate_where[0]
+        else:
+            center = gate_where[1]
+        info["cur_orthog"] = (center, center)
+
+        if need_to_swap and swap_back:
+            mpo.swap_site_to_(i + 1, j, info=info, **compress_opts)
+
+        if strip_exponent:
+            center = info["cur_orthog"][0]
+            mpo.strip_exponent(mpo[center])
+
+        return mpo
+
+    gate_sandwich_with_auto_swap_ = functools.partialmethod(
+        gate_sandwich_with_auto_swap,
+        inplace=True,
+    )
 
     def fill_empty_sites(
         self, mode="full", phys_dim=None, fill_array=None, inplace=False

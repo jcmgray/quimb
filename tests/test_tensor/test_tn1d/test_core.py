@@ -1,3 +1,6 @@
+import importlib
+
+import autoray as ar
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -696,6 +699,11 @@ class TestMatrixProductState:
             k2 = psi.swap_sites_with_compress(i, j).to_qarray()
             assert qu.fidelity(k1, k2) == pytest.approx(1.0)
 
+        psi_compressed = psi.swap_sites_with_compress(
+            0, 6, max_bond=1, cutoff=0.0
+        )
+        assert psi_compressed.max_bond() == 1
+
     def test_swap_gating(self):
         psi0 = qtn.MPS_rand_state(20, 5)
         CNOT = qu.controlled("not")
@@ -838,6 +846,118 @@ class TestMatrixProductState:
 
 
 class TestMatrixProductOperator:
+    @pytest.mark.parametrize("where", [(1, 2), (2, 1)])
+    @pytest.mark.parametrize("absorb", ["left", "right"])
+    @pytest.mark.parametrize("dagger", [False, True])
+    @pytest.mark.parametrize("strip_exponent", [False, True])
+    @pytest.mark.parametrize("contract", ["split", "reduce-split"])
+    def test_gate_sandwich_with_auto_swap(
+        self, where, absorb, dagger, strip_exponent, contract
+    ):
+        mpo = qtn.MPO_rand(4, 3, dtype=complex, seed=1)
+        mpo.exponent = 2.0
+        G = qu.rand_matrix(4, seed=2)
+
+        A = mpo.to_dense()
+        IGI = qu.pkron(G, [2] * mpo.L, where)
+        if dagger:
+            expected = IGI.H @ A @ IGI
+        else:
+            expected = IGI @ A @ IGI.H
+
+        info = {}
+        gated = mpo.gate_sandwich_with_auto_swap(
+            G,
+            where,
+            dagger=dagger,
+            info=info,
+            absorb=absorb,
+            cutoff=0.0,
+            cutoff_mode="rel",
+            max_bond=32,
+            strip_exponent=strip_exponent,
+            contract=contract,
+        )
+
+        assert_allclose(gated.to_dense(), expected)
+        center = where[0] if absorb == "left" else where[1]
+        assert info["cur_orthog"] == (center, center)
+        assert gated.calc_current_orthog_center() == (center, center)
+        if strip_exponent:
+            assert gated[center].norm() == pytest.approx(1.0)
+            assert gated.exponent != mpo.exponent
+        else:
+            assert gated.exponent == mpo.exponent
+        assert_allclose(mpo.to_dense(), A)
+
+    @pytest.mark.parametrize("where", [(0, 3), (3, 0)])
+    def test_gate_sandwich_with_auto_swap_long_range(self, where):
+        mpo = qtn.MPO_rand(4, 3, dtype=complex, seed=3)
+        G = qu.rand_matrix(4, seed=4)
+
+        A = mpo.to_dense()
+        IGI = qu.pkron(G, [2] * mpo.L, where)
+        expected = IGI @ A @ IGI.H
+
+        info = {}
+        mpo.gate_sandwich_with_auto_swap_(
+            G,
+            where,
+            info=info,
+            cutoff=0.0,
+            max_bond=64,
+        )
+
+        assert_allclose(mpo.to_dense(), expected)
+        assert mpo.calc_current_orthog_center() == info["cur_orthog"]
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("symmray") is None,
+        reason="symmray not installed",
+    )
+    def test_gate_sandwich_with_auto_swap_symmray(self):
+        import symmray as sr
+
+        charges = [0, 1]
+        index_maps = (charges, charges)
+        eye = sr.utils.from_dense(
+            np.eye(2),
+            symmetry="Z2",
+            index_maps=index_maps,
+            duals=(False, True),
+        )
+        z = sr.utils.from_dense(
+            qu.pauli("Z"),
+            symmetry="Z2",
+            index_maps=index_maps,
+            duals=(False, True),
+        )
+        mpo = qtn.MPO_product_operator([eye, z, eye, eye])
+
+        X = qu.pauli("X")
+        Gd = qu.expm(-0.2j * qu.kron(X, X))
+        G = sr.utils.from_dense(
+            ar.do("reshape", Gd, (2, 2, 2, 2)),
+            symmetry="Z2",
+            index_maps=(charges,) * 4,
+            duals=(False, False, True, True),
+        )
+        expected = qu.ikron(Gd, [2] * mpo.L, (1, 2))
+        expected = expected.H @ ar.to_numpy(mpo.to_dense()) @ expected
+
+        info = {"cur_orthog": (0, 0)}
+        mpo.gate_sandwich_with_auto_swap_(
+            G,
+            (1, 2),
+            dagger=True,
+            info=info,
+            absorb="right",
+            cutoff=0.0,
+        )
+
+        assert_allclose(ar.to_numpy(mpo.to_dense()), expected)
+        assert info["cur_orthog"] == (2, 2)
+
     @pytest.mark.parametrize("cyclic", [False, True])
     def test_matrix_product_operator(self, cyclic):
         end_shape = (5, 5, 2, 2) if cyclic else (5, 2, 2)
