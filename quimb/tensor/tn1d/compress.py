@@ -19,8 +19,7 @@ import warnings
 
 from autoray import do
 
-from ...gen.rand import randn
-from ..tensor_builder import TN_matching, rand_tensor
+from ..tensor_builder import TN_matching
 from ..tensor_core import (
     Tensor,
     TensorNetwork,
@@ -1225,6 +1224,8 @@ def _do_sweep_compress_from_low_rank_left_envs(
 
 
 def _src_get_local_noise_tensors(
+    tn,
+    rng,
     noise_mode,
     noise_dist,
     max_bond,
@@ -1233,34 +1234,41 @@ def _src_get_local_noise_tensors(
     ind_sizes,
     site_tag,
 ):
+    xp = tn.get_namespace()
+
+    def fill_fn(shape):
+        return xp.random.array(shape, dist=noise_dist, rng=rng)
+
     # get random sampling tensors for the previous site
     if noise_mode == "joint":
         # one big noise tensor for all output legs on this site
         tws = [
-            rand_tensor(
-                shape=(max_bond, *ind_sizes),
+            Tensor(
+                data=fill_fn((max_bond, *ind_sizes)),
                 inds=(Bix, *inds),
                 tags=(site_tag,),
-                dist=noise_dist,
             )
         ]
     elif noise_mode == "separable":
         # one stack of noise vectors for each leg on this site
         tws = [
-            rand_tensor(
-                shape=(max_bond, d),
+            Tensor(
+                data=fill_fn((max_bond, d)),
                 inds=(Bix, ix),
                 tags=(site_tag,),
-                dist=noise_dist,
             )
             for ix, d in zip(inds, ind_sizes)
         ]
     elif noise_mode == "symmetric":
         # reuse the same noise for all output legs on this site
-        shape = (max_bond, ind_sizes[0])
-        data = randn(shape, dist=noise_dist)
+        data = fill_fn((max_bond, ind_sizes[0]))
         tws = [
-            Tensor(data=data, inds=(Bix, ix), tags=(site_tag,)) for ix in inds
+            Tensor(
+                data=data,
+                inds=(Bix, ix),
+                tags=(site_tag,),
+            )
+            for ix in inds
         ]
     else:
         raise ValueError(
@@ -1279,6 +1287,7 @@ def tensor_network_1d_compress_src(
     normalize=False,
     noise_mode="joint",
     noise_dist="normal",
+    seed=None,
     permute_arrays=True,
     sweep_reverse=False,
     canonize=True,
@@ -1313,9 +1322,11 @@ def tensor_network_1d_compress_src(
         random tensor for all outer indices on a site. 'separable' generates a
         random vector for each outer index. 'symmetric' reuses the same random
         vector for all outer indices on a site.
-    noise_dist : {"normal", "rademacher", ...}, optional
-        The distribution to use when generating the random noise tensors. See
-        :func:`~quimb.tensor.rand_tensor` for options.
+    noise_dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to use when generating the random noise tensors.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use. If not given, use the backend's
+        global random state.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1351,8 +1362,6 @@ def tensor_network_1d_compress_src(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
-    # TODO: customizable noise and seed etc. [ ]
-
     if not canonize:
         warnings.warn("`canonize=False` is ignored for the `src` method.")
 
@@ -1383,6 +1392,12 @@ def tensor_network_1d_compress_src(
 
     tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
 
+    if seed is not None:
+        xp = tn.get_namespace()
+        rng = xp.random.default_rng(seed)
+    else:
+        rng = None
+
     # first we segment the tensor network into local sites
     local_tns = []
     local_inds = []
@@ -1403,6 +1418,8 @@ def tensor_network_1d_compress_src(
     left_env_inds = [(Bix,)] * L
     for i in range(1, L):
         tws = _src_get_local_noise_tensors(
+            tn,
+            rng=rng,
             noise_mode=noise_mode,
             noise_dist=noise_dist,
             max_bond=max_bond,
@@ -1459,6 +1476,8 @@ def tensor_network_1d_compress_src_oversample(
     cutoff=1e-10,
     cutoff_oversample=0.0,
     noise_mode="joint",
+    noise_dist="normal",
+    seed=None,
     site_tags=None,
     canonize=True,
     normalize=False,
@@ -1498,6 +1517,12 @@ def tensor_network_1d_compress_src_oversample(
         Unused for SRC.
     noise_mode : {'separable', 'symmetric', 'joint'}, optional
         How to generate the random noise tensors for the SRC step.
+    noise_dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to use when generating the random noise tensors for
+        the SRC step.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use for the SRC step. If not given, use
+        the backend's global random state.
     site_tags : sequence of str, optional
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
@@ -1582,6 +1607,8 @@ def tensor_network_1d_compress_src_oversample(
         cutoff=cutoff_oversample,
         site_tags=site_tags,
         noise_mode=noise_mode,
+        noise_dist=noise_dist,
+        seed=seed,
         normalize=False,  # handled after direct sweep
         permute_arrays=False,  # handle after direct sweep
         sweep_reverse=True,  # handled above, opposite to direct sweep
@@ -1611,6 +1638,8 @@ def tensor_network_1d_compress_srcmps(
     tn_fit=None,
     site_tags=None,
     normalize=False,
+    noise_dist="normal",
+    seed=None,
     permute_arrays=True,
     sweep_reverse=False,
     canonize=True,
@@ -1646,6 +1675,13 @@ def tensor_network_1d_compress_srcmps(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
+    noise_dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to use when generating the random sampling MPS, only
+        relevant if ``tn_fit`` is not supplied.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use when generating the random sampling
+        MPS. If not given, use the backend's global random state. This is only
+        relevant if ``tn_fit`` is not supplied.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1678,9 +1714,6 @@ def tensor_network_1d_compress_srcmps(
     TensorNetwork
         The compressed tensor network.
     """
-    # TODO: customizable noise and seed etc.
-    # TODO: handle arbitrary outer indices
-
     if not canonize:
         warnings.warn("`canonize=False` is ignored for the `src` method.")
     if cutoff != 0.0:
@@ -1719,6 +1752,8 @@ def tensor_network_1d_compress_srcmps(
                 tn,
                 max_bond=max_bond,
                 site_tags=site_tags,
+                dist=noise_dist,
+                seed=seed,
             )
         else:
             if isinstance(tn_fit, str):
@@ -1776,6 +1811,8 @@ def tensor_network_1d_compress_srcmps_oversample(
     cutoff=1e-10,
     cutoff_oversample=0.0,
     tn_fit=None,
+    noise_dist="normal",
+    seed=None,
     site_tags=None,
     canonize=True,
     normalize=False,
@@ -1817,6 +1854,12 @@ def tensor_network_1d_compress_srcmps_oversample(
     tn_fit : TensorNetwork, optional
         The MPS specificing the sampling noise (its bond dimension effectively
         sets the compression rank).
+    noise_dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to use when generating the random sampling MPS, only
+        relevant if ``tn_fit`` is not supplied.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use for the SRCMPS step. If not given,
+        use the backend's global random state.
     site_tags : sequence of str, optional
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
@@ -1900,6 +1943,8 @@ def tensor_network_1d_compress_srcmps_oversample(
         max_bond=max_bond_oversample,
         cutoff=cutoff_oversample,
         tn_fit=tn_fit,
+        noise_dist=noise_dist,
+        seed=seed,
         site_tags=site_tags,
         normalize=False,  # handled after direct sweep
         permute_arrays=False,  # handle after direct sweep
@@ -2252,6 +2297,8 @@ def tensor_network_1d_compress_fit(
     site_tags=None,
     cutoff_mode="rsum2",
     sweep_sequence="RL",
+    noise_dist="normal",
+    seed=None,
     normalize=False,
     permute_arrays=True,
     optimize="auto-hq",
@@ -2327,6 +2374,13 @@ def tensor_network_1d_compress_fit(
         to right, then right to left. The sequence is cycled. The final
         canonical form of the output tensor network depends on the last sweep
         direction and ``sweep_reverse``.
+    noise_dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to use when generating the random sampling MPS, only
+        relevant if ``tn_fit`` is not supplied.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use when generating the initial guess.
+        If not given, use the backend's global random state. This is only
+        relevant if ``tn_fit`` is not supplied.
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in left or right canonical form.
@@ -2450,7 +2504,11 @@ def tensor_network_1d_compress_fit(
                 current_bond_dim = max_bond
 
             tn_fit = TN_matching(
-                tns[0], max_bond=current_bond_dim, site_tags=site_tags
+                tns[0],
+                max_bond=current_bond_dim,
+                site_tags=site_tags,
+                dist=noise_dist,
+                seed=seed,
             )
         else:
             if isinstance(tn_fit, str):
@@ -2657,6 +2715,8 @@ def tensor_network_1d_compress_fit_oversample(
     cutoff_fit=0.0,
     bsz=1,
     site_tags=None,
+    noise_dist="normal",
+    seed=None,
     canonize=True,
     normalize=False,
     cutoff_mode="rsum2",
@@ -2698,6 +2758,12 @@ def tensor_network_1d_compress_fit_oversample(
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
         tensor per site, in the order given by ``site_tags``.
+    noise_dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to use when generating the random sampling MPS, only
+        relevant if ``tn_fit`` is not supplied.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use for the fit step. If not given, use
+        the backend's global random state.
     canonize : bool, optional
         Whether to pseudo canonicalize the initial tensor network.
     normalize : bool, optional
@@ -2770,6 +2836,8 @@ def tensor_network_1d_compress_fit_oversample(
         bsz=bsz,
         max_iterations=1,
         site_tags=site_tags,
+        noise_dist=noise_dist,
+        seed=seed,
         normalize=False,  # handled after direct sweep
         permute_arrays=False,  # handle after direct sweep
         sweep_sequence="R",  # to ensure right canonical form

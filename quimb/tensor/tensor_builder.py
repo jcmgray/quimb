@@ -4060,7 +4060,17 @@ def HTN_random_ksat(
 
 
 def TN_matching(
-    tn, max_bond, site_tags=None, fill_fn=None, dtype=None, **randn_opts
+    tn,
+    max_bond,
+    site_tags=None,
+    fill_fn=None,
+    dtype=None,
+    *,
+    dist="normal",
+    loc=0.0,
+    scale=1.0,
+    device=None,
+    seed=None,
 ):
     """Create a tensor network with the same outer indices as ``tn`` but
     with a single tensor per site with bond dimension ``max_bond`` between
@@ -4079,12 +4089,23 @@ def TN_matching(
         site, in the order given by ``site_tags``.
     fill_fn : callable, optional
         A function with signature ``fill_fn(shape) -> array``, used to fill
-        each tensor. If not given, random data is used.
+        each tensor. If not given, random data matching the backend, dtype and
+        device of ``tn`` is used.
     dtype : dtype, optional
         The data type to use for the new tensors, if not given uses the same as
         the original tensors.
-    randn_opts
-        Supplied to :func:`~quimb.gen.rand.randn`.
+    dist : {"normal", "uniform", "rademacher"}, optional
+        The distribution to sample the random entries from.
+    loc : float, optional
+        An additive offset to apply to the random entries.
+    scale : float, optional
+        A multiplicative factor to apply to the random entries.
+    device : device, optional
+        The device to place the new tensors on, if not given uses the same as
+        the original tensors.
+    seed : None, int, or random generator, optional
+        A random seed or generator to use. If not given, use the backend's
+        global random state.
 
     Returns
     -------
@@ -4093,13 +4114,19 @@ def TN_matching(
     _, neighbors = create_lazy_edge_map(tn, site_tags)
 
     if fill_fn is None:
-        if dtype is None:
-            try:
-                dtype = tn.dtype
-            except AttributeError:
-                # for arrays with no dtype - e.g. autoray.lazy
-                dtype = "float64"
-        fill_fn = get_rand_fill_fn(dtype=dtype, **randn_opts)
+        # namespace injects the dtype and device of ``tn`` if not given here
+        xp = tn.get_namespace()
+        rand_opts = {"dist": dist, "loc": loc, "scale": scale}
+        rand_opts["rng"] = (
+            xp.random.default_rng(seed) if seed is not None else None
+        )
+        if dtype is not None:
+            rand_opts["dtype"] = dtype
+        if device is not None:
+            rand_opts["device"] = device
+
+        def fill_fn(shape):
+            return xp.random.array(shape, **rand_opts)
 
     tn_match = TensorNetwork()
     all_outer_ix = set(tn.outer_inds())
