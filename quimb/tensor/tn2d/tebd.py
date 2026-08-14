@@ -97,6 +97,7 @@ class LocalHam2D(LocalHamGen):
     def build_pepo_propagator_trotterized(
         self,
         x,
+        order=1,
         ordering="sort",
         site_tag_id="I{},{}",
         tags=None,
@@ -107,8 +108,8 @@ class LocalHam2D(LocalHamGen):
         **split_opts,
     ):
         """Build a PEPO representation of ``expm(H * x)``, i.e. the imaginary
-        or real time propagator of this local 2D hamiltonian, using a first
-        order trotterized decomposition.
+        or real time propagator of this local 2D hamiltonian, using a
+        trotterized decomposition.
 
         Parameters
         ----------
@@ -116,6 +117,14 @@ class LocalHam2D(LocalHamGen):
             The time to evolve for. Note this does **not** include the
             imaginary prefactor of the Schrodinger equation, so real ``x``
             corresponds to imaginary time evolution, and vice versa.
+        order : {1, 2, 4}, optional
+            The order of the trotter decomposition, see
+            :meth:`~quimb.tensor.tnag.tebd.LocalHamGen.get_trotter_gates`.
+            Higher orders are more accurate but apply more gates, and so give
+            a larger bond dimension.
+        ordering : str, None or sequence[sequence[tuple[int]]], optional
+            How to group the terms into commuting layers, passed to
+            :meth:`~quimb.tensor.tnag.tebd.LocalHamGen.get_trotter_gates`.
         site_tag_id : str
             A string specifying how to tag the tensors at each site. Should
             contain two ``'{}'`` placeholders for (row, col). It is used to
@@ -155,12 +164,10 @@ class LocalHam2D(LocalHamGen):
             y_tag_id="Y{}",
         )
 
-        if ordering is None or isinstance(ordering, str):
-            ordering = self.get_auto_ordering(ordering)
-
-        for coo_a, coo_b in ordering:
+        for U, (coo_a, coo_b) in self.get_trotter_gates(
+            x, order=order, ordering=ordering
+        ):
             # get a tensor of the local exponentiated term
-            U = self.get_gate_expm((coo_a, coo_b), x)
             d = int(U.shape[0] ** 0.5)
             U = do("reshape", U, (d, d, d, d))
 
@@ -196,6 +203,8 @@ class LocalHam2D(LocalHamGen):
                 st = pepo.site_tag(i, j)
                 if st in pepo.tag_map:
                     pepo ^= st
+            # higher orders gate the same pair twice, leaving multiple bonds
+            pepo.fuse_multibonds_()
 
         if tags is not None:
             pepo.add_tag(tags)

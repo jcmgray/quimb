@@ -1,14 +1,12 @@
 """Tools for performing TEBD like algorithms in 1D."""
 
-import itertools
-
 import numpy as np
 from autoray import do
 
 from ...utils import continuous_progbar, deprecated, ensure_dict
 from ...utils import progbar as Progbar
 from ..array_ops import norm_fro
-from ..tnag.tebd import LocalHamGen
+from ..tnag.tebd import LocalHamGen, trotter_schedule
 
 
 class LocalHam1D(LocalHamGen):
@@ -100,6 +98,8 @@ class LocalHam1D(LocalHamGen):
     def build_mpo_propagator_trotterized(
         self,
         x,
+        order=1,
+        ordering="sort",
         site_tag_id="I{}",
         tags=None,
         upper_ind_id="k{}",
@@ -109,8 +109,8 @@ class LocalHam1D(LocalHamGen):
         **split_opts,
     ):
         """Build an MPO representation of ``expm(H * x)``, i.e. the imaginary
-        or real time propagator of this local 1D hamiltonian, using a first
-        order trotterized decomposition.
+        or real time propagator of this local 1D hamiltonian, using a
+        trotterized decomposition.
 
         Parameters
         ----------
@@ -118,6 +118,14 @@ class LocalHam1D(LocalHamGen):
             The time to evolve for. Note this does **not** include the
             imaginary prefactor of the Schrodinger equation, so real ``x``
             corresponds to imaginary time evolution, and vice versa.
+        order : {1, 2, 4}, optional
+            The order of the trotter decomposition, see
+            :meth:`~quimb.tensor.tnag.tebd.LocalHamGen.get_trotter_gates`.
+            Higher orders are more accurate but apply more gates, and so give
+            a larger bond dimension.
+        ordering : str, None or sequence[sequence[tuple[int]]], optional
+            How to group the terms into commuting layers, passed to
+            :meth:`~quimb.tensor.tnag.tebd.LocalHamGen.get_trotter_gates`.
         site_tag_id : str
             A string specifiying how to tag the tensors at each site. Should
             contain a ``'{}'`` placeholder. It is used to generate the actual tags
@@ -156,18 +164,12 @@ class LocalHam1D(LocalHamGen):
             lower_ind_id=lower_ind_id,
             cyclic=self.cyclic,
         )
-        imax = self.L - (not self.cyclic)
-
-        # process even bonds then odd bonds
-        layered_sites = itertools.chain(range(0, imax, 2), range(1, imax, 2))
-
-        # process even bonds
-        for i in layered_sites:
-            j = (i + 1) % self.L
-
+        for U, (i, j) in self.get_trotter_gates(
+            x, order=order, ordering=ordering
+        ):
             # get a tensor of the local exponentiated term
-            U = self.get_gate_expm((i, j), x)
-            U = do("reshape", U, (2, 2, 2, 2))
+            d = int(U.shape[0] ** 0.5)
+            U = do("reshape", U, (d, d, d, d))
 
             ki = upper_ind_id.format(i)
             kj = upper_ind_id.format(j)
@@ -196,6 +198,8 @@ class LocalHam1D(LocalHamGen):
             # combine site groups into single tensors
             for st in mpo.site_tags:
                 mpo ^= st
+            # higher orders gate the same pair twice, leaving multiple bonds
+            mpo.fuse_multibonds_()
 
         if tags is not None:
             # global tags
@@ -431,27 +435,12 @@ class TEBD:
             factor = self._pt[final_site_ind].norm()
             self._pt[final_site_ind] /= factor
 
-    def _step_order2(self, tau=1, **sweep_opts):
-        """Perform a single, second order step."""
-        self.sweep("right", tau / 2, **sweep_opts)
-        self.sweep("left", tau, **sweep_opts)
-        self.sweep("right", tau / 2, **sweep_opts)
-
-    def _step_order4(self, **sweep_opts):
-        """Perform a single, fourth order step."""
-        tau1 = tau2 = 1 / (4 * 4 ** (1 / 3))
-        tau3 = 1 - 2 * tau1 - 2 * tau2
-        self._step_order2(tau1, **sweep_opts)
-        self._step_order2(tau2, **sweep_opts)
-        self._step_order2(tau3, **sweep_opts)
-        self._step_order2(tau2, **sweep_opts)
-        self._step_order2(tau1, **sweep_opts)
-
     def step(self, order=2, dt=None, progbar=None, **sweep_opts):
         """Perform a single step of time ``self.dt``."""
-        {2: self._step_order2, 4: self._step_order4}[order](
-            dt=dt, **sweep_opts
-        )
+        # the even bonds are swept right, the odd bonds left
+        directions = ("right", "left")
+        for k, frac in trotter_schedule(2, order=order):
+            self.sweep(directions[k], frac, dt=dt, **sweep_opts)
 
         dt = self._dt if dt is None else dt
         self.t += dt
