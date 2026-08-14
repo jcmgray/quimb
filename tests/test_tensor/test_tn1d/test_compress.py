@@ -1,9 +1,118 @@
+import autoray as ar
+import numpy as np
 import pytest
 
 import quimb as qu
 import quimb.tensor as qtn
 
+from .. import jax_case, pytorch_case
+
 dtypes = ["float32", "float64", "complex64", "complex128"]
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["src", "src-first", "srcmps", "srcmps-first", "fit", "fit-oversample"],
+)
+@pytest.mark.parametrize("seed_mode", ["global", "integer", "generator"])
+def test_random_seed(method, seed_mode):
+    psi = qtn.MPS_rand_state(4, 3, seed=7)
+    compress_opts = {
+        "max_bond": 2,
+        "method": method,
+    }
+    if method == "fit":
+        compress_opts["max_iterations"] = 1
+    else:
+        compress_opts["cutoff"] = 0.0
+
+    def compress():
+        if seed_mode == "global":
+            np.random.seed(42)
+            seed = None
+        elif seed_mode == "integer":
+            seed = 42
+        else:
+            seed = np.random.default_rng(42)
+        return qtn.tensor_network_1d_compress(
+            psi,
+            seed=seed,
+            **compress_opts,
+        ).to_dense()
+
+    np.testing.assert_allclose(compress(), compress())
+
+
+@pytest.mark.parametrize("method", ["src-first", "srcmps-first"])
+def test_random_oversample_noise_dist(method):
+    psi = qtn.MPS_rand_state(4, 3, seed=7)
+    a = qtn.tensor_network_1d_compress(
+        psi,
+        max_bond=2,
+        method=method,
+        noise_dist="rademacher",
+        seed=42,
+    )
+    b = qtn.tensor_network_1d_compress(
+        psi,
+        max_bond=2,
+        method=method,
+        noise_dist="rademacher",
+        seed=42,
+    )
+    np.testing.assert_allclose(a.to_dense(), b.to_dense())
+
+
+@pytest.mark.parametrize("backend", [jax_case, pytorch_case])
+@pytest.mark.parametrize("seed_mode", ["integer", "generator"])
+@pytest.mark.parametrize("method", ["src", "srcmps"])
+def test_random_backend(method, seed_mode, backend):
+    psi = qtn.MPS_rand_state(4, 3, dtype="complex64", seed=7)
+    psi.apply_to_arrays(lambda x: ar.do("array", x, like=backend))
+    expected = ar.infer_backend_device_dtype(psi[0].data)
+
+    if seed_mode == "integer":
+        seed = 42
+    else:
+        seed = psi.get_namespace().random.default_rng(42)
+
+    compressed = qtn.tensor_network_1d_compress(
+        psi,
+        max_bond=2,
+        cutoff=0.0,
+        method=method,
+        seed=seed,
+    )
+
+    for tensor in compressed:
+        assert ar.infer_backend_device_dtype(tensor.data) == expected
+
+
+@pytest.mark.parametrize("method", ["srcmps", "fit"])
+def test_tn_fit(method):
+    psi = qtn.MPS_rand_state(4, 3, seed=7)
+    tn_fit = qtn.TN_matching(psi, max_bond=2, seed=42)
+    compress_opts = {
+        "max_bond": 2,
+        "method": method,
+        "tn_fit": tn_fit,
+    }
+    if method == "fit":
+        compress_opts["max_iterations"] = 1
+    else:
+        compress_opts["cutoff"] = 0.0
+
+    a = qtn.tensor_network_1d_compress(
+        psi,
+        seed=1,
+        **compress_opts,
+    )
+    b = qtn.tensor_network_1d_compress(
+        psi,
+        seed=2,
+        **compress_opts,
+    )
+    np.testing.assert_allclose(a.to_dense(), b.to_dense())
 
 
 @pytest.mark.parametrize(
