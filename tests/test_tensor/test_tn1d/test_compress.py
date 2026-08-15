@@ -88,6 +88,24 @@ def test_random_backend(method, seed_mode, backend):
         assert ar.infer_backend_device_dtype(tensor.data) == expected
 
 
+@pytest.mark.parametrize("backend", [jax_case, pytorch_case])
+@pytest.mark.parametrize("method", ["sdc", "sdc-oversample"])
+def test_sdc_backend(method, backend):
+    psi = qtn.MPS_rand_state(4, 3, dtype="complex64", seed=7)
+    psi.apply_to_arrays(lambda x: ar.do("array", x, like=backend))
+    expected = ar.infer_backend_device_dtype(psi[0].data)
+
+    compressed = qtn.tensor_network_1d_compress(
+        psi,
+        max_bond=2,
+        cutoff=0.0,
+        method=method,
+    )
+
+    for tensor in compressed:
+        assert ar.infer_backend_device_dtype(tensor.data) == expected
+
+
 @pytest.mark.parametrize("method", ["srcmps", "fit"])
 def test_tn_fit(method):
     psi = qtn.MPS_rand_state(4, 3, seed=7)
@@ -123,6 +141,8 @@ def test_tn_fit(method):
         "zipup",
         "zipup-first",
         "zipup-oversample",
+        "sdc",
+        "sdc-oversample",
         "src",
         "src-first",
         "src-oversample",
@@ -222,6 +242,8 @@ def test_basic_compress_double_mpo(
         "zipup",
         "zipup-first",
         "zipup-oversample",
+        "sdc",
+        "sdc-oversample",
         "src",
         "src-first",
         "src-oversample",
@@ -273,6 +295,8 @@ def test_mps_partial_mpo_apply(method, dtype, sweep_reverse):
         "fit",
         "zipup",
         "zipup-first",
+        "sdc",
+        "sdc-oversample",
         "src",
         "src-first",
     ],
