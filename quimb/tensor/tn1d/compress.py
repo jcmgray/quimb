@@ -1184,7 +1184,22 @@ def _do_sweep_compress_from_low_rank_left_envs(
         #     ━━█━━▓▓
         #       i  i+1
         #
-        ts = [*local_tns[i], tq.conj()]
+        tqc = tq.conj()
+        if tqc.isfermionic():
+            # tq, tqc pair should resolve to the identity effectively
+            # TODO: use an ndim general `conj_project` in symmray instead
+            data = tqc.data
+            (bix,) = (ix for ix in tq.inds if ix not in t.inds)
+            bdual = data.indices[tqc.inds.index(bix)].dual
+            axs = tuple(
+                ax
+                for ax, ix in enumerate(tqc.inds)
+                if (ix != bix) and (data.indices[ax].dual is bdual)
+            )
+            if axs:
+                tqc.modify(data=data.phase_flip(*axs))
+
+        ts = [*local_tns[i], tqc]
         if i < L - 1:
             # include the right environment
             ts.append(right_env)
