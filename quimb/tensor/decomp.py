@@ -18,6 +18,7 @@ from autoray import (
     astype,
     compose,
     dag,
+    do,
     get_dtype_name,
     get_lib_fn,
     get_namespace,
@@ -529,8 +530,12 @@ def safe_inverse(x, cutoff=None, power=1.0):
     xp = get_namespace(x)
 
     # work in units of xmax so powers can't over- or underflow
-    xmax = xp.expand_dims(xp.max(x, axis=-1), -1)
-    xmax = xp.where(xmax > 0.0, xmax, 1.0)
+    if xp.ndim(x) == 1:
+        xmax = xp.max(x)
+    else:
+        xmax = xp.expand_dims(xp.max(x, axis=-1), -1)
+    # reducing can change backend, e.g. block sparse arrays -> scalar
+    xmax = do("where", xmax > 0.0, xmax, 1.0)
     if cutoff is None:
         try:
             # backend finfo, which knows about e.g. torch's bfloat16
