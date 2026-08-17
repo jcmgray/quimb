@@ -1,3 +1,5 @@
+import importlib.util
+
 import autoray as ar
 import numpy as np
 import pytest
@@ -139,6 +141,27 @@ class TestSafeInverse:
 
         x = ar.lazy.array(np.array([2.0, 1e-3, 0.0]))
         assert_allclose(safe_inverse(x).compute(), [0.5, 1e3, 0.0])
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("symmray") is None,
+        reason="symmray not installed",
+    )
+    @pytest.mark.parametrize("power", [1.0, 0.5])
+    def test_block_sparse(self, power):
+        # block sparse: one vector, no axis aware max, expand_dims or where
+        import symmray as sr
+
+        from quimb.tensor.decomp import safe_inverse
+
+        inds = [sr.BlockIndex({0: 2, 1: 3}, dual=d) for d in (0, 1)]
+        x = sr.Z2Array.random(inds, seed=42)
+        _u, s, _vh = ar.do("linalg.svd", x)
+
+        sinv = safe_inverse(s, power=power)
+        assert_allclose(
+            ar.to_numpy(sinv.to_dense()),
+            safe_inverse(ar.to_numpy(s.to_dense()), power=power),
+        )
 
 
 @pytest.mark.parametrize("absorb", ["both", None, "left", "right"])
