@@ -1,3 +1,5 @@
+import importlib.util
+
 import autoray as ar
 import numpy as np
 import pytest
@@ -8,6 +10,11 @@ import quimb.tensor as qtn
 from .. import jax_case, pytorch_case
 
 dtypes = ["float32", "float64", "complex64", "complex128"]
+
+requires_symmray = pytest.mark.skipif(
+    importlib.util.find_spec("symmray") is None,
+    reason="symmray not installed",
+)
 
 
 @pytest.mark.parametrize(
@@ -104,6 +111,25 @@ def test_sdc_backend(method, backend):
 
     for tensor in compressed:
         assert ar.infer_backend_device_dtype(tensor.data) == expected
+
+
+@requires_symmray
+@pytest.mark.parametrize("method", ["sdc", "sdc-oversample"])
+@pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
+def test_sdc_fermionic(method, from_which):
+    import symmray as sr
+
+    peps = sr.PEPS_fermionic_rand("Z2", 3, 3, bond_dim=2, phys_dim=2, seed=42)
+    expected = peps.make_norm().contract(all, optimize="auto-hq")
+
+    value = peps.make_norm().contract_boundary(
+        max_bond=64,  # exact
+        cutoff=0.0,
+        mode=method,
+        sequence=(from_which,),
+    )
+
+    assert value == pytest.approx(expected, rel=1e-10)
 
 
 @pytest.mark.parametrize("method", ["srcmps", "fit"])
