@@ -1198,6 +1198,9 @@ def _do_sweep_compress_from_low_rank_left_envs(
             )
             if axs:
                 tqc.modify(data=data.phase_flip(*axs))
+            # tensors of odd parity also pick up a global sign
+            if bdual and sum(m.parity for m in tqc.data.dummy_modes) % 2:
+                tqc.modify(data=tqc.data.phase_global())
 
         ts = [*local_tns[i], tqc]
         if i < L - 1:

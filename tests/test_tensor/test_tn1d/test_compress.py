@@ -132,6 +132,51 @@ def test_sdc_fermionic(method, from_which):
     assert value == pytest.approx(expected, rel=1e-10)
 
 
+@requires_symmray
+@pytest.mark.parametrize("method", ["sdc", "sdc-oversample"])
+@pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
+@pytest.mark.parametrize("sweep_reverse", [False, True])
+def test_sdc_fermionic_odd_parity(method, from_which, sweep_reverse):
+    # odd parity tensors carry dummy modes, contributing a global sign that
+    # the projector sweep must account for as well
+    import symmray as sr
+
+    Lx = Ly = 4
+
+    def build():
+        tn = sr.TN_abelian_from_edges_rand(
+            symmetry="Z2",
+            edges=qtn.edges_2d_square(Lx, Ly),
+            bond_dim=2,
+            phys_dim=None,
+            fermionic=True,
+            site_tag_id="I{},{}",
+            # checkerboard of odd sites, so the total charge stays even
+            site_charge=lambda site: (site[0] + site[1]) % 2,
+            seed=42,
+        )
+        for i in range(Lx):
+            for j in range(Ly):
+                tn[f"I{i},{j}"].add_tag(f"X{i}")
+                tn[f"I{i},{j}"].add_tag(f"Y{j}")
+        return tn.view_as_(
+            qtn.TensorNetwork2D, Lx=Lx, Ly=Ly, x_tag_id="X{}", y_tag_id="Y{}"
+        )
+
+    expected = build().contract(all, optimize="auto-hq")
+
+    # max_bond is large enough that nothing is discarded
+    value = build().contract_boundary(
+        max_bond=32,
+        cutoff=0.0,
+        mode=method,
+        sequence=(from_which,),
+        sweep_reverse=sweep_reverse,
+    )
+
+    assert value == pytest.approx(expected, rel=1e-10)
+
+
 @pytest.mark.parametrize("method", ["srcmps", "fit"])
 def test_tn_fit(method):
     psi = qtn.MPS_rand_state(4, 3, seed=7)
