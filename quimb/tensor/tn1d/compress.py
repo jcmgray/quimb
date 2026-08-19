@@ -1073,6 +1073,45 @@ def tensor_network_1d_compress_zipup_oversample(
     )
 
 
+def _conj_project(tq: Tensor, bond_ind: str) -> Tensor:
+    """Conjugate the isometry ``tq``, such that the pair resolves to the
+    identity when inserted back into a tensor network on ``bond_ind``.
+
+    Fermionic data needs a phase flip on the contracted indices sharing
+    ``bond_ind``'s dualness, and a global sign if of odd parity.
+
+    Parameters
+    ----------
+    tq : Tensor
+        The isometry, ``bond_ind`` being its only index not contracted back
+        into the network.
+    bond_ind : str
+        The new bond index produced when ``tq`` was split off.
+
+    Returns
+    -------
+    Tensor
+    """
+    tqc = tq.conj()
+
+    if tqc.isfermionic():
+        # TODO: replace with an ndim general `conj_project` in symmray
+        data = tqc.data
+        bdual = data.indices[tqc.inds.index(bond_ind)].dual
+        axs = tuple(
+            ax
+            for ax, ix in enumerate(tqc.inds)
+            if (ix != bond_ind) and (data.indices[ax].dual is bdual)
+        )
+        if axs:
+            tqc.modify(data=data.phase_flip(*axs))
+        # arrays of odd parity also pick up a global sign
+        if bdual and sum(m.parity for m in tqc.data.dummy_modes) % 2:
+            tqc.modify(data=tqc.data.phase_global())
+
+    return tqc
+
+
 def _do_sweep_compress_from_low_rank_left_envs(
     tn: TensorNetwork,
     local_tns: list[TensorNetwork],
@@ -1184,25 +1223,9 @@ def _do_sweep_compress_from_low_rank_left_envs(
         #     ━━█━━▓▓
         #       i  i+1
         #
-        tqc = tq.conj()
-        if tqc.isfermionic():
-            # tq, tqc pair should resolve to the identity effectively
-            # TODO: use an ndim general `conj_project` in symmray instead
-            data = tqc.data
-            (bix,) = (ix for ix in tq.inds if ix not in t.inds)
-            bdual = data.indices[tqc.inds.index(bix)].dual
-            axs = tuple(
-                ax
-                for ax, ix in enumerate(tqc.inds)
-                if (ix != bix) and (data.indices[ax].dual is bdual)
-            )
-            if axs:
-                tqc.modify(data=data.phase_flip(*axs))
-            # tensors of odd parity also pick up a global sign
-            if bdual and sum(m.parity for m in tqc.data.dummy_modes) % 2:
-                tqc.modify(data=tqc.data.phase_global())
-
-        ts = [*local_tns[i], tqc]
+        # the new bond is the only index of tq not already in t
+        (bond_ind,) = (ix for ix in tq.inds if ix not in t.inds)
+        ts = [*local_tns[i], _conj_project(tq, bond_ind)]
         if i < L - 1:
             # include the right environment
             ts.append(right_env)
@@ -2537,14 +2560,6 @@ def _tn1d_fit_sum_sweep_2site(
                 | envs["R", i + 1, k]
             )
 
-            if fermion:
-                # keep track of the environment legs for possible phase flips later
-                left_env_ind, right_env_ind = None, None
-                if type(envs["L", i, k]) is Tensor:
-                    (left_env_ind,) = tfi0.bonds(envs["L", i, k])
-                if type(envs["R", i + 1, k]) is Tensor:
-                    (right_env_ind,) = tfi1.bonds(envs["R", i + 1, k])
-
             # remove old tensors
             del tnik["__FIT__", site0]
             del tnik["__FIT__", site1]
@@ -2554,32 +2569,6 @@ def _tn1d_fit_sum_sweep_2site(
                 all, optimize=optimize, output_inds=left_inds + right_inds
             )
 
-            if fermion:
-                # flip the dual indices of the environment legs if needed
-                lind_id, rind_id = None, None
-                lind_id = (
-                    tfiknew.inds.index(left_env_ind)
-                    if left_env_ind is not None
-                    else None
-                )
-                rind_id = (
-                    tfiknew.inds.index(right_env_ind)
-                    if right_env_ind is not None
-                    else None
-                )
-                if lind_id is not None and rind_id is not None:
-                    if tfiknew.data.duals[lind_id]:
-                        tfiknew.data.phase_flip(lind_id, inplace=True)
-                    else:
-                        tfiknew.data.phase_flip(rind_id, inplace=True)
-                elif lind_id is not None and rind_id is None:
-                    if tfiknew.data.duals[lind_id]:
-                        tfiknew.data.phase_flip(lind_id, inplace=True)
-                elif (lind_id is None and rind_id is not None) and (
-                    tfiknew.data.duals[rind_id]
-                ):
-                    tfiknew.data.phase_flip(rind_id, inplace=True)
-
             # sum into fitted tensor
             if tfinew is None:
                 tfinew = tfiknew
@@ -2587,20 +2576,10 @@ def _tn1d_fit_sum_sweep_2site(
                 tfinew += tfiknew
 
         if fermion:
-            # when conjugating tn_fit (a ftn) the dual outer indices will be flipped (phase_dual=True)
-            # but ftensor.conj() assumes phase_dual=False by default
-            # we need to manually flip the dual 'physical' indices in tfinew before conjugating
-            data = tfinew.data
-            dual_outer_axs = tuple(
-                ax
-                for ax, ix in enumerate(tfinew.inds)
-                if ix not in (left_env_ind, right_env_ind)
-                and data.indices[ax].dual  # or tfixnew.data.duals[ax]
-            )
-            if dual_outer_axs:
-                tfinew.modify(data=data.phase_flip(*dual_outer_axs))
-
-        tfinew.conj_()
+            # also flips the dual indices
+            tfinew.modify(data=tfinew.data.conj(phase_dual=True))
+        else:
+            tfinew.conj_()
 
         tfinew0, tfinew1 = tfinew.split(
             max_bond=max_bond,
