@@ -2363,9 +2363,12 @@ def _tn1d_fit_sum_sweep_1site(
     K = len(tn_overlaps)
 
     fermion = tn_fit.isfermionic()
-    if fermion:
-        raise NotImplementedError(
-            "Fermionic 1-site fitting not implemented, use 2-site (bsz=2)."
+    if fermion and any(
+        t.data.dummy_modes for tn_o in tn_overlaps for t in tn_o
+    ):
+        warnings.warn(
+            "1-site fitting of fermionic tensor networks with tensors of odd "
+            "parity is likely incorrect, use 2-site (`bsz=2`)."
         )
 
     if max_bond is not None:

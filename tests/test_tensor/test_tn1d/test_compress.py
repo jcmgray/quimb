@@ -114,34 +114,52 @@ def test_sdc_backend(method, backend):
 
 
 @requires_symmray
-@pytest.mark.parametrize("method", ["sdc", "sdc-oversample"])
+@pytest.mark.parametrize("parity", ["even", "odd"])
+@pytest.mark.parametrize(
+    "method",
+    [
+        "direct",
+        "dm",
+        "zipup",
+        "zipup-oversample",
+        "sdc",
+        "sdc-oversample",
+        "fit-bsz1",
+        "fit-bsz2",
+    ],
+)
 @pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
-def test_sdc_fermionic(method, from_which):
+def test_fermionic_boundary_contract(method, parity, from_which, request):
+    """Every 1D compression method should exactly contract a scalar fermionic
+    2D network, given enough bond dimension, whatever the parity of its
+    tensors or the side contracted from.
+    """
     import symmray as sr
 
-    peps = sr.PEPS_fermionic_rand("Z2", 3, 3, bond_dim=2, phys_dim=2, seed=42)
-    expected = peps.make_norm().contract(all, optimize="auto-hq")
-
-    value = peps.make_norm().contract_boundary(
-        max_bond=64,  # exact
-        cutoff=0.0,
-        mode=method,
-        sequence=(from_which,),
-    )
-
-    assert value == pytest.approx(expected, rel=1e-10)
-
-
-@requires_symmray
-@pytest.mark.parametrize("method", ["sdc", "sdc-oversample"])
-@pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
-@pytest.mark.parametrize("sweep_reverse", [False, True])
-def test_sdc_fermionic_odd_parity(method, from_which, sweep_reverse):
-    # odd parity tensors carry dummy modes, contributing a global sign that
-    # the projector sweep must account for as well
-    import symmray as sr
+    if method == "dm":
+        # the reduced density matrices are not positive semi-definite, so the
+        # eigendecomposition retains the wrong subspace
+        request.applymarker(
+            pytest.mark.xfail(reason="dm is wrong for fermionic", strict=True)
+        )
+    elif (method, parity) == ("fit-bsz1", "odd"):
+        # only some directions are affected, so not strict
+        request.applymarker(
+            pytest.mark.xfail(
+                reason="1-site fitting is wrong for odd parity", strict=False
+            )
+        )
 
     Lx = Ly = 4
+    if parity == "even":
+
+        def site_charge(site):
+            return 0
+
+    else:
+        # odd sites on the diagonal, keeping the total charge even
+        def site_charge(site):
+            return int(site[0] == site[1])
 
     def build():
         tn = sr.TN_abelian_from_edges_rand(
@@ -151,8 +169,7 @@ def test_sdc_fermionic_odd_parity(method, from_which, sweep_reverse):
             phys_dim=None,
             fermionic=True,
             site_tag_id="I{},{}",
-            # checkerboard of odd sites, so the total charge stays even
-            site_charge=lambda site: (site[0] + site[1]) % 2,
+            site_charge=site_charge,
             seed=42,
         )
         for i in range(Lx):
@@ -163,17 +180,25 @@ def test_sdc_fermionic_odd_parity(method, from_which, sweep_reverse):
             qtn.TensorNetwork2D, Lx=Lx, Ly=Ly, x_tag_id="X{}", y_tag_id="Y{}"
         )
 
+    opts = {"mode": method}
+    if method.startswith("fit"):
+        opts = {
+            "mode": "fit",
+            "bsz": int(method[-1]),
+            "tn_fit": "zipup",
+            "max_iterations": 6,
+        }
+
+    contract_opts = {
+        # enough that nothing is discarded
+        "max_bond": 4,
+        "cutoff": 0.0,
+        "sequence": (from_which,),
+        **opts,
+    }
+
     expected = build().contract(all, optimize="auto-hq")
-
-    # max_bond is large enough that nothing is discarded
-    value = build().contract_boundary(
-        max_bond=32,
-        cutoff=0.0,
-        mode=method,
-        sequence=(from_which,),
-        sweep_reverse=sweep_reverse,
-    )
-
+    value = build().contract_boundary(**contract_opts)
     assert value == pytest.approx(expected, rel=1e-10)
 
 
