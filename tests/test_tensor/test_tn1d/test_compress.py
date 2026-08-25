@@ -16,6 +16,52 @@ requires_symmray = pytest.mark.skipif(
     reason="symmray not installed",
 )
 
+symmetries = [
+    "abelian",
+    "fermionic-even",
+    "fermionic-odd-checker",
+    "fermionic-odd-diag",
+]
+
+
+def symmetric_2d_tn(symmetry, Lx, Ly, bond_dim=2, seed=42):
+    """Build a scalar Z2-symmetric ``TensorNetwork2D`` test case."""
+    import symmray as sr
+
+    if symmetry == "fermionic-odd-checker":
+
+        def site_charge(site):
+            return (site[0] + site[1]) % 2
+
+    elif symmetry == "fermionic-odd-diag":
+
+        def site_charge(site):
+            return int(site[0] == site[1])
+
+    else:
+
+        def site_charge(site):
+            return 0
+
+    tn = sr.TN_abelian_from_edges_rand(
+        symmetry="Z2",
+        edges=qtn.edges_2d_square(Lx, Ly),
+        bond_dim=bond_dim,
+        phys_dim=None,
+        fermionic=symmetry != "abelian",
+        site_tag_id="I{},{}",
+        site_charge=site_charge,
+        seed=seed,
+    )
+    for i in range(Lx):
+        for j in range(Ly):
+            tn[f"I{i},{j}"].add_tag(f"X{i}")
+            tn[f"I{i},{j}"].add_tag(f"Y{j}")
+
+    return tn.view_as_(
+        qtn.TensorNetwork2D, Lx=Lx, Ly=Ly, x_tag_id="X{}", y_tag_id="Y{}"
+    )
+
 
 @pytest.mark.parametrize(
     "method",
@@ -114,15 +160,7 @@ def test_sdc_backend(method, backend):
 
 
 @requires_symmray
-@pytest.mark.parametrize(
-    "symmetry",
-    [
-        "abelian",
-        "fermionic-even",
-        "fermionic-odd-checker",
-        "fermionic-odd-diag",
-    ],
-)
+@pytest.mark.parametrize("symmetry", symmetries)
 @pytest.mark.parametrize(
     "method",
     [
@@ -142,17 +180,7 @@ def test_symmetric_boundary_contract(method, symmetry, from_which, request):
     2D network, given enough bond dimension, whatever the parity of its
     tensors or the side contracted from.
     """
-    import symmray as sr
-
-    fermionic = symmetry != "abelian"
-
-    if method == "dm" and fermionic:
-        # the reduced density matrices are not positive semi-definite, so the
-        # eigendecomposition retains the wrong subspace
-        request.applymarker(
-            pytest.mark.xfail(reason="dm is wrong for fermionic", strict=True)
-        )
-    elif (method, symmetry) == ("fit-bsz1", "fermionic-odd-diag"):
+    if (method, symmetry) == ("fit-bsz1", "fermionic-odd-diag"):
         # only some directions are affected, so not strict
         request.applymarker(
             pytest.mark.xfail(
@@ -160,39 +188,7 @@ def test_symmetric_boundary_contract(method, symmetry, from_which, request):
             )
         )
 
-    Lx = Ly = 4
-    if symmetry == "fermionic-odd-checker":
-        # checkerboard of odd sites, keeping the total charge even
-        def site_charge(site):
-            return (site[0] + site[1]) % 2
-
-    elif symmetry == "fermionic-odd-diag":
-        # odd sites on the diagonal, keeping the total charge even
-        def site_charge(site):
-            return int(site[0] == site[1])
-
-    else:
-
-        def site_charge(site):
-            return 0
-
-    tn = sr.TN_abelian_from_edges_rand(
-        symmetry="Z2",
-        edges=qtn.edges_2d_square(Lx, Ly),
-        bond_dim=2,
-        phys_dim=None,
-        fermionic=fermionic,
-        site_tag_id="I{},{}",
-        site_charge=site_charge,
-        seed=42,
-    )
-    for i in range(Lx):
-        for j in range(Ly):
-            tn[f"I{i},{j}"].add_tag(f"X{i}")
-            tn[f"I{i},{j}"].add_tag(f"Y{j}")
-    tn.view_as_(
-        qtn.TensorNetwork2D, Lx=Lx, Ly=Ly, x_tag_id="X{}", y_tag_id="Y{}"
-    )
+    tn = symmetric_2d_tn(symmetry, 4, 4)
 
     opts = {"mode": method}
     if method.startswith("fit"):
@@ -214,6 +210,19 @@ def test_symmetric_boundary_contract(method, symmetry, from_which, request):
     expected = tn.contract(all, optimize="auto-hq")
     value = tn.contract_boundary(**contract_opts)
     assert value == pytest.approx(expected, rel=1e-10)
+
+
+@requires_symmray
+@pytest.mark.parametrize("symmetry", symmetries)
+@pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
+def test_dm_truncating_matches_direct(symmetry, from_which):
+    """Check DM truncation against direct compression."""
+    # choose a network and bond limit that force truncation
+    tn = symmetric_2d_tn(symmetry, 6, 6)
+    opts = {"max_bond": 4, "cutoff": 0.0, "sequence": (from_which,)}
+    value_dm = tn.contract_boundary(mode="dm", **opts)
+    value_direct = tn.contract_boundary(mode="direct", **opts)
+    assert value_dm == pytest.approx(value_direct, rel=1e-8)
 
 
 @pytest.mark.parametrize("method", ["srcmps", "fit"])

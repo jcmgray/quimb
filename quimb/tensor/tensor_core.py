@@ -2648,17 +2648,44 @@ class Tensor:
         new_ind_pair_diag, inplace=True
     )
 
-    def conj(self, inplace=False):
-        """Conjugate this tensors data (does nothing to indices)."""
+    def conj(self, inplace=False, output_inds=None):
+        """Conjugate this tensor's data without changing its indices.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to conjugate this tensor in place.
+        output_inds : sequence of str, optional
+            Only matters if this tensor is fermionic. If so, which indices to
+            consider as 'outer' indices of a global network, if any of those
+            are non-dual, the corresponding axes are phase-flipped to give the
+            correct local fermionic signs. Unlike `TensorNetwork.conj`, no
+            indices are automatically inferred.
+
+        Returns
+        -------
+        Tensor
+        """
         t = self if inplace else self.copy()
         t.modify(apply=conj, left_inds=t.left_inds)
+
+        if output_inds and t.isfermionic():
+            data = t.data
+            axs = tuple(
+                ax
+                for ax, ix in enumerate(t.inds)
+                if (ix in output_inds) and not data.indices[ax].dual
+            )
+            if axs:
+                t.modify(data=data.phase_flip(*axs))
+
         return t
 
     conj_ = functools.partialmethod(conj, inplace=True)
 
     @property
     def H(self):
-        """Conjugate this tensors data (does nothing to indices)."""
+        """Conjugate this tensor's data without changing its indices."""
         return self.conj()
 
     @property
@@ -4756,13 +4783,18 @@ class TensorNetwork:
             Whether to mangle the inner indices of the network. If a string is
             given, it will be appended to the index names.
         output_inds : sequence of str, optional
-            If given, the indices to mangle will be restricted to those not in
-            this list. This is only needed for (hyper) tensor networks where
-            output indices are not given simply by those that appear once.
+            Which indices to treat as 'outer', which matters for fermionic
+            conjugation as well as index mangling. Computed as every index
+            that appears exactly once if not given (which may be incorrect if
+            A) hyper-indices are present or B) you are viewing a sub-network).
+            For fermionic networks, outer indices are phase flipped based on
+            their dualness. For hyper tensor networks, outer indices are
+            not mangled, even if they appear twice or more.
         phase_dual : bool, optional
             If the tensor data is fermionic, whether to phase flip any dual
             outer indices, to ensure the correct behavior when forming local
-            cluster states. By default ``True``.
+            cluster states. By default ``True``. See `output_inds` for which
+            indices are considered outer.
         inplace : bool, optional
             Whether to perform the conjugation inplace or not.
 
@@ -4772,8 +4804,17 @@ class TensorNetwork:
         """
         tn = self if inplace else self.copy()
 
+        if phase_dual and tn.isfermionic():
+            # select indices eligible for fermionic conjugation phases
+            if output_inds is None:
+                phase_inds = oset(tn.outer_inds())
+            else:
+                phase_inds = tags_to_oset(output_inds)
+        else:
+            phase_inds = None
+
         for t in tn:
-            t.conj_()
+            t.conj_(output_inds=phase_inds)
 
         if mangle_inner:
             append = None if mangle_inner is True else str(mangle_inner)
@@ -4785,19 +4826,6 @@ class TensorNetwork:
                 which = oset(tn.ind_map) - tags_to_oset(output_inds)
 
             tn.mangle_inner_(append=append, which=which)
-
-        if phase_dual and tn.isfermionic():
-            # if we have fermionic data, need to phase dual outer indices
-            outer_inds = tn.outer_inds()
-            for t in tn:
-                data = t.data
-                dual_outer_axs = tuple(
-                    ax
-                    for ax, ix in enumerate(t.inds)
-                    if (ix in outer_inds) and not data.indices[ax].dual
-                )
-                if dual_outer_axs:
-                    t.modify(data=data.phase_flip(*dual_outer_axs))
 
         return tn
 
@@ -10135,6 +10163,7 @@ class TensorNetwork:
         tn = self
         bra_map = dict(ixmap)
         environment_tensors = []
+        message_inds = oset()
         if gauges:
             from .belief_propagation.d2bp import D2BP
 
@@ -10183,6 +10212,7 @@ class TensorNetwork:
 
                     bix = rand_uuid()
                     bra_map[ix] = bix
+                    message_inds.add(bix)
                     environment_tensors.append(Tensor(m, inds=(bix, ix)))
 
             else:
@@ -10191,7 +10221,14 @@ class TensorNetwork:
                 )
 
         # contract to dense array
-        tnd = tn.reindex(bra_map).conj_() & tn
+        bra = tn.reindex(bra_map)
+        if bra.isfermionic():
+            # message tensors already carry the required fermionic phases
+            phase_inds = bra._outer_inds - message_inds
+        else:
+            phase_inds = None
+        bra.conj_(output_inds=phase_inds)
+        tnd = bra & tn
         for tm in environment_tensors:
             tnd |= tm
         XX = tnd.to_dense(lix, rix, **contract_opts)
@@ -12674,16 +12711,34 @@ class PTensor(Tensor):
         """The backend inferred from the data."""
         return infer_backend(self.params)
 
+    def isfermionic(self):
+        """Check whether the generated tensor data is fermionic."""
+        return isfermionic(self.data)
+
     def _apply_function(self, fn):
         """Apply ``fn`` to the data array of this ``PTensor`` (lazily), by
         composing it with the current parametrized array function.
         """
         self._data.add_function(fn)
 
-    def conj(self, inplace=False):
-        """Conjugate this parametrized tensor - done lazily whenever the
-        ``.data`` attribute is accessed.
+    def conj(self, inplace=False, output_inds=None):
+        """Conjugate this parametrized tensor lazily.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to conjugate this tensor in place.
+        output_inds : sequence of str, optional
+            Indices to treat as outputs when applying fermionic conjugation
+            phases. Fermionic output phases are not supported for parametrized
+            tensors.
         """
+        if output_inds and self.isfermionic():
+            raise NotImplementedError(
+                "Fermionic PTensor conjugation with `output_inds` is not "
+                "supported."
+            )
+
         t = self if inplace else self.copy()
         t._apply_function(conj)
         return t

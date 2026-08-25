@@ -170,6 +170,25 @@ class TestBasicTensorOperations:
         a.conj_()
         assert_allclose(data.conj(), a.data)
 
+        b = Tensor(data.copy(), inds=[0, 1, 2], tags="blue")
+        assert b.conj(True) is b
+        assert_allclose(data.conj(), b.data)
+
+    def test_ptensor_conj_output_inds(self):
+        t = qtn.PTensor(lambda x: x, np.array([1.0j]), inds=["a"])
+        tn = TensorNetwork([t])
+        tnc = tn.conj(output_inds=["a"])
+        tc = next(iter(tnc))
+        assert isinstance(tc, qtn.PTensor)
+        assert_allclose(tc.data, np.array([-1.0j]))
+
+        sr = pytest.importorskip("symmray")
+        ix = sr.BlockIndex({0: 1, 1: 1}, dual=True)
+        data = sr.Z2FermionicArray.random(indices=[ix], seed=42)
+        ft = qtn.PTensor(lambda _: data, np.array([0.0]), inds=["a"])
+        with pytest.raises(NotImplementedError, match="Fermionic PTensor"):
+            TensorNetwork([ft]).conj(output_inds=["a"])
+
     def test_gate_transpose(self):
         t = qtn.rand_tensor([2, 3], inds="ab", dtype=complex, seed=42)
         G = qu.rand_matrix(2, dtype=complex, seed=42)
