@@ -63,6 +63,20 @@ def symmetric_2d_tn(symmetry, Lx, Ly, bond_dim=2, seed=42):
     )
 
 
+@pytest.fixture(scope="module")
+def fpeps_norm_and_benchmark():
+    import symmray as sr
+
+    fpeps = sr.PEPS_fermionic_rand("Z2", 4, 4, bond_dim=4, phys_dim=4, seed=42)
+    fpeps.equalize_norms_()
+    for tensor in fpeps.tensors:
+        tensor.data.phase_sync(inplace=True)
+
+    fpeps_norm = fpeps.make_norm()
+    benchmark = fpeps_norm.contract(all, optimize="auto-hq")
+    return fpeps_norm, benchmark
+
+
 @pytest.mark.parametrize(
     "method",
     ["src", "src-first", "srcmps", "srcmps-first", "fit", "fit-oversample"],
@@ -210,6 +224,42 @@ def test_symmetric_boundary_contract(method, symmetry, from_which, request):
     expected = tn.contract(all, optimize="auto-hq")
     value = tn.contract_boundary(**contract_opts)
     assert value == pytest.approx(expected, rel=1e-10)
+
+
+@requires_symmray
+@pytest.mark.parametrize(
+    "from_which,boundary_range",
+    [
+        pytest.param("xmin", (0, 2), id="xmin"),
+        pytest.param("xmax", (1, 3), id="xmax"),
+        pytest.param("ymin", (0, 2), id="ymin"),
+        pytest.param("ymax", (1, 3), id="ymax"),
+    ],
+)
+def test_fmps_mpo_fitting(
+    from_which,
+    boundary_range,
+    fpeps_norm_and_benchmark,
+):
+    fpeps_norm, benchmark = fpeps_norm_and_benchmark
+    contract_boundary = getattr(
+        fpeps_norm,
+        f"contract_boundary_from_{from_which}",
+    )
+    range_key = "xrange" if from_which.startswith("x") else "yrange"
+
+    result = contract_boundary(
+        **{range_key: boundary_range},
+        max_bond=128,
+        cutoff=0.0,
+        mode="fit",
+        tol=1e-5,
+        tn_fit="zipup",
+        bsz=2,
+        max_iterations=6,
+    ).contract()
+
+    assert result == pytest.approx(benchmark, rel=1e-4)
 
 
 @requires_symmray
