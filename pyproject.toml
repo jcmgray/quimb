@@ -125,6 +125,7 @@ numba = "*"
 numpy = "*"
 psutil = "*"
 scipy = ">=1.16.0"
+symmray = "*"
 tqdm = "*"
 
 [tool.pixi.pypi-dependencies]

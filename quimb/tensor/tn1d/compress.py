@@ -467,11 +467,11 @@ def tensor_network_1d_compress_dm(
 
     compress_opts = kwargs | ensure_dict(compress_opts)
     compress_opts.setdefault("max_bond", max_bond)
+    compress_opts.setdefault("absorb", "lorthog")
     compress_opts.setdefault("method", "eigh")
     compress_opts.setdefault("positive", 1)
     compress_opts.setdefault("cutoff", cutoff)
     compress_opts.setdefault("cutoff_mode", cutoff_mode)
-    compress_opts.setdefault("absorb", None)
 
     if not canonize:
         warnings.warn("`canonize=False` is ignored for the `dm` method.")
@@ -483,6 +483,7 @@ def tensor_network_1d_compress_dm(
     N = len(site_tags)
 
     ket = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    fermion = ket.isfermionic()
 
     # partition outer indices, and create conjugate bra indices
     ket_site_inds = []
@@ -506,6 +507,11 @@ def tensor_network_1d_compress_dm(
     norm = bra & ket
     # open the bra's indices back up
     bra.reindex_(ketbra_indmap)
+
+    # map every ket index to its bra layer equivalent
+    kb_indmap = {}
+    for tk, tb in zip(ket.tensors, bra.tensors):
+        kb_indmap.update(zip(tk.inds, tb.inds))
 
     # construct dense left environments
     # (n.b. K, B generally *collection* of tensors)
@@ -564,24 +570,36 @@ def tensor_network_1d_compress_dm(
 
         # contract and then split it
         #
-        #                    │  ┃
+        #                    │  ┃  ... left_inds
         #     │  ┃           UUUU
         #     │  ┃            ┃
         #     rhoi    =>      s    ... bix, with size max_bond
         #     │  ┃            ┃
         #     │  ┃           UHUH
-        #                    │  ┃
+        #                    │  ┃  ... right_inds
         #
         rhoi = tensor_contract(*rho_tensors, **contract_opts)
 
-        # XXX: fermionic, see fix in squared_op_to_reduced_factor
+        if fermion:
+            # phase flip dual bra-side axes so rhoi is positive
+            data = rhoi.data
+            axs_flip = tuple(
+                ax
+                for ax, ix in enumerate(rhoi.inds)
+                if (ix in right_inds) and data.indices[ax].dual
+            )
+            if axs_flip:
+                rhoi.modify(data=data.phase_flip(*axs_flip))
 
-        U, s, UH = rhoi.split(
+        # construct the conjugate projector separately below
+        bix = rand_uuid()
+        U = rhoi.split(
             left_inds=left_inds,
             right_inds=right_inds,
             get="tensors",
+            bond_ind=bix,
             **compress_opts,
-        )
+        )[0]
 
         # turn bond into 'virtual right' indices
         #
@@ -589,13 +607,11 @@ def tensor_network_1d_compress_dm(
         #     UUUU
         #      ┃   ...new_bonds["k", i]
         #     ✂
-        #      ┃   ...new_bonds["b", i]
+        #      ┃   ...new_bonds["b", i], on the conjugate
         #     UHUH
         #     │  ┃
         #
-        (bix,) = s.inds
         U.reindex_({bix: new_bonds["k", i]})
-        UH.reindex_({bix: new_bonds["b", i]})
         Us[i] = U
 
         # attach the unitaries to the right environments and contract
@@ -612,12 +628,15 @@ def tensor_network_1d_compress_dm(
         #       UHUHU†             new_bonds["b", i]
         #         ┃
         #
-        right_ket_tensors = [*ket.select_tensors(site_tags[i]), U.H]
-        right_bra_tensors = [*bra.select_tensors(site_tags[i]), UH.H]
+        if fermion:
+            Uc = _conj_project(U, new_bonds["k", i])
+        else:
+            Uc = U.H
+        kb_indmap[new_bonds["k", i]] = new_bonds["b", i]
+        right_ket_tensors = [*ket.select_tensors(site_tags[i]), Uc]
         if right_env_ket is not None:
             # we have already done one move -> have right envs
             right_ket_tensors.append(right_env_ket)
-            right_bra_tensors.append(right_env_bra)
 
         right_env_ket = tensor_contract(
             *right_ket_tensors,
@@ -630,16 +649,11 @@ def tensor_network_1d_compress_dm(
             right_env_ket, result_exponent = right_env_ket
             exponent += result_exponent
 
-        # TODO: could compute this just as conjugated and relabelled ket env
-        right_env_bra = tensor_contract(
-            *right_bra_tensors,
-            drop_tags=True,
-            strip_exponent=equalize_norms,
-            **contract_opts,
+        # derive the bra environment by conjugating and relabeling the ket
+        right_env_bra = right_env_ket.conj(output_inds=(new_bonds["k", i],))
+        right_env_bra.reindex_(
+            {ix: kb_indmap[ix] for ix in right_env_bra.inds}
         )
-        if equalize_norms:
-            # don't need stripped exponent
-            right_env_bra, _ = right_env_bra
 
     # form the final site
     #
@@ -1077,8 +1091,7 @@ def _conj_project(tq: Tensor, bond_ind: str) -> Tensor:
     """Conjugate the isometry ``tq``, such that the pair resolves to the
     identity when inserted back into a tensor network on ``bond_ind``.
 
-    Fermionic data needs a phase flip on the contracted indices sharing
-    ``bond_ind``'s dualness, and a global sign if of odd parity.
+    Fermionic data needs possible phases on the contracted indices.
 
     Parameters
     ----------
@@ -1092,22 +1105,13 @@ def _conj_project(tq: Tensor, bond_ind: str) -> Tensor:
     -------
     Tensor
     """
-    tqc = tq.conj()
+    tqc = tq.copy()
 
-    if tqc.isfermionic():
-        # TODO: replace with an ndim general `conj_project` in symmray
-        data = tqc.data
-        bdual = data.indices[tqc.inds.index(bond_ind)].dual
-        axs = tuple(
-            ax
-            for ax, ix in enumerate(tqc.inds)
-            if (ix != bond_ind) and (data.indices[ax].dual is bdual)
-        )
-        if axs:
-            tqc.modify(data=data.phase_flip(*axs))
-        # arrays of odd parity also pick up a global sign
-        if bdual and sum(m.parity for m in tqc.data.dummy_modes) % 2:
-            tqc.modify(data=tqc.data.phase_global())
+    if tq.isfermionic():
+        axis = tq.inds.index(bond_ind)
+        tqc.modify(data=tq.data.conj_project(axis=axis))
+    else:
+        tqc.conj_()
 
     return tqc
 

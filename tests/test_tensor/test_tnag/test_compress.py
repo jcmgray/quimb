@@ -57,12 +57,13 @@ def test_compress_projector_symmetric(symmetry, canonize, from_which, request):
 
     fermionic = symmetry != "abelian"
 
-    if canonize == "bp" and fermionic:
-        # the d2bp gauges make the squared operators non positive
-        # semi-definite, which `compute_reduced_factor` assumes
+    if canonize == "bp" and fermionic and from_which in ("xmax", "ymax"):
+        # inserting the messages still picks up an overall sign in some
+        # regions, leaving the squared operator minus a positive operator,
+        # which `compute_reduced_factor` assumes it is not
         request.applymarker(
             pytest.mark.xfail(
-                reason="bp gauging is wrong for fermionic", strict=True
+                reason="bp message insertion signs some regions", strict=True
             )
         )
 

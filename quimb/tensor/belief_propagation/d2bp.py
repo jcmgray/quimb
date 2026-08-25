@@ -349,14 +349,11 @@ class D2BP(BeliefPropagationCommon):
 
         t = self.tn.tensor_map[tid]
         ix_neighbors = {}
-        axs_output = []
 
         # first build initial messages from ix->tid
-        for ax, ix in enumerate(t.inds):
+        for ix in t.inds:
             if ix in self.output_inds:
                 # output index -> directly contract without message
-                # if fermionic we may need to phase flip -> record
-                axs_output.append(ax)
                 continue
 
             # bond index -> mangle for bra
@@ -382,15 +379,9 @@ class D2BP(BeliefPropagationCommon):
             # make sure touch_map entry exists
             self.touch_map.setdefault((ix, tid), {})
 
-        t_dag = t.conj().reindex_(self.index_dual_map)
-        if t_dag.isfermionic():
-            # need to phase dual output indices only
-            data = t_dag.data
-            axs_phase = tuple(
-                ax for ax in axs_output if not data.indices[ax].dual
-            )
-            if axs_phase:
-                t_dag.modify(data=data.phase_flip(*axs_phase))
+        # phase only output legs when forming a fermionic conjugate
+        t_dag = t.conj(output_inds=self.output_inds)
+        t_dag.reindex_(self.index_dual_map)
 
         self.tensor_dual_map[tid] = t_dag
         kix = t.inds
@@ -1065,6 +1056,8 @@ class D2BP(BeliefPropagationCommon):
         """
         tn = self.tn if inplace else self.tn.copy()
 
+        fermionic = tn.isfermionic()
+
         reduce_opts = ensure_dict(reduce_opts)
         compress_opts = kwargs | ensure_dict(compress_opts)
         compress_opts.setdefault("max_bond", max_bond)
@@ -1093,7 +1086,12 @@ class D2BP(BeliefPropagationCommon):
 
             tb = tn.tensor_map[tidb]
             dim_right = tb.size // dim_bond
-            mr_raw = self.messages[ix, tida].T
+            mr_raw = self.messages[ix, tida]
+            if fermionic:
+                # transpose without fermionic phases to match matrix axis order
+                mr_raw = mr_raw.transpose(phase=False)
+            else:
+                mr_raw = ar.do("transpose", mr_raw)
             mr = mr_raw if conditioner is None else conditioner(mr_raw)
             Rb = qtn.decomp.squared_op_to_reduced_factor(
                 mr, dim_bond, dim_right, right=False, **reduce_opts
@@ -1119,9 +1117,20 @@ class D2BP(BeliefPropagationCommon):
                         mr_raw, dim_bond, dim_right, right=False, **reduce_opts
                     )
                 new_Ra = Ra @ Pa
+                if fermionic:
+                    new_ml = new_Ra.dagger_compose_left() @ new_Ra
+                else:
+                    new_ml = ar.dag(new_Ra) @ new_Ra
+                self.messages[ix, tidb] = new_ml
+
                 new_Rb = Pb @ Rb
-                self.messages[ix, tidb] = ar.dag(new_Ra) @ new_Ra
-                self.messages[ix, tida] = new_Rb @ ar.dag(new_Rb)
+                if fermionic:
+                    new_mr = new_Rb @ new_Rb.dagger_compose_right()
+                    new_mr = new_mr.transpose(phase=False)
+                else:
+                    new_mr = ar.do("transpose", new_Rb @ ar.dag(new_Rb))
+                self.messages[ix, tida] = new_mr
+
                 self._messages_conditioned.pop((ix, tidb), None)
                 self._messages_conditioned.pop((ix, tida), None)
 
