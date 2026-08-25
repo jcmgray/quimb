@@ -942,8 +942,14 @@ class TestMatrixProductOperator:
             index_maps=(charges,) * 4,
             duals=(False, False, True, True),
         )
+
+        def to_dense_array(mpo):
+            # unfuse before densifying to preserve computational-basis order
+            x = mpo.to_dense().unfuse_all().to_dense()
+            return x.reshape(2**mpo.L, 2**mpo.L)
+
         expected = qu.ikron(Gd, [2] * mpo.L, (1, 2))
-        expected = expected.H @ ar.to_numpy(mpo.to_dense()) @ expected
+        expected = expected.H @ to_dense_array(mpo) @ expected
 
         info = {"cur_orthog": (0, 0)}
         mpo.gate_sandwich_with_auto_swap_(
@@ -955,7 +961,7 @@ class TestMatrixProductOperator:
             cutoff=0.0,
         )
 
-        assert_allclose(ar.to_numpy(mpo.to_dense()), expected)
+        assert_allclose(to_dense_array(mpo), expected)
         assert info["cur_orthog"] == (2, 2)
 
     @pytest.mark.parametrize("cyclic", [False, True])
