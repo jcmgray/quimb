@@ -3,6 +3,7 @@
 - assumes no hyper indices, only standard bonds.
 - assumes a single ('dense') tensor per site
 - works directly on the '1-norm' i.e. scalar tensor network
+- supports sparse COO-format tensors, which have specialized numba kernels
 
 This is the simplest version of belief propagation, and is useful for
 simple investigations.
@@ -25,6 +26,12 @@ from .bp_common import (
 from .hd1bp import (
     compute_all_tensor_messages_tree,
 )
+from .sparse_ops import (
+    compute_all_tensor_messages_coo,
+    contract_tensor_messages_coo,
+    parse_coo,
+    sum_all_but_axis_coo,
+)
 
 
 def initialize_messages(tn, fill_fn=None):
@@ -39,6 +46,9 @@ def initialize_messages(tn, fill_fn=None):
             if fill_fn is not None:
                 d = t_from.ind_size(ix)
                 m = fill_fn((d,))
+            elif parse_coo(t_from.data) is not None:
+                # sparse COO tensor
+                m = sum_all_but_axis_coo(t_from.data, t_from.inds.index(ix))
             else:
                 m = array_contract(
                     arrays=(t_from.data,),
@@ -55,6 +65,9 @@ class D1BP(BeliefPropagationCommon):
     belief propagation algorithm. Allows message reuse. This version assumes no
     hyper indices (i.e. a standard tensor network). This is the simplest
     version of belief propagation.
+
+    The tensors can be sparse COO-format tensors, either from pydata-sparse or
+    scipy-sparse.
 
     Parameters
     ----------
@@ -125,6 +138,10 @@ class D1BP(BeliefPropagationCommon):
         contract_every=None,
         inplace=False,
     ):
+        # check for pydata-sparse.COO or scipy-sparse.COO tensors
+        # -> use optimized sparse array + dense message contractions if so
+        self.sparse = any(parse_coo(t.data) is not None for t in tn)
+
         super().__init__(
             tn=tn,
             damping=damping,
@@ -133,6 +150,7 @@ class D1BP(BeliefPropagationCommon):
             distance=distance,
             contract_every=contract_every,
             inplace=inplace,
+            backend="numpy" if self.sparse else None,
         )
 
         self.local_convergence = local_convergence
@@ -166,11 +184,15 @@ class D1BP(BeliefPropagationCommon):
 
         def _compute_ms(tid):
             t = self.tn.tensor_map[tid]
-            new_ms = compute_all_tensor_messages_tree(
-                t.data,
-                [self.messages[ix, tid] for ix in t.inds],
-                self.backend,
-            )
+            ms = [self.messages[ix, tid] for ix in t.inds]
+            coo = parse_coo(t.data)
+            if coo is not None:
+                # compute via optimized sparse contraction
+                new_ms = compute_all_tensor_messages_coo(coo, ms)
+            else:
+                new_ms = compute_all_tensor_messages_tree(
+                    t.data, ms, self.backend
+                )
             new_ms = [self._normalize_fn(m) for m in new_ms]
             new_ks = [self.key_pairs[ix, tid] for ix in t.inds]
 
@@ -353,10 +375,10 @@ class D1BP(BeliefPropagationCommon):
         """
         stn = self.tn._select_tids(tids, virtual=False)
 
-        for ix, tids in tuple(stn.ind_map.items()):
+        for ix, stids in tuple(stn.ind_map.items()):
             if ix in stn._inner_inds:
                 # insert inner excitation projector
-                tidl, tidr = tids
+                tidl, tidr = stids
                 ml = self.messages[ix, tidl]
                 mr = self.messages[ix, tidr]
                 # form outer product
@@ -367,7 +389,7 @@ class D1BP(BeliefPropagationCommon):
                 stn.tensor_map[tidr].gate_(pe, ix)
             else:
                 # insert boundary message
-                (tid,) = tids
+                (tid,) = stids
                 m = self.messages[ix, tid]
                 t = stn.tensor_map[tid]
                 t.vector_reduce_(ix, m)
@@ -442,6 +464,14 @@ class D1BP(BeliefPropagationCommon):
     def local_tensor_contract(self, tid):
         """Contract the messages around tensor ``tid``."""
         t = self.tn.tensor_map[tid]
+
+        coo = parse_coo(t.data)
+        if coo is not None:
+            # perform optimized sparse contraction
+            return contract_tensor_messages_coo(
+                coo, [self.messages[ix, tid] for ix in t.inds]
+            )
+
         arrays = [t.data]
         inputs = [tuple(range(t.ndim))]
         for i, ix in enumerate(t.inds):

@@ -2,10 +2,16 @@ from unittest import mock
 
 import numpy as np
 import pytest
+import scipy.sparse as sps
 
 import quimb as qu
 import quimb.tensor as qtn
 import quimb.tensor.belief_propagation as qbp
+from quimb.tensor.belief_propagation.sparse_ops import (
+    compute_all_tensor_messages_coo,
+    contract_tensor_messages_coo,
+    parse_coo,
+)
 
 
 @pytest.mark.parametrize("local_convergence", [False, True])
@@ -200,3 +206,126 @@ class TestGloopExpand:
 
         z = bp.contract_gloop_expand(strip_exponent=False, **kwargs)
         assert z == pytest.approx(mantissa * 10**exponent)
+
+
+def _zero_out_half(tn, seed=42):
+    """Zero out half the entries of each tensor, always keeping the largest,
+    so that no tensor vanishes entirely.
+    """
+    rng = np.random.default_rng(seed)
+    for t in tn:
+        data = t.data.copy()
+        keep = np.argmax(np.abs(data))
+        data[rng.random(data.shape) < 0.5] = 0.0
+        data.flat[keep] = t.data.flat[keep]
+        t.modify(data=data)
+
+
+class TestSparse:
+    @pytest.mark.parametrize("shape", [(5,), (4, 6), (3, 4, 5), (2, 3, 4, 3)])
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    def test_kernels_match_einsum(self, shape, dtype):
+        rng = np.random.default_rng(42)
+        x = rng.normal(size=shape)
+        ms = [rng.normal(size=d) for d in shape]
+        if dtype == "complex128":
+            x = x + 1j * rng.normal(size=shape)
+            ms = [m + 1j * rng.normal(size=m.size) for m in ms]
+        x[rng.random(shape) < 0.5] = 0.0
+        coo = parse_coo(sps.coo_array(x))
+
+        syms = "abcdefg"[: len(shape)]
+        new_ms = compute_all_tensor_messages_coo(coo, ms)
+        for k in range(len(shape)):
+            js = [j for j in range(len(shape)) if j != k]
+            eq = syms + "".join("," + syms[j] for j in js) + "->" + syms[k]
+            expected = np.einsum(eq, x, *(ms[j] for j in js))
+            assert new_ms[k] == pytest.approx(expected)
+
+        eq = syms + "".join("," + s for s in syms) + "->"
+        z = contract_tensor_messages_coo(coo, ms)
+        assert z == pytest.approx(np.einsum(eq, x, *ms))
+
+    def test_messages_promote_dtype(self):
+        rng = np.random.default_rng(42)
+        x = rng.normal(size=(3, 4))
+        x[rng.random(x.shape) < 0.5] = 0.0
+        ms = [rng.normal(size=d) + 1j * rng.normal(size=d) for d in x.shape]
+
+        new_ms = compute_all_tensor_messages_coo(
+            parse_coo(sps.coo_array(x)), ms
+        )
+        assert new_ms[0] == pytest.approx(x @ ms[1])
+        assert new_ms[1] == pytest.approx(ms[0] @ x)
+
+    def test_duplicate_coordinates_are_summed(self):
+        data = np.array([1.5, 2.5, -1.0])
+        coords = (np.array([0, 0, 1]), np.array([1, 1, 0]))
+        x = sps.coo_array((data, coords), shape=(2, 2))
+        assert not x.has_canonical_format
+        dense = np.zeros((2, 2))
+        np.add.at(dense, coords, data)
+        ms = [np.array([0.3, -0.7]), np.array([1.1, 0.5])]
+
+        new_ms = compute_all_tensor_messages_coo(parse_coo(x), ms)
+        assert new_ms[0] == pytest.approx(dense @ ms[1])
+        assert new_ms[1] == pytest.approx(ms[0] @ dense)
+
+    def test_parse_coo_only_accepts_coo(self):
+        x = np.eye(3)
+        assert parse_coo(x) is None
+        assert parse_coo(sps.csr_array(x)) is None
+        coords, data = parse_coo(sps.coo_array(x))
+        assert len(coords) == 2
+        assert data == pytest.approx(np.ones(3))
+
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    def test_tree_contraction_is_exact(self, dtype):
+        tn = qtn.TN_rand_tree(20, 3, seed=42, dtype=dtype)
+        _zero_out_half(tn)
+        Z = tn.contract()
+        assert Z != 0.0
+
+        for t in tn:
+            t.modify(data=sps.coo_array(t.data))
+        assert tn.backend == "scipy"
+
+        info = {}
+        Z_bp = qbp.contract_d1bp(tn, info=info)
+        assert info["converged"]
+        assert Z_bp == pytest.approx(Z, rel=1e-10)
+
+    def test_matches_dense_messages(self):
+        tn = qtn.TN2D_from_fill_fn(
+            lambda s: qu.randn(s, dist="uniform"), 6, 6, 2
+        )
+        _zero_out_half(tn)
+
+        tn_sparse = tn.copy()
+        for t in tn_sparse:
+            t.modify(data=sps.coo_array(t.data))
+
+        bp = qbp.D1BP(tn)
+        bp_sparse = qbp.D1BP(tn_sparse)
+        # messages are dense vectors even though the tensors are not
+        assert bp_sparse.backend == "numpy"
+        for key, m in bp.messages.items():
+            assert bp_sparse.messages[key] == pytest.approx(m)
+
+        bp.run(tol=1e-12)
+        bp_sparse.run(tol=1e-12)
+        assert bp.converged
+        for key, m in bp.messages.items():
+            assert bp_sparse.messages[key] == pytest.approx(m, abs=1e-10)
+        assert bp_sparse.contract() == pytest.approx(bp.contract(), rel=1e-8)
+
+    def test_mixed_dense_and_sparse_tensors(self):
+        tn = qtn.TN_rand_tree(10, 3, seed=42)
+        Z = tn.contract()
+
+        for i, t in enumerate(tn):
+            if i % 2:
+                t.modify(data=sps.coo_array(t.data))
+
+        Z_bp = qbp.contract_d1bp(tn)
+        assert Z_bp == pytest.approx(Z, rel=1e-10)

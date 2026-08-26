@@ -68,9 +68,10 @@ class BeliefPropagationCommon:
         contract_every=None,
         callback=None,
         inplace=False,
+        backend=None,
     ):
         self.tn = tn if inplace else tn.copy()
-        self.backend = self.tn.backend
+        self.backend = self.tn.backend if backend is None else backend
         self.dtype = self.tn.dtype
         self.sign = 1.0
         self.exponent = tn.exponent
@@ -331,7 +332,7 @@ class BeliefPropagationCommon:
                 max_mdiff = result.get("max_mdiff", float("inf"))
             else:
                 max_mdiff = result
-                result = dict()
+                result = {}
 
             self.mdiffs.append(max_mdiff)
 
