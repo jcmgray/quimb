@@ -25,6 +25,11 @@ class BeliefPropagationCommon:
         of the old message into the new one, with the final message being
         ``damping * old + (1 - damping) * new``. This makes convergence more
         reliable but slower.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace to help
+        converge the messages by extrapolating to low error guesses. If a
+        dict, should contain options for the DIIS algorithm. The relevant
+        options are {`max_history`, `beta`, `rcond`}.
     update : {'sequential', 'parallel'}, optional
         Whether to update messages sequentially (newly computed messages are
         immediately used for other updates in the same iteration round) or in
@@ -62,6 +67,7 @@ class BeliefPropagationCommon:
         tn: TensorNetwork,
         *,
         damping=0.0,
+        diis=False,
         update="sequential",
         normalize=None,
         distance=None,
@@ -76,6 +82,7 @@ class BeliefPropagationCommon:
         self.sign = 1.0
         self.exponent = tn.exponent
         self.damping = damping
+        self.diis = diis
         self.update = update
         self.callback = callback
 
@@ -257,7 +264,8 @@ class BeliefPropagationCommon:
     def run(
         self,
         max_iterations=1000,
-        diis=False,
+        damping=None,
+        diis=None,
         tol=5e-6,
         tol_abs=None,
         tol_rolling_diff=None,
@@ -269,11 +277,15 @@ class BeliefPropagationCommon:
         ----------
         max_iterations : int, optional
             The maximum number of iterations to perform.
+        damping : float or callable, optional
+            The damping factor to apply to messages. If given, this updates
+            the default set at initialization.
         diis : bool or dict, optional
             Whether to use direct inversion in the iterative subspace to
             help converge the messages by extrapolating to low error guesses.
             If a dict, should contain options for the DIIS algorithm. The
-            relevant options are {`max_history`, `beta`, `rcond`}.
+            relevant options are {`max_history`, `beta`, `rcond`}. If given,
+            this updates the default set at initialization.
         tol : float, optional
             The convergence tolerance for messages.
         tol_abs : float, optional
@@ -291,6 +303,11 @@ class BeliefPropagationCommon:
         progbar : bool, optional
             Whether to show a progress bar.
         """
+        if damping is not None:
+            self.damping = damping
+        if diis is not None:
+            self.diis = diis
+
         if tol_abs is None:
             tol_abs = tol
         if tol_rolling_diff is None:
@@ -303,12 +320,11 @@ class BeliefPropagationCommon:
         else:
             pbar = None
 
-        if diis:
+        if self.diis:
             from .diis import DIIS
 
-            if isinstance(diis, dict):
-                self._diis = DIIS(**diis)
-                diis = True
+            if isinstance(self.diis, dict):
+                self._diis = DIIS(**self.diis)
             else:
                 self._diis = DIIS()
         else:
@@ -324,7 +340,7 @@ class BeliefPropagationCommon:
             # we supply tol here for use with local convergence
             result = self.iterate(tol=tol)
 
-            if diis:
+            if self._diis is not None:
                 # extrapolate new guess for messages
                 self.messages = self._diis.update(self.messages)
 

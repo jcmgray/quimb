@@ -135,6 +135,11 @@ class D2BP(BeliefPropagationCommon):
         of the old message into the new one, with the final message being
         ``damping * old + (1 - damping) * new``. This makes convergence more
         reliable but slower.
+    diis : bool or dict, optional
+        Whether to use direct inversion in the iterative subspace to help
+        converge the messages by extrapolating to low error guesses. If a
+        dict, should contain options for the DIIS algorithm. The relevant
+        options are {`max_history`, `beta`, `rcond`}.
     update : {'sequential', 'parallel'}, optional
         Whether to update messages sequentially (newly computed messages are
         immediately used for other updates in the same iteration round) or in
@@ -187,6 +192,7 @@ class D2BP(BeliefPropagationCommon):
         output_inds=None,
         optimize="auto-hq",
         damping=0.0,
+        diis=False,
         update="sequential",
         power=1.0,
         smudge=0.0,
@@ -200,6 +206,7 @@ class D2BP(BeliefPropagationCommon):
         super().__init__(
             tn=tn,
             damping=damping,
+            diis=diis,
             update=update,
             normalize=normalize,
             distance=distance,
