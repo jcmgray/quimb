@@ -102,6 +102,7 @@ from .networking import (
     connected_bipartitions,
     gen_all_paths_between_tids,
     gen_gloops,
+    gen_gloops_edge_induced,
     gen_inds_connected,
     gen_loops,
     gen_patches,
@@ -7333,6 +7334,7 @@ class TensorNetwork:
     gen_paths_loops = gen_paths_loops
     gen_sloops = gen_sloops
     gen_gloops = gen_gloops
+    gen_gloops_edge_induced = gen_gloops_edge_induced
     get_local_patch = get_local_patch
     get_path_between_tids = get_path_between_tids
     get_loop_union = get_loop_union

@@ -1212,6 +1212,132 @@ def gen_gloops(
     return current_patches
 
 
+def _gen_gloops_edge_induced_single(tn, region):
+    """Generate all edge-induced loops that span exactly ``region``.
+
+    Each :class:`NetworkPatch` stores the tensors and retained bonds.
+    """
+    region = tuple(region)
+    num_tids = len(region)
+
+    # inner bonds appear twice in the region
+    edge_counts = collections.Counter(
+        ix for tid in region for ix in tn.tensor_map[tid].inds
+    )
+    edges = [ix for ix, count in edge_counts.items() if count == 2]
+
+    # keeping every inner bond is always valid
+    yield NetworkPatch(region, edges)
+
+    # each tensor needs at least two bonds
+    max_drop = len(edges) - num_tids
+    if max_drop < 1:
+        return
+
+    degrees = collections.Counter()
+    edge_tids = {}
+    for ix in edges:
+        tid_a, tid_b = edge_tids[ix] = tuple(tn.ind_map[ix])
+        degrees[tid_a] += 1
+        degrees[tid_b] += 1
+
+    candidates = [
+        ix for ix in edges if all(degrees[tid] > 2 for tid in edge_tids[ix])
+    ]
+    if not candidates:
+        return
+
+    def is_connected(dropped):
+        neighbors = {tid: [] for tid in region}
+        for ix in edges:
+            if ix not in dropped:
+                tid_a, tid_b = edge_tids[ix]
+                neighbors[tid_a].append(tid_b)
+                neighbors[tid_b].append(tid_a)
+        seen = {region[0]}
+        queue = [region[0]]
+        while queue:
+            for tid in neighbors[queue.pop()]:
+                if tid not in seen:
+                    seen.add(tid)
+                    queue.append(tid)
+        return len(seen) == num_tids
+
+    def gen_dropped(start, dropped):
+        if len(dropped) == max_drop:
+            return
+        for position in range(start, len(candidates)):
+            ix = candidates[position]
+            tid_a, tid_b = edge_tids[ix]
+            if (degrees[tid_a] < 3) or (degrees[tid_b] < 3):
+                continue
+            new_dropped = dropped | {ix}
+            if not is_connected(new_dropped):
+                continue
+            yield new_dropped
+            degrees[tid_a] -= 1
+            degrees[tid_b] -= 1
+            # later positions prevent duplicate sets
+            yield from gen_dropped(position + 1, new_dropped)
+            degrees[tid_a] += 1
+            degrees[tid_b] += 1
+
+    for dropped in gen_dropped(0, set()):
+        yield NetworkPatch(region, (ix for ix in edges if ix not in dropped))
+
+
+def gen_gloops_edge_induced(
+    tn,
+    max_size=None,
+    tids=None,
+    grow_from="all",
+    num_joins=1,
+    join_overlap=2,
+):
+    """Generate edge-induced loops as :class:`NetworkPatch` objects. Unlike
+    `gen_gloops`, the same tensor regions can yield multiple patches, differing
+    by whether certain internal bonds are included or not (for example
+    removing the centeral span of an figure of eight).
+
+    Each patch stores the loop tensors in ``patch.tids`` and its bonds in
+    ``patch.inds``. :func:`gen_gloops` includes every bond between a set of
+    tensors. This function also yields loops that omit bonds while remaining
+    connected and keeping at least two bonds per tensor.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        Tensor network to search.
+    max_size : None, int or "min"
+        Maximum tensors per region. See :func:`gen_gloops`.
+    tids : None or sequence of int, optional
+        Only yield loops that contain these ``tids``. See ``grow_from``.
+    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+        How to filter loops when ``tids`` is set. See :func:`gen_gloops`.
+    num_joins : int, optional
+        Number of loops to join per result. See :func:`gen_gloops`.
+    join_overlap : {1, 2}, optional
+        Minimum number of ``tids`` that joined loops must share.
+
+    Yields
+    ------
+    NetworkPatch
+
+    See Also
+    --------
+    gen_gloops
+    """
+    for region in gen_gloops(
+        tn,
+        max_size=max_size,
+        tids=tids,
+        grow_from=grow_from,
+        num_joins=num_joins,
+        join_overlap=join_overlap,
+    ):
+        yield from _gen_gloops_edge_induced_single(tn, region)
+
+
 def gen_loops(tn, max_loop_length=None):
     """Generate sequences of tids that represent loops in the TN.
 

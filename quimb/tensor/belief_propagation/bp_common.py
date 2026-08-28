@@ -820,6 +820,45 @@ def auto_add_indices(tn, regions):
     return new_regions
 
 
+def parse_gloops_edge_induced(tn, gloops=None):
+    """Generate and then possibly expand tid based generalized loops to
+    :class:`~quimb.tensor.networking.NetworkPatch` objects, which also specify
+    which subset of internal bonds to include. Multiple edge induced patches
+    can therefore be generated from the same tensor region.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        Tensor network to inspect.
+    gloops : None, int, "min" or iterable, optional
+        Loops or regions to convert. An integer generates all loops up to that
+        size. ``None`` and ``"min"`` use an automatic size. An iterable can
+        contain regions of ``tids`` or patches.
+
+    Returns
+    -------
+    tuple[NetworkPatch]
+    """
+    from quimb.tensor.networking import (
+        NetworkPatch,
+        _gen_gloops_edge_induced_single,
+        gen_gloops_edge_induced,
+    )
+
+    if (gloops is None) or isinstance(gloops, (int, str)):
+        return tuple(gen_gloops_edge_induced(tn, max_size=gloops))
+
+    patches = []
+    for gloop in gloops:
+        if isinstance(gloop, NetworkPatch):
+            # the patch already selects the excited bonds
+            patches.append(gloop)
+        else:
+            patches.extend(_gen_gloops_edge_induced_single(tn, gloop))
+
+    return tuple(patches)
+
+
 def process_loop_series_expansion_weights(
     weights,
     mantissa=1.0,
