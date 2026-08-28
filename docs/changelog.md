@@ -31,7 +31,7 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
-- [`D1BP.contract_loop_series_expansion`](#D1BP.contract_loop_series_expansion) and [`D2BP.contract_loop_series_expansion`](#D2BP.contract_loop_series_expansion): sum all distinct loops in each region, including loops that do not excite every bond.
+- [`D1BP.contract_loop_series_expansion`](#D1BP.contract_loop_series_expansion) and [`D2BP.contract_loop_series_expansion`](#D2BP.contract_loop_series_expansion): sum all distinct loops in each region, including loops that do not excite every bond. Also use the intensive free energy in loop-series suppression factors. Multi-excitation corrections now raise ``RuntimeError`` if they do not converge.
 - [`MPS_product_state`](#MPS_product_state): reshape single-site vectors through the backend-neutral interface. The previous ``x.reshape(*shape)`` call raised ``TypeError`` for array libraries that require a single shape tuple.
 - [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register, not its site label, as the ``ikron`` index. The previous code silently returned the wrong matrix when these values differed, e.g. with non-identity ordering or non-integer site labels.
 - [`HilbertSpace`](#HilbertSpace): prevent site reordering from leaving the rank-to-configuration mappings in the old order. In spaces with mixed dimensions, this decoded ranks into invalid configurations. Site ordering is now immutable, as described above.

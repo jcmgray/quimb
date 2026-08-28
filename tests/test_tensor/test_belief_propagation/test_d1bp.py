@@ -1,3 +1,4 @@
+import math
 from unittest import mock
 
 import numpy as np
@@ -7,6 +8,9 @@ import scipy.sparse as sps
 import quimb as qu
 import quimb.tensor as qtn
 import quimb.tensor.belief_propagation as qbp
+from quimb.tensor.belief_propagation.bp_common import (
+    process_loop_series_expansion_weights,
+)
 from quimb.tensor.belief_propagation.sparse_ops import (
     compute_all_tensor_messages_coo,
     contract_tensor_messages_coo,
@@ -250,6 +254,32 @@ class TestLoopSeriesExpansion:
         _, bp = self.get_tn_and_bp()
         z_auto = bp.contract_loop_series_expansion(gloops=6)
         assert z_tids == pytest.approx(z_auto, rel=1e-12)
+
+    def test_correction_uses_free_energy_density(self):
+        gloop = (0, 1, 2, 3)
+        num_tensors = 100
+        f = 0.2
+        weights = {gloop: -f * math.exp(-len(gloop) * f / num_tensors)}
+
+        z = process_loop_series_expansion_weights(weights, num_tensors)
+
+        assert z == pytest.approx(1 - f)
+
+    def test_correction_nonconvergence_raises(self):
+        weights = {(0, 1, 2, 3): 1.0}
+
+        with pytest.raises(RuntimeError, match="did not converge"):
+            process_loop_series_expansion_weights(
+                weights,
+                num_tensors=1,
+                maxiter_correction=4,
+            )
+
+    def test_correction_overflow_raises(self):
+        weights = {(0, 1, 2, 3): -1.0}
+
+        with pytest.raises(RuntimeError, match="exponential overflow"):
+            process_loop_series_expansion_weights(weights, num_tensors=1)
 
     def test_explicit_patches_are_used_directly(self):
         _, bp = self.get_tn_and_bp()

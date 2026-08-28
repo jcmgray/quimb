@@ -481,6 +481,7 @@ class D1BP(BeliefPropagationCommon):
 
         return process_loop_series_expansion_weights(
             weights,
+            num_tensors=self.tn.num_tensors,
             mantissa=self.sign,
             exponent=self.exponent,
             multi_excitation_correct=multi_excitation_correct,

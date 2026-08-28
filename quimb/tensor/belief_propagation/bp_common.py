@@ -861,6 +861,7 @@ def parse_gloops_edge_induced(tn, gloops=None):
 
 def process_loop_series_expansion_weights(
     weights,
+    num_tensors,
     mantissa=1.0,
     exponent=0.0,
     multi_excitation_correct=True,
@@ -872,26 +873,60 @@ def process_loop_series_expansion_weights(
     """Assuming a normalized BP fixed point, take a series of loop weights, and
     iteratively compute the free energy by requiring self-consistency with
     exponential suppression factors. See https://arxiv.org/abs/2409.03108.
+
+    Parameters
+    ----------
+    weights : mapping
+        The loop regions and their weights.
+    num_tensors : int
+        The number of tensors used to make the free energy intensive.
+
+    Raises
+    ------
+    RuntimeError
+        If the multi-excitation correction does not converge.
     """
     # this is the single exictation approximation
     f_uncorrected = -sum(weights.values())
 
     if multi_excitation_correct:
         # iteratively compute a self consistent free energy
-        fold = float("inf")
         f = f_uncorrected
-        for _ in range(maxiter_correction):
-            f = -sum(
-                wl * math.exp(len(gloop) * f) for gloop, wl in weights.items()
-            )
+        fold = f
+        for it in range(1, maxiter_correction + 1):
+            fold = f
+            try:
+                f = -sum(
+                    wl * math.exp(len(gloop) * fold / num_tensors)
+                    for gloop, wl in weights.items()
+                )
+            except OverflowError:
+                raise RuntimeError(
+                    "Loop series correction did not converge after "
+                    f"{it} iterations: exponential overflow."
+                ) from None
+
+            if not math.isfinite(abs(f)):
+                raise RuntimeError(
+                    "Loop series correction did not converge after "
+                    f"{it} iterations: non-finite free energy."
+                )
+
             if abs(f - fold) < tol_correction:
                 break
-            fold = f
+        else:
+            raise RuntimeError(
+                "Loop series correction did not converge after "
+                f"{maxiter_correction} iterations, "
+                f"|df|={abs(f - fold):.3e}."
+            )
     else:
         f = f_uncorrected
 
     if return_all:
-        return {gloop: math.exp(len(gloop) * f) for gloop in weights}
+        return {
+            gloop: math.exp(len(gloop) * f / num_tensors) for gloop in weights
+        }
 
     mantissa = mantissa * (1 - f)
 
