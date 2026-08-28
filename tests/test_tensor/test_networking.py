@@ -1,3 +1,5 @@
+import collections
+import itertools
 import warnings
 
 import pytest
@@ -336,6 +338,93 @@ class TestGenGloops:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert len(self.get_gloops(psi)) == 6
+
+
+class TestGenGloopsEdgeInduced:
+    # six-site ring with one bond across the middle
+    theta_edges = ((0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0), (0, 3))
+
+    @staticmethod
+    def is_connected(tn, inds):
+        neighbors = {}
+        for ix in inds:
+            tid_a, tid_b = tn.ind_map[ix]
+            neighbors.setdefault(tid_a, []).append(tid_b)
+            neighbors.setdefault(tid_b, []).append(tid_a)
+        first_tid = next(iter(neighbors))
+        seen = {first_tid}
+        queue = [first_tid]
+        while queue:
+            for tid in neighbors[queue.pop()]:
+                if tid not in seen:
+                    seen.add(tid)
+                    queue.append(tid)
+        return len(seen) == len(neighbors)
+
+    @classmethod
+    def enumerate_expected(cls, tn, tids):
+        """Enumerate connected subgraphs that span ``tids`` and give each
+        tensor at least two bonds.
+        """
+        edge_counts = collections.Counter(
+            ix for tid in tids for ix in tn.tensor_map[tid].inds
+        )
+        edges = [ix for ix, count in edge_counts.items() if count == 2]
+
+        found = []
+        for size in range(len(edges) + 1):
+            for kept in itertools.combinations(edges, size):
+                degrees = collections.Counter(
+                    tid for ix in kept for tid in tn.ind_map[ix]
+                )
+                if (len(degrees) != len(tids)) or any(
+                    degree < 2 for degree in degrees.values()
+                ):
+                    continue
+                if cls.is_connected(tn, kept):
+                    found.append(frozenset(kept))
+
+        return sorted(map(sorted, found))
+
+    def test_theta_yields_the_ring_with_and_without_the_bond(self):
+        tn = qtn.TN_from_edges_rand(self.theta_edges, D=2, seed=42)
+        patches = [
+            p for p in tn.gen_gloops_edge_induced(6) if p.num_tensors == 6
+        ]
+        assert len(patches) == 2
+        patch_ring, patch_full = sorted(patches, key=lambda p: p.num_indices)
+        assert patch_ring.tids == patch_full.tids
+        assert set(patch_full.inds) - set(patch_ring.inds) == set(
+            qtn.bonds(tn[0], tn[3])
+        )
+        assert patch_ring.num_indices == 6
+
+    def test_adds_plain_ring_to_gen_gloops(self):
+        tn = qtn.TN_from_edges_rand(self.theta_edges, D=2, seed=42)
+        gloops = sorted(map(tuple, tn.gen_gloops(6)))
+        assert len(tuple(tn.gen_gloops_edge_induced(6))) == len(gloops) + 1
+
+    @pytest.mark.parametrize("max_size", [4, 5, 6])
+    def test_matches_exhaustive_enumeration(self, max_size):
+        tn = qtn.TN2D_rand(3, 3, D=2, cyclic=True, seed=42)
+        grouped = {}
+        for patch in tn.gen_gloops_edge_induced(max_size):
+            grouped.setdefault(frozenset(patch.tids), []).append(
+                sorted(patch.inds)
+            )
+        assert grouped
+        for tids, patches in grouped.items():
+            assert sorted(patches) == self.enumerate_expected(tn, tids)
+
+    def test_every_site_keeps_two_bonds_and_stays_connected(self):
+        tn = qtn.TN_rand_reg(10, 4, D=2, seed=42)
+        for patch in tn.gen_gloops_edge_induced(6):
+            degrees = collections.Counter(
+                tid for ix in patch.inds for tid in tn.ind_map[ix]
+            )
+            assert set(degrees) == set(patch.tids)
+            assert min(degrees.values()) >= 2
+            assert self.is_connected(tn, patch.inds)
 
 
 def test_connected_bipartitions():

@@ -15,12 +15,14 @@ import autoray as ar
 
 from quimb.tensor import Tensor, TensorNetwork, rand_uuid
 from quimb.tensor.contraction import array_contract
+from quimb.tensor.networking import NetworkPatch
 from quimb.utils import oset
 
 from .bp_common import (
     BeliefPropagationCommon,
     combine_local_contractions,
     normalize_message_pair,
+    parse_gloops_edge_induced,
     process_loop_series_expansion_weights,
 )
 from .hd1bp import (
@@ -375,15 +377,39 @@ class D1BP(BeliefPropagationCommon):
             t.vector_reduce_(ix, self.messages[ix, tid])
         return tnr
 
-    def get_cluster_excited(self, tids):
-        """Get the local tensor network for ``tids`` with BP messages inserted
-        on the boundary and excitation projectors inserted on the inner bonds.
-        See https://arxiv.org/abs/2409.03108 for more details.
+    def get_cluster_excited(self, gloop):
+        """Build the local loop excitation tensor network for ``gloop``.
+
+        Insert BP messages on boundary bonds and excitation projectors on
+        all or selected inner bonds. See https://arxiv.org/abs/2409.03108.
+
+        Parameters
+        ----------
+        gloop : sequence[int] or NetworkPatch
+            The region ``tids``. A
+            :class:`~quimb.tensor.networking.NetworkPatch` also selects the
+            subset of inner excited bonds. Non-excited inner bonds are treated
+            like boundary bonds. See
+            :func:`~quimb.tensor.networking.gen_gloops_edge_induced`.
+
+        Returns
+        -------
+        TensorNetwork
         """
+        if isinstance(gloop, NetworkPatch):
+            tids = gloop.tids
+            excited = gloop.inds
+        else:
+            # excite every inner bond
+            tids = gloop
+            excited = None
+
         stn = self.tn._select_tids(tids, virtual=False)
 
         for ix, stids in tuple(stn.ind_map.items()):
-            if ix in stn._inner_inds:
+            if (ix in stn._inner_inds) and (
+                (excited is None) or (ix in excited)
+            ):
                 # insert inner excitation projector
                 tidl, tidr = stids
                 ml = self.messages[ix, tidl]
@@ -395,11 +421,10 @@ class D1BP(BeliefPropagationCommon):
                 # absorb into one of tensors
                 stn.tensor_map[tidr].gate_(pe, ix)
             else:
-                # insert boundary message
-                (tid,) = stids
-                m = self.messages[ix, tid]
-                t = stn.tensor_map[tid]
-                t.vector_reduce_(ix, m)
+                # messages cut an unexcited inner bond like a boundary bond
+                for tid in tuple(stids):
+                    t = stn.tensor_map[tid]
+                    t.vector_reduce_(ix, self.messages[ix, tid])
 
         return stn
 
@@ -419,10 +444,11 @@ class D1BP(BeliefPropagationCommon):
 
         Parameters
         ----------
-        gloops : None, int, "min" or iterable of tuples, optional
-            The generalized loops to use, an integer to generate all loops up
-            to that size, or ``None``/``"min"`` for the automatic size, see
-            :func:`~quimb.tensor.networking.gen_gloops`.
+        gloops : None, int, "min" or iterable, optional
+            Loops or regions to use. An integer generates all loops up to that
+            size. ``None`` and ``"min"`` use an automatic size. An iterable
+            can contain explicit regions of ``tids`` or ``NetworkPatch``
+            objects.
         multi_excitation_correct : bool, optional
             Whether to use the multi-excitation correction. If ``True``, then
             the free energy is refined iteratively until self consistent.
@@ -443,20 +469,15 @@ class D1BP(BeliefPropagationCommon):
         # accrues BP estimate into self.sign and self.exponent
         self.normalize_tensors()
 
-        if (gloops is None) or isinstance(gloops, (int, str)):
-            gloops = tuple(self.tn.gen_gloops(max_size=gloops))
-        else:
-            gloops = tuple(gloops)
+        gloops = parse_gloops_edge_induced(self.tn, gloops)
 
         weights = {}
         for gloop in gloops:
-            # get local tensor network with boundary
-            # messages and exctiation projectors
             etn = self.get_cluster_excited(gloop)
-            # contract it to get local weight!
-            weights[tuple(gloop)] = etn.contract(
-                optimize=optimize, **contract_opts
-            )
+            w = etn.contract(optimize=optimize, **contract_opts)
+            # loops with the same tensor support use one suppression factor
+            key = tuple(sorted(gloop.tids))
+            weights[key] = weights.get(key, 0.0) + w
 
         return process_loop_series_expansion_weights(
             weights,

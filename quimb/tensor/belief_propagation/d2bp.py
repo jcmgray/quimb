@@ -15,12 +15,14 @@ import operator
 import autoray as ar
 
 import quimb.tensor as qtn
+from quimb.tensor.networking import NetworkPatch
 from quimb.utils import check_opt, ensure_dict, oset
 
 from .bp_common import (
     BeliefPropagationCommon,
     combine_local_contractions,
     normalize_message_pair,
+    parse_gloops_edge_induced,
     process_loop_series_expansion_weights,
 )
 from .regions import gen_region_counts
@@ -679,25 +681,36 @@ class D2BP(BeliefPropagationCommon):
         partial_trace_map=(),
         exclude=(),
     ):
-        """Get the local norm tensor network for ``tids`` with BP messages
-        inserted on the boundary and excitation projectors inserted on the
-        inner bonds. See arxiv.org/abs/2409.03108 for more details.
+        """Build the local loop excitation norm tensor network for ``tids``.
+
+        Insert BP messages on boundary bonds and excitation projectors on
+        all or selected inner bonds. See https://arxiv.org/abs/2409.03108.
 
         Parameters
         ----------
-        tids : iterable of hashable
-            The tensor ids to include in the cluster.
+        tids : iterable of hashable or NetworkPatch
+            The region ``tids``. A
+            :class:`~quimb.tensor.networking.NetworkPatch` also selects the
+            subset of inner excited bonds. Non-excited inner bonds are treated
+            like boundary bonds. See
+            :func:`~quimb.tensor.networking.gen_gloops_edge_induced`.
         partial_trace_map : dict[str, str], optional
-            A remapping of ket indices to bra indices to perform an effective
-            partial trace.
+            Map ket indices to bra indices for an effective partial trace.
         exclude : iterable of str, optional
-            A set of bond indices to exclude from inserting excitation
-            projectors on, e.g. when forming a reduced density matrix.
+            Bond indices that do not receive excitation projectors, e.g. when
+            forming a reduced density matrix.
 
         Returns
         -------
         TensorNetwork
         """
+        if isinstance(tids, NetworkPatch):
+            excited = tids.inds
+            tids = tids.tids
+        else:
+            # excite every inner bond
+            excited = None
+
         stn = self.tn._select_tids(tids)
 
         kixmaps = {tid: {} for tid in stn.tensor_map}
@@ -728,7 +741,13 @@ class D2BP(BeliefPropagationCommon):
                     bixmaps[tid][ix] = bix
                     # store labels for excitation projector, (bra, ket)
                     exc_ixs.setdefault(ix, {})[tid] = (bix, kix)
-                ems.append((ix, ix_tids))
+
+                if (excited is None) or (ix in excited):
+                    ems.append((ix, ix_tids))
+                else:
+                    # messages cut this bond like a boundary bond
+                    for tid in ix_tids:
+                        bms.append((ix, tid))
 
             else:
                 # boundary index
@@ -754,7 +773,7 @@ class D2BP(BeliefPropagationCommon):
             inds = (bixmaps[tid][ix], kixmaps[tid][ix])
             tn |= qtn.Tensor(data, inds)
 
-        # add inner exitation projector message tensors
+        # add inner excitation projectors
         with ar.backend_like(self.backend):
             for ix, ix_tids in ems:
                 tidl, tidr = ix_tids
@@ -792,10 +811,10 @@ class D2BP(BeliefPropagationCommon):
 
         Parameters
         ----------
-        gloops : None, int, "min" or iterable of tuples, optional
-            The generalized loops to use, an integer to generate all loops up
-            to that size, or ``None``/``"min"`` for the automatic size, see
-            :func:`~quimb.tensor.networking.gen_gloops`.
+        gloops : None, int, "min" or iterable, optional
+            Loops or regions to use. An integer generates all loops up to that
+            size. ``None`` and ``"min"`` use an automatic size. An iterable
+            can contain regions of ``tids`` or ``NetworkPatch`` objects.
         multi_excitation_correct : bool, optional
             Whether to use the multi-excitation correction. If ``True``, then
             the free energy is refined iteratively until self consistent.
@@ -816,17 +835,15 @@ class D2BP(BeliefPropagationCommon):
         # accrues BP estimate into self.sign and self.exponent
         self.normalize_tensors()
 
-        gloops = _parse_global_gloops(self.tn, gloops)
+        gloops = parse_gloops_edge_induced(self.tn, gloops)
 
         weights = {}
         for gloop in gloops:
-            # get local tensor network with boundary
-            # messages and excitation projectors inserted
             etn = self.get_cluster_excited(gloop)
-            # contract it to get local weight!
-            weights[tuple(gloop)] = etn.contract(
-                optimize=optimize, **contract_opts
-            )
+            w = etn.contract(optimize=optimize, **contract_opts)
+            # loops with the same tensor support use one suppression factor
+            key = tuple(sorted(gloop.tids))
+            weights[key] = weights.get(key, 0.0) + w
 
         return process_loop_series_expansion_weights(
             weights,

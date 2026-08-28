@@ -164,6 +164,20 @@ def test_loop_series_expansion_repeatable(dtype):
     assert_allclose(r1, r3, atol=1e-12)
 
 
+def test_loop_series_expansion_converges_to_exact():
+    # every pair of loops shares a site, so the connected series is exact
+    peps = qtn.PEPS.rand(3, 3, bond_dim=2, seed=42, dist="uniform", loc=0.5)
+    zex = (peps.H | peps).contract(output_inds=())
+
+    bp = qbp.D2BP(peps)
+    bp.run(tol=1e-13)
+    z = bp.contract_loop_series_expansion(
+        gloops=9,
+        multi_excitation_correct=False,
+    )
+    assert z == pytest.approx(zex, rel=1e-12)
+
+
 @pytest.mark.parametrize("seed", range(2))
 def test_gate(seed):
     peps = qtn.PEPS.rand(3, 4, 3, seed=seed)

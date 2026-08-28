@@ -221,6 +221,46 @@ def _zero_out_half(tn, seed=42):
         t.modify(data=data)
 
 
+class TestLoopSeriesExpansion:
+    # the six-site ring has one bond across the middle
+    # every pair of loops shares a site, so the connected series is exact
+    theta_edges = ((0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0), (0, 3))
+
+    def get_tn_and_bp(self):
+        tn = qtn.TN_from_edges_rand(
+            self.theta_edges, D=2, seed=42, dist="uniform", loc=0.5
+        )
+        bp = qbp.D1BP(tn)
+        bp.run(tol=1e-13)
+        assert bp.converged
+        return tn, bp
+
+    def test_full_series_is_exact(self):
+        tn, bp = self.get_tn_and_bp()
+        z = bp.contract_loop_series_expansion(
+            gloops=6, multi_excitation_correct=False
+        )
+        assert z == pytest.approx(tn.contract(output_inds=()), rel=1e-12)
+
+    def test_explicit_tids_are_expanded_into_every_loop(self):
+        tn, _ = self.get_tn_and_bp()
+        gloops = tuple(tn.gen_gloops(6))
+        _, bp = self.get_tn_and_bp()
+        z_tids = bp.contract_loop_series_expansion(gloops=gloops)
+        _, bp = self.get_tn_and_bp()
+        z_auto = bp.contract_loop_series_expansion(gloops=6)
+        assert z_tids == pytest.approx(z_auto, rel=1e-12)
+
+    def test_explicit_patches_are_used_directly(self):
+        _, bp = self.get_tn_and_bp()
+        # bond names are network-specific
+        patches = tuple(bp.tn.gen_gloops_edge_induced(6))
+        z_patches = bp.contract_loop_series_expansion(gloops=patches)
+        _, bp = self.get_tn_and_bp()
+        z_auto = bp.contract_loop_series_expansion(gloops=6)
+        assert z_patches == pytest.approx(z_auto, rel=1e-12)
+
+
 class TestSparse:
     @pytest.mark.parametrize("shape", [(5,), (4, 6), (3, 4, 5), (2, 3, 4, 3)])
     @pytest.mark.parametrize("dtype", ["float64", "complex128"])
