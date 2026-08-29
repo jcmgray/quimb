@@ -10,16 +10,25 @@
 ./examples/ex_TEBD_evo
 ./examples/ex_MERA
 ./examples/ex_tensorflow_optimize_pbc_mps
-./examples/ex_tn_circuit_sample_explore
-./examples/ex_tn_train_circuit
-./examples/ex_tn_qaoa_energy_bayesopt
 ./examples/ex_quimb_within_torch
 ./examples/ex_quimb_within_jax_flax_optax
 ./examples/ex_tn_tensor_fitting
-./examples/ex_circuit_to_mpo
 ./examples/ex_htn_to_tn_2d
 ./examples/ex_tracing_tn_functions
 ./examples/ex_real_time_simple_update.ipynb
+```
+
+
+# Examples: Quantum Circuits
+
+```{toctree}
+:numbered:
+:maxdepth: 2
+
+./examples/ex_tn_circuit_sample_explore
+./examples/ex_tn_train_circuit
+./examples/ex_tn_qaoa_energy_bayesopt
+./examples/ex_circuit_to_mpo
 ```
 
 

@@ -53,6 +53,7 @@ installation
 ```{toctree}
 :maxdepth: 2
 index_tn
+index_circuit
 index_matrix
 index_operator
 ```
