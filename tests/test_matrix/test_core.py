@@ -489,6 +489,12 @@ class Testikron:
         X2 = qu.ikron((X, Y), dims, (1, 3), ownership=(ri, rf))
         assert_allclose(X1.toarray(), X2.toarray())
 
+    @mark.parametrize("inds", [(1, 3), (-1, 0), (0, 0)])
+    def test_bad_inds_raise(self, inds):
+        X = qu.rand_matrix(2)
+        with raises(ValueError):
+            qu.ikron((X, X), [2, 2, 2], inds)
+
 
 class TestPermikron:
     def test_dop_spread(self):

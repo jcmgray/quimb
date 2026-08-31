@@ -31,6 +31,8 @@ Release notes for `quimb`.
 
 **Bug fixes:**
 
+- fixed [`SpinHam1D.build_sparse`](#SpinHam1D.build_sparse) with ``cyclic=True`` from missing the last term ({issue}`419`)
+- [`ikron`](#ikron): raise ``ValueError`` for indices that are out of range or repeated. These placed fewer operators than given, with no error.
 - [`D1BP.contract_loop_series_expansion`](#D1BP.contract_loop_series_expansion) and [`D2BP.contract_loop_series_expansion`](#D2BP.contract_loop_series_expansion): sum all distinct loops in each region, including loops that do not excite every bond. Also use the intensive free energy in loop-series suppression factors. Multi-excitation corrections now raise ``RuntimeError`` if they do not converge.
 - [`MPS_product_state`](#MPS_product_state): reshape single-site vectors through the backend-neutral interface. The previous ``x.reshape(*shape)`` call raised ``TypeError`` for array libraries that require a single shape tuple.
 - [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register, not its site label, as the ``ikron`` index. The previous code silently returned the wrong matrix when these values differed, e.g. with non-identity ordering or non-integer site labels.

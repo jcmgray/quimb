@@ -57,8 +57,9 @@ vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)
 """
 
 
-class CacheThreadPool(object):
-    """ """
+class CacheThreadPool:
+    """Helper class to keep a single thread pool around, but allow the number
+    of threads to be changed."""
 
     def __init__(self, func):
         self._settings = "__UNINITIALIZED__"
@@ -1971,6 +1972,12 @@ def ikron(
     qarray or sparse matrix
         Operator such that ops act on ``dims[inds]``.
 
+    Raises
+    ------
+    ValueError
+        If any index in ``inds`` is out of range or repeated. Then some of
+        ``ops`` would not be placed at all.
+
     See Also
     --------
     kron, pkron
@@ -2021,6 +2028,20 @@ def ikron(
     # Make sure `inds` is list
     elif np.ndim(inds) == 0:
         inds = (inds,)
+
+    # reject indices that would drop some of `ops` with no error
+    bad = tuple(ix for ix in inds if not (0 <= ix < len(dims)))
+    if bad:
+        raise ValueError(
+            f"Indices {bad} are out of range for {len(dims)} subsystems. "
+            "Negative and cyclic indices are not supported, wrap them "
+            "yourself, e.g. 'i % len(dims)'."
+        )
+    if len(set(inds)) != len(tuple(inds)):
+        raise ValueError(
+            f"Indices {tuple(inds)} contain repeats, but each subsystem "
+            "takes at most one operator."
+        )
 
     # Infer sparsity from list of ops
     if sparse is None:
