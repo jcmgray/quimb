@@ -82,6 +82,18 @@ class TestSpinHam1D:
 
         assert_allclose(H_mpo.to_dense(), H_sps.toarray())
 
+    @pytest.mark.parametrize("cyclic", [False, True])
+    @pytest.mark.parametrize("n", [2, 3, 5])
+    def test_build_sparse_matches_mpo(self, cyclic, n):
+        HB = qtn.SpinHam1D(S=1 / 2, cyclic=cyclic)
+        HB += -1.0, "X", "X"
+        HB += -0.7, "Z"
+        assert_allclose(
+            HB.build_mpo(n).to_dense(),
+            HB.build_sparse(n).toarray(),
+            atol=1e-12,
+        )
+
     def test_no_default_term(self):
         N = 10
         builder = qtn.SpinHam1D(1 / 2)

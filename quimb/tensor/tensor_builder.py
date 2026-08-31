@@ -5185,7 +5185,7 @@ class SpinHam1D:
 
         Parameters
         ----------
-        L : int, optional
+        L : int
             The number of spins to build the matrix for.
         ikron_opts
             Supplied to :func:`~quimb.core.ikron`.
@@ -5207,8 +5207,14 @@ class SpinHam1D:
                     s = spin_operator(s, S=self.S, sparse=True)
                 terms.append(ikron(factor * s, dims, i, **ikron_opts))
 
-            if (i + 1 == L) and (not self.cyclic):
-                break
+            if i + 1 == L:
+                if (not self.cyclic) or (L < 2):
+                    # open chain, or the wrap would act on one site twice
+                    break
+                # last bond of the ring joins back to the first site
+                j = 0
+            else:
+                j = i + 1
 
             t2s = self.var_two_site_terms.get((i, i + 1), self.two_site_terms)
             for factor, s1, s2 in t2s:
@@ -5217,7 +5223,7 @@ class SpinHam1D:
                 if isinstance(s2, str):
                     s2 = spin_operator(s2, S=self.S, sparse=True)
                 terms.append(
-                    ikron([factor * s1, s2], dims, [i, i + 1], **ikron_opts)
+                    ikron([factor * s1, s2], dims, [i, j], **ikron_opts)
                 )
 
         return sum(terms)
