@@ -125,11 +125,12 @@ numba = "*"
 numpy = "*"
 psutil = "*"
 scipy = ">=1.16.0"
-symmray = "*"
 tqdm = "*"
 
 [tool.pixi.pypi-dependencies]
 quimb = { path = ".", editable = true }
+# temporary
+symmray = { git = "https://github.com/jcmgray/symmray.git", branch = "main" }
 
 [tool.pixi.feature.full.dependencies]
 autograd= "*"

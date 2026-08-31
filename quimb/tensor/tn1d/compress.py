@@ -380,6 +380,20 @@ def _form_final_tn_from_tensor_sequence(
     return new
 
 
+def _phase_dm_operator(rho: Tensor, left_inds, right_inds):
+    """Apply fermionic signs before decomposing ``rho``.
+
+    If the first left index is not dual, flip all right indices. This makes
+    the kept eigenspace match a direct SVD.
+    """
+    data = rho.data
+    if not data.indices[rho.inds.index(left_inds[0])].dual:
+        axes_to_flip = tuple(
+            axis for axis, ind in enumerate(rho.inds) if ind in right_inds
+        )
+        rho.modify(data=data.phase_flip(*axes_to_flip))
+
+
 def tensor_network_1d_compress_dm(
     tn: TensorNetwork,
     max_bond=None,
@@ -581,15 +595,7 @@ def tensor_network_1d_compress_dm(
         rhoi = tensor_contract(*rho_tensors, **contract_opts)
 
         if fermion:
-            # phase flip dual bra-side axes so rhoi is positive
-            data = rhoi.data
-            axs_flip = tuple(
-                ax
-                for ax, ix in enumerate(rhoi.inds)
-                if (ix in right_inds) and data.indices[ax].dual
-            )
-            if axs_flip:
-                rhoi.modify(data=data.phase_flip(*axs_flip))
+            _phase_dm_operator(rhoi, left_inds, right_inds)
 
         # construct the conjugate projector separately below
         bix = rand_uuid()
@@ -1108,8 +1114,8 @@ def _conj_project(tq: Tensor, bond_ind: str) -> Tensor:
     tqc = tq.copy()
 
     if tq.isfermionic():
-        axis = tq.inds.index(bond_ind)
-        tqc.modify(data=tq.data.conj_project(axis=axis))
+        axes = tq.inds.index(bond_ind)
+        tqc.modify(data=tq.data.conj_project(axes=axes))
     else:
         tqc.conj_()
 
@@ -2346,6 +2352,19 @@ def tensor_network_1d_compress_srcmps_oversample(
 # ---------------------------- fitting methods ------------------------------ #
 
 
+def _conjugate_fit_update(fit_update: Tensor) -> None:
+    """Conjugate a local fit update in place.
+
+    For fermionic data, also phase every dual axis of the update. This
+    includes exposed fit bonds. It is a local adjoint, not the network-level
+    conjugation used to build the overlap.
+    """
+    if fit_update.isfermionic():
+        fit_update.modify(data=fit_update.data.conj(phase_dual=True))
+    else:
+        fit_update.conj_()
+
+
 def _tn1d_fit_sum_sweep_1site(
     tn_fit: TensorNetwork,
     tn_overlaps: list[TensorNetwork],
@@ -2365,15 +2384,6 @@ def _tn1d_fit_sum_sweep_1site(
 
     N = len(site_tags)
     K = len(tn_overlaps)
-
-    fermion = tn_fit.isfermionic()
-    if fermion and any(
-        t.data.dummy_modes for tn_o in tn_overlaps for t in tn_o
-    ):
-        warnings.warn(
-            "1-site fitting of fermionic tensor networks with tensors of odd "
-            "parity is likely incorrect, use 2-site (`bsz=2`)."
-        )
 
     if max_bond is not None:
         current_bond_dim = tn_fit.max_bond()
@@ -2465,7 +2475,7 @@ def _tn1d_fit_sum_sweep_1site(
             else:
                 tfinew += tfiknew
 
-        tfinew.conj_()
+        _conjugate_fit_update(tfinew)
 
         if compute_tdiff:
             # track change in tensor norm
@@ -2557,8 +2567,6 @@ def _tn1d_fit_sum_sweep_2site(
         right_inds = tuple(ix for ix in tfi1.inds if ix != bond)
         tfinew = None
 
-        fermion = tfi0.isfermionic()
-
         for k, tn_overlap in enumerate(tn_overlaps):
             # form local overlap
             tnik = (
@@ -2582,11 +2590,7 @@ def _tn1d_fit_sum_sweep_2site(
             else:
                 tfinew += tfiknew
 
-        if fermion:
-            # also flips the dual indices
-            tfinew.modify(data=tfinew.data.conj(phase_dual=True))
-        else:
-            tfinew.conj_()
+        _conjugate_fit_update(tfinew)
 
         tfinew0, tfinew1 = tfinew.split(
             max_bond=max_bond,
@@ -2609,12 +2613,6 @@ def _tn1d_fit_sum_sweep_2site(
         tfinew1.transpose_like_(tfi1)
         tfi0.modify(data=tfinew0.data, left_inds=tfinew0.left_inds)
         tfi1.modify(data=tfinew1.data, left_inds=tfinew1.left_inds)
-
-        if fermion:
-            # deal with the global signs generated during conjugation
-            for ts in (tfi0 | tfi1).tensors:
-                if sum(m.parity for m in ts.data.dummy_modes) % 2 == 1:
-                    ts.data.phase_global(inplace=True)
 
     return max_tdiff
 
@@ -2939,6 +2937,11 @@ def tensor_network_1d_compress_fit(
 
     tn_fit.drop_tags("__FIT__")
     tn_fit.conj_()
+    if tn_fit.isfermionic():
+        # correct the sign from double fermionic conjugation
+        total_dummy_parity = sum(t.data.dummy_parity for t in tn_fit)
+        t = tn_fit[site_tags[0]]
+        t.modify(data=t.data.phase_global(parity=total_dummy_parity))
 
     if normalize:
         if reverse:

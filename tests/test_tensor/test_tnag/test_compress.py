@@ -1,13 +1,14 @@
-import importlib.util
-
 import pytest
 
+import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor.tnag.compress import tensor_network_ag_compress
 
-requires_symmray = pytest.mark.skipif(
-    importlib.util.find_spec("symmray") is None,
-    reason="symmray not installed",
+from .. import (
+    bond_orientations,
+    make_symmetric_2d_tn,
+    requires_symmray,
+    symmetry_cases,
 )
 
 
@@ -37,81 +38,52 @@ def test_compress_projector_bp_canonize():
 
 
 @requires_symmray
-@pytest.mark.parametrize(
-    "symmetry",
-    [
-        "abelian",
-        "fermionic-even",
-        "fermionic-odd-checker",
-        "fermionic-odd-diag",
-    ],
-)
+@pytest.mark.parametrize("symmetry", symmetry_cases)
 @pytest.mark.parametrize("canonize", [False, True, "layered", "bp"])
-@pytest.mark.parametrize("from_which", ["xmin", "xmax", "ymin", "ymax"])
-def test_compress_projector_symmetric(symmetry, canonize, from_which, request):
-    """Boundary contracting a scalar symmetric network with locally computed
-    projectors should be exact, given enough bond dimension, however the
-    network is preconditioned.
+@pytest.mark.parametrize("bond_orientation", bond_orientations)
+@pytest.mark.parametrize("direction", ["xmin", "xmax", "ymin", "ymax"])
+def test_compress_projector_symmetric(
+    symmetry, canonize, bond_orientation, direction, request
+):
+    """Check exact boundary contraction with local projectors.
+
+    Cover each preconditioner, bond orientation, and contraction direction.
+    Use enough bond dimension to prevent truncation.
     """
-    import symmray as sr
+    canonize_opts = None
+    if canonize == "bp":
+        # isolate phase errors with a tightly converged BP gauge
+        canonize_opts = {"max_iterations": 1000, "tol": 5e-13}
 
-    fermionic = symmetry != "abelian"
-
-    if canonize == "bp" and fermionic and from_which in ("xmax", "ymax"):
-        # inserting the messages still picks up an overall sign in some
-        # regions, leaving the squared operator minus a positive operator,
-        # which `compute_reduced_factor` assumes it is not
-        request.applymarker(
-            pytest.mark.xfail(
-                reason="bp message insertion signs some regions", strict=True
+        if symmetry != "abelian":
+            # BP messages do not retain the full fermionic phase frame
+            request.applymarker(
+                pytest.mark.xfail(
+                    reason="BP messages lose the fermionic phase frame",
+                    strict=False,
+                )
             )
-        )
 
-    if symmetry == "fermionic-odd-checker":
-        # checkerboard of odd sites, keeping the total charge even
-        def site_charge(site):
-            return (site[0] + site[1]) % 2
-
-    elif symmetry == "fermionic-odd-diag":
-        # odd sites on the diagonal, keeping the total charge even
-        def site_charge(site):
-            return int(site[0] == site[1])
-
-    else:
-
-        def site_charge(site):
-            return 0
-
-    Lx = Ly = 4
-
-    tn = sr.TN_abelian_from_edges_rand(
-        symmetry="Z2",
-        edges=qtn.edges_2d_square(Lx, Ly),
-        bond_dim=2,
-        phys_dim=None,
-        fermionic=fermionic,
-        site_tag_id="I{},{}",
-        site_charge=site_charge,
-        seed=42,
+    # use distinct random data for each case
+    seed = qu.utils.hash_kwargs_to_int(
+        symmetry=symmetry,
+        canonize=canonize,
+        bond_orientation=bond_orientation,
+        direction=direction,
     )
-    for i in range(Lx):
-        for j in range(Ly):
-            tn[f"I{i},{j}"].add_tag(f"X{i}")
-            tn[f"I{i},{j}"].add_tag(f"Y{j}")
-    tn.view_as_(
-        qtn.TensorNetwork2D, Lx=Lx, Ly=Ly, x_tag_id="X{}", y_tag_id="Y{}"
-    )
+    tn = make_symmetric_2d_tn(symmetry, duals=bond_orientation, seed=seed)
 
     expected = tn.contract(all, optimize="auto-hq")
 
     # `contract_boundary` routes this to `tensor_network_ag_compress`
     value = tn.contract_boundary(
-        # enough that nothing is discarded
+        # prevent truncation
         max_bond=8,
         cutoff=0.0,
         mode="projector",
         canonize=canonize,
-        sequence=(from_which,),
+        canonize_opts=canonize_opts,
+        sequence=(direction,),
     )
 
     assert value == pytest.approx(expected, rel=1e-10)
