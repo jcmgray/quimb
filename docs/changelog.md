@@ -38,7 +38,8 @@ Release notes for `quimb`.
 - [`compute_oblique_projectors`](#compute_oblique_projectors): damp inverse singular values at ``max(s) * eps`` instead of dividing by them directly. Rank-deficient environments can retain zero singular values when ``cutoff=0.0``. These values previously produced ``inf`` or ``nan`` projectors. The shared diagonal division helpers use the same damping. This also applies to [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges="inverse"``.
 - [`safe_inverse`](#safe_inverse): compute a scalar maximum for a single vector. The previous last-axis reduction broadcast the result back. This caused a ``TypeError`` in ``mode="projector"`` boundary contractions with block-sparse backends such as ``symmray``.
 - 1D compression: fix ``sdc`` and ``sdc-oversample`` for fermionic tensor networks.
-- 1D compression: fix ``dm`` for fermionic tensor networks.
+- 1D compression: fix ``dm`` for fermionic tensor networks, including mixed bond orientations. Its eigendecomposition now keeps the same subspace as a direct SVD.
+- 1D compression: fix ``fit`` for fermionic tensor networks. Local updates now include dual-axis phases. Final conjugation now handles the total dummy-mode parity.
 - [`D2BP.compress`](#D2BP.compress) and [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric): preserve positive messages and full-rank identity matrices for fermionic tensor networks.
 - [`TensorNetwork.conj`](#TensorNetwork.conj): use ``output_inds`` to select the global output legs for fermionic conjugation phases. This also works for subnetworks.
 - [`Tensor.conj`](#Tensor.conj): add the same ``output_inds`` control for a single tensor.

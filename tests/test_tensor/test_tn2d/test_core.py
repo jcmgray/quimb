@@ -8,6 +8,13 @@ from numpy.testing import assert_allclose
 import quimb as qu
 import quimb.tensor as qtn
 
+from .. import (
+    bond_orientations,
+    make_symmetric_2d_tn,
+    requires_symmray,
+    symmetry_cases,
+)
+
 
 class TestPEPSConstruct:
     @pytest.mark.parametrize("Lx", [3, 4, 5])
@@ -324,6 +331,59 @@ class Test2DContract:
         xe = norm.contract(all, optimize="auto-hq")
         xt = norm.contract_hotrg(max_bond=5)
         assert xt == pytest.approx(xe, rel=1e-4)
+
+    @pytest.mark.parametrize(
+        "bond_dim,max_bond,dist,tolerance",
+        [
+            pytest.param(2, None, "normal", 1e-10, id="untruncated"),
+            # local rank is up to 16, so max_bond=8 truncates
+            pytest.param(4, 8, "uniform", 0.1, id="truncated"),
+        ],
+    )
+    @requires_symmray
+    @pytest.mark.parametrize("symmetry", symmetry_cases)
+    @pytest.mark.parametrize("bond_orientation", bond_orientations)
+    @pytest.mark.parametrize("direction", ["x", "y"])
+    def test_contract_hotrg_symmetric(
+        self,
+        symmetry,
+        bond_orientation,
+        direction,
+        bond_dim,
+        max_bond,
+        dist,
+        tolerance,
+    ):
+        """Check exact and truncated HOTRG contraction.
+
+        Cover tensor parity, bond orientation, and coarse-graining direction.
+        Uniform data gives a stable approximation when truncating.
+        """
+        seed = qu.utils.hash_kwargs_to_int(
+            method="hotrg",
+            symmetry=symmetry,
+            bond_orientation=bond_orientation,
+            direction=direction,
+            bond_dim=bond_dim,
+            max_bond=max_bond,
+            dist=dist,
+        )
+        tn = make_symmetric_2d_tn(
+            symmetry,
+            duals=bond_orientation,
+            bond_dim=bond_dim,
+            seed=seed,
+            dist=dist,
+        )
+
+        expected = tn.contract(all, optimize="auto-hq")
+        value = tn.contract_hotrg(
+            max_bond=max_bond,
+            cutoff=0.0,
+            sequence=(direction,),
+            reduce_opts={"method": "eigh"},
+        )
+        assert value == pytest.approx(expected, rel=tolerance)
 
     def test_ising_accuracy_regression(self):
         tn = qtn.TN2D_classical_ising_partition_function(16, 16, 0.44)
