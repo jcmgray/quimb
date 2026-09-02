@@ -12,7 +12,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
-- 1D tensor-network compression: add successive deterministic compression (``method="sdc"``) and the ``sdc-oversample`` variant. These methods are based on https://arxiv.org/abs/2601.19650.
+- 1D tensor-network compression: add successive deterministic compression (``method="sdc"``) and the ``sdc-oversample``, ``sdcr``, and ``sdcr-oversample`` variants. These methods are based on https://arxiv.org/abs/2601.19650. ``sdc`` forms the low-rank left environments with ``method="svd:eig"``, whereas ``sdcr`` uses a cheap randomized SVD.
 - [`MatrixProductOperator.gate_sandwich_with_auto_swap`](#MatrixProductOperator.gate_sandwich_with_auto_swap): apply a two-site gate sandwich and keep the MPO in canonical form. The method tracks the orthogonality center and can strip the center tensor's exponent. For long-range gates, it swaps the sites together and then restores their positions.
 - 1D compression: ``src``, ``srcmps``, and ``fit`` now create random tensors with ``autoray.random.array`` (autoray v0.10.0 or newer). The tensors match the device and dtype. These methods and their oversampling variants accept a ``seed`` or random generator. By default, they use the backend's global random state.
 - 1D compression: ``fit`` with ``bsz=1`` now supports fermionic tensor networks. It warns if the network contains odd-parity tensors because the result is likely incorrect.
@@ -40,6 +40,7 @@ Release notes for `quimb`.
 - [`compute_oblique_projectors`](#compute_oblique_projectors): damp inverse singular values at ``max(s) * eps`` instead of dividing by them directly. Rank-deficient environments can retain zero singular values when ``cutoff=0.0``. These values previously produced ``inf`` or ``nan`` projectors. The shared diagonal division helpers use the same damping. This also applies to [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges="inverse"``.
 - [`safe_inverse`](#safe_inverse): compute a scalar maximum for a single vector. The previous last-axis reduction broadcast the result back. This caused a ``TypeError`` in ``mode="projector"`` boundary contractions with block-sparse backends such as ``symmray``.
 - 1D compression: fix ``sdc`` and ``sdc-oversample`` for fermionic tensor networks.
+- [`tensor_split`](#tensor_split): fix ``method='svd:eig'`` with nonzero ``cutoff`` for single precision and numba
 - 1D compression: fix ``dm`` for fermionic tensor networks, including mixed bond orientations. Its eigendecomposition now keeps the same subspace as a direct SVD.
 - 1D compression: fix ``fit`` for fermionic tensor networks. Local updates now include dual-axis phases. Final conjugation now handles the total dummy-mode parity.
 - [`D2BP.compress`](#D2BP.compress) and [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric): preserve positive messages and full-rank identity matrices for fermionic tensor networks.
