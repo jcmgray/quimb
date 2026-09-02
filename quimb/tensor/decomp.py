@@ -1499,7 +1499,7 @@ def _svd_via_eig_numba(
         if descending:
             s2 = s2[::-1]
             V = np.ascontiguousarray(V[:, ::-1])
-        s2 = np.maximum(s2, 0.0)
+        s2 = np.maximum(s2, np.zeros_like(s2))
         if absorb == get_s:  # 'svals'
             return None, np.sqrt(s2), None
         if absorb == get_VH:  # 'rorthog'
@@ -1543,8 +1543,7 @@ def _svd_via_eig_numba(
         if descending:
             s2 = s2[::-1]
             U = np.ascontiguousarray(U[:, ::-1])
-        # clip small/negative eigenvalues
-        s2 = np.maximum(s2, 0.0)
+        s2 = np.maximum(s2, np.zeros_like(s2))
         if absorb == get_s:  # 'svals'
             return None, np.sqrt(s2), None
         if absorb == get_U:  # 'lorthog'
@@ -2311,7 +2310,7 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift=True):
         try:
             # try without shift
             return _cholesky_maybe_with_diag_shift(x, absorb, shift=0.0)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             warnings.warn(
                 f"Cholesky decomposition failed with error: {e}. "
                 "retrying with small regularization added to the diagonal."
@@ -2346,7 +2345,7 @@ def cholesky_regularized_numpy(x, absorb=get_Usq_sqVH, shift=True):
         try:
             # try without shift
             return _cholesky_regularized_numba(x, absorb, shift=0.0)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             warnings.warn(
                 f"Cholesky decomposition failed with error: {e}. "
                 "retrying with small regularization added to the diagonal."

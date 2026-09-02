@@ -24,6 +24,8 @@ boundary_options = {
     "zipup-oversample": {"mode": "zipup-oversample"},
     "sdc": {"mode": "sdc"},
     "sdc-oversample": {"mode": "sdc-oversample"},
+    "sdcr": {"mode": "sdcr"},
+    "sdcr-oversample": {"mode": "sdcr-oversample"},
     "fit-bsz1": {
         "mode": "fit",
         "bsz": 1,
@@ -144,7 +146,9 @@ def test_random_backend(method, seed_mode, backend):
 
 
 @pytest.mark.parametrize("backend", [jax_case, pytorch_case])
-@pytest.mark.parametrize("method", ["sdc", "sdc-oversample"])
+@pytest.mark.parametrize(
+    "method", ["sdc", "sdc-oversample", "sdcr", "sdcr-oversample"]
+)
 def test_sdc_backend(method, backend):
     psi = qtn.MPS_rand_state(4, 3, dtype="complex64", seed=7)
     psi.apply_to_arrays(lambda x: ar.do("array", x, like=backend))
@@ -296,6 +300,8 @@ def test_tn_fit(method):
         "zipup-oversample",
         "sdc",
         "sdc-oversample",
+        "sdcr",
+        "sdcr-oversample",
         "src",
         "src-first",
         "src-oversample",
@@ -375,7 +381,7 @@ def test_basic_compress_double_mpo(
         assert c.exponent == 0.0
 
     eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
-    if "src" in method:
+    if ("src" in method) or ("sdcr" in method):
         # account for noise
         eps *= 5
 
@@ -397,6 +403,8 @@ def test_basic_compress_double_mpo(
         "zipup-oversample",
         "sdc",
         "sdc-oversample",
+        "sdcr",
+        "sdcr-oversample",
         "src",
         "src-first",
         "src-oversample",
@@ -432,7 +440,7 @@ def test_mps_partial_mpo_apply(method, dtype, sweep_reverse):
     )
     assert new.num_tensors == 10
     eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
-    if "src" in method:
+    if ("src" in method) or ("sdcr" in method):
         # account for noise
         eps *= 5
     assert new.distance_normalized(mps.gate(A, where)) == pytest.approx(
@@ -450,6 +458,8 @@ def test_mps_partial_mpo_apply(method, dtype, sweep_reverse):
         "zipup-first",
         "sdc",
         "sdc-oversample",
+        "sdcr",
+        "sdcr-oversample",
         "src",
         "src-first",
     ],
