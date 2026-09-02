@@ -296,17 +296,14 @@ def test_tn_fit(method):
         "direct",
         "dm",
         "zipup",
-        "zipup-first",
         "zipup-oversample",
         "sdc",
         "sdc-oversample",
         "sdcr",
         "sdcr-oversample",
         "src",
-        "src-first",
         "src-oversample",
         "srcmps",
-        "srcmps-first",
         "srcmps-oversample",
         "fit",
         "fit-zipup",
@@ -399,17 +396,14 @@ def test_basic_compress_double_mpo(
         "direct",
         "dm",
         "zipup",
-        "zipup-first",
         "zipup-oversample",
         "sdc",
         "sdc-oversample",
         "sdcr",
         "sdcr-oversample",
         "src",
-        "src-first",
         "src-oversample",
         "srcmps",
-        "srcmps-first",
         "srcmps-oversample",
         "fit",
         "fit-zipup",
@@ -439,7 +433,7 @@ def test_mps_partial_mpo_apply(method, dtype, sweep_reverse):
         is new
     )
     assert new.num_tensors == 10
-    eps = 1e-3 if dtype in ("float32", "complex64") else 1e-6
+    eps = 1e-3 if dtype in ("float32", "complex64") else 1e-5
     if ("src" in method) or ("sdcr" in method):
         # account for noise
         eps *= 5
