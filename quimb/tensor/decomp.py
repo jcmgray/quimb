@@ -1792,11 +1792,9 @@ def svd_rand_truncated(
             # note unlike svd via eig, tall vs wide is secondary consideration
             right = m > n
 
-    rng = xp.random.default_rng(seed)
-
     if right:
         # tall: sketch from the right
-        omega = rng.normal(size=(*batch_dims, n, k_sketch))
+        omega = xp.random.array((*batch_dims, n, k_sketch), rng=seed)
         y = x @ omega
         if num_iterations:
             xdag = xp.conj(xp.swapaxes(x, -2, -1))
@@ -1820,7 +1818,7 @@ def svd_rand_truncated(
         B = xp.conj(xp.swapaxes(Q, -2, -1)) @ x
     else:
         # wide: sketch from the left
-        omega = rng.normal(size=(*batch_dims, k_sketch, m))
+        omega = xp.random.array((*batch_dims, k_sketch, m), rng=seed)
         y = omega @ x
         if num_iterations:
             xdag = xp.conj(xp.swapaxes(x, -2, -1))

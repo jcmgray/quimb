@@ -690,6 +690,25 @@ def test_batch_svd(backend, method, max_bond, absorb):
 
 
 @pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_svd_rand_sketch_matches_dtype_and_device(backend, dtype):
+    # the random sketch must match `x`, a raw generator call gives a real
+    # float array on the default device, which torch refuses to contract
+    xp = ar.get_namespace(backend, dtype=dtype)
+    x = xp.random.array((6, 5), rng=42)
+    expected = ar.infer_backend_device_dtype(x)
+
+    U, _, VH = array_split(x, method="svd:rand", max_bond=5, absorb="both")
+
+    assert ar.infer_backend_device_dtype(U) == expected
+    assert ar.infer_backend_device_dtype(VH) == expected
+    # loose, the sketch is single precision and the point here is the dtype
+    assert_allclose(ar.to_numpy(U @ VH), ar.to_numpy(x), rtol=1e-2, atol=1e-2)
+
+
+@pytest.mark.parametrize(
     "backend",
     [
         "numpy",
