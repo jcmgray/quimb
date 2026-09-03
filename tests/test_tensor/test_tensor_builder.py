@@ -247,6 +247,177 @@ class TestGenericTN:
         )
         assert tn.contract() == pytest.approx(1.0)
 
+    def test_TN_from_strings_join_trees(self):
+        edges = tuple(qtn.edges_2d_square(4, 4)) * 2
+        opts = {"join": True, "random_rewire": True, "random_rewire_seed": 42}
+        tn = qtn.TN_from_strings(edges, contract_sites=False, **opts)
+        assert len(tn.subgraphs()) > 1
+        assert {t.ndim for t in tn} == {2}
+        for join_prefer in (None, "short"):
+            tn_cactus = qtn.TN_from_strings(
+                edges,
+                contract_sites=False,
+                join_trees=True,
+                join_prefer=join_prefer,
+                **opts,
+            )
+            # all loops form one tree
+            assert len(tn_cactus.subgraphs()) == 1
+            # each tensor gains at most one bond
+            assert {t.ndim for t in tn_cactus} == {2, 3}
+
+    def test_TN_from_strings_avoid_loop_length(self):
+        strings = [(0, 1), (0, 1), (1, 2)]
+        opts = {"join": True, "contract_sites": False}
+
+        def count_loops(**kwargs):
+            tn = qtn.TN_from_strings(strings, **opts, **kwargs)
+            return sum(
+                all(t.ndim == 2 for t in subgraph)
+                for subgraph in tn.subgraphs()
+            )
+
+        assert count_loops() == 0
+        assert count_loops(join_avoid_loop_length=0) == 1
+
+        with pytest.warns(FutureWarning, match="join_avoid_self_loops"):
+            assert count_loops(join_avoid_self_loops=True) == 0
+        with pytest.warns(FutureWarning, match="join_avoid_self_loops"):
+            assert count_loops(join_avoid_self_loops=False) == 1
+
+    def test_TN_from_strings_join_prefer(self):
+        def get_contracted_loop_lengths(tn):
+            return [
+                sum(tag in subgraph.tag_map for tag in subgraph.site_tags)
+                for subgraph in tn.subgraphs()
+            ]
+
+        edges = tuple(qtn.edges_2d_square(6, 6)) * 2
+        opts = {
+            "join": True,
+            "random_rewire": True,
+            "random_rewire_seed": 42,
+            "contract_sites": False,
+        }
+        loop_lengths = {}
+        for prefer in ("short", "long"):
+            tn = qtn.TN_from_strings(edges, join_prefer=prefer, **opts)
+            loop_lengths[prefer] = get_contracted_loop_lengths(tn)
+
+        # short pairing makes more, smaller loops
+        assert len(loop_lengths["short"]) > len(loop_lengths["long"])
+        assert min(loop_lengths["short"]) < min(loop_lengths["long"])
+        assert max(loop_lengths["short"]) < max(loop_lengths["long"])
+
+        tn_allow_parallel = qtn.TN_from_strings(
+            edges, join_prefer="short", join_avoid_loop_length=0, **opts
+        )
+        parallel_loop_count = sum(
+            length <= 2 for length in loop_lengths["short"]
+        )
+        parallel_loop_count_allowed = sum(
+            length <= 2
+            for length in get_contracted_loop_lengths(tn_allow_parallel)
+        )
+        assert parallel_loop_count < parallel_loop_count_allowed
+
+        tn_avoid_squares = qtn.TN_from_strings(
+            edges, join_prefer="short", join_avoid_loop_length=4, **opts
+        )
+        small_loop_count = sum(length <= 4 for length in loop_lengths["short"])
+        small_loop_count_avoided = sum(
+            length <= 4
+            for length in get_contracted_loop_lengths(tn_avoid_squares)
+        )
+        assert small_loop_count_avoided < small_loop_count
+
+        cases = (
+            (2, [(0, 1), (0, 1)], {}),
+            (4, [(0, 1), (1, 2), (2, 3), (3, 0)], {}),
+        )
+        for expected, strings, case_opts in cases:
+            tn = qtn.TN_from_strings(
+                strings,
+                join=True,
+                join_prefer="short",
+                contract_sites=False,
+                **case_opts,
+            )
+            assert get_contracted_loop_lengths(tn) == [expected]
+
+        with pytest.raises(ValueError):
+            qtn.TN_from_strings(edges, join_prefer="shortest", **opts)
+
+        with pytest.raises(
+            ValueError, match='join_prefer is not supported with join="all"'
+        ):
+            qtn.TN_from_strings(
+                edges,
+                join_prefer="short",
+                **{**opts, "join": "all"},
+            )
+
+    def test_TN_from_strings_join_prefer_short_groups(self):
+        strings = [
+            (0, 1),
+            (0, 2, 3, 4),
+            (0, 5, 6),
+            (0, 7, 8, 9, 10, 11),
+        ]
+        tn = qtn.TN_from_strings(
+            strings,
+            join=True,
+            join_prefer="short",
+            contract_sites=False,
+        )
+        endpoint_pairs = {
+            frozenset(next(iter(t.tags)) for t in subgraph if t.ndim == 1)
+            for subgraph in tn.subgraphs()
+        }
+        assert endpoint_pairs == {
+            frozenset(("I1", "I6")),
+            frozenset(("I4", "I11")),
+        }
+
+    def test_TN_rand_hidden_loop_deduplicates_edges(self):
+        tn = qtn.TN_rand_hidden_loop(
+            [(0, 1), (1, 0), (1, 2), (2, 0)], line_density=1, seed=42
+        )
+        assert tn.sites == (0, 1, 2)
+        assert tn.num_tensors == 3
+        assert tn.max_bond() == 2
+
+    def test_TN_rand_hidden_cactus_exact(self):
+        edges = qtn.edges_2d_square(3, 3)
+        opts = {"seed": 42, "gauge_random": False}
+        tn_uncontracted = qtn.TN_rand_hidden_cactus(
+            edges, contract_sites=False, **opts
+        )
+        assert len(tn_uncontracted.subgraphs()) == 1
+        tn_contracted = qtn.TN_rand_hidden_cactus(edges, **opts)
+        assert tn_contracted.contract(...) == pytest.approx(
+            tn_uncontracted.contract(...)
+        )
+        # added bonds disappear when each site is contracted
+        tn_ref = qtn.TN_rand_hidden_loop(edges, **opts)
+        for site in tn_contracted.sites:
+            assert sorted(tn_contracted[site].shape) == sorted(
+                tn_ref[site].shape
+            )
+
+    def test_TN3D_rand_hidden_cactus(self):
+        tn_uncontracted = qtn.TN3D_rand_hidden_cactus(
+            2, 2, 2, seed=42, gauge_random=False, contract_sites=False
+        )
+        assert len(tn_uncontracted.subgraphs()) == 1
+        tn_contracted = qtn.TN3D_rand_hidden_cactus(
+            2, 2, 2, seed=42, gauge_random=False
+        )
+        assert tn_contracted.num_tensors == 8
+        assert tn_contracted.contract(...) == pytest.approx(
+            tn_uncontracted.contract(...)
+        )
+
     @pytest.mark.parametrize("Lx", [3])
     @pytest.mark.parametrize("Ly", [2, 4])
     @pytest.mark.parametrize("beta", [0.13, 0.44])

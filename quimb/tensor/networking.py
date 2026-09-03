@@ -1451,19 +1451,30 @@ def tids_are_connected(tn, tids):
     -------
     bool
     """
-    enum = range(len(tids))
-    groups = dict(zip(enum, enum))
-    regions = [(oset([tid]), tn._get_neighbor_tids(tid)) for tid in tids]
-    for i, j in itertools.combinations(enum, 2):
-        mi = groups.get(i, i)
-        mj = groups.get(j, j)
+    parents = {tid: tid for tid in tids}
+    num_groups = len(parents)
+    if num_groups == 0:
+        return False
 
-        if regions[mi][0] & regions[mj][1]:
-            groups[mj] = mi
-            regions[mi][0].update(regions[mj][0])
-            regions[mi][1].update(regions[mj][1])
+    def find_root(tid):
+        while parents[tid] != tid:
+            parents[tid] = parents[parents[tid]]
+            tid = parents[tid]
+        return tid
 
-    return len(set(groups.values())) == 1
+    for tid in parents:
+        root = find_root(tid)
+        for neighbor_tid in tn._get_neighbor_tids(tid):
+            if neighbor_tid not in parents:
+                continue
+            neighbor_root = find_root(neighbor_tid)
+            if root != neighbor_root:
+                parents[neighbor_root] = root
+                num_groups -= 1
+                if num_groups == 1:
+                    return True
+
+    return num_groups == 1
 
 
 def compute_shortest_distances(tn, tids=None, exclude_inds=()):
