@@ -23,7 +23,7 @@ from ..gen.rand import (
     randn,
     random_seed_fn,
 )
-from ..utils import concat, deprecated, unique
+from ..utils import check_opt, concat, deprecated, unique
 from .array_ops import reshape, sensibly_scale
 from .contraction import array_contract
 from .tensor_core import (
@@ -725,7 +725,10 @@ def TN_from_strings(
     random_rewire=False,
     random_rewire_seed=None,
     join=False,
-    join_avoid_self_loops=True,
+    join_avoid_self_loops=None,
+    join_prefer=None,
+    join_avoid_loop_length=2,
+    join_trees=False,
     normalize=False,
     contract_sites=True,
     fuse_multibonds=True,
@@ -754,13 +757,36 @@ def TN_from_strings(
         Whether to randomly permute the indices at each site.
     random_rewire_seed : int, optional
         A random seed for ``random_rewire``.
-    join : bool or {"all"}, optional
-        Whether to join dangling string ends at each site.
+    join : bool or "all", optional
+        Join pairs of dangling string ends at each site. Use ``"all"`` to
+        also join an unpaired end to an adjacent tensor. Default is off.
     join_avoid_self_loops : bool, optional
-        Whether to avoid joining string ends that form self-loops.
+        Deprecated. Use ``join_avoid_loop_length=2`` to avoid two-line loops,
+        or ``0`` to disable loop avoidance. If set, this option overrides
+        ``join_avoid_loop_length``.
+    join_prefer : {None, "short", "long"}, optional
+        How to select pairs of string ends. ``None`` selects the first
+        compatible end. ``"short"`` first closes the shortest allowed loop.
+        If no end closes a loop, it prefers a shorter partner group.
+        ``"long"`` selects the end that closes the longest loop. Loop length
+        is the number of lines, or equivalently the number of tensors after
+        contracting each site. An end in a separate component has infinite
+        loop length. This option is not supported with ``join="all"``.
+    join_avoid_loop_length : int, optional
+        Maximum loop length to avoid when joining string ends. Loops at or
+        below this length are used only when no other pair is available. The
+        default of 2 avoids loops made from two parallel lines on one edge.
+        Use 4 to also avoid square plaquette loops. Use 0 to disable loop
+        avoidance.
+    join_trees : bool, optional
+        Connect separate components into a cactus, i.e. a tree of loops. When
+        two components meet at a site, add a bond of size ``line_dim`` between
+        them. These bonds create no new cycles. A connected string graph gives
+        one cactus. A disconnected graph gives one per connected component.
+        The initial components are loops only when ``join=True`` and each site
+        has an even number of string ends.
     normalize : bool, optional
-        Whether to normalize the tensor network while it is still made from
-        disconnected loops.
+        Normalize each connected component before contracting sites.
     contract_sites : bool, optional
         Whether to contract all tensors at each site into a single tensor.
     fuse_multibonds : bool, optional
@@ -776,6 +802,17 @@ def TN_from_strings(
     """
     if fill_fn is None:
         fill_fn = delta_array
+
+    if join_avoid_self_loops is not None:
+        import warnings
+
+        warnings.warn(
+            "join_avoid_self_loops is deprecated; use "
+            "join_avoid_loop_length=2 or 0 instead",
+            FutureWarning,
+            stacklevel=2,
+        )
+        join_avoid_loop_length = 2 if join_avoid_self_loops else 0
 
     # find all unique sites
     sites = tuple(sorted(set.union(*map(set, strings))))
@@ -823,59 +860,158 @@ def TN_from_strings(
             new_inds = rng.permutation(inds)
             stn.reindex_(dict(zip(inds, new_inds)))
 
-    # compute which pairs of sites each index appears at
-    ind_locs = {}
-    for tag in tn.site_tags:
-        for ind in tn.select(tag).all_inds():
-            ind_locs.setdefault(ind, set()).add(tag)
+    if join:
+        check_opt("join_prefer", join_prefer, (None, "short", "long"))
+
+        if (join == "all") and (join_prefer is not None):
+            raise ValueError('join_prefer is not supported with join="all"')
+
+    track_group_lengths = bool(join)
+    track_groups = track_group_lengths or join_trees
+    if track_groups:
+        # track the current connected groups, each string starts in its own
+        # group (labelled by an arbitrary tid), to be merged as we join below
+        group_parents = {}
+        group_lengths = {}
+        for tid in tn.tensor_map:
+            if tid not in group_parents:
+                group_tids = tn._get_subgraph_tids([tid])
+                for group_tid in group_tids:
+                    group_parents[group_tid] = tid
+                if track_group_lengths:
+                    group_lengths[tid] = (
+                        sum(
+                            tn.tensor_map[group_tid].ndim
+                            for group_tid in group_tids
+                        )
+                        // 2
+                    )
+
+        def find_group_root(tid):
+            while group_parents[tid] != tid:
+                group_parents[tid] = group_parents[group_parents[tid]]
+                tid = group_parents[tid]
+            return tid
 
     if join:
-        # at each site, join pairs of string ends up
+        # join pairs of string ends at each site
         for tag in tn.site_tags:
-            # get all tensors at this site
             stn = tn.select(tag)
-            # get all string ends (i.e. vectors)
-            ts = [t for t in stn if t.ndim == 1]
+            # string ends are vectors
+            tids = [tid for tid, t in stn.tensor_map.items() if t.ndim == 1]
 
-            # connect pairs of tensors, but try avoid creating trivial loops
-            while len(ts) > 1:
-                ta = ts.pop(0)
-                if join_avoid_self_loops:
-                    i = next(
+            # join pairs while avoiding trivial loops
+            while len(tids) > 1:
+                tid_a = tids.pop(0)
+                ta = tn.tensor_map[tid_a]
+
+                root_a = find_group_root(tid_a)
+                candidate_roots = [find_group_root(tid) for tid in tids]
+
+                if join_prefer == "long":
+                    loop_lengths = [
+                        group_lengths[root_a]
+                        if root_b == root_a
+                        else float("inf")
+                        for root_b in candidate_roots
+                    ]
+                    partner_pos = max(
+                        range(len(tids)), key=loop_lengths.__getitem__
+                    )
+                elif join_prefer == "short":
+                    partner_scores = []
+                    for root_b in candidate_roots:
+                        if root_b != root_a:
+                            # prefer a shorter separate group
+                            partner_scores.append(
+                                (
+                                    1,
+                                    group_lengths[root_a]
+                                    + group_lengths[root_b],
+                                )
+                            )
+                        elif group_lengths[root_a] <= join_avoid_loop_length:
+                            # use longest avoided loop as fallback
+                            partner_scores.append((2, -group_lengths[root_a]))
+                        else:
+                            partner_scores.append((0, group_lengths[root_a]))
+                    partner_pos = min(
+                        range(len(tids)),
+                        key=partner_scores.__getitem__,
+                    )
+                else:
+                    partner_pos = next(
                         (
-                            i
-                            for i, t in enumerate(ts)
-                            if ind_locs[ta.inds[0]] != ind_locs[t.inds[0]]
+                            pos
+                            for pos, root_b in enumerate(candidate_roots)
+                            if (root_b != root_a)
+                            or (group_lengths[root_a] > join_avoid_loop_length)
                         ),
                         0,
                     )
-                else:
-                    i = 0
-                tb = ts.pop(i)
+
+                tid_b = tids.pop(partner_pos)
+                tb = tn.tensor_map[tid_b]
+
+                if track_groups:
+                    root_a = find_group_root(tid_a)
+                    root_b = find_group_root(tid_b)
+                    if root_a != root_b:
+                        group_parents[root_b] = root_a
+                        if track_group_lengths:
+                            group_lengths[root_a] += group_lengths.pop(root_b)
+
                 new_bond(ta, tb, size=line_dim)
                 ta.modify(data=fill_fn(ta.shape))
                 tb.modify(data=fill_fn(tb.shape))
 
-            if (join == "all") and ts:
-                # connect dangling bond to nearest neighbor, even if this
-                # creates merged loops
-                (ta,) = ts
-                tb = min(
-                    [t for t in stn if t is not ta],
+            if (join == "all") and tids:
+                # connect the last end to the nearest loop
+                (tid_a,) = tids
+                ta = tn.tensor_map[tid_a]
+                tid_b = min(
+                    (tid for tid in stn.tensor_map if tid != tid_a),
                     # choose to merge with shortest neithboring loop however
-                    key=lambda t: len(stn._ind_to_subgraph_tids(t.inds[0])),
+                    key=lambda tid: len(
+                        stn._ind_to_subgraph_tids(tn.tensor_map[tid].inds[0])
+                    ),
                 )
+                tb = tn.tensor_map[tid_b]
+                if track_groups:
+                    root_a = find_group_root(tid_a)
+                    root_b = find_group_root(tid_b)
+                    if root_a != root_b:
+                        group_parents[root_b] = root_a
                 new_bond(ta, tb, size=line_dim)
                 ta.modify(data=fill_fn(ta.shape))
                 tb.modify(data=fill_fn(tb.shape))
+
+    if join_trees:
+        # connect components without creating new cycles
+        for tag in tn.site_tags:
+            # consecutive tensors cover all components at this site
+            previous_tid = None
+            for tid in tuple(tn._get_tids_from_tags(tag)):
+                if previous_tid is not None:
+                    previous_root = find_group_root(previous_tid)
+                    root = find_group_root(tid)
+                    if previous_root != root:
+                        # merge different components
+                        group_parents[previous_root] = root
+                        ta = tn.tensor_map[previous_tid]
+                        tb = tn.tensor_map[tid]
+                        new_bond(ta, tb, size=line_dim)
+                        ta.modify(data=fill_fn(ta.shape))
+                        tb.modify(data=fill_fn(tb.shape))
+                previous_tid = tid
 
     if normalize:
-        # normalize the tensor network, while it is still easy to contract
+        # normalize before contracting sites
 
         phase = 1
         exponent = 0.0
         for tn_i in tn.subgraphs():
-            # contract each subgraph/loop seperately
+            # contract each component separately
             tn_i = tn_i.rank_simplify(equalize_norms=1.0)
             mantissa_i, exponent_i = tn_i.contract(
                 strip_exponent=True, **contract_opts
@@ -896,6 +1032,169 @@ def TN_from_strings(
             tn.fuse_multibonds_()
 
     return tn
+
+
+def TN_rand_hidden_loop(
+    edges,
+    *,
+    line_dim=2,
+    line_density=2,
+    seed=None,
+    dist="normal",
+    dtype="float64",
+    loc=0.0,
+    scale=1.0,
+    gauge_random=True,
+    site_tag_id="I{}",
+    **kwargs,
+) -> TensorNetworkGen:
+    """Build a random hidden-loop tensor network on an arbitrary graph.
+
+    Place random lines on the graph edges. Rewire and join their ends into
+    closed loops at each site. The result follows the target graph. Its exact
+    contraction cost is low.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        Pairs of graph nodes. Reversed or repeated pairs count once.
+    line_dim : int, optional
+        The dimension of each hidden line index.
+    line_density : int, optional
+        The number of hidden lines placed on each graph edge.
+    seed : int, optional
+        Seed for the random number generator.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Random distribution. Default is ``'normal'``.
+    dtype : str, optional
+        The data type of the tensors.
+    loc : float, optional
+        Additive offset for the random values.
+    scale : float, optional
+        Scale factor for the random values.
+    gauge_random : bool, optional
+        Apply a random gauge transformation.
+    site_tag_id : str, optional
+        Format string for site tags.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetworkGen
+
+    See Also
+    --------
+    TN_rand_hidden_cactus, TN_from_strings
+    """
+    fill_fn = get_rand_fill_fn(dist, loc, scale, seed, dtype)
+
+    edges = tuple(gen_unique_edges(edges)) * line_density
+
+    kwargs.setdefault("join", True)
+    kwargs.setdefault("random_rewire", True)
+    kwargs.setdefault("random_rewire_seed", seed)
+    kwargs.setdefault("site_tag_id", site_tag_id)
+    tn = TN_from_strings(edges, line_dim=line_dim, fill_fn=fill_fn, **kwargs)
+
+    if gauge_random:
+        tn.gauge_all_random_()
+
+    return tn
+
+
+def TN_rand_hidden_cactus(
+    edges,
+    *,
+    line_dim=2,
+    line_density=2,
+    seed=None,
+    dist="normal",
+    dtype="float64",
+    loc=0.0,
+    scale=1.0,
+    gauge_random=True,
+    site_tag_id="I{}",
+    join_prefer=None,
+    join_avoid_loop_length=2,
+    normalize=False,
+    contract_sites=True,
+    **kwargs,
+) -> TensorNetworkGen:
+    """Build a random hidden-cactus tensor network on an arbitrary graph.
+
+    Build random hidden loops on graph edges, then join them into a tree. The
+    joining bonds create no new loops.
+
+    Parameters
+    ----------
+    edges : sequence of tuple[hashable, hashable]
+        Pairs of graph nodes. Reversed or repeated pairs count once.
+    line_dim : int, optional
+        The dimension of each hidden line index.
+    line_density : int, optional
+        The number of hidden lines placed on each graph edge.
+    seed : int, optional
+        Seed for the random number generator.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Random distribution. Default is ``'normal'``.
+    dtype : str, optional
+        The data type of the tensors.
+    loc : float, optional
+        Additive offset for the random values.
+    scale : float, optional
+        Scale factor for the random values.
+    gauge_random : bool, optional
+        Apply a random gauge transformation.
+    site_tag_id : str, optional
+        Format string for site tags.
+    join_prefer : {None, "short", "long"}, optional
+        How to select pairs of string ends. ``None`` selects the first
+        compatible end. ``"short"`` first closes the shortest allowed loop.
+        If no end closes a loop, it prefers a shorter partner group.
+        ``"long"`` selects the end that closes the longest loop. Loop length
+        is the number of lines, or equivalently the number of tensors after
+        contracting each site. An end in a separate component has infinite
+        loop length. This option is not supported with ``join="all"``.
+    join_avoid_loop_length : int, optional
+        Maximum loop length to avoid when joining string ends. Loops at or
+        below this length are used only when no other pair is available. The
+        default of 2 avoids loops made from two parallel lines on one edge.
+        Use 4 to also avoid square plaquette loops. Use 0 to disable loop
+        avoidance.
+    normalize : bool, optional
+        Normalize each connected component before contracting sites.
+    contract_sites : bool, optional
+        Whether to contract all tensors at each site into a single tensor.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetworkGen
+
+    See Also
+    --------
+    TN_rand_hidden_loop, TN_from_strings
+    """
+    return TN_rand_hidden_loop(
+        edges,
+        line_dim=line_dim,
+        line_density=line_density,
+        seed=seed,
+        dist=dist,
+        dtype=dtype,
+        loc=loc,
+        scale=scale,
+        gauge_random=gauge_random,
+        site_tag_id=site_tag_id,
+        join_prefer=join_prefer,
+        join_avoid_loop_length=join_avoid_loop_length,
+        normalize=normalize,
+        contract_sites=contract_sites,
+        join_trees=True,
+        **kwargs,
+    )
 
 
 def HTN_rand(
@@ -1777,6 +2076,118 @@ def TN2D_rand_hidden_loop(
     )
 
 
+def TN2D_rand_hidden_cactus(
+    Lx,
+    Ly,
+    *,
+    cyclic=False,
+    line_dim=2,
+    line_density=2,
+    seed=None,
+    dist="normal",
+    dtype="float64",
+    loc=0.0,
+    scale=1.0,
+    gauge_random=True,
+    site_tag_id="I{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    join_prefer=None,
+    join_avoid_loop_length=2,
+    normalize=False,
+    contract_sites=True,
+    **kwargs,
+) -> TensorNetwork2D:
+    """Build a random 2D hidden-cactus tensor network.
+
+    Build random hidden loops on 2D lattice edges, then join them into a tree.
+    The joining bonds create no new loops. They do not change the lattice bond
+    dimensions.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    cyclic : bool or (bool, bool), optional
+        Whether to use periodic boundary conditions. X and Y can be specified
+        separately using a tuple.
+    line_dim : int, optional
+        The dimension of each hidden line index.
+    line_density : int, optional
+        The number of hidden lines placed on each lattice edge.
+    seed : int, optional
+        A random seed.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    dtype : str, optional
+        The data type of the tensors.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    gauge_random : bool, optional
+        Whether to apply a random gauge transformation to the tensor network.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of row tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of column tags.
+    join_prefer : {None, "short", "long"}, optional
+        How to select pairs of string ends. ``None`` selects the first
+        compatible end. ``"short"`` first closes the shortest allowed loop.
+        If no end closes a loop, it prefers a shorter partner group.
+        ``"long"`` selects the end that closes the longest loop. Loop length
+        is the number of lines, or equivalently the number of tensors after
+        contracting each site. An end in a separate component has infinite
+        loop length. This option is not supported with ``join="all"``.
+    join_avoid_loop_length : int, optional
+        Maximum loop length to avoid when joining string ends. Loops at or
+        below this length are used only when no other pair is available. The
+        default of 2 avoids loops made from two parallel lines on one edge.
+        Use 4 to also avoid square plaquette loops. Use 0 to disable loop
+        avoidance.
+    normalize : bool, optional
+        Normalize each connected component before contracting sites.
+    contract_sites : bool, optional
+        Whether to contract all tensors at each site into a single tensor.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetwork2D
+
+    See Also
+    --------
+    TN2D_rand_hidden_loop, TN_from_strings
+    """
+    return TN2D_rand_hidden_loop(
+        Lx,
+        Ly,
+        cyclic=cyclic,
+        line_dim=line_dim,
+        line_density=line_density,
+        seed=seed,
+        dist=dist,
+        dtype=dtype,
+        loc=loc,
+        scale=scale,
+        gauge_random=gauge_random,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        join_prefer=join_prefer,
+        join_avoid_loop_length=join_avoid_loop_length,
+        normalize=normalize,
+        contract_sites=contract_sites,
+        join_trees=True,
+        **kwargs,
+    )
+
+
 def convert_to_3d(
     tn,
     Lx=None,
@@ -2308,6 +2719,126 @@ def TN3D_rand_hidden_loop(
         y_tag_id=y_tag_id,
         z_tag_id=z_tag_id,
         inplace=True,
+    )
+
+
+def TN3D_rand_hidden_cactus(
+    Lx,
+    Ly,
+    Lz,
+    *,
+    cyclic=False,
+    line_dim=2,
+    line_density=2,
+    seed=None,
+    dist="normal",
+    dtype="float64",
+    loc=0.0,
+    scale=1.0,
+    gauge_random=True,
+    site_tag_id="I{},{},{}",
+    x_tag_id="X{}",
+    y_tag_id="Y{}",
+    z_tag_id="Z{}",
+    join_prefer=None,
+    join_avoid_loop_length=2,
+    normalize=False,
+    contract_sites=True,
+    **kwargs,
+) -> TensorNetwork3D:
+    """Build a random 3D hidden-cactus tensor network.
+
+    Build random hidden loops on 3D lattice edges, then join them into a tree.
+    The joining bonds create no new loops. They do not change the lattice bond
+    dimensions.
+
+    Parameters
+    ----------
+    Lx : int
+        Length of side x.
+    Ly : int
+        Length of side y.
+    Lz : int
+        Length of side z.
+    cyclic : bool or (bool, bool, bool), optional
+        Whether to use periodic boundary conditions. X, Y and Z can be
+        specified separately using a tuple.
+    line_dim : int, optional
+        The dimension of each hidden line index.
+    line_density : int, optional
+        The number of hidden lines placed on each lattice edge.
+    seed : int, optional
+        A random seed.
+    dist : {'normal', 'uniform', 'rademacher', 'exp'}, optional
+        Type of random number to generate, defaults to 'normal'.
+    dtype : str, optional
+        The data type of the tensors.
+    loc : float, optional
+        An additive offset to add to the random numbers.
+    scale : float, optional
+        A multiplicative factor to scale the random numbers by.
+    gauge_random : bool, optional
+        Whether to apply a random gauge transformation to the tensor network.
+    site_tag_id : str, optional
+        String specifier for naming convention of site tags.
+    x_tag_id : str, optional
+        String specifier for naming convention of x-plane tags.
+    y_tag_id : str, optional
+        String specifier for naming convention of y-plane tags.
+    z_tag_id : str, optional
+        String specifier for naming convention of z-plane tags.
+    join_prefer : {None, "short", "long"}, optional
+        How to select pairs of string ends. ``None`` selects the first
+        compatible end. ``"short"`` first closes the shortest allowed loop.
+        If no end closes a loop, it prefers a shorter partner group.
+        ``"long"`` selects the end that closes the longest loop. Loop length
+        is the number of lines, or equivalently the number of tensors after
+        contracting each site. An end in a separate component has infinite
+        loop length. This option is not supported with ``join="all"``.
+    join_avoid_loop_length : int, optional
+        Maximum loop length to avoid when joining string ends. Loops at or
+        below this length are used only when no other pair is available. The
+        default of 2 avoids loops made from two parallel lines on one edge.
+        Use 4 to also avoid square plaquette loops. Use 0 to disable loop
+        avoidance.
+    normalize : bool, optional
+        Normalize each connected component before contracting sites.
+    contract_sites : bool, optional
+        Whether to contract all tensors at each site into a single tensor.
+    kwargs
+        Additional keyword arguments are passed to :func:`TN_from_strings`.
+
+    Returns
+    -------
+    TensorNetwork3D
+
+    See Also
+    --------
+    TN3D_rand_hidden_loop, TN_from_strings
+    """
+    return TN3D_rand_hidden_loop(
+        Lx,
+        Ly,
+        Lz,
+        cyclic=cyclic,
+        line_dim=line_dim,
+        line_density=line_density,
+        seed=seed,
+        dist=dist,
+        dtype=dtype,
+        loc=loc,
+        scale=scale,
+        gauge_random=gauge_random,
+        site_tag_id=site_tag_id,
+        x_tag_id=x_tag_id,
+        y_tag_id=y_tag_id,
+        z_tag_id=z_tag_id,
+        join_prefer=join_prefer,
+        join_avoid_loop_length=join_avoid_loop_length,
+        normalize=normalize,
+        contract_sites=contract_sites,
+        join_trees=True,
+        **kwargs,
     )
 
 

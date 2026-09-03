@@ -395,10 +395,15 @@ class Test2DContract:
             assert Zap == pytest.approx(8.459419593253275e100, rel=3.9e-9)
 
     @pytest.mark.parametrize("mode", ["mps", "ctmrg", "hotrg"])
-    def test_cdl_rand_large(self, mode):
-        tn = qtn.TN2D_rand_hidden_loop(10, 10, seed=42, contract_sites=False)
+    @pytest.mark.parametrize("builder", ["loop", "cactus"])
+    def test_cdl_rand_large(self, mode, builder):
+        build_fn = {
+            "loop": qtn.TN2D_rand_hidden_loop,
+            "cactus": qtn.TN2D_rand_hidden_cactus,
+        }[builder]
+        tn = build_fn(10, 10, seed=42, contract_sites=False)
         Zex = tn.contract(...)
-        tn = qtn.TN2D_rand_hidden_loop(10, 10, seed=42, contract_sites=True)
+        tn = build_fn(10, 10, seed=42, contract_sites=True)
 
         if mode == "mps":
             Z = tn.contract_boundary(max_bond=16)
@@ -539,7 +544,7 @@ class Test2DContract:
         )
         ex = qu.expec(A, k)
 
-        opts = dict(cutoff=2e-3, max_bond=9, contract_optimize="auto-hq")
+        opts = {"cutoff": 2e-3, "max_bond": 9, "contract_optimize": "auto-hq"}
         e = peps.compute_local_expectation(
             terms, mode=mode, normalized=normalized, **opts
         )
@@ -559,13 +564,13 @@ class Test2DContract:
             qu.normalize(k)
         ex = qu.expec(H, k)
 
-        opts = dict(
-            mode=mode,
-            normalized=normalized,
-            cutoff=2e-3,
-            max_bond=16,
-            contract_optimize="auto-hq",
-        )
+        opts = {
+            "mode": mode,
+            "normalized": normalized,
+            "cutoff": 2e-3,
+            "max_bond": 16,
+            "contract_optimize": "auto-hq",
+        }
 
         # compute 2x1 and 1x2 plaquettes separately
         hterms = {coos: Hij for coos in peps.gen_horizontal_bond_coos()}

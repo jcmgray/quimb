@@ -46,6 +46,22 @@ def test_subgraphs():
     assert {s1.num_tensors, s2.num_tensors} == {6, 8}
 
 
+def test_tids_are_connected_order_independent():
+    tn = qtn.TensorNetwork(
+        [
+            qtn.rand_tensor((2,), ("a",)),
+            qtn.rand_tensor((2,), ("c",)),
+            qtn.rand_tensor((2, 2), ("b", "c")),
+            qtn.rand_tensor((2, 2), ("a", "b")),
+        ]
+    )
+    tids = tuple(tn.tensor_map)
+    assert not tn.tids_are_connected(())
+    assert tn.tids_are_connected(tids[:1])
+    assert tn.tids_are_connected(tids)
+    assert not tn.tids_are_connected(tids[:3])
+
+
 def test_gen_paths_loops():
     tn = qtn.TN2D_rand(3, 4, 2)
     loops = tuple(tn.gen_paths_loops())
