@@ -843,6 +843,8 @@ def svd_truncated(
 
     Parameters
     ----------
+    x : array_like
+        The 2D array or batch of 2D arrays to decompose.
     cutoff : float, optional
         Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
         ``max_bond`` is used.
@@ -1180,7 +1182,7 @@ def svd_via_eig(
     Parameters
     ----------
     x : array-like
-        The 2d array to decompose.
+        The 2D array or batch of 2D arrays to decompose.
     absorb : str or None, optional
         What to compute / where to absorb the singular values:
 
@@ -1378,6 +1380,8 @@ def svd_via_eig_truncated(
 
     Parameters
     ----------
+    x : array-like
+        The 2D array or batch of 2D arrays to decompose.
     cutoff : float, optional
         Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
         ``max_bond`` is used.
@@ -1708,7 +1712,7 @@ def svd_rand_truncated(
     Parameters
     ----------
     x : array_like
-        The 2d array to decompose.
+        The 2D array or batch of 2D arrays to decompose.
     max_bond : int
         An explicit maximum bond dimension / target rank for the randomized
         sketch. You can use ``None`` or a negative value to indicate no
@@ -1910,6 +1914,35 @@ def eigh_truncated(
 
     Parameters
     ----------
+    x : array_like
+        The 2D array or batch of 2D arrays to decompose.
+    cutoff : float, optional
+        Singular value cutoff threshold, if ``cutoff <= 0.0``, then only
+        ``max_bond`` is used.
+    cutoff_mode : {1, 2, 3, 4, 5, 6}, optional
+        How to perform the truncation based on ``cutoff``:
+
+        - 1 / 'abs': trim values below ``cutoff``
+        - 2 / 'rel': trim values below ``s[0] * cutoff``
+        - 3 / 'sum2': trim s.t. ``sum(s_trim**2) < cutoff``.
+        - 4 / 'rsum2': trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
+        - 5 / 'sum1': trim s.t. ``sum(s_trim**1) < cutoff``.
+        - 6 / 'rsum1': trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
+
+    max_bond : int, optional
+        An explicit maximum bond dimension, use -1 for none.
+    absorb : int or None, optional
+        How to absorb the singular values, as a pre-converted numeric code
+        (``get_Us_VH=-1``: left, ``get_Usq_sqVH=0``: both,
+        ``get_U_sVH=1``: right, ``None``: return separately). Use
+        ``array_split`` with string aliases (e.g. ``'left'``, ``'both'``,
+        ``'right'``, ``None``) for a friendlier interface.
+    renorm : int, optional
+        Whether to renormalize the kept singular values. ``0`` means
+        no renormalization, ``1`` maintains the trace norm, ``2``
+        maintains the Frobenius norm.
+    positive : bool, optional
+        Whether to assume the operator is positive semi-definite.
     shift : bool or float, optional
         Whether to add a small shift to the diagonal of ``x`` for
         regularization. The valid options are:
@@ -2057,7 +2090,7 @@ def qr_stabilized(x, absorb=get_U_sVH, stabilized=True, **kwargs):
     Parameters
     ----------
     x : array_like
-        The 2d array to decompose.
+        The 2D array or batch of 2D arrays to decompose.
     absorb : str or int, optional
         What form to compute / where to 'absorb' the singular values:
 
@@ -2273,7 +2306,7 @@ def cholesky_regularized(x, absorb=get_Usq_sqVH, shift=True):
     Parameters
     ----------
     x : array_like
-        The 2D array to decompose.
+        The 2D array or batch of 2D arrays to decompose.
     absorb : int, optional
         How to absorb the factors. The valid options are:
 
