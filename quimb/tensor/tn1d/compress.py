@@ -1972,7 +1972,7 @@ def tensor_network_1d_compress_src(
         random tensor for all outer indices on a site. 'separable' generates a
         random vector for each outer index. 'symmetric' reuses the same random
         vector for all outer indices on a site.
-    noise_dist : {"normal", "uniform", "rademacher"}, optional
+    noise_dist : {"normal", "rademacher"}, optional
         The distribution to use when generating the random noise tensors.
     seed : None, int, or random generator, optional
         A random seed or generator to use. If not given, use the backend's
@@ -2167,7 +2167,7 @@ def tensor_network_1d_compress_src_oversample(
         Unused for SRC.
     noise_mode : {'separable', 'symmetric', 'joint'}, optional
         How to generate the random noise tensors for the SRC step.
-    noise_dist : {"normal", "uniform", "rademacher"}, optional
+    noise_dist : {"normal", "rademacher"}, optional
         The distribution to use when generating the random noise tensors for
         the SRC step.
     seed : None, int, or random generator, optional
@@ -2325,7 +2325,7 @@ def tensor_network_1d_compress_srcmps(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
-    noise_dist : {"normal", "uniform", "rademacher"}, optional
+    noise_dist : {"normal", "rademacher"}, optional
         The distribution to use when generating the random sampling MPS, only
         relevant if ``tn_fit`` is not supplied.
     seed : None, int, or random generator, optional
@@ -2504,7 +2504,7 @@ def tensor_network_1d_compress_srcmps_oversample(
     tn_fit : TensorNetwork, optional
         The MPS specificing the sampling noise (its bond dimension effectively
         sets the compression rank).
-    noise_dist : {"normal", "uniform", "rademacher"}, optional
+    noise_dist : {"normal", "rademacher"}, optional
         The distribution to use when generating the random sampling MPS, only
         relevant if ``tn_fit`` is not supplied.
     seed : None, int, or random generator, optional
@@ -2975,7 +2975,7 @@ def tensor_network_1d_compress_fit(
         to right, then right to left. The sequence is cycled. The final
         canonical form of the output tensor network depends on the last sweep
         direction and ``sweep_reverse``.
-    noise_dist : {"normal", "uniform", "rademacher"}, optional
+    noise_dist : {"normal", "rademacher"}, optional
         The distribution to use when generating the random sampling MPS, only
         relevant if ``tn_fit`` is not supplied.
     seed : None, int, or random generator, optional
@@ -3364,7 +3364,7 @@ def tensor_network_1d_compress_fit_oversample(
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``. The tensor network built will have one
         tensor per site, in the order given by ``site_tags``.
-    noise_dist : {"normal", "uniform", "rademacher"}, optional
+    noise_dist : {"normal", "rademacher"}, optional
         The distribution to use when generating the random sampling MPS, only
         relevant if ``tn_fit`` is not supplied.
     seed : None, int, or random generator, optional

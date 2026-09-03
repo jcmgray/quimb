@@ -1703,6 +1703,7 @@ def svd_rand_truncated(
     lorthog_opts=None,
     reduced_opts=None,
     seed=None,
+    noise_dist="normal",
 ):
     """Singular value decomposition of raw 2d array ``x``, via randomized
     sketching, with static truncation (``max_bond`` only) and various
@@ -1758,6 +1759,8 @@ def svd_rand_truncated(
         matrix.
     seed : int, Generator or None, optional
         Random seed or existing generator for reproducibility.
+    noise_dist : {"normal", "rademacher"}, optional
+        The distribution to use when generating the random sketch.
 
     Returns
     -------
@@ -1798,7 +1801,9 @@ def svd_rand_truncated(
 
     if right:
         # tall: sketch from the right
-        omega = xp.random.array((*batch_dims, n, k_sketch), rng=seed)
+        omega = xp.random.array(
+            (*batch_dims, n, k_sketch), dist=noise_dist, rng=seed
+        )
         y = x @ omega
         if num_iterations:
             xdag = xp.conj(xp.swapaxes(x, -2, -1))
@@ -1822,7 +1827,9 @@ def svd_rand_truncated(
         B = xp.conj(xp.swapaxes(Q, -2, -1)) @ x
     else:
         # wide: sketch from the left
-        omega = xp.random.array((*batch_dims, k_sketch, m), rng=seed)
+        omega = xp.random.array(
+            (*batch_dims, k_sketch, m), dist=noise_dist, rng=seed
+        )
         y = omega @ x
         if num_iterations:
             xdag = xp.conj(xp.swapaxes(x, -2, -1))

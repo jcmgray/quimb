@@ -461,6 +461,36 @@ def test_svd_rand_seed_reproducible():
     assert not np.allclose(U3, U4)
 
 
+@pytest.mark.parametrize("right", [True, False])
+def test_svd_rand_noise_dist(right):
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(7, 6))
+
+    def compute_approx(noise_dist=None):
+        kwargs = {}
+        if noise_dist is not None:
+            kwargs["noise_dist"] = noise_dist
+        U, s, VH = array_split(
+            x,
+            method="svd:rand",
+            absorb=None,
+            max_bond=2,
+            oversample=0,
+            num_iterations=0,
+            right=right,
+            seed=42,
+            **kwargs,
+        )
+        return U @ np.diag(s) @ VH
+
+    default = compute_approx()
+    normal = compute_approx("normal")
+    rademacher = compute_approx("rademacher")
+
+    assert_allclose(default, normal)
+    assert not np.allclose(normal, rademacher)
+
+
 @pytest.mark.parametrize("da,db", [(4, 8), (8, 4), (6, 6)])
 @pytest.mark.parametrize("right", [True, False, None])
 def test_svd_rand_right_param(right, da, db):
