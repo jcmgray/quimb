@@ -6,6 +6,64 @@ from ..utils import check_opt
 from .contraction import contract_strategy
 
 
+def distance_from_overlaps(xAA, xAB, xBB, normalized=False):
+    r"""Compute the distance between two objects from their overlaps.
+
+    Parameters
+    ----------
+    xAA : scalar
+        The overlap ``<A|A>``.
+    xAB : scalar
+        The overlap ``<A|B>``.
+    xBB : scalar
+        The overlap ``<B|B>``.
+    normalized : bool or str, optional
+        If ``True``, normalize the distance by the norms of the two objects,
+        giving ``2 * D(A, B) / (|A| + |B|)``. If ``'squared'``, normalize the
+        squared distance before taking the square root, giving
+        ``sqrt(2 * D(A, B)**2 / (|A|**2 + |B|**2))``. If ``'infidelity'``,
+        return ``1 - |<A|B>|**2 / (|A|**2 |B|**2)``. If ``'infidelity_sqrt'``,
+        return ``1 - |<A|B>| / (|A| |B|)``.
+
+    Returns
+    -------
+    scalar
+        The distance in the same array backend as the supplied overlaps.
+    """
+    xAA = do("abs", xAA)
+    xBB = do("abs", xBB)
+
+    if normalized == "infidelity":
+        return 1 - do("abs", xAB) ** 2 / (xAA * xBB)
+
+    elif normalized == "infidelity_sqrt":
+        return 1 - do("abs", xAB) / (xAA * xBB) ** 0.5
+
+    xAB = do("real", xAB)
+
+    if normalized == "squared":
+        return (
+            do("abs", xAA + xBB - 2 * xAB)
+            # divide by average norm-squared of A and B
+            * 2
+            / (xAA + xBB)
+        ) ** 0.5
+
+    elif isinstance(normalized, str):
+        raise ValueError(
+            f"Unknown normalized option: '{normalized}'. Should be one of "
+            "{True, False, 'infidelity', 'infidelity_sqrt', 'squared'}."
+        )
+
+    dAB = do("abs", xAA + xBB - 2 * xAB) ** 0.5
+
+    if normalized:
+        # divide by average norm of A and B
+        dAB = dAB * 2 / (xAA**0.5 + xBB**0.5)
+
+    return dAB
+
+
 def tensor_network_distance(
     tnA,
     tnB,
@@ -118,39 +176,7 @@ def tensor_network_distance(
         # <B|B>
         xBB = tnB.norm(squared=True, output_inds=oix, **contract_opts)
 
-    xAA = do("abs", xAA)
-    xBB = do("abs", xBB)
-    xAB = do("real", xAB)
-
-    if normalized == "infidelity":
-        # compute normalized infidelity
-        return 1 - xAB**2 / (xAA * xBB)
-
-    elif normalized == "infidelity_sqrt":
-        # compute normalized sqrt infidelity
-        return 1 - do("abs", xAB) / (xAA * xBB) ** 0.5
-
-    elif normalized == "squared":
-        return (
-            do("abs", xAA + xBB - 2 * xAB)
-            # divide by average norm-squared of A and B
-            * 2
-            / (xAA + xBB)
-        ) ** 0.5
-
-    elif isinstance(normalized, str):
-        raise ValueError(
-            f"Unknown normalized option: '{normalized}'. Should be one of "
-            "{True, False, 'infidelity', 'infidelity_sqrt', 'squared'}."
-        )
-
-    dAB = do("abs", xAA + xBB - 2 * xAB) ** 0.5
-
-    if normalized:
-        # divide by average norm of A and B
-        dAB = dAB * 2 / (xAA**0.5 + xBB**0.5)
-
-    return dAB
+    return distance_from_overlaps(xAA, xAB, xBB, normalized=normalized)
 
 
 def tensor_network_fit_autodiff(

@@ -32,6 +32,7 @@ Release notes for `quimb`.
 - Add [`TN_rand_hidden_loop`](#TN_rand_hidden_loop), the arbitrary-graph version of [`TN2D_rand_hidden_loop`](#TN2D_rand_hidden_loop).
 - Fix [`tids_are_connected`](#TensorNetwork.tids_are_connected) so its result does not depend on tensor order.
 - Add [`MatrixProductState.from_product`](#MatrixProductState.from_product). [`MPS_product_state`](#MPS_product_state) now calls this method. It accepts block-sparse single-site vectors, e.g. from ``symmray``. Each new bond index is non-dual on the left and dual on the right. This makes the two ends contractible.
+- Add [`distance_from_overlaps`](#distance_from_overlaps) to compute normalized distances and infidelities directly from three precomputed overlaps.
 
 
 **Bug fixes:**
@@ -55,6 +56,7 @@ Release notes for `quimb`.
 - SRC compression: use QR, not SVD, by default to orthogonalize the sketched columns.
 - [`TEBD`](#TEBD): fix ``order=4``, which was only second-order accurate. The Suzuki weight was ``1 / (4 * 4**(1/3))`` instead of ``1 / (4 - 4**(1/3))``. The method now converges at fourth order. For a Heisenberg chain with ``dt=0.05``, it is about 1,000 times more accurate. The correct weights include a negative value, so part of each fourth-order step now evolves backward. [`trotter_schedule`](#trotter_schedule) now supplies the step schedule. ``order=1`` is also accepted.
 - [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized): apply the wrapping term of a cyclic chain with its sites in the correct order. The old order caused error linear in ``x`` instead of quadratic. Terms that are symmetric under a site swap, such as Heisenberg terms, were not affected.
+- [`tensor_network_distance`](#tensor_network_distance): use the magnitude of complex overlaps when computing infidelity. Previously it used only the real part, making infidelity depend incorrectly on the relative phase.
 
 
 ## v1.15.0 (2026-08-10)

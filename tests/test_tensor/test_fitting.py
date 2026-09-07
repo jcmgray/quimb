@@ -1,14 +1,73 @@
+import autoray as ar
 import numpy as np
 import pytest
 
 import quimb.tensor as qtn
+from quimb.tensor.fitting import (
+    distance_from_overlaps,
+)
 
-from . import found_autograd
+from . import (
+    found_autograd,
+    jax_case,
+    pytorch_case,
+    tensorflow_case,
+)
 
 requires_autograd = pytest.mark.skipif(
     not found_autograd,
     reason="autograd not installed",
 )
+
+
+@pytest.mark.parametrize(
+    "normalized",
+    (False, True, "squared", "infidelity", "infidelity_sqrt"),
+)
+def test_distance_from_overlaps(normalized):
+    a = np.array([1.0 + 1.0j, 2.0 - 1.0j])
+    b = np.array([0.5 - 0.5j, -1.0 + 2.0j])
+    xAA = np.vdot(a, a)
+    xAB = np.vdot(a, b)
+    xBB = np.vdot(b, b)
+
+    d = distance_from_overlaps(xAA, xAB, xBB, normalized=normalized)
+
+    if normalized == "infidelity":
+        expected = 1 - abs(xAB) ** 2 / (xAA * xBB)
+    elif normalized == "infidelity_sqrt":
+        expected = 1 - abs(xAB) / (xAA * xBB) ** 0.5
+    else:
+        expected = np.linalg.norm(a - b)
+        if normalized is True:
+            expected *= 2 / (np.linalg.norm(a) + np.linalg.norm(b))
+        elif normalized == "squared":
+            expected *= (2 / (xAA + xBB)) ** 0.5
+
+    assert d == pytest.approx(expected)
+
+
+def test_distance_from_overlaps_near_zero_cancellation():
+    xAB = np.nextafter(1.0, 2.0)
+    d = distance_from_overlaps(1.0, xAB, 1.0)
+    assert np.isfinite(d)
+    assert d == pytest.approx((2 * (xAB - 1.0)) ** 0.5)
+
+
+@pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, pytorch_case, tensorflow_case]
+)
+def test_distance_from_overlaps_backend_preservation(backend):
+    xAA = ar.do("array", 2.0, like=backend)
+    xAB = ar.do("array", 1.0 + 0.5j, like=backend)
+    xBB = ar.do("array", 3.0, like=backend)
+    d = distance_from_overlaps(xAA, xAB, xBB)
+    assert ar.infer_backend(d) == backend
+
+
+def test_distance_from_overlaps_invalid_normalized():
+    with pytest.raises(ValueError, match="Unknown normalized option"):
+        distance_from_overlaps(1.0, 0.0, 1.0, normalized="invalid")
 
 
 @pytest.mark.parametrize("method", ("auto", "dense", "overlap"))
