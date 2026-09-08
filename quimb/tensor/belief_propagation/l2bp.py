@@ -437,21 +437,18 @@ class L2BP(BeliefPropagationCommon):
                 Rl, Rr, **compress_opts
             )
 
-            Pl = ar.do("reshape", Pl, (*bix_sizes, -1))
-            Pr = ar.do("reshape", Pr, (-1, *bix_sizes))
-
-            ltn = tn.select(i)
-            rtn = tn.select(j)
-
-            new_lix = [qtn.rand_uuid() for _ in bix]
-            new_rix = [qtn.rand_uuid() for _ in bix]
-            new_bix = [qtn.rand_uuid()]
-            ltn.reindex_(dict(zip(bix, new_lix)))
-            rtn.reindex_(dict(zip(bix, new_rix)))
-
-            # ... and insert the new projectors in place
-            tn |= qtn.Tensor(Pl, inds=new_lix + new_bix, tags=(i,))
-            tn |= qtn.Tensor(Pr, inds=new_bix + new_rix, tags=(j,))
+            tn.insert_projectors_between_regions_(
+                i,
+                j,
+                Pl,
+                Pr,
+                left_inds=bix,
+                right_inds=bix,
+                left_dims=bix_sizes,
+                right_dims=bix_sizes,
+                new_ltags=i,
+                new_rtags=j,
+            )
 
         if not lazy:
             for st in self.site_tags:
