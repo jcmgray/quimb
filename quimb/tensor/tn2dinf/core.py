@@ -958,12 +958,13 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             **kwargs,
         )
 
-    def _gloop_region(self, where, gloops):
+    def _gloop_region(self, where, gloops, num_joins=1):
         """The set of sites needed to evaluate a generalized-loop expansion of
         size ``gloops`` around ``where``. An explicit set of loops contributes
         exactly its sites; an integer max-size or ``None`` (smallest loop) is
         turned into a conservative graph-distance radius (a loop of ``C`` sites
-        reaches at most ``~C // 2`` hops out and back).
+        reaches at most ``~C // 2`` hops out and back). Each further join can
+        extend the loop by at most the same radius.
         """
         if gloops is None:
             # smallest non-trivial loop ~ one unit-cell plaquette
@@ -976,10 +977,21 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             for gloop in gloops:
                 sites.update(gloop)
             return sites
+        radius *= max(1, num_joins)
         return self._region_sites(where, radius)
 
     def local_expectation_gloop_expand(
-        self, G, where, gloops=None, gauges=None, normalized=True, **kwargs
+        self,
+        G,
+        where,
+        gloops=None,
+        gauges=None,
+        normalized=True,
+        *,
+        max_size=None,
+        num_joins=1,
+        info=None,
+        **kwargs,
     ):
         """Approximate local expectation of gate ``G`` at sites ``where`` via a
         generalized-loop expansion with the bond ``gauges`` as the environment.
@@ -1000,23 +1012,46 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             Diagonal bond gauges (environments), keyed by bond index.
         normalized : bool, optional
             Whether and how to normalize the result.
+        max_size : None, int, or "min", optional
+            Alias for an automatically generated ``gloops`` size, matching
+            :meth:`~quimb.tensor.networking.gen_gloops`. Cannot be combined
+            with a non-``None`` ``gloops`` specification.
+        num_joins : int, optional
+            How many overlapping generalized loops can be joined together.
+            Typically only vary this with `gloops`/`max_size` set to ``None``
+            or the explicit smallest loop size.
+        info : dict, optional
+            A cache for intermediate contraction results. This can be reused
+            across different loop settings while the tensor network, gauges,
+            and local operator remain unchanged.
 
         Returns
         -------
         float
         """
 
-        fragment_sites = self._gloop_region(where, gloops)
+        if (gloops is not None) and (max_size is not None):
+            raise ValueError("Cannot supply both `gloops` and `max_size`.")
+        if gloops is None:
+            gloops = max_size
+
+        fragment_sites = self._gloop_region(where, gloops, num_joins)
 
         fragment, fragment_gauges = self.build_fragment_with_gauges(
             fragment_sites, gauges
         )
+        if (info is not None) and ("neighbors" in info):
+            # this cache depends on the particular finite fragment
+            info["neighbors"] = fragment.get_site_neighbor_map()
+
         return fragment.local_expectation_gloop_expand(
             G,
             where,
             gloops=gloops,
             gauges=fragment_gauges,
             normalized=normalized,
+            num_joins=num_joins,
+            info=info,
             **kwargs,
         )
 
@@ -1027,6 +1062,9 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         *,
         gauges=None,
         normalized=True,
+        max_size=None,
+        num_joins=1,
+        info=None,
         return_all=False,
         **kwargs,
     ):
@@ -1047,6 +1085,18 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             Diagonal bond gauges (environments), keyed by bond index.
         normalized : bool, optional
             Whether and how to normalize the result.
+        max_size : None, int, or "min", optional
+            Alias for an automatically generated ``gloops`` size, matching
+            :meth:`~quimb.tensor.networking.gen_gloops`. Cannot be combined
+            with a non-``None`` ``gloops`` specification.
+        num_joins : int, optional
+            How many overlapping generalized loops can be joined together.
+            Typically only vary this with `gloops`/`max_size` set to ``None``
+            or the explicit smallest loop size.
+        info : dict, optional
+            A cache for intermediate contraction results. This can be reused
+            across different loop settings while the tensor network, gauges,
+            and local operators remain unchanged.
         return_all : bool, optional
             If ``True`` return the per-``bond_type`` expectations instead of
             their sum.
@@ -1055,17 +1105,28 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         -------
         float or dict[bond_type, float]
         """
+        if (gloops is not None) and (max_size is not None):
+            raise ValueError("Cannot supply both `gloops` and `max_size`.")
+        if gloops is None:
+            gloops = max_size
+
         where_sites = set()
         for where in terms:
             where_sites.update(ensure_inf_2d_sites(where))
         fragment, fragment_gauges = self.build_fragment_with_gauges(
-            self._gloop_region(where_sites, gloops), gauges
+            self._gloop_region(where_sites, gloops, num_joins), gauges
         )
+        if (info is not None) and ("neighbors" in info):
+            # this cache depends on the particular finite fragment
+            info["neighbors"] = fragment.get_site_neighbor_map()
+
         return fragment.compute_local_expectation_gloop_expand(
             terms,
             gloops,
             gauges=fragment_gauges,
             normalized=normalized,
+            num_joins=num_joins,
+            info=info,
             return_all=return_all,
             **kwargs,
         )

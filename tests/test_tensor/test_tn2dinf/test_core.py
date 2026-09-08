@@ -644,6 +644,56 @@ class TestPEPSInfinite2D:
         )
         assert np.isfinite(v) and abs(np.imag(v)) < 1e-10
 
+    def test_gloop_expand_num_joins_and_info(self):
+        geom = geom_square_2x2
+        psi = PEPSInfinite2D.rand(geom, bond_dim=2, seed=42)
+        ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
+        bt = geom.bond_types[0]
+        gauges = {}
+        psi.gauge_all_simple_(gauges=gauges, max_iterations=20)
+        info = {}
+
+        v1 = psi.local_expectation_gloop_expand(
+            ham.get_gate(bt),
+            bt,
+            max_size=None,
+            num_joins=1,
+            gauges=gauges,
+            info=info,
+            optimize="greedy",
+        )
+        cached_expecs = info["expecs"]
+        cached_regions = set(cached_expecs)
+
+        v2 = psi.local_expectation_gloop_expand(
+            ham.get_gate(bt),
+            bt,
+            max_size=None,
+            num_joins=2,
+            gauges=gauges,
+            info=info,
+            optimize="greedy",
+        )
+
+        assert np.isfinite(v1)
+        assert np.isfinite(v2)
+        assert info["expecs"] is cached_expecs
+        assert cached_regions < set(cached_expecs)
+        assert len(psi._gloop_region(bt, None, 2)) > len(
+            psi._gloop_region(bt, None, 1)
+        )
+
+    def test_gloop_expand_rejects_two_size_specs(self):
+        geom = geom_square_2x2
+        psi = PEPSInfinite2D.rand(geom, bond_dim=1)
+        ham = LocalHamInfinite2D(geom, qu.ham_heis(2))
+        bt = geom.bond_types[0]
+
+        with pytest.raises(ValueError, match="both `gloops` and `max_size`"):
+            psi.local_expectation_gloop_expand(
+                ham.get_gate(bt), bt, gloops=4, max_size=4
+            )
+
     def test_gauge_all_simple_populates_and_normalizes(self):
         itn = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=4)
         gauges = {}
