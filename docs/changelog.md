@@ -33,6 +33,7 @@ Release notes for `quimb`.
 - Fix [`tids_are_connected`](#TensorNetwork.tids_are_connected) so its result does not depend on tensor order.
 - Add [`MatrixProductState.from_product`](#MatrixProductState.from_product). [`MPS_product_state`](#MPS_product_state) now calls this method. It accepts block-sparse single-site vectors, e.g. from ``symmray``. Each new bond index is non-dual on the left and dual on the right. This makes the two ends contractible.
 - Add [`distance_from_overlaps`](#distance_from_overlaps) to compute normalized distances and infidelities directly from three precomputed overlaps.
+- Add [`TensorNetwork.insert_projectors_between_regions`](#TensorNetwork.insert_projectors_between_regions) to insert already computed projector arrays between tensor-network regions.
 
 
 **Bug fixes:**

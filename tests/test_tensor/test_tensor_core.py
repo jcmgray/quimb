@@ -23,6 +23,8 @@ from quimb.tensor import (
 )
 from quimb.tensor.tensor_core import _get_gauge_conditioner
 
+from . import jax_case, pytorch_case, tensorflow_case
+
 requires_autograd = pytest.mark.skipif(
     importlib.util.find_spec("autograd") is None,
     reason="autograd not installed",
@@ -2035,6 +2037,130 @@ class TestTensorNetwork:
         rx = ramp.contract()
         xs = mps.to_dense().ravel()
         assert not any(np.allclose(rx, x) for x in xs)
+
+    def test_insert_projectors_between_regions(self):
+        tl = qtn.rand_tensor(
+            (2, 2, 3),
+            inds=("a", "x", "y"),
+            tags="L",
+            dtype="complex128",
+            seed=1,
+        )
+        tr = qtn.rand_tensor(
+            (2, 3, 2),
+            inds=("x", "y", "b"),
+            tags="R",
+            dtype="complex128",
+            seed=2,
+        )
+        tn = tl & tr
+        geometry_hash = tn.geometry_hash()
+
+        rng = np.random.default_rng(3)
+        Pl = rng.normal(size=(6, 4)) + 1j * rng.normal(size=(6, 4))
+        Pr = rng.normal(size=(4, 6)) + 1j * rng.normal(size=(4, 6))
+        expected = np.einsum(
+            "axy,yxk,kzw,wzb->ab",
+            tl.data,
+            Pl.reshape(3, 2, 4),
+            Pr.reshape(4, 3, 2),
+            tr.data,
+        )
+
+        tnp = tn.insert_projectors_between_regions(
+            "L",
+            "R",
+            Pl,
+            Pr,
+            left_inds=("y", "x"),
+            right_inds=("y", "x"),
+            new_tags="P",
+            new_ltags="PL",
+            new_rtags="PR",
+            bond_ind="p",
+        )
+
+        assert tn.geometry_hash() == geometry_hash
+        assert tn.num_tensors == 2
+        assert tnp.num_tensors == 4
+        assert tnp["PL"].inds[-1] == "p"
+        assert tnp["PR"].inds[0] == "p"
+        assert "P" in tnp["PL"].tags
+        assert "P" in tnp["PR"].tags
+        actual = (tnp ^ all).transpose("a", "b").data
+        assert_allclose(actual, expected)
+
+    def test_insert_projectors_between_regions_multiple_tensors_and_inplace(
+        self,
+    ):
+        inputs = ["abgl", "gfhim", "bcdfe", "iekj"]
+        tags = ["A", "C", "B", "D"]
+        ts = [
+            qtn.rand_tensor(
+                [2] * len(inds),
+                inds=inds,
+                tags=tag,
+                dtype="complex128",
+                seed=i,
+            )
+            for i, (inds, tag) in enumerate(zip(inputs, tags))
+        ]
+        tn = qtn.TensorNetwork(ts)
+        geometry_hash = tn.geometry_hash()
+        expected = tn.contract()
+        Pl = Pr = np.eye(8, dtype=complex)
+
+        inserted = tn.insert_projectors_between_regions(
+            ("A", "B"),
+            ("C", "D"),
+            Pl,
+            Pr,
+            new_ltags="PL",
+            new_rtags="PR",
+        )
+        assert inserted.num_tensors == 6
+        assert inserted.contract().almost_equals(expected)
+        assert "PL" in inserted.tags
+        assert "PR" in inserted.tags
+
+        assert tn.geometry_hash() == geometry_hash
+
+        target = tn.copy()
+        result = target.insert_projectors_between_regions_(
+            ("A", "B"),
+            ("C", "D"),
+            Pl,
+            Pr,
+        )
+        assert result is target
+        assert target.num_tensors == 6
+
+    @pytest.mark.parametrize(
+        "backend",
+        ["numpy", jax_case, pytorch_case, tensorflow_case],
+    )
+    def test_insert_projectors_between_regions_backend(self, backend):
+        xp = ar.get_namespace(backend)
+        tn = qtn.TensorNetwork(
+            [
+                qtn.rand_tensor((2, 3), inds=("a", "x"), tags="L"),
+                qtn.rand_tensor((3, 2), inds=("x", "b"), tags="R"),
+            ]
+        )
+        Pl = xp.asarray(np.ones((3, 2)))
+        Pr = xp.asarray(np.ones((2, 3)))
+
+        tnp = tn.insert_projectors_between_regions(
+            "L",
+            "R",
+            Pl,
+            Pr,
+            new_ltags="PL",
+            new_rtags="PR",
+        )
+
+        assert ar.infer_backend(tnp["PL"].data) == backend
+        assert ar.infer_backend(tnp["PR"].data) == backend
 
     @pytest.mark.parametrize("method_reduce", ["eigh", "svd", "cholesky"])
     def test_insert_compressor_between_regions(self, method_reduce):
