@@ -152,6 +152,90 @@ def tags_to_oset(tags):
         return oset(tags)
 
 
+def parse_site_tag_groups(tn, site_tags, tag_id="__GST{}__"):
+    """Turn possible groups of tags specifying sites into single temporary
+    tags. The tensor network is tagged inplace with any needed temporary tags,
+    and the new sequence of single site tags is returned. A callable is also
+    returned that removes the temporary tags from the network it is called on.
+
+    Parameters
+    ----------
+    tn : TensorNetwork or sequence of TensorNetwork
+        The tensor network(s) to tag inplace. Each tensor should belong to
+        exactly one site given by the tags below.
+    site_tags : None or sequence
+        Tags that identify and order sites. Each element can be a single tag
+        or a group. Within a group, each element can be a single tag, matching
+        any tensors with that tag, or a nested sequence of tags, matching
+        tensors with *all* of them only. ``None`` is returned unchanged.
+    tag_id : str, optional
+        Format string for temporary tags.
+
+    Returns
+    -------
+    site_tags : None or tuple[str]
+        One tag per site. A temporary tag replaces each group.
+    untag_groups : callable
+        Removes temporary tags from the given networks and all tensors tagged
+        by this function. This includes tensors since removed from a network.
+
+    Examples
+    --------
+
+        >>> site_tags = [
+        ...     "I0",                   # tag I0
+        ...     ("I1", "I2"),           # tag I1 or I2
+        ...     ("I3", ("I4", "KET")),  # tag I3, or tags I4 and KET
+        ... ]
+
+    """
+    if site_tags is None:
+        return None, lambda *tns: None
+
+    if all(isinstance(st, str) for st in site_tags):
+        return tuple(site_tags), lambda *tns: None
+
+    if isinstance(tn, TensorNetwork):
+        tns = (tn,)
+    else:
+        tns = tuple(tn)
+
+    new_site_tags = []
+    temp_tags = []
+    # algorithms can drop tagged initial tensors, so we record them as well
+    tagged_tensors = {}
+
+    for i, group in enumerate(site_tags):
+        if isinstance(group, str):
+            new_site_tags.append(group)
+            continue
+
+        group = tuple(group)
+        if (len(group) == 1) and isinstance(group[0], str):
+            new_site_tags.append(group[0])
+            continue
+
+        # is a group
+        site_tag = tag_id.format(i)
+        new_site_tags.append(site_tag)
+        temp_tags.append(site_tag)
+        for where in group:
+            # "all" accepts one tag or a sequence of tags
+            for tni in tns:
+                tni.add_tag(
+                    site_tag, where=where, which="all", record=tagged_tensors
+                )
+
+    def untag_groups(*tns):
+        for tni in tns:
+            tni.drop_tags(temp_tags)
+        while tagged_tensors:
+            tensor, tensor_temp_tags = tagged_tensors.popitem()
+            tensor.drop_tags(tensor_temp_tags)
+
+    return tuple(new_site_tags), untag_groups
+
+
 def sortedtuple(x):
     return tuple(sorted(x))
 

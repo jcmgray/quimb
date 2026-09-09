@@ -17,6 +17,7 @@ from ..tensor_core import (
     bonds,
     bonds_size,
     oset,
+    parse_site_tag_groups,
     rand_uuid,
     tags_to_oset,
 )
@@ -1135,56 +1136,54 @@ class TensorNetwork3D(TensorNetworkGen):
         site_tag = r2d.site_tag
         istep = r2d.istep
 
-        def _do_compress(site_tag_tmps):
+        def _do_compress(site_tags):
             nonlocal self
 
-            # split off the boundary network
-            self, tn_boundary = self.partition(site_tag_tmps, inplace=True)
+            site_tags, untag_groups = parse_site_tag_groups(self, site_tags)
+            self, tn_boundary = self.partition(site_tags, inplace=True)
 
-            # compress it inplace
             tensor_network_2d_compress(
                 tn_boundary,
                 max_bond=max_bond,
                 cutoff=cutoff,
                 method=method,
-                site_tags=site_tag_tmps,
+                site_tags=site_tags,
                 inplace=True,
                 **compress_opts,
             )
 
-            # recombine with the main network
             self |= tn_boundary
 
-        # maybe compress the initial row, which may be multiple layers
-        # and have effective bond dimension > max_bond already
-        site_tag_tmps = [
-            site_tag(r2d.sweep[0], j, k) for j, k in r2d.sweep_other
-        ]
-        if any(len(self.tag_map[st]) > 1 for st in site_tag_tmps):
-            _do_compress(site_tag_tmps)
+            # also clean tensors replaced during compression
+            untag_groups(self)
 
-        site_tag_tmps = [f"__ST{j},{k}__" for j, k in r2d.sweep_other]
+        # the initial plane can contain several layers
+        site_tags = [site_tag(r2d.sweep[0], j, k) for j, k in r2d.sweep_other]
+        if any(len(self.tag_map[st]) > 1 for st in site_tags):
+            _do_compress(site_tags)
 
         if layer_tags is None:
             layer_tags = [None]
 
         for i in r2d.sweep[:-1]:
             for layer_tag in layer_tags:
-                for (j, k), st in zip(r2d.sweep_other, site_tag_tmps):
-                    # group outer single tensor with inner tensor(s)
-                    tag1 = site_tag(i, j, k)  # outer
-                    tag2 = site_tag(i + istep, j, k)  # inner
-                    if layer_tag is None:
-                        # tag and compress any inner tensors
-                        self.select_any((tag1, tag2)).add_tag(st)
-                    else:
-                        # only tag and compress one inner layer
-                        self.select_all((tag1,)).add_tag(st)
-                        self.select_all((tag2, layer_tag)).add_tag(st)
+                if layer_tag is None:
+                    # group all tensors tagged (i,j,k) OR (i+istep,j,k)
+                    site_tags = [
+                        (site_tag(i, j, k), site_tag(i + istep, j, k))
+                        for j, k in r2d.sweep_other
+                    ]
+                else:
+                    # group all tagged (i,j,k) OR ((i+istep,j,k) AND layer_tag)
+                    site_tags = [
+                        (
+                            site_tag(i, j, k),
+                            (site_tag(i + istep, j, k), layer_tag),
+                        )
+                        for j, k in r2d.sweep_other
+                    ]
 
-                _do_compress(site_tag_tmps)
-
-        self.drop_tags(site_tag_tmps)
+                _do_compress(site_tags)
 
     def _contract_boundary_core(
         self,
@@ -1396,12 +1395,11 @@ class TensorNetwork3D(TensorNetworkGen):
         for i0, i1 in pairwise(r.sweep):
             tnp = self.partition([r.x_tag(i0), r.x_tag(i1)], inplace=True)[1]
 
-            regions = []
-            for j, k in r.sweep_other:
-                region_tag = f"__R{j},{k}__"
-                tnp[r.site_tag(i0, j, k)].add_tag(region_tag)
-                tnp[r.site_tag(i1, j, k)].add_tag(region_tag)
-                regions.append(region_tag)
+            regions = [
+                (r.site_tag(i0, j, k), r.site_tag(i1, j, k))
+                for j, k in r.sweep_other
+            ]
+            regions, untag_groups = parse_site_tag_groups(tnp, regions)
 
             l2bp.compress_l2bp(
                 tnp,
@@ -1413,7 +1411,7 @@ class TensorNetwork3D(TensorNetworkGen):
                 inplace=True,
                 **compress_opts,
             )
-            tnp.drop_tags(regions)
+            untag_groups(tnp)
             self |= tnp
 
             if equalize_norms:

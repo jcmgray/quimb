@@ -35,6 +35,7 @@ Release notes for `quimb`.
 - Add [`distance_from_overlaps`](#distance_from_overlaps) to compute normalized distances and infidelities directly from three precomputed overlaps.
 - Add [`TensorNetwork.insert_projectors_between_regions`](#TensorNetwork.insert_projectors_between_regions) to insert already computed projector arrays between tensor-network regions.
 - Infinite 2D generalized-loop expectations accept ``max_size`` and ``num_joins`` loop-generation options. Their ``info`` cache can be reused across different loop settings while the state, gauges, and operators are unchanged.
+- Compression functions now accept tag *groups* in ``site_tags``. A tag in a group selects tensors with that tag. A nested sequence selects tensors with every tag. See [`parse_site_tag_groups`](#parse_site_tag_groups). The 1D, 2D, and arbitrary-geometry compression wrappers also accept custom `method` callables.
 
 
 **Bug fixes:**
@@ -48,6 +49,7 @@ Release notes for `quimb`.
 - [`compute_oblique_projectors`](#compute_oblique_projectors): damp inverse singular values at ``max(s) * eps`` instead of dividing by them directly. Rank-deficient environments can retain zero singular values when ``cutoff=0.0``. These values previously produced ``inf`` or ``nan`` projectors. The shared diagonal division helpers use the same damping. This also applies to [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges="inverse"``.
 - [`safe_inverse`](#safe_inverse): compute a scalar maximum for a single vector. The previous last-axis reduction broadcast the result back. This caused a ``TypeError`` in ``mode="projector"`` boundary contractions with block-sparse backends such as ``symmray``.
 - 1D compression: fix ``sdc`` and ``sdc-oversample`` for fermionic tensor networks.
+- 3D boundary contraction: remove temporary site tags from replaced tensors, including tensors shared with cached environments.
 - [`tensor_split`](#tensor_split): fix ``method='svd:rand'`` for complex and single precision arrays: use autoray random.array interface to match dtype and device.
 - [`tensor_split`](#tensor_split): fix ``method='svd:eig'`` with nonzero ``cutoff`` for single precision and numba
 - 1D compression: fix ``dm`` for fermionic tensor networks, including mixed bond orientations. Its eigendecomposition now keeps the same subspace as a direct SVD.
