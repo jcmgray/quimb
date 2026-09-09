@@ -273,6 +273,20 @@ class Test2DContract:
         xt = norm.contract_boundary(max_bond=27, layer_tags=["KET", "BRA"])
         assert xt == pytest.approx(xe, rel=1e-2)
 
+    @pytest.mark.parametrize("two_layer", [False, True])
+    def test_contract_2d_boundary_via_1d(self, two_layer):
+        psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags="KET")
+        norm = psi.make_norm()
+        xe = norm.contract(all, optimize="auto-hq")
+
+        # retain a virtual view to detect leaked tags
+        view = norm.select(norm.x_tag(0))
+
+        layer_tags = ["KET", "BRA"] if two_layer else None
+        norm.contract_boundary_(max_bond=27, mode="dm", layer_tags=layer_tags)
+        assert norm.contract(all) == pytest.approx(xe, rel=5e-2)
+        assert not any(tag.startswith("__ST") for tag in view.tag_map)
+
     def test_contract_2d_full_bond(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags="KET")
         norm = psi.make_norm()

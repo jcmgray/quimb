@@ -24,6 +24,7 @@ from ..tensor_core import (
     bonds,
     bonds_size,
     oset,
+    parse_site_tag_groups,
     rand_uuid,
     tags_to_oset,
 )
@@ -1287,70 +1288,49 @@ class TensorNetwork2D(TensorNetworkGen):
         site_tag = r2d.site_tag
         istep = r2d.istep
 
-        def _do_compress(site_tag_tmps):
-            # split off the boundary network
-            tn_boundary = self.partition(site_tag_tmps, inplace=True)[1]
+        def _do_compress(site_tags):
+            site_tags, untag_groups = parse_site_tag_groups(self, site_tags)
+            tn_boundary = self.partition(site_tags, inplace=True)[1]
 
-            # compress it inplace
             tensor_network_1d_compress(
                 tn_boundary,
                 max_bond=max_bond,
                 cutoff=cutoff,
                 method=method,
-                site_tags=site_tag_tmps,
+                site_tags=site_tags,
                 inplace=True,
                 **compress_opts,
             )
 
-            # recombine with the main network
             self.add_tensor_network(tn_boundary, virtual=True)
 
-        # maybe compress the initial row, which may be multiple layers
-        # and have effective bond dimension > max_bond already
-        site_tag_tmps = [site_tag(r2d.sweep[0], j) for j in r2d.sweep_other]
-        if any(len(self.tag_map[st]) > 1 for st in site_tag_tmps):
-            _do_compress(site_tag_tmps)
+            # also clean tensors replaced during compression
+            untag_groups(self)
 
-        site_tag_tmps = [f"__ST{j}__" for j in r2d.sweep_other]
+        # the initial row can contain several layers
+        site_tags = [site_tag(r2d.sweep[0], j) for j in r2d.sweep_other]
+        if any(len(self.tag_map[st]) > 1 for st in site_tags):
+            _do_compress(site_tags)
 
         if layer_tags is None:
             layer_tags = [None]
 
-        # we explicitly track the temporary tags to drop later, so we don't
-        # have to track all the env networks they might appear in
-        record = {}
-
         for i in r2d.sweep[:-1]:
             for layer_tag in layer_tags:
-                for j, st in zip(r2d.sweep_other, site_tag_tmps):
-                    # group outer single tensor with inner tensor(s)
-                    tag1 = site_tag(i, j)  # outer
-                    tag2 = site_tag(i + istep, j)  # inner
-                    if layer_tag is None:
-                        # tag and compress any inner tensors
-                        self.add_tag(
-                            st,
-                            where=(tag1, tag2),
-                            which="any",
-                            record=record,
-                        )
-                    else:
-                        # only tag and compress one inner layer
-                        self.add_tag(st, where=(tag1,), record=record)
-                        self.add_tag(
-                            st,
-                            where=(tag2, layer_tag),
-                            which="all",
-                            record=record,
-                        )
+                if layer_tag is None:
+                    # group all tensors tagged (i,j) OR (i+istep,j)
+                    site_tags = [
+                        (site_tag(i, j), site_tag(i + istep, j))
+                        for j in r2d.sweep_other
+                    ]
+                else:
+                    # group all tagged (i,j) OR ((i+istep,j) AND layer_tag)
+                    site_tags = [
+                        (site_tag(i, j), (site_tag(i + istep, j), layer_tag))
+                        for j in r2d.sweep_other
+                    ]
 
-                _do_compress(site_tag_tmps)
-
-        # rewind *all* the temporary tags
-        self.drop_tags(site_tag_tmps)
-        # even those not in final boundary
-        for t, t_tmp_tags in record.items():
-            t.drop_tags(t_tmp_tags)
+                _do_compress(site_tags)
 
     def _contract_boundary_core(
         self,

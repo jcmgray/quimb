@@ -73,6 +73,20 @@ class Test3DManualContract:
         f = -qu.log(Z) / (L**3 * beta)
         assert f == pytest.approx(fex, rel=1e-3)
 
+    @pytest.mark.parametrize("mode", ["local-early", "projector", "l2bp3d"])
+    def test_contract_boundary_via_2d_no_stale_tags(self, mode):
+        L = 4
+        beta = 0.3
+        tn = qtn.TN3D_classical_ising_partition_function(L, L, L, beta=beta)
+        Zex = tn.contract_boundary(max_bond=8)
+
+        # retain a virtual view to detect leaked tags
+        view = tn.select(tn.x_tag(0))
+
+        tn.contract_boundary_(max_bond=8, mode=mode)
+        assert tn.contract(all) == pytest.approx(Zex, rel=1e-1)
+        assert not any(tag.startswith(("__ST", "__R")) for tag in view.tag_map)
+
     def test_contract_peps_sweep_strip_exponent(self):
         tn = qtn.TN3D_classical_ising_partition_function(3, 3, 3, beta=0.3)
         tn.multiply_each_(1e20)

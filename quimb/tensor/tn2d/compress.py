@@ -29,12 +29,14 @@ def tensor_network_2d_compress(
         The maximum bond dimension to compress to.
     cutoff : float, optional
         A dynamic threshold for discarding singular values when compressing.
-    method : {"direct", "dm", "zipup", "zipup-first", "fit", "projector"}
-        The compression method to use.
-    site_tags : sequence of sequence of str, optional
-        The tags to use to group and order the tensors from ``tn``. If not
-        given, uses ``tn.site_tags``. The tensor network built will have one
-        tensor per site, in the order given by ``site_tags``.
+    method : str or callable, optional
+        The compression method to use. A callable is passed the same arguments
+        as a built-in 2D method.
+    site_tags : sequence of str or tag groups, optional
+        Tags that identify and order sites. Defaults to ``tn.site_tags``.
+        Each item can group tags as described by
+        :func:`~quimb.tensor.parse_site_tag_groups`. The output has one tensor
+        per item.
     canonize : bool, optional
         Whether to perform canonicalization, pseudo or otherwise depending on
         the method, before compressing. Ignored for ``method='dm'`` and
@@ -60,8 +62,13 @@ def tensor_network_2d_compress(
     """
     compress_opts = compress_opts or {}
 
-    try:
-        return _TN2D_COMPRESS_METHODS[method](
+    if callable(method):
+        f_tn2d = method
+    else:
+        f_tn2d = _TN2D_COMPRESS_METHODS.get(method, None)
+
+    if f_tn2d is not None:
+        return f_tn2d(
             tn,
             max_bond=max_bond,
             cutoff=cutoff,
@@ -74,23 +81,23 @@ def tensor_network_2d_compress(
             compress_opts=compress_opts,
             **kwargs,
         )
-    except KeyError:
-        # try arbitrary geometry methods
-        tnc = tensor_network_ag_compress(
-            tn,
-            max_bond=max_bond,
-            cutoff=cutoff,
-            method=method,
-            site_tags=site_tags,
-            canonize=canonize,
-            optimize=optimize,
-            equalize_norms=equalize_norms,
-            inplace=inplace,
-            compress_opts=compress_opts,
-            **kwargs,
-        )
 
-        if permute_arrays:
-            possibly_permute_(tnc, permute_arrays)
+    # try arbitrary geometry methods
+    tnc = tensor_network_ag_compress(
+        tn,
+        max_bond=max_bond,
+        cutoff=cutoff,
+        method=method,
+        site_tags=site_tags,
+        canonize=canonize,
+        optimize=optimize,
+        equalize_norms=equalize_norms,
+        inplace=inplace,
+        compress_opts=compress_opts,
+        **kwargs,
+    )
 
-        return tnc
+    if permute_arrays:
+        possibly_permute_(tnc, permute_arrays)
+
+    return tnc

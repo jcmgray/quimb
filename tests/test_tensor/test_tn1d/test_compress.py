@@ -483,3 +483,72 @@ def test_mpo_compress_opts(method, sweep_reverse):
 
     for site in range(L):
         assert set(ABc[site].tags) == {"A", "B", f"I{site}"}
+
+
+@pytest.mark.parametrize("method", ["direct", "local-early"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_compress_site_tag_groups(method, nested):
+    L = 6
+    max_bond = 4
+    A = qtn.MPO_rand(L, 3, phys_dim=2, seed=42, tags="A")
+    B = qtn.MPS_rand_state(L, 3, phys_dim=2, seed=43, tags="B")
+    AB = qtn.tensor_network_apply_op_vec(A, B, contract=False)
+
+    # add a unique tag to each tensor at a site
+    for i in range(L):
+        AB.select(("A", AB.site_tag(i)), "all").add_tag(f"L{i}")
+        AB.select(("B", AB.site_tag(i)), "all").add_tag(f"R{i}")
+
+    if nested:
+        # the nested item requires both tags
+        site_tags = [(f"L{i}", (f"R{i}", "B")) for i in range(L)]
+    else:
+        site_tags = [(f"L{i}", f"R{i}") for i in range(L)]
+
+    # retain a virtual view to detect leaked tags
+    view = AB.select("A")
+
+    ref = qtn.tensor_network_1d_compress(AB, max_bond=max_bond, method=method)
+    ABc = qtn.tensor_network_1d_compress(
+        AB, max_bond=max_bond, method=method, site_tags=site_tags
+    )
+
+    assert ABc.num_tensors == L
+    assert ABc.max_bond() == max_bond
+    for src in (ABc, AB, view):
+        assert not any(tag.startswith("__GST") for tag in src.tag_map)
+    for i in range(L):
+        assert set(ABc[f"L{i}"].tags) == {"A", "B", f"I{i}", f"L{i}", f"R{i}"}
+
+    # both forms select the same tensors
+    np.testing.assert_allclose(ABc.to_dense(), ref.to_dense(), atol=1e-12)
+
+
+def test_compress_fit_site_tag_groups_with_initial_guess():
+    L = 4
+    A = qtn.MPO_rand(L, 3, phys_dim=2, seed=42, tags="A")
+    B = qtn.MPS_rand_state(L, 3, phys_dim=2, seed=43, tags="B")
+    AB = qtn.tensor_network_apply_op_vec(A, B, contract=False)
+    guess = qtn.MPS_rand_state(L, 2, phys_dim=2, seed=44)
+
+    site_tags = []
+    for i in range(L):
+        left_tag = f"L{i}"
+        right_tag = f"R{i}"
+        AB.select(("A", AB.site_tag(i)), "all").add_tag(left_tag)
+        AB.select(("B", AB.site_tag(i)), "all").add_tag(right_tag)
+        guess[i].add_tag((left_tag, right_tag))
+        site_tags.append((left_tag, right_tag))
+
+    ABc = qtn.tensor_network_1d_compress(
+        AB,
+        max_bond=2,
+        method="fit",
+        site_tags=site_tags,
+        tn_fit=guess,
+        max_iterations=1,
+    )
+
+    assert ABc.num_tensors == L
+    for src in (ABc, AB, guess):
+        assert not any(tag.startswith("__GST") for tag in src.tag_map)
