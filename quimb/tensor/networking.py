@@ -1135,7 +1135,10 @@ def gen_gloops(
         If larger than 1, repeatedly generate larger loops by joining together
         the initial set (individually with size up to ``max_size``) of
         generalized loops. Each join combines loops that overlap on at least
-        ``join_overlap`` tids.
+        ``join_overlap`` tids. If ``tids`` are supplied, the base loops for
+        each join are generated only around the current patches. An automatic
+        ``max_size`` is resolved from the initial targeted loops and then held
+        fixed.
     join_overlap : {1, 2}, optional
         When joining loops together, the minimum number of overlapping
         tids they much share. 1 allows merging on a single node, 2 requires
@@ -1148,6 +1151,7 @@ def gen_gloops(
     if num_joins < 1:
         return ()
 
+    targeted = tids is not None
     base_gloops = _gen_gloops_single(
         tn,
         max_size=max_size,
@@ -1159,25 +1163,6 @@ def gen_gloops(
         # just return the base loops
         return base_gloops
 
-    # will reuse
-    current_patches = tuple(map(frozenset, base_gloops))
-
-    if tids is None:
-        # loops are already global
-        base_gloops = current_patches
-    else:
-        # need to merge local base loops with global loops
-        # XXX: do this with the tids in current_patches, every join
-        base_gloops = tuple(
-            map(frozenset, _gen_gloops_single(tn, max_size=max_size))
-        )
-
-    # efficient lookup of overlapping gloop tids
-    lookup = {}
-    for gl in base_gloops:
-        for tid in gl:
-            lookup.setdefault(tid, []).append(gl)
-
     once = set()
     twice = set()
 
@@ -1188,7 +1173,41 @@ def gen_gloops(
     else:
         raise ValueError("`join_overlap` must be 1 or 2.")
 
+    current_patches = tuple(map(frozenset, base_gloops))
+    if not current_patches:
+        return ()
+
+    if max_size in (None, "min"):
+        # reuse the automatically resolved initial base-loop size
+        base_max_size = max(map(len, current_patches))
+    else:
+        base_max_size = max_size
+
+    if not targeted:
+        # loops are already global and can be reused for every join
+        lookup = {}
+        for gl in current_patches:
+            for tid in gl:
+                lookup.setdefault(tid, []).append(gl)
+
     for _ in range(num_joins - 1):
+        if targeted:
+            # only generate base loops which can join the current patches
+            target_tids = set().union(*current_patches)
+            base_gloops = map(
+                frozenset,
+                _gen_gloops_single(
+                    tn,
+                    max_size=base_max_size,
+                    tids=target_tids,
+                    grow_from="any",
+                ),
+            )
+            lookup = {}
+            for gl in base_gloops:
+                for tid in gl:
+                    lookup.setdefault(tid, []).append(gl)
+
         next_patches = set()
         for gl in current_patches:
             once.clear()
@@ -1197,7 +1216,7 @@ def gen_gloops(
             # for each tensor
             for tid in gl:
                 # lookup possible base loops to merge with
-                for glo in lookup[tid]:
+                for glo in lookup.get(tid, ()):
                     if glo in once:
                         twice.add(glo)
                     else:

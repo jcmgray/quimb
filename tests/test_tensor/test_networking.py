@@ -91,11 +91,11 @@ def test_gen_inds_connected():
 
 class TestGenGloops:
     # a triangle sharing the single site 2 with a square
-    edges = [(0, 1), (1, 2), (2, 0), (2, 3), (3, 4), (4, 5), (5, 2)]
+    edges = ((0, 1), (1, 2), (2, 0), (2, 3), (3, 4), (4, 5), (5, 2))
 
     # site 3 dangles, and here the size 3 loops are only found after some
     # size 4 regions have already been queued
-    ragged_edges = [
+    ragged_edges = (
         (0, 1),
         (0, 7),
         (0, 8),
@@ -108,10 +108,10 @@ class TestGenGloops:
         (4, 8),
         (5, 6),
         (7, 8),
-    ]
+    )
 
     # two triangles joined by a path, whose sites lie on no cycle
-    dumbbell_edges = [
+    dumbbell_edges = (
         (0, 1),
         (1, 2),
         (2, 0),
@@ -121,10 +121,10 @@ class TestGenGloops:
         (5, 6),
         (6, 7),
         (7, 5),
-    ]
+    )
 
     # a triangle and a square with no bond between them
-    split_edges = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 6), (6, 3)]
+    split_edges = ((0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 6), (6, 3))
 
     @staticmethod
     def get_gloops(psi, max_size=None, **kwargs):
@@ -264,9 +264,8 @@ class TestGenGloops:
             len(self.get_gloops(psi, 4, sites=sites, grow_from=grow_from)) > 1
         )
 
-    def test_num_joins_generates_global_gloops(self):
-        # joining local gloops needs the global ones, which are generated with
-        # the same `max_size` -> the dangling site 3 is ignored by both
+    def test_num_joins_grows_from_local_gloops(self):
+        # each join generates only base loops intersecting the current patches
         psi = qtn.TN_from_edges_rand(
             self.ragged_edges, D=2, phys_dim=2, seed=42
         )
@@ -279,10 +278,54 @@ class TestGenGloops:
             warnings.simplefilter("error")
             assert self.get_gloops(
                 psi, sites=sites, grow_from="any", num_joins=2
-            ) == [(0, 1, 2, 4, 7, 8), (0, 1, 7), (0, 1, 7, 8), (0, 7, 8)]
+            ) == [(0, 1, 7), (0, 1, 7, 8), (0, 7, 8)]
         assert self.get_gloops(
             psi, "min", sites=sites, grow_from="any", num_joins=2
         ) == [(0, 1, 7), (0, 1, 7, 8), (0, 7, 8)]
+
+        # each round can reach base loops neighboring the previous patches
+        assert self.get_gloops(
+            psi, 5, sites=sites, grow_from="any", num_joins=3
+        )[0] == (0, 1, 2, 4, 5, 6, 7, 8)
+
+    @pytest.mark.parametrize("join_overlap", [1, 2])
+    def test_local_joins_match_global_reference(self, join_overlap):
+        psi = qtn.TN_from_edges_rand(
+            self.ragged_edges, D=2, phys_dim=2, seed=42
+        )
+        max_size = 5
+        base_gloops = tuple(map(frozenset, psi.gen_gloops_sites(max_size)))
+        current = set(
+            map(
+                frozenset,
+                psi.gen_gloops_sites(
+                    max_size,
+                    sites=(0,),
+                    grow_from="any",
+                ),
+            )
+        )
+
+        for num_joins in (1, 2, 3):
+            actual = set(
+                map(
+                    frozenset,
+                    psi.gen_gloops_sites(
+                        max_size,
+                        sites=(0,),
+                        grow_from="any",
+                        num_joins=num_joins,
+                        join_overlap=join_overlap,
+                    ),
+                )
+            )
+            assert actual == current
+            current = {
+                patch | base
+                for patch in current
+                for base in base_gloops
+                if len(patch & base) >= join_overlap
+            }
 
     @pytest.mark.parametrize("max_size", [None, "min", 4])
     @pytest.mark.parametrize("grow_from", ["all", "any"])
