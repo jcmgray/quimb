@@ -701,7 +701,7 @@ def tensor_network_1d_compress_zipup(
     site_tags=None,
     canonize=True,
     normalize=False,
-    cutoff_mode="rsum2",
+    cutoff_mode="rel",
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
@@ -744,7 +744,7 @@ def tensor_network_1d_compress_zipup(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
-    cutoff_mode : {"rsum2", "rel", ...}, optional
+    cutoff_mode : {"rel", "rsum2", ...}, optional
         The mode to use when truncating the singular values of the decomposed
         tensors. See :func:`~quimb.tensor.tensor_split`.
     permute_arrays : bool or str, optional
@@ -945,11 +945,12 @@ def tensor_network_1d_compress_zipup_oversample(
     max_bond=None,
     max_bond_oversample=None,
     cutoff=1e-10,
-    cutoff_oversample=None,
+    cutoff_oversample="auto",
     site_tags=None,
     canonize=True,
     normalize=False,
     cutoff_mode="rsum2",
+    cutoff_mode_oversample="rel",
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
@@ -957,6 +958,7 @@ def tensor_network_1d_compress_zipup_oversample(
     contract_opts=None,
     canonize_opts=None,
     compress_opts=None,
+    compress_opts_final=None,
     inplace=False,
     **kwargs,
 ):
@@ -985,11 +987,11 @@ def tensor_network_1d_compress_zipup_oversample(
         twice the target bond dimension, ``2 * max_bond``.
     cutoff : float, optional
         A dynamic threshold for discarding singular values when compressing.
-    cutoff_oversample : float, optional
+    cutoff_oversample : float or "auto", optional
         A dynamic threshold for discarding singular values when compressing to
-        the intermediate bond dimension using the 'zip-up' algorithm. If not
-        given, this is set to the same as ``cutoff`` if a maximum bond is
-        given, else ``cutoff / 10``.
+        the intermediate bond dimension using the 'zip-up' algorithm.
+        With ``"auto"``, use ``0.0`` for randomized SVD and ``1e-10`` for
+        exact decompositions, independently of the final sweep's ``cutoff``.
     site_tags : sequence of str or tag groups, optional
         Tags that identify and order sites. Defaults to ``tn.site_tags``.
         Each item can group tags as described by
@@ -1001,8 +1003,11 @@ def tensor_network_1d_compress_zipup_oversample(
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
     cutoff_mode : {"rsum2", "rel", ...}, optional
-        The mode to use when truncating the singular values of the decomposed
-        tensors. See :func:`~quimb.tensor.tensor_split`.
+        The mode used in the final canonical sweep.
+        See :func:`~quimb.tensor.tensor_split`.
+    cutoff_mode_oversample : {"rel", "rsum2", ...}, optional
+        The mode used in the intermediate pseudo-canonical zipup step,
+        independently of the final sweep. Defaults to ``"rel"``.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1022,12 +1027,15 @@ def tensor_network_1d_compress_zipup_oversample(
     canonize_opts : dict, optional
         Supplied to :func:`tensor_network_1d_compress_zipup` when
         pseudo-canonicalizing in the oversampling step.
+    compress_opts : dict, optional
+        Supplied to :func:`~quimb.tensor.tensor_split` in the intermediate
+        zipup step only. Values set here take precedence over defaults.
+    compress_opts_final : dict, optional
+        Options for the final direct sweep, independently of ``compress_opts``.
+        Defaults to exact SVD. Values set here override the final sweep's
+        ``max_bond``, ``cutoff``, and ``cutoff_mode``.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
-    compress_opts : dict, optional
-        Supplied to :func:`~quimb.tensor.tensor_split` in the oversampling step
-        and to :func:`~quimb.tensor.TensorNetwork.compress_between` in the
-        final direct sweep. Values set here take precedence over defaults.
     kwargs
         Extra keyword arguments are combined into `compress_opts`, though
         existing items in `compress_opts` take precedence over `kwargs`.
@@ -1063,14 +1071,6 @@ def tensor_network_1d_compress_zipup_oversample(
         # assume manually supplied, `max_bond` is not needed
         max_bond_oversample = int(max_bond_oversample)
 
-    if cutoff_oversample is None:
-        if max_bond is None:
-            # fully dynamic mode
-            cutoff_oversample = cutoff / 10
-        else:
-            # assume max_bond limited
-            cutoff_oversample = cutoff
-
     if site_tags is None:
         site_tags = tn.site_tags
     if sweep_reverse:
@@ -1084,7 +1084,7 @@ def tensor_network_1d_compress_zipup_oversample(
         cutoff=cutoff_oversample,
         site_tags=site_tags,
         canonize=canonize,
-        cutoff_mode=cutoff_mode,
+        cutoff_mode=cutoff_mode_oversample,
         optimize=optimize,
         sweep_reverse=True,
         equalize_norms=equalize_norms,
@@ -1103,7 +1103,7 @@ def tensor_network_1d_compress_zipup_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        compress_opts=compress_opts,
+        compress_opts=compress_opts_final,
     )
 
     untag_groups(new)
@@ -1201,6 +1201,7 @@ def _do_sweep_compress_from_low_rank_left_envs(
     project_opts = ensure_dict(project_opts)
     project_opts.setdefault("method", "qr")
     project_opts.setdefault("absorb", "lorthog")
+    project_opts.setdefault("cutoff", 0.0)
 
     # we sweep in from the right
     L = len(local_tns)
@@ -1355,7 +1356,7 @@ def tensor_network_1d_compress_sdc(
     cutoff=1e-10,
     site_tags=None,
     normalize=False,
-    cutoff_mode="rsum2",
+    cutoff_mode="rel",
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
@@ -1394,7 +1395,7 @@ def tensor_network_1d_compress_sdc(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
-    cutoff_mode : {"rsum2", "rel", ...}, optional
+    cutoff_mode : {"rel", "rsum2", ...}, optional
         The mode to use when truncating the singular values of the left
         environments. See :func:`~quimb.tensor.tensor_split`.
     permute_arrays : bool or str, optional
@@ -1544,6 +1545,7 @@ def tensor_network_1d_compress_sdc_oversample(
     canonize=True,
     normalize=False,
     cutoff_mode="rsum2",
+    cutoff_mode_oversample="rel",
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
@@ -1551,6 +1553,7 @@ def tensor_network_1d_compress_sdc_oversample(
     contract_opts=None,
     project_opts=None,
     compress_opts=None,
+    compress_opts_final=None,
     inplace=False,
     **kwargs,
 ):
@@ -1589,8 +1592,11 @@ def tensor_network_1d_compress_sdc_oversample(
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
     cutoff_mode : {"rsum2", "rel", ...}, optional
-        The mode to use when truncating singular values in both compression
-        sweeps. See :func:`~quimb.tensor.tensor_split`.
+        The mode used in the final canonical sweep.
+        See :func:`~quimb.tensor.tensor_split`.
+    cutoff_mode_oversample : {"rel", "rsum2", ...}, optional
+        The mode used for the intermediate low-rank left environments,
+        independently of the final sweep. Defaults to ``"rel"``.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1612,9 +1618,12 @@ def tensor_network_1d_compress_sdc_oversample(
         orthogonal projectors in the SDC step. Values set here take precedence
         over defaults.
     compress_opts : dict, optional
-        Supplied to :func:`~quimb.tensor.tensor_split` in the SDC step and to
-        :func:`~quimb.tensor.TensorNetwork.compress_between` in the final
-        direct sweep. Values set here take precedence over defaults.
+        Supplied to :func:`~quimb.tensor.tensor_split` in the intermediate
+        SDC step only. Values set here take precedence over defaults.
+    compress_opts_final : dict, optional
+        Options for the final direct sweep, independently of ``compress_opts``.
+        Defaults to exact SVD. Values set here override the final sweep's
+        ``max_bond``, ``cutoff``, and ``cutoff_mode``.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     kwargs
@@ -1660,7 +1669,7 @@ def tensor_network_1d_compress_sdc_oversample(
         cutoff=cutoff_oversample,
         site_tags=site_tags,
         normalize=False,
-        cutoff_mode=cutoff_mode,
+        cutoff_mode=cutoff_mode_oversample,
         permute_arrays=False,
         optimize=optimize,
         sweep_reverse=True,
@@ -1681,7 +1690,7 @@ def tensor_network_1d_compress_sdc_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        compress_opts=compress_opts,
+        compress_opts=compress_opts_final,
     )
 
     untag_groups(new)
@@ -1691,10 +1700,10 @@ def tensor_network_1d_compress_sdc_oversample(
 def tensor_network_1d_compress_sdcr(
     tn: TensorNetwork,
     max_bond: int,
-    cutoff=1e-10,
+    cutoff="auto",
     site_tags=None,
     normalize=False,
-    cutoff_mode="rsum2",
+    cutoff_mode="rel",
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
@@ -1720,8 +1729,9 @@ def tensor_network_1d_compress_sdcr(
     max_bond : int
         The maximum bond dimension to compress to, also the rank of the
         randomized sketches.
-    cutoff : float, optional
-        Unused by the default randomized method, use ``max_bond``.
+    cutoff : float or "auto", optional
+        A non-cumulative threshold for discarding singular values. With
+        ``"auto"``, use only ``max_bond``.
     site_tags : sequence of str or tag groups, optional
         Tags that identify and order sites. Defaults to ``tn.site_tags``.
         Each item can group tags as described by
@@ -1730,9 +1740,10 @@ def tensor_network_1d_compress_sdcr(
     normalize : bool, optional
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
-    cutoff_mode : {"rsum2", "rel", ...}, optional
+    cutoff_mode : {"rel", "abs"}, optional
         The mode to use when truncating the singular values of the left
-        environments. See :func:`~quimb.tensor.tensor_split`.
+        environments. Defaults to ``"rel"``. See
+        :func:`~quimb.tensor.tensor_split`.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1815,6 +1826,7 @@ def tensor_network_1d_compress_sdcr_oversample(
     canonize=True,
     normalize=False,
     cutoff_mode="rsum2",
+    cutoff_mode_oversample="rel",
     permute_arrays=True,
     optimize="auto-hq",
     sweep_reverse=False,
@@ -1822,6 +1834,7 @@ def tensor_network_1d_compress_sdcr_oversample(
     contract_opts=None,
     project_opts=None,
     compress_opts=None,
+    compress_opts_final=None,
     inplace=False,
     **kwargs,
 ):
@@ -1846,7 +1859,11 @@ def tensor_network_1d_compress_sdcr_oversample(
         A dynamic threshold for discarding singular values during the final
         direct sweep.
     cutoff_oversample : float, optional
-        Unused by the default randomized method of the SDCR step.
+        A non-cumulative threshold for discarding singular values in the SDCR
+        step, interpreted using ``cutoff_mode_oversample``.
+    cutoff_mode_oversample : {"rel", "abs"}, optional
+        How to interpret the SDCR step's cutoff. Defaults to ``"rel"``,
+        independently of the final direct sweep's ``cutoff_mode``.
     site_tags : sequence of str or tag groups, optional
         Tags that identify and order sites. Defaults to ``tn.site_tags``.
         Each item can group tags as described by
@@ -1859,8 +1876,8 @@ def tensor_network_1d_compress_sdcr_oversample(
         Whether to normalize the final tensor network, making use of the fact
         that the output tensor network is in right canonical form.
     cutoff_mode : {"rsum2", "rel", ...}, optional
-        The mode to use when truncating singular values in both compression
-        sweeps. See :func:`~quimb.tensor.tensor_split`.
+        The mode to use when truncating singular values in the final direct
+        sweep. See :func:`~quimb.tensor.tensor_split`.
     permute_arrays : bool or str, optional
         Whether to permute the array indices of the final tensor network into
         canonical order. If ``True`` will use the default order, otherwise if a
@@ -1883,10 +1900,12 @@ def tensor_network_1d_compress_sdcr_oversample(
         over defaults.
     compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` in the SDCR step, where
-        the randomized defaults are applied, and to
-        :func:`~quimb.tensor.TensorNetwork.compress_between` in the final
-        direct sweep, which is always exact. Values set here take precedence
-        over defaults.
+        the randomized defaults are applied. These options only affect the
+        intermediate step and take precedence over defaults.
+    compress_opts_final : dict, optional
+        Options for the final direct sweep, independently of ``compress_opts``.
+        Defaults to exact SVD. Values set here override the final sweep's
+        ``max_bond``, ``cutoff``, and ``cutoff_mode``.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     kwargs
@@ -1932,7 +1951,7 @@ def tensor_network_1d_compress_sdcr_oversample(
         cutoff=cutoff_oversample,
         site_tags=site_tags,
         normalize=False,
-        cutoff_mode=cutoff_mode,
+        cutoff_mode=cutoff_mode_oversample,
         permute_arrays=False,
         optimize=optimize,
         sweep_reverse=True,
@@ -1953,7 +1972,7 @@ def tensor_network_1d_compress_sdcr_oversample(
         equalize_norms=equalize_norms,
         normalize=normalize,
         permute_arrays=permute_arrays,
-        compress_opts=compress_opts,
+        compress_opts=compress_opts_final,
     )
 
     untag_groups(new)
@@ -2175,6 +2194,7 @@ def tensor_network_1d_compress_src_oversample(
     contract_opts=None,
     project_opts=None,
     compress_opts=None,
+    compress_opts_final=None,
     inplace=False,
     **kwargs,
 ):
@@ -2248,6 +2268,10 @@ def tensor_network_1d_compress_src_oversample(
     compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
         sweep. Values set here take precedence over defaults.
+    compress_opts_final : dict, optional
+        Options for the final direct sweep. Values set here take precedence
+        over ``compress_opts`` and ``kwargs``, which also target the final
+        sweep for this method.
     kwargs
         Extra keyword arguments are combined into `compress_opts`, though
         existing items in `compress_opts` take precedence over `kwargs`.
@@ -2260,7 +2284,9 @@ def tensor_network_1d_compress_src_oversample(
     contract_opts = ensure_dict(contract_opts)
     contract_opts.setdefault("optimize", optimize)
 
-    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts = (
+        kwargs | ensure_dict(compress_opts) | ensure_dict(compress_opts_final)
+    )
 
     if max_bond is None:
         raise ValueError(
@@ -2520,6 +2546,7 @@ def tensor_network_1d_compress_srcmps_oversample(
     contract_opts=None,
     project_opts=None,
     compress_opts=None,
+    compress_opts_final=None,
     inplace=False,
     **kwargs,
 ):
@@ -2593,6 +2620,10 @@ def tensor_network_1d_compress_srcmps_oversample(
     compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
         sweep. Values set here take precedence over defaults.
+    compress_opts_final : dict, optional
+        Options for the final direct sweep. Values set here take precedence
+        over ``compress_opts`` and ``kwargs``, which also target the final
+        sweep for this method.
     inplace : bool, optional
         Whether to perform the compression inplace or not.
     kwargs
@@ -2607,7 +2638,9 @@ def tensor_network_1d_compress_srcmps_oversample(
     contract_opts = ensure_dict(contract_opts)
     contract_opts.setdefault("optimize", optimize)
 
-    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts = (
+        kwargs | ensure_dict(compress_opts) | ensure_dict(compress_opts_final)
+    )
 
     if max_bond is None:
         raise ValueError(
@@ -3388,6 +3421,7 @@ def tensor_network_1d_compress_fit_oversample(
     sweep_reverse=False,
     equalize_norms=False,
     compress_opts=None,
+    compress_opts_final=None,
     inplace=False,
     **kwargs,
 ):
@@ -3454,6 +3488,10 @@ def tensor_network_1d_compress_fit_oversample(
     compress_opts : dict, optional
         Supplied to :func:`~quimb.tensor.tensor_split` during the final direct
         sweep. Values set here take precedence over defaults.
+    compress_opts_final : dict, optional
+        Options for the final direct sweep. Values set here take precedence
+        over ``compress_opts`` and ``kwargs``, which also target the final
+        sweep for this method.
     kwargs
         Extra keyword arguments are combined into `compress_opts`, though
         existing items in `compress_opts` take precedence over `kwargs`.
@@ -3465,7 +3503,9 @@ def tensor_network_1d_compress_fit_oversample(
         ``site_tags[0]`` ('right canonical' form) or ``site_tags[-1]`` ('left
         canonical' form) if ``sweep_reverse``.
     """
-    compress_opts = kwargs | ensure_dict(compress_opts)
+    compress_opts = (
+        kwargs | ensure_dict(compress_opts) | ensure_dict(compress_opts_final)
+    )
 
     if max_bond is None:
         raise ValueError(
@@ -3555,10 +3595,20 @@ _TN1D_COMPRESS_METHODS = {
 }
 
 
+_TN1D_COMPRESS_DEFAULT_CUTOFFS = {
+    # choose from compress method, svd:rand by default
+    "sdcr": "auto",
+    # these can't be used with any kind of cutoff
+    "src": 0.0,
+    "srcmps": 0.0,
+    # everything else gets default of 1e-10
+}
+
+
 def tensor_network_1d_compress(
     tn: TensorNetwork | list[TensorNetwork],
     max_bond=None,
-    cutoff=1e-10,
+    cutoff="auto",
     method="dm",
     site_tags=None,
     canonize=True,
@@ -3589,8 +3639,11 @@ def tensor_network_1d_compress(
         compressed as their sum (only supported by the 'fit' method).
     max_bond : int
         The maximum bond dimension to compress to.
-    cutoff : float, optional
+    cutoff : float or "auto", optional
         A dynamic threshold for discarding singular values when compressing.
+        With ``"auto"``, use ``0.0`` for ranomized svd like methods, else
+        1e-10. For oversampling methods, this is the cutoff of the final direct
+        sweep, not the intermediate step.
     method : str or callable, optional
         The compression method to use. A callable is passed the same arguments
         as a built-in 1D method. The named options are:
@@ -3656,6 +3709,9 @@ def tensor_network_1d_compress(
     -------
     TensorNetwork
     """
+    if cutoff == "auto":
+        cutoff = _TN1D_COMPRESS_DEFAULT_CUTOFFS.get(method, 1e-10)
+
     if callable(method):
         f_tn1d = method
     else:
@@ -3862,7 +3918,7 @@ def mps_gate_with_mpo_zipup_first(
     max_bond=None,
     max_bond_oversample=None,
     cutoff=1e-10,
-    cutoff_oversample=None,
+    cutoff_oversample="auto",
     canonize=True,
     optimize="auto-hq",
     **compress_opts,
@@ -3887,15 +3943,18 @@ def mps_gate_with_mpo_zipup_first(
     cutoff : float, optional
         The truncation error to use when performing the final regular
         compression sweep.
-    cutoff_oversample : float, optional
-        The truncation error to use when performing the zip-up compression.
+    cutoff_oversample : float or "auto", optional
+        The singular-value cutoff for the zip-up compression. With ``"auto"``,
+        use ``0.0`` for randomized SVD and ``1e-10`` for exact decompositions,
+        independently of the final sweep's ``cutoff``.
     canonize : bool, optional
         Whether to pseudo canonicalize the initial tensor network.
     optimize : str, optional
         The contraction path optimizer to use.
     compress_opts
-        Supplied to :func:`~quimb.tensor.tensor_split` (both the zip-up and
-        final sweep).
+        Supplied to :func:`tensor_network_1d_compress_zipup_oversample`.
+        Extra split options affect the intermediate zipup step. Use
+        ``compress_opts_final`` to configure the final direct sweep.
 
     Returns
     -------

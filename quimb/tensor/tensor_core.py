@@ -481,7 +481,7 @@ def tensor_split(
     method="auto",
     absorb="auto",
     max_bond=None,
-    cutoff=1e-10,
+    cutoff="auto",
     cutoff_mode="rel",
     renorm=None,
     get=None,
@@ -522,8 +522,8 @@ def tensor_split(
         - ``'svd:eig'``: full SVD via eigendecomposition, allowing all
           truncation options. This can be faster than the standard SVD, but
           entails some loss of precision.
-        - ``'svd:rand'``: low-rank SVD via randomized projection, allows
-          (and is only beneficial for) static truncation
+        - ``'svd:rand'``: low-rank SVD via randomized projection, allowing
+          static and non-cumulative dynamic truncation.
         - ``'qr'``: QR decomposition, by default left factor is isometric.
         - ``'qr:cholesky'``: QR decomposition via Cholesky factorization, by
           default left factor is isometric. This can be faster than the
@@ -577,25 +577,27 @@ def tensor_split(
     max_bond : None or int
         If integer, the maximum number of singular values to keep, regardless
         of ``cutoff``.
-    cutoff : float, optional
+    cutoff : float or "auto", optional
         The threshold below which to discard singular values, only applies to
-        rank revealing methods (not QR, LQ, or cholesky etc.).
-    cutoff_mode : {'rsum2', 'rel', 'abs', 'sum2', 'rsum1', 'sum1'}, optional
+        rank revealing methods (not QR, LQ, or cholesky etc.). With
+        ``"auto"``, use ``1e-10`` for exact methods and no cutoff for
+        randomized SVD.
+    cutoff_mode : {"rel", "rsum2", "rsum1", "abs", "sum2", "sum1"}, optional
         How to interpret ``cutoff`` when discarding singular values:
 
         - ``'rel'``: values less than ``cutoff * s[0]`` discarded.
-        - ``'abs'``: values less than ``cutoff`` discarded.
-        - ``'sum2'``: sum squared of values discarded must be ``< cutoff``.
         - ``'rsum2'``: sum squared of values discarded must be less than
           ``cutoff`` times the total sum of squared values.
-        - ``'sum1'``: sum values discarded must be ``< cutoff``.
         - ``'rsum1'``: sum of values discarded must be less than ``cutoff``
           times the total sum of values.
+        - ``'abs'``: values less than ``cutoff`` discarded.
+        - ``'sum2'``: sum squared of values discarded must be ``< cutoff``.
+        - ``'sum1'``: sum values discarded must be ``< cutoff``.
 
     renorm : int or bool, optional
         Whether to renormalize the kept singular values to maintain the
         Frobenius or nuclear norm. ``0`` or ``False`` means no renormalization.
-        ``True`` automatically picks the power based on ``cutoff_mode``.
+        ``True`` uses power 1 for ``sum1``/``rsum1`` and power 2 otherwise.
     ltags : sequence of str, optional
         Add these new tags to the left tensor.
     rtags : sequence of str, optional
