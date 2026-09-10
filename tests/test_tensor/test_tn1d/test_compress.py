@@ -16,6 +16,148 @@ from .. import (
 
 dtypes = ["float32", "float64", "complex64", "complex128"]
 
+
+@pytest.mark.parametrize("method", ["src", "srcmps"])
+@pytest.mark.filterwarnings("error:`cutoff` is ignored")
+def test_random_sampling_default_cutoff(method):
+    from quimb.tensor.tn1d.compress import tensor_network_1d_compress
+
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    result = tensor_network_1d_compress(
+        psi, max_bond=2, method=method, seed=42
+    )
+    assert result.max_bond() <= 2
+    with pytest.warns(UserWarning, match="`cutoff` is ignored"):
+        tensor_network_1d_compress(
+            psi, max_bond=2, method=method, cutoff=1e-10, seed=42
+        )
+
+
+@pytest.mark.parametrize("method", ["zipup", "sdc", "sdcr"])
+@pytest.mark.parametrize("mode", [None, "abs"])
+def test_oversample_independent_cutoff_modes(monkeypatch, method, mode):
+    from quimb.tensor.tn1d import compress
+
+    name = f"tensor_network_1d_compress_{method}"
+    original = getattr(compress, name)
+    original_sweep = compress._do_direct_sweep
+    modes = []
+
+    def record_intermediate(*args, **kwargs):
+        modes.append(kwargs["cutoff_mode"])
+        return original(*args, **kwargs)
+
+    def record_sweep(*args, **kwargs):
+        modes.append(kwargs["cutoff_mode"])
+        return original_sweep(*args, **kwargs)
+
+    monkeypatch.setattr(compress, name, record_intermediate)
+    monkeypatch.setattr(compress, "_do_direct_sweep", record_sweep)
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    opts = {} if mode is None else {"cutoff_mode_oversample": mode}
+    result = compress.tensor_network_1d_compress(
+        psi,
+        method=f"{method}-oversample",
+        max_bond=2,
+        max_bond_oversample=4,
+        cutoff_oversample=1e-8,
+        **opts,
+    )
+    assert modes == [mode or "rel", "rsum2"]
+    assert result.max_bond() <= 2
+
+
+@pytest.mark.parametrize("max_bond", [None, 2])
+def test_zipup_oversample_default_cutoff(monkeypatch, max_bond):
+    from quimb.tensor.tn1d import compress
+
+    original = compress.tensor_network_1d_compress_zipup
+    cutoffs = []
+
+    def record(*args, **kwargs):
+        cutoffs.append(kwargs["cutoff"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(compress, "tensor_network_1d_compress_zipup", record)
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    compress.tensor_network_1d_compress_zipup_oversample(
+        psi, max_bond=max_bond, max_bond_oversample=4, cutoff=1e-3
+    )
+    compress.mps_gate_with_mpo_zipup_first(
+        psi,
+        qtn.MPO_identity(5),
+        max_bond=max_bond,
+        max_bond_oversample=4,
+        cutoff=1e-3,
+    )
+    assert cutoffs == ["auto", "auto"]
+
+
+@pytest.mark.parametrize(
+    "method,expected", [("svd", 1e-10), ("svd:rand", 0.0)]
+)
+def test_zipup_oversample_method_cutoff(monkeypatch, method, expected):
+    import functools
+
+    from quimb.tensor import decomp
+    from quimb.tensor.tn1d import compress
+
+    original = decomp._SPLIT_FNS[method]
+    cutoffs = []
+
+    @functools.wraps(original)
+    def record(*args, **kwargs):
+        cutoffs.append(kwargs["cutoff"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setitem(decomp._SPLIT_FNS, method, record)
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    compress.tensor_network_1d_compress_zipup_oversample(
+        psi, max_bond=2, cutoff=1e-3, method=method
+    )
+    assert cutoffs
+    assert cutoffs[:4] == [expected] * 4
+    assert set(cutoffs[4:]) == ({1e-3} if method == "svd" else set())
+
+
+@pytest.mark.parametrize("method", ["zipup", "sdc", "sdcr"])
+def test_oversample_randomized_options_stay_intermediate(method):
+    from quimb.tensor.tn1d.compress import tensor_network_1d_compress
+
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    intermediate = {"method": "svd:rand", "oversample": 1}
+    final = {"method": "svd", "max_bond": 1}
+    result = tensor_network_1d_compress(
+        psi,
+        method=f"{method}-oversample",
+        max_bond=2,
+        max_bond_oversample=4,
+        seed=42,
+        compress_opts=intermediate,
+        compress_opts_final=final,
+    )
+    assert result.max_bond() == 1
+    assert intermediate == {"method": "svd:rand", "oversample": 1}
+    assert final == {"method": "svd", "max_bond": 1}
+
+
+@pytest.mark.parametrize("method", ["src", "srcmps", "fit"])
+def test_oversample_final_options_precedence(method):
+    from quimb.tensor.tn1d.compress import tensor_network_1d_compress
+
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    result = tensor_network_1d_compress(
+        psi,
+        method=f"{method}-oversample",
+        max_bond=2,
+        max_bond_oversample=4,
+        seed=42,
+        compress_opts={"cutoff_mode": "rsum2", "max_bond": 3},
+        compress_opts_final={"method": "svd", "max_bond": 1},
+    )
+    assert result.max_bond() == 1
+
+
 # compression options, including fit sweep counts
 boundary_options = {
     "direct": {"mode": "direct"},

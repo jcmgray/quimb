@@ -6,6 +6,9 @@ Release notes for `quimb`.
 
 **Breaking Changes:**
 
+- [`array_split`](#array_split) and the low-level rank-revealing decompositions now default to ``cutoff_mode="rel"`` instead of ``"rsum2"``.
+- Randomized SVD and batched decompositions now reject active cumulative cutoff modes. Use ``"abs"`` or ``"rel"`` instead.
+- 1D ``zipup`` compression now defaults to ``cutoff_mode="rel"`` for its pseudo-canonical truncations.
 - [`HilbertSpace`](#HilbertSpace): site ordering is now immutable. ``set_ordering`` raises ``TypeError``. Use the new [`with_ordering`](#HilbertSpace.with_ordering) method to create a space with a different ordering.
 - [`fermi_hubbard_from_edges`](#fermi_hubbard_from_edges): the default is now ``order="interleaved"``. This alternates the spins at each coordinate instead of grouping them. The on-site interaction is then register-local, so the MPO bond dimension does not grow with system size. The cost is one extra Jordan-Wigner Z per hopping term and a ~10% slower matrix-vector product. The register layout changes. Rebuild anything keyed by rank or flat configuration. Use ``order="blocked"`` for the old layout.
 
@@ -16,6 +19,13 @@ Release notes for `quimb`.
 - [`MatrixProductOperator.gate_sandwich_with_auto_swap`](#MatrixProductOperator.gate_sandwich_with_auto_swap): apply a two-site gate sandwich and keep the MPO in canonical form. The method tracks the orthogonality center and can strip the center tensor's exponent. For long-range gates, it swaps the sites together and then restores their positions.
 - 1D compression: ``src``, ``srcmps``, and ``fit`` now create random tensors with ``autoray.random.array`` (autoray v0.10.0 or newer). The tensors match the device and dtype. These methods and their oversampling variants accept a ``seed`` or random generator. By default, they use the backend's global random state.
 - [`svd_rand_truncated`](#svd_rand_truncated): add ``noise_dist`` to select the ``"normal"`` or ``"rademacher"`` random sketch distribution.
+- Split functions accept ``cutoff="auto"``. Exact decompositions use ``1e-10``, randomized SVD disables the cutoff.
+- [`svd_rand_truncated`](#svd_rand_truncated) supports ``"abs"`` and ``"rel"`` cutoffs on the sketched spectrum.
+- Batched ``"abs"`` and ``"rel"`` cutoffs treat the blocks as one spectrum and retain one common bond dimension.
+- Relative and absolute cutoffs support renormalization, including for batched decompositions.
+- 1D ``src`` and ``srcmps`` compression now default to ``cutoff=0.0``. ``sdcr`` leaves its cutoff disabled with the default randomized SVD.
+- The intermediate steps of ``zipup``, ``sdc``, and ``sdcr`` oversampling accept a separate ``cutoff_mode_oversample``. Zipup also accepts method-aware ``cutoff_oversample="auto"``.
+- 1D oversampling methods accept ``compress_opts_final`` for configuring the final direct sweep independently of the intermediate compression.
 - 1D compression: ``fit`` with ``bsz=1`` now supports fermionic tensor networks. It warns if the network contains odd-parity tensors because the result is likely incorrect.
 - Gating: add a ``dagger`` option to [`tensor_network_gate_inds`](#tensor_network_gate_inds) (``tn.gate_inds``), [`tensor_network_gate_sandwich_inds`](#tensor_network_gate_sandwich_inds) (``tn.gate_sandwich_inds``), [`tensor_network_ag_gate`](#tensor_network_ag_gate) (``tn.gate``, ``tn.gate_sandwich``, ``tn.gate_upper``, and ``tn.gate_lower``), [`tensor_network_ag_gate_simple`](#tensor_network_ag_gate_simple) (``tn.gate_simple``, including its long-range variant), and [`TensorNetworkGenOperator.gate_sandwich_with_op_lazy`](#TensorNetworkGenOperator.gate_sandwich_with_op_lazy). This option applies $G^\dagger$ instead of $G$. For example, it changes $G A G^\dagger$ to $G^\dagger A G$ for Heisenberg evolution. It avoids manually reshaping and conjugate-transposing tensor gates.
 - Gating: add a matching ``transpose`` option to the functions above. It applies $G^T$ instead of $G$, without conjugation. [`MatrixProductState.gate_nonlocal`](#MatrixProductState.gate_nonlocal) also accepts this option and passes it to [`gate_with_submpo`](#MatrixProductState.gate_with_submpo).

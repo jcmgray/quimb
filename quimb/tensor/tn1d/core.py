@@ -813,7 +813,8 @@ class TensorNetwork1DOperator(TensorNetwork1D, TensorNetworkGenOperator):
 
 
 def set_default_compress_mode(opts, cyclic=False):
-    opts.setdefault("cutoff_mode", "rel" if cyclic else "rsum2")
+    relative = cyclic or opts.get("method") == "svd:rand"
+    opts.setdefault("cutoff_mode", "rel" if relative else "rsum2")
 
 
 class TensorNetwork1DFlat(TensorNetwork1D):

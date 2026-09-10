@@ -23,8 +23,19 @@ def test_parse_split_opts():
     method, opts = parse_split_opts()
     assert method == "svd"
     assert opts["absorb"] == 0
-    assert opts["cutoff"] != 0.0
+    assert opts["cutoff"] == 1e-10
+    assert opts["cutoff_mode"] == 2
     assert opts["max_bond"] == -1
+
+    method, opts = parse_split_opts("svd:rand", max_bond=4)
+    assert method == "svd:rand"
+    assert opts["cutoff"] == 0.0
+    assert opts["cutoff_mode"] == 2
+
+    method, opts = parse_split_opts("svd:rand", max_bond=4, cutoff=1e-6)
+    assert method == "svd:rand"
+    assert opts["cutoff"] == 1e-6
+    assert opts["cutoff_mode"] == 2
 
     method, opts = parse_split_opts("qr", "auto", max_bond=None, cutoff=0.0)
     assert method == "qr"
@@ -47,6 +58,135 @@ def test_parse_split_opts():
     )
     assert method == "qr:cholesky"
     assert opts["absorb"] == -1
+
+
+def test_default_cutoff_mode_is_rel():
+    x = np.diag([1.0, 1e-7])
+
+    _, s_default, _ = array_split(x, absorb=None)
+    _, s_rel, _ = array_split(x, absorb=None, cutoff=1e-10, cutoff_mode="rel")
+    _, s_rsum2, _ = array_split(
+        x, absorb=None, cutoff=1e-10, cutoff_mode="rsum2"
+    )
+
+    assert s_default.shape == s_rel.shape == (2,)
+    assert s_rsum2.shape == (1,)
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("cutoff_mode", ["abs", "rel"])
+@pytest.mark.parametrize("renorm", [True, 1, 2])
+def test_non_cumulative_renorm(batch, cutoff_mode, renorm):
+    x = np.diag([3.0, 2.0, 1.0])
+    if batch:
+        x = np.stack([x, 2 * x, np.zeros_like(x)])
+    _, s, _ = array_split(
+        x,
+        absorb=None,
+        max_bond=1,
+        cutoff=0.1,
+        cutoff_mode=cutoff_mode,
+        renorm=renorm,
+    )
+    power = 2 if renorm is True else renorm
+    expected = np.sum(
+        np.abs(np.diagonal(x, axis1=-2, axis2=-1)) ** power, axis=-1
+    )
+    assert_allclose(np.sum(s**power, axis=-1), expected)
+
+
+@pytest.mark.parametrize("cutoff_mode", ["sum1", "rsum1", "sum2", "rsum2"])
+@pytest.mark.parametrize("power", [1, 2])
+def test_cumulative_renorm_generic(cutoff_mode, power):
+    from quimb.tensor.decomp import (
+        _CUTOFF_MODE_MAP,
+        _trim_and_renorm_svd_result,
+    )
+
+    spectrum = np.array([3.0, 2.0, 1.0])
+    _, s, _ = _trim_and_renorm_svd_result(
+        np.eye(3),
+        spectrum.copy(),
+        np.eye(3),
+        cutoff=0.01,
+        cutoff_mode=_CUTOFF_MODE_MAP[cutoff_mode],
+        max_bond=2,
+        absorb=None,
+        renorm=power,
+    )
+    assert s.shape == (2,)
+    assert_allclose(np.sum(s**power), np.sum(spectrum**power))
+
+
+def test_randomized_mps_default_cutoff_mode():
+    import quimb.tensor as qtn
+    from quimb.tensor.tn1d.core import set_default_compress_mode
+
+    opts = {}
+    set_default_compress_mode(opts)
+    assert opts["cutoff_mode"] == "rsum2"
+    psi = qtn.MPS_rand_state(5, 6, seed=42)
+    psi.compress(max_bond=3, method="svd:rand")
+    assert psi.max_bond() <= 3
+    with pytest.raises(ValueError, match="Cumulative cutoff modes"):
+        psi.compress(
+            max_bond=2, method="svd:rand", cutoff=1e-10, cutoff_mode="rsum2"
+        )
+
+
+@pytest.mark.parametrize("right,absorb", [(True, "right"), (False, "left")])
+def test_randomized_reduced_cutoff_disables_shortcut(right, absorb):
+    x = np.diag([10.0, 1.0, 0.1, 0.01])
+    left, _, right_factor = array_split(
+        x,
+        method="svd:rand",
+        max_bond=3,
+        oversample=0,
+        absorb=absorb,
+        right=right,
+        seed=42,
+        reduced_opts={"cutoff": 0.2, "cutoff_mode": "rel"},
+    )
+    assert left.shape == (4, 1)
+    assert right_factor.shape == (1, 4)
+
+
+def test_randomized_reduced_auto_cutoff_uses_exact_default(monkeypatch):
+    from quimb.tensor import decomp
+
+    original = decomp.array_split
+    methods = []
+
+    def record(x, *args, **kwargs):
+        methods.append(kwargs.get("method"))
+        return original(x, *args, **kwargs)
+
+    monkeypatch.setattr(decomp, "array_split", record)
+    decomp.svd_rand_truncated(
+        np.eye(5),
+        max_bond=2,
+        absorb="right",
+        oversample=0,
+        num_iterations=0,
+        seed=42,
+        reduced_opts={"cutoff": "auto"},
+    )
+    assert methods == ["qr", "svd"]
+
+
+def test_low_level_default_cutoff_mode_is_rel():
+    from quimb.tensor.decomp import svd_truncated
+
+    x = np.diag([1.0, 0.1, 0.001])
+    _, s_default, _ = svd_truncated(x, cutoff=0.01, absorb=None)
+    _, s_rel, _ = svd_truncated(x, cutoff=0.01, cutoff_mode="rel", absorb=None)
+    _, s_rsum2, _ = svd_truncated(
+        x, cutoff=0.01, cutoff_mode="rsum2", absorb=None
+    )
+
+    assert_allclose(s_default, s_rel)
+    assert s_default.shape == (2,)
+    assert s_rsum2.shape == (1,)
 
 
 def test_trim_singular_vals():
@@ -515,6 +655,61 @@ def test_svd_rand_right_param(right, da, db):
     assert np.linalg.norm(x - U @ np.diag(s) @ VH) < 0.5
 
 
+@pytest.mark.parametrize("right", [True, False])
+@pytest.mark.parametrize(
+    "cutoff,cutoff_mode",
+    [
+        (2.0, "abs"),
+        (0.2, "rel"),
+    ],
+)
+def test_svd_rand_cutoff(right, cutoff, cutoff_mode):
+    x = np.diag([10.0, 4.0, 1.0, 0.1, 0.0, 0.0])
+
+    U, s, VH = array_split(
+        x,
+        method="svd:rand",
+        absorb=None,
+        max_bond=3,
+        cutoff=cutoff,
+        cutoff_mode=cutoff_mode,
+        oversample=2,
+        right=right,
+        seed=42,
+    )
+
+    assert U.shape == (6, 2)
+    assert s.shape == (2,)
+    assert VH.shape == (2, 6)
+    assert_allclose(s, [10.0, 4.0])
+
+
+@pytest.mark.parametrize("cutoff_mode", ["sum1", "sum2", "rsum1", "rsum2"])
+def test_svd_rand_rejects_cumulative_cutoff(cutoff_mode):
+    x = np.diag([3.0, 2.0, 1.0])
+
+    with pytest.raises(ValueError, match="Cumulative cutoff modes"):
+        array_split(
+            x,
+            method="svd:rand",
+            max_bond=2,
+            cutoff=0.1,
+            cutoff_mode=cutoff_mode,
+        )
+
+    # a disabled cutoff preserves static truncation behavior
+    _, s, _ = array_split(
+        x,
+        method="svd:rand",
+        absorb=None,
+        max_bond=2,
+        cutoff=0.0,
+        cutoff_mode=cutoff_mode,
+        seed=42,
+    )
+    assert s.shape == (2,)
+
+
 def test_svd_rand_truncated_warns():
     from quimb.tensor.decomp import svd_rand_truncated
 
@@ -717,6 +912,75 @@ def test_batch_svd(backend, method, max_bond, absorb):
     assert left is None or left.shape == (3, 5, k)
     assert s is None or s.shape == (3, k)
     assert right is None or right.shape == (3, k, 7)
+
+
+@pytest.mark.parametrize(
+    "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+)
+@pytest.mark.parametrize("method", ["svd", "svd:eig", "svd:rand"])
+def test_batch_svd_relative_cutoff_uses_global_scale(backend, method):
+    xp = ar.get_namespace(backend)
+    x = xp.asarray(
+        np.stack(
+            [
+                np.diag([10.0, 1.0, 0.1]),
+                np.diag([1.0, 0.9, 0.8]),
+            ]
+        )
+    )
+
+    kwargs = {}
+    if method == "svd:rand":
+        kwargs["seed"] = 42
+
+    left, s, right = array_split(
+        x,
+        method=method,
+        absorb=None,
+        max_bond=3,
+        cutoff=0.2,
+        cutoff_mode="rel",
+        **kwargs,
+    )
+
+    assert left.shape == (2, 3, 1)
+    assert s.shape == (2, 1)
+    assert right.shape == (2, 1, 3)
+    assert_allclose(ar.to_numpy(s[:, 0]), [10.0, 1.0], rtol=1e-5)
+
+
+def test_batch_svd_absolute_cutoff_uses_common_rank():
+    x = np.stack(
+        [
+            np.diag([10.0, 1.0, 0.1]),
+            np.diag([1.0, 0.9, 0.8]),
+        ]
+    )
+
+    left, s, right = array_split(
+        x,
+        method="svd",
+        absorb=None,
+        cutoff=0.5,
+        cutoff_mode="abs",
+    )
+
+    assert left.shape == (2, 3, 3)
+    assert s.shape == (2, 3)
+    assert right.shape == (2, 3, 3)
+
+
+@pytest.mark.parametrize("cutoff_mode", ["sum1", "sum2", "rsum1", "rsum2"])
+def test_batch_svd_rejects_cumulative_cutoff(cutoff_mode):
+    x = np.stack([np.eye(3), np.eye(3)])
+
+    with pytest.raises(ValueError, match="Cumulative cutoff modes"):
+        array_split(
+            x,
+            method="svd",
+            cutoff=0.1,
+            cutoff_mode=cutoff_mode,
+        )
 
 
 @pytest.mark.parametrize(
