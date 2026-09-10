@@ -1434,6 +1434,7 @@ class TensorNetworkGen(TensorNetwork):
         grow_from="all",
         num_joins=1,
         join_overlap=2,
+        allow_dangling=False,
     ):
         """Generate sets of sites that represent 'generalized loops' where
         every node is connected to at least two other loop nodes. This is a
@@ -1446,21 +1447,17 @@ class TensorNetworkGen(TensorNetwork):
             The maximum number of tensors that can appear in a loop. If
             ``None``, grow the loops until every target site, i.e. ``sites``
             or every site, appears in at least one loop, then use that size.
-            Targets outside the 2-core never appear in a loop and are
-            ignored, with a warning if ``sites`` was given or the network is
-            tree like. If ``"min"``, instead use the size of the first valid
-            loop found.
+            Targets that are not in a loop are ignored, with a warning if
+            ``sites`` was given or the network is tree like. If ``"min"``, use
+            the size of the first non-dangling loop found.
         sites : None or sequence[hashable]
             If supplied, only consider loops containing these sites.
-        grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+        grow_from : {'all', 'any'}, optional
             Only if ``sites`` is specified, this determines how to filter
             loops. If 'all', only yield loops containing *all* of the sites
             in ``sites``, if 'any', yield loops containing *any* of the sites
-            in ``sites``. If 'alldangle' or 'anydangle', the sites are allowed
-            to be dangling, i.e. 1-degree connected. This is useful for
-            computing local expectations where the operator insertion breaks
-            the loop assumption locally. Any loop covers a dangling target,
-            so with these ``max_size=None`` acts like ``"min"``.
+            in ``sites``. ``'alldangle'`` and ``'anydangle'`` are old names
+            for ``'all'`` and ``'any'`` that also set ``allow_dangling=True``.
         num_joins : int, optional
             If larger than 1, repeatedly generate larger loops by joining
             together the initial set (individually those with size up to
@@ -1468,8 +1465,13 @@ class TensorNetworkGen(TensorNetwork):
             overlap on at least ``join_overlap`` sites.
         join_overlap : {1, 2}, optional
             When joining loops together, the minimum number of overlapping
-            sites they much share. 1 allows merging on a single site, 2
+            sites they must share. 1 allows merging on a single site, 2
             requires sharing a bond, which leads to fewer but 'denser' loops.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded regions. An automatic size is still taken from
+            non-dangling loops. If no target is in a loop, warn and return the
+            target region only.
 
         Yields
         ------
@@ -1489,6 +1491,7 @@ class TensorNetworkGen(TensorNetwork):
             grow_from=grow_from,
             num_joins=num_joins,
             join_overlap=join_overlap,
+            allow_dangling=allow_dangling,
         ):
             yield tuple(tid2site[tid] for tid in gloop)
 
@@ -1738,6 +1741,7 @@ class TensorNetworkGen(TensorNetwork):
         num_joins=1,
         strict_size=False,
         info=None,
+        allow_dangling=True,
     ):
         r"""Parse the ``gloops`` argument to get the relevant generalized
         loops for the given ``where`` sites. If ``gloops`` is an integer,
@@ -1752,7 +1756,7 @@ class TensorNetworkGen(TensorNetwork):
             -A---B-
              |   |
 
-        Setting ``grow_from='any'`` in would also generates loops like::
+        Setting ``grow_from='any'`` would also generate loops like::
 
              |   |
             -o---o-
@@ -1760,9 +1764,10 @@ class TensorNetworkGen(TensorNetwork):
             -o---A---B-
              |   |   |
 
-        where only site A is part of the original, generating loop, but both
-        A and B are part of the returned cluster. For ``"alldangle"`` the same
-        cluster would be generated but its size would be considered 5.
+        where only site A is part of the generating loop, but both A and B
+        appear in the returned cluster, which is treated as size 4. With
+        ``grow_from='all'`` and ``allow_dangling=True``, the same cluster is
+        generated with B dangling in the generating region, so its size is 5.
 
         Parameters
         ----------
@@ -1779,9 +1784,14 @@ class TensorNetworkGen(TensorNetwork):
             sequences, use those gloops.
         grow_from : {"all", "any"}, optional
             Whether to generate gloops that originally contain all or just
-            any of the target sites in ``where``. The base sites are always
-            included in all returned gloops, even if they were not part of
-            the supplied or auto-generated cluster.
+            any of the target sites in ``where``. ``"alldangle"`` and
+            ``"anydangle"`` are old names that also set
+            ``allow_dangling=True``. The base sites are always included in all
+            returned gloops, even if they were not part of the supplied or
+            auto-generated cluster.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded regions.
 
         Returns
         -------
@@ -1789,6 +1799,11 @@ class TensorNetworkGen(TensorNetwork):
         """
         if tids is None and where is None:
             raise ValueError("Either `tids` or `where` must be supplied.")
+
+        if grow_from in ("alldangle", "anydangle"):
+            grow_from = grow_from.removesuffix("dangle")
+            allow_dangling = True
+        check_opt("grow_from", grow_from, ("all", "any"))
 
         if isinstance(gloops, (int, str)):
             max_size = gloops
@@ -1824,6 +1839,7 @@ class TensorNetworkGen(TensorNetwork):
                         sites=where,
                         grow_from=grow_from,
                         num_joins=num_joins,
+                        allow_dangling=allow_dangling,
                     )
                 )
             else:
@@ -1835,6 +1851,7 @@ class TensorNetworkGen(TensorNetwork):
                         tids=tids,
                         grow_from=grow_from,
                         num_joins=num_joins,
+                        allow_dangling=allow_dangling,
                     )
                 )
         else:
@@ -1871,14 +1888,9 @@ class TensorNetworkGen(TensorNetwork):
             if grow_from == "all":
                 # get all gloops which contain *all* sites in `where`
                 gloops = set.intersection(*(lookup[coo] for coo in where))
-            elif grow_from == "any":
+            else:  # "any"
                 # get all gloops which contain *any* site in `where`
                 gloops = set.union(*(lookup[coo] for coo in where))
-            else:
-                raise ValueError(
-                    f"Invalid `grow_from` value: {grow_from}."
-                    "Should be 'all' or 'any'."
-                )
 
         if grow_from == "any":
             # gloops only guaranteed to include any 1 site from `where`
@@ -1889,6 +1901,9 @@ class TensorNetworkGen(TensorNetwork):
             # gloops guaranteed to include all sites from `where`, but might
             # not include the base region if its not a valid cluster on its own
             clusters = (r0, *map(frozenset, gloops))
+
+        # remove duplicates, dangling regions can already yield r0
+        clusters = tuple(dict.fromkeys(clusters))
 
         if strict_size:
             # only allow clusters below max_size *including* base region,
@@ -3239,6 +3254,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         info=None,
         tn_cache_maxsize=512,
         progbar=False,
+        allow_dangling=True,
         **contract_opts,
     ):
         """Compute the expectation of operator ``G`` at site(s) ``where`` by
@@ -3283,7 +3299,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             If auto generating loops, whether generate only those which contain
             *all* sites in the term, or just *any*. The loops generated by
             "any" are a superset of those generated by "all", giving a more
-            accuracte estimate.
+            accurate estimate.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded regions. An automatic size is still taken from
+            non-dangling loops.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use.
         info : dict, optional
@@ -3315,6 +3335,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             num_joins=num_joins,
             strict_size=strict_size,
             info=info,
+            allow_dangling=allow_dangling,
         )
 
         if autoreduce:
@@ -3523,6 +3544,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         return_all=False,
         executor=None,
         progbar=False,
+        allow_dangling=True,
         **contract_opts,
     ):
         """Contract many local expectations using generalized loop expansion.
@@ -3567,7 +3589,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             If auto generating loops, whether generate only those which contain
             *all* sites in the term, or just *any*. The loops generated by
             "any" are a superset of those generated by "all", giving a more
-            accuracte estimate.
+            accurate estimate.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded regions. An automatic size is still taken from
+            non-dangling loops.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use.
         info : dict, optional
@@ -3629,6 +3655,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
             return_all=return_all,
             executor=executor,
             progbar=progbar,
+            allow_dangling=allow_dangling,
             **contract_opts,
         )
 

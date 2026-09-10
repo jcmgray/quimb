@@ -644,6 +644,15 @@ class TestPEPSInfinite2D:
         )
         assert np.isfinite(v) and abs(np.imag(v)) < 1e-10
 
+    def test_gloop_region_allows_dangling_reach(self):
+        psi = PEPSInfinite2D.rand(geom_square_2x2, bond_dim=2)
+        where = geom_square_2x2.bond_types[0]
+        nondangling = psi._gloop_region(where, 10, allow_dangling=False)
+        dangling = psi._gloop_region(where, 10, allow_dangling=True)
+        assert nondangling < dangling
+        # a dangling target reaches at most C - 2 hops
+        assert dangling == psi._region_sites(where, 8)
+
     def test_gloop_expand_num_joins_and_info(self):
         geom = geom_square_2x2
         psi = PEPSInfinite2D.rand(geom, bond_dim=2, seed=42)

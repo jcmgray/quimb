@@ -143,6 +143,24 @@ def test_loop_series_expansion_order0_matches_partial_trace(dtype):
     assert_allclose(rho_ls4, rho_ls4.conj().T, atol=1e-10)
 
 
+@pytest.mark.parametrize(
+    "method",
+    ["partial_trace_loop_series_expansion", "partial_trace_gloop_expand"],
+)
+def test_partial_trace_gloop_tree_returns_base(method):
+    tn = qtn.TN_from_edges_rand(
+        [(0, 1), (1, 2), (2, 3)], D=2, phys_dim=2, seed=42
+    )
+    bp = qbp.D2BP(tn)
+    bp.run(tol=1e-12)
+    with pytest.warns(UserWarning, match="only the target region"):
+        rho = getattr(bp, method)([1])
+    assert rho.shape == (2, 2)
+    assert_allclose(np.trace(rho), 1.0)
+    # on a tree bp is exact, so the fallback must give the base region rdm
+    assert_allclose(rho, bp.partial_trace([1], get="matrix"))
+
+
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_loop_series_expansion_repeatable(dtype):
     # see gh-381

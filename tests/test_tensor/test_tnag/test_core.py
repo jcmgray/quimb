@@ -448,23 +448,52 @@ class TestGetLocalGloops:
             )
 
     @pytest.mark.parametrize(
-        "grow_from,gloops,expected",
+        "allow_dangling,gloops",
         [
-            ("all", None, [2, 4, 4]),
-            ("all", "min", [2, 4, 4]),
-            ("all", 4, [2, 4, 4]),
-            # the automatic size does not expand when the targets can dangle
-            ("alldangle", None, [2, 2]),
-            ("alldangle", "min", [2, 2]),
-            ("alldangle", 4, [2, 2, 4, 4]),
+            (False, None),
+            (False, "min"),
+            (False, 4),
+            (True, None),
+            (True, "min"),
+            (True, 4),
         ],
     )
-    def test_dangle_modes_ignore_covering(self, grow_from, gloops, expected):
+    def test_allow_dangling_uses_nondangling_auto_size(
+        self, allow_dangling, gloops
+    ):
         peps = qtn.PEPS.rand(3, 3, 2, seed=42)
         clusters = peps.get_local_gloops(
-            where=[(1, 1), (1, 2)], gloops=gloops, grow_from=grow_from
+            where=[(1, 1), (1, 2)],
+            gloops=gloops,
+            grow_from="all",
+            allow_dangling=allow_dangling,
         )
-        assert sorted(map(len, clusters)) == expected
+        assert sorted(map(len, clusters)) == [2, 4, 4]
+        assert len(clusters) == len(set(clusters))
+
+    @pytest.mark.parametrize("allow_dangling", [False, True])
+    def test_grow_from_any_adds_all_target_sites(self, allow_dangling):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        where = frozenset(((1, 1), (1, 2)))
+        clusters = peps.get_local_gloops(
+            where=where,
+            gloops=None,
+            grow_from="any",
+            allow_dangling=allow_dangling,
+        )
+        assert all(where <= cluster for cluster in clusters)
+        assert len(clusters) == len(set(clusters))
+
+    def test_supplied_gloops_accept_legacy_anydangle(self):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        where = frozenset(((1, 1), (1, 2)))
+        gloops = tuple(peps.gen_gloops_sites(4))
+        clusters = peps.get_local_gloops(
+            where=where,
+            gloops=gloops,
+            grow_from="anydangle",
+        )
+        assert all(where <= cluster for cluster in clusters)
 
 
 # ------------------------- long range gating tests ------------------------- #

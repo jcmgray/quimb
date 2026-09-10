@@ -920,8 +920,8 @@ def connected_bipartitions(tn):
 
 def _get_two_core_tids(tn):
     """Get the tids of the 2-core of ``tn``: the largest sub network in which
-    every tensor has at least two bonds. I.e. all dangling tensors are removed.
-    A tid outside the 2-core can never appear in a generalized loop.
+    every tensor has at least two bonds, found by repeatedly removing
+    dangling tensors. Only these tids can appear in a generalized loop.
     """
     live = set(tn.tensor_map)
     # number of live tensors on each index, more than one is a bond
@@ -949,7 +949,28 @@ def _get_two_core_tids(tn):
     return live
 
 
-def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
+def _parse_gloop_grow_from(grow_from, allow_dangling):
+    """Check ``grow_from``, mapping the old 'alldangle' and 'anydangle'
+    options to ``allow_dangling``.
+    """
+    if grow_from in ("alldangle", "anydangle"):
+        grow_from = grow_from.removesuffix("dangle")
+        allow_dangling = True
+
+    if grow_from not in ("all", "any"):
+        raise ValueError("`grow_from` must be 'all' or 'any'.")
+
+    return grow_from, allow_dangling
+
+
+def _gen_gloops_single(
+    tn,
+    max_size=None,
+    tids=None,
+    grow_from="all",
+    allow_dangling=False,
+    two_core_tids=None,
+):
     # whether the caller named the targets, or wants loops everywhere
     targeted = tids is not None
 
@@ -957,6 +978,7 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
         # find loops everywhere
         tids = tuple(tn.tensor_map)
         grow_from = "any"
+        allow_dangling = False
     elif isinstance(tids, int):
         # handle single tid region
         tids = (tids,)
@@ -965,28 +987,25 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
         # no targets -> no gloops
         return
 
-    if grow_from in ("all", "alldangle"):
+    grow_from, allow_dangling = _parse_gloop_grow_from(
+        grow_from, allow_dangling
+    )
+
+    if grow_from == "all":
         # take `tids` as single initial region
         queue = collections.deque((frozenset(tids),))
-    elif grow_from in ("any", "anydangle"):
+    else:
         # take each tid as an initial region
         queue = collections.deque(frozenset([tid]) for tid in tids)
-    else:
-        raise ValueError("`grow_from` must be 'all' or 'any'.")
 
-    if "dangle" in grow_from:
+    if allow_dangling:
         # target tids are allowed to be dangling
         dangle_tids = set(tids)
     else:
         dangle_tids = set()
 
-    if (max_size == "min") or ((max_size is None) and dangle_tids):
-        # the first, and thus smallest, valid gloop sets the maximum size,
-        # which any region does for a dangling target, so covering matches
-
-        # TODO: for dangling targets, resolve the size with them not exempt,
-        # so that they sit within a real loop
-
+    if max_size == "min":
+        # the first, and thus smallest, non-dangling loop sets the max size
         mode = "min"
         max_size = None
     elif max_size is None:
@@ -997,15 +1016,16 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
 
         mode = "cover"
         remaining = set(tids)
-        # TODO: cache this via an `info` dict, it is recomputed every call
         # only tids in the 2-core can appear in a gloop, so cover at most those
-        uncoverable = remaining - _get_two_core_tids(tn)
+        # TODO: cache this via an `info` dict, it is recomputed every call
+        if two_core_tids is None:
+            two_core_tids = _get_two_core_tids(tn)
+        uncoverable = remaining - two_core_tids
         if uncoverable:
             if targeted:
                 warnings.warn(
-                    f"The tensors {tuple(sorted(uncoverable))} are outside the "
-                    "2-core, and so can never appear in a generalized loop, "
-                    "ignoring them when choosing the maximum size."
+                    f"The tensors {tuple(sorted(uncoverable))} are not in a "
+                    "loop and will be ignored when choosing the maximum size."
                 )
             remaining -= uncoverable
             if not remaining:
@@ -1051,7 +1071,8 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
                 else:
                     inds_once.add(ind)
 
-        valid_gloop = True
+        can_yield = True
+        is_nondangling = True
         for tid in region:
             # count number of connections each node has within region
             num_inner_connections = 0
@@ -1065,15 +1086,21 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
                         if ntid != tid:
                             tids_next.add(ntid)
 
-            valid_gloop &= (
+            two_connected = num_inner_connections >= 2
+            can_yield &= (
                 # site is allowed to dangle
                 tid in dangle_tids
                 # or it is connected by at least two bonds
-                or num_inner_connections >= 2
+                or two_connected
             )
+            is_nondangling &= two_connected
 
-        if valid_gloop:
-            # valid region: no node is connected by a single bond only
+        if can_yield:
+            # only the target tids are allowed to dangle
+            yield tuple(sorted(region))
+
+        if is_nondangling:
+            # every node has at least two internal bonds
             if mode == "cover":
                 remaining.difference_update(region)
                 if not remaining:
@@ -1084,7 +1111,6 @@ def _gen_gloops_single(tn, max_size=None, tids=None, grow_from="all"):
                 # automatically set maximum region size
                 max_size = len(region)
                 mode = "fixed"
-            yield tuple(sorted(region))
 
         if (max_size is None) or len(region) < max_size:
             # continue searching
@@ -1104,6 +1130,7 @@ def gen_gloops(
     grow_from="all",
     num_joins=1,
     join_overlap=2,
+    allow_dangling=False,
 ):
     """Generate sets of tids that represent 'generalized loops' where every
     node is connected to at least two bonds, i.e. 2-degree connected subgraphs.
@@ -1116,21 +1143,18 @@ def gen_gloops(
         The maximum number of tensors that can appear in a region. If
         ``None``, grow the regions until every target tid, i.e. ``tids`` or
         every tid, appears in at least one loop, then use that size. Targets
-        outside the 2-core never appear in a loop and are ignored, with a
-        warning if ``tids`` was given or the network is tree like. If
-        ``"min"``, instead use the size of the first valid region found.
+        that are not in a loop are ignored, with a warning if ``tids`` was
+        given or the network is tree like. If ``"min"``, use the size of the
+        first non-dangling loop found.
     tids : None or sequence of int, optional
         If supplied, only yield loops containing these tids, see
         ``grow_from``.
-    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+    grow_from : {'all', 'any'}, optional
         Only if ``tids`` is specified, this determines how to filter
         loops. If 'all', only yield loops containing *all* of the tids
         in ``tids``, if 'any', yield loops containing *any* of the tids
-        in ``tids``. If 'alldangle' or 'anydangle', the tids are allowed to
-        be dangling, i.e. 1-degree connected. This is useful for computing
-        local expectations where the operator insertion breaks the loop
-        assumption locally. Any region covers a dangling target, so with
-        these ``max_size=None`` acts like ``"min"``.
+        in ``tids``. ``'alldangle'`` and ``'anydangle'`` are old names for
+        ``'all'`` and ``'any'`` that also set ``allow_dangling=True``.
     num_joins : int, optional
         If larger than 1, repeatedly generate larger loops by joining together
         the initial set (individually with size up to ``max_size``) of
@@ -1141,8 +1165,14 @@ def gen_gloops(
         fixed.
     join_overlap : {1, 2}, optional
         When joining loops together, the minimum number of overlapping
-        tids they much share. 1 allows merging on a single node, 2 requires
+        tids they must share. 1 allows merging on a single node, 2 requires
         sharing a bond, which leads to fewer but 'denser' loops.
+    allow_dangling : bool, optional
+        Whether the target tids can have fewer than two internal bonds in
+        yielded regions. An automatic size is still taken from non-dangling
+        loops, ignoring targets that are not in a loop. If no target is in a
+        loop, warn and return the target region only. Ignored when ``tids``
+        is not supplied.
 
     Yields
     ------
@@ -1152,11 +1182,34 @@ def gen_gloops(
         return ()
 
     targeted = tids is not None
+    two_core_tids = None
+    if targeted:
+        if isinstance(tids, int):
+            tids = (tids,)
+        else:
+            tids = tuple(tids)
+
+        grow_from, allow_dangling = _parse_gloop_grow_from(
+            grow_from, allow_dangling
+        )
+
+        if allow_dangling and tids and (max_size in (None, "min")):
+            two_core_tids = _get_two_core_tids(tn)
+            if not (set(tids) & two_core_tids):
+                # no target is in a loop, so there is no loop to grow
+                warnings.warn(
+                    f"The target tensors {tuple(sorted(tids))} are not in "
+                    "a loop, so only the target region will be returned."
+                )
+                return (tuple(sorted(tids)),)
+
     base_gloops = _gen_gloops_single(
         tn,
         max_size=max_size,
         tids=tids,
         grow_from=grow_from,
+        allow_dangling=allow_dangling,
+        two_core_tids=two_core_tids,
     )
 
     if num_joins == 1:
@@ -1312,6 +1365,7 @@ def gen_gloops_edge_induced(
     grow_from="all",
     num_joins=1,
     join_overlap=2,
+    allow_dangling=False,
 ):
     """Generate edge-induced loops as :class:`NetworkPatch` objects. Unlike
     `gen_gloops`, the same tensor regions can yield multiple patches, differing
@@ -1331,12 +1385,14 @@ def gen_gloops_edge_induced(
         Maximum tensors per region. See :func:`gen_gloops`.
     tids : None or sequence of int, optional
         Only yield loops that contain these ``tids``. See ``grow_from``.
-    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+    grow_from : {'all', 'any'}, optional
         How to filter loops when ``tids`` is set. See :func:`gen_gloops`.
     num_joins : int, optional
         Number of loops to join per result. See :func:`gen_gloops`.
     join_overlap : {1, 2}, optional
         Minimum number of ``tids`` that joined loops must share.
+    allow_dangling : bool, optional
+        Whether target tids can dangle. See :func:`gen_gloops`.
 
     Yields
     ------
@@ -1351,6 +1407,7 @@ def gen_gloops_edge_induced(
         max_size=max_size,
         tids=tids,
         grow_from=grow_from,
+        allow_dangling=allow_dangling,
         num_joins=num_joins,
         join_overlap=join_overlap,
     ):
@@ -1387,8 +1444,9 @@ def get_loop_union(
     tids,
     max_size=None,
     grow_from="all",
+    allow_dangling=False,
 ):
-    """Find the union, in terms of tids, of all generliazed loops that pass
+    """Find the union, in terms of tids, of all generalized loops that pass
     through either all or at least one of the given tids, depending on
     `grow_from`.
 
@@ -1402,23 +1460,26 @@ def get_loop_union(
         The maximum number of tensors that can appear in the region. If
         ``None``, grow the regions until every tid in ``tids`` appears in at
         least one loop, then use that size. If ``"min"``, instead use the
-        size of the first valid region found. See :func:`gen_gloops`.
-    grow_from : {'all', 'any', 'alldangle', 'anydangle'}, optional
+        size of the first non-dangling loop found. See :func:`gen_gloops`.
+    grow_from : {'all', 'any'}, optional
         Only if ``tids`` is specified, this determines how to filter
         loops. If 'all', only take loops containing *all* of the tids
         in ``tids``, if 'any', yield loops containing *any* of the tids
-        in ``tids``. If 'alldangle' or 'anydangle', the base tids are allowed
-        to be dangling, i.e. 1-degree connected.
+        in ``tids``.
+    allow_dangling : bool, optional
+        Whether the target tids can have fewer than two internal bonds. See
+        :func:`gen_gloops`.
 
     Returns
     -------
     tuple[int]
     """
-    gloops = _gen_gloops_single(
+    gloops = gen_gloops(
         tn,
         max_size=max_size,
         tids=tids,
         grow_from=grow_from,
+        allow_dangling=allow_dangling,
     )
     return tuple(sorted({tid for r in gloops for tid in r}))
 

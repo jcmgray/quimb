@@ -861,10 +861,11 @@ class D2BP(BeliefPropagationCommon):
         where,
         gloops=None,
         normalized=True,
-        grow_from="alldangle",
+        grow_from="all",
         strict_size=False,
         multi_excitation_correct=True,
         optimize="auto-hq",
+        allow_dangling=True,
         **contract_opts,
     ):
         """Compute the reduced density matrix for the sites specified by
@@ -882,17 +883,16 @@ class D2BP(BeliefPropagationCommon):
             :func:`~quimb.tensor.networking.gen_gloops`.
         normalized : bool, optional
             Whether to normalize the final density matrix.
-        grow_from : {'alldangle', 'all', 'any'}, optional
+        grow_from : {'all', 'any'}, optional
             How to grow the generalized loops from the specified ``where``:
 
-            - 'alldangle': clusters up to max size, where target sites are
-              allowed to dangle.
-            - 'all': clusters where loop, up to max size, has to include *all*
-              target sites.
-            - 'any': clusters where loop, up to max size, can include *any* of
-              the target sites. Remaining target sites are added as extras.
+            - 'all': the loop, up to max size, must include *all* target sites.
+            - 'any': the loop, up to max size, can include *any* of the target
+              sites. The other target sites are added as extras.
 
-            By default 'alldangle'.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded regions.
         strict_size : bool, optional
             Whether to enforce the maximum size of the generalized loops, only
             relevant for `grow_from="any"`.
@@ -922,6 +922,7 @@ class D2BP(BeliefPropagationCommon):
             gloops=gloops,
             grow_from=grow_from,
             strict_size=strict_size,
+            allow_dangling=allow_dangling,
         )
         # the base (BP) region, including target sites only
         r0 = frozenset(tids)
@@ -1470,9 +1471,10 @@ class D2BP(BeliefPropagationCommon):
         gloops=None,
         combine="sum",
         normalized=True,
-        grow_from="alldangle",
+        grow_from="all",
         strict_size=False,
         optimize="auto-hq",
+        allow_dangling=True,
         **contract_opts,
     ):
         """Compute a reduced density matrix for the sites specified by
@@ -1495,17 +1497,16 @@ class D2BP(BeliefPropagationCommon):
             normalize each cluster density matrix by its trace. If "separate",
             normalize the final density matrix by its trace (usually less
             accurate). If False, do not normalize.
-        grow_from : {'alldangle', 'all', 'any'}, optional
+        grow_from : {'all', 'any'}, optional
             How to grow the generalized loops from the specified ``where``:
 
-            - 'alldangle': clusters up to max size, where target sites are
-              allowed to dangle.
-            - 'all': clusters where loop, up to max size, has to include *all*
-              target sites.
-            - 'any': clusters where loop, up to max size, can include *any* of
-              the target sites. Remaining target sites are added as extras.
+            - 'all': the loop, up to max size, must include *all* target sites.
+            - 'any': the loop, up to max size, can include *any* of the target
+              sites. The other target sites are added as extras.
 
-            By default 'alldangle'.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded regions.
         strict_size : bool, optional
             Whether to enforce the maximum size of the generalized loops, only
             relevant for `grow_from="any"`.
@@ -1525,6 +1526,7 @@ class D2BP(BeliefPropagationCommon):
             gloops=gloops,
             grow_from=grow_from,
             strict_size=strict_size,
+            allow_dangling=allow_dangling,
         )
 
         rhos = []

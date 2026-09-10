@@ -190,7 +190,7 @@ class TestGenGloops:
         psi = qtn.TN_from_edges_rand(
             [(i, i + 1) for i in range(9)], D=2, phys_dim=2, seed=42
         )
-        with pytest.warns(UserWarning, match="never"):
+        with pytest.warns(UserWarning, match="not in a loop"):
             assert self.get_gloops(psi, sites=(4,), grow_from="any") == []
         # naming no target instead reports the whole network
         with pytest.warns(UserWarning, match="tree like"):
@@ -243,26 +243,119 @@ class TestGenGloops:
         ]
 
     @pytest.mark.parametrize(
-        "grow_from,expected",
-        [("alldangle", [(0, 3)]), ("anydangle", [(0,), (3,)])],
+        "grow_from,max_size,resolved_size",
+        [
+            ("all", None, 6),
+            ("all", "min", 6),
+            ("any", None, 4),
+            ("any", "min", 3),
+        ],
     )
-    def test_dangle_modes_ignore_covering(self, grow_from, expected):
-        # the targets are exempt from the two bond condition, so the seed
-        # region is already valid and covering stops there -> the automatic
-        # size gives the same as 'min', and no expansion at all
+    def test_allow_dangling_uses_nondangling_auto_size(
+        self, grow_from, max_size, resolved_size
+    ):
+        # dangling regions are yielded, but only non-dangling loops set size
         psi = qtn.TN_from_edges_rand(self.edges, D=2, phys_dim=2, seed=42)
         sites = (0, 3)
-        assert self.get_gloops(psi, sites=sites, grow_from=grow_from) == (
-            expected
+        gloops = self.get_gloops(
+            psi,
+            max_size,
+            sites=sites,
+            grow_from=grow_from,
+            allow_dangling=True,
         )
-        assert (
-            self.get_gloops(psi, "min", sites=sites, grow_from=grow_from)
-            == expected
+        assert gloops == self.get_gloops(
+            psi,
+            resolved_size,
+            sites=sites,
+            grow_from=grow_from,
+            allow_dangling=True,
         )
-        # an explicit size does expand
-        assert (
-            len(self.get_gloops(psi, 4, sites=sites, grow_from=grow_from)) > 1
+        nondangling_gloops = self.get_gloops(
+            psi, resolved_size, sites=sites, grow_from=grow_from
         )
+        assert set(nondangling_gloops) < set(gloops)
+
+    @pytest.mark.parametrize("grow_from", ["all", "any"])
+    def test_legacy_dangle_grow_from_alias(self, grow_from):
+        psi = qtn.TN_from_edges_rand(self.edges, D=2, phys_dim=2, seed=42)
+        opts = {"max_size": 4, "sites": (0, 3)}
+        assert self.get_gloops(
+            psi,
+            grow_from=grow_from,
+            allow_dangling=True,
+            **opts,
+        ) == self.get_gloops(
+            psi,
+            grow_from=f"{grow_from}dangle",
+            **opts,
+        )
+
+    @pytest.mark.parametrize("grow_from", ["all", "any"])
+    @pytest.mark.parametrize("max_size", [None, "min"])
+    @pytest.mark.parametrize("num_joins", [1, 2])
+    def test_auto_dangling_target_not_in_loop_returns_base(
+        self, grow_from, max_size, num_joins
+    ):
+        psi = qtn.TN_from_edges_rand(
+            [(0, 1), (1, 2), (2, 0), (0, 3)],
+            D=2,
+            phys_dim=2,
+            seed=42,
+        )
+        with pytest.warns(UserWarning, match="only the target region"):
+            gloops = self.get_gloops(
+                psi,
+                max_size,
+                sites=(3,),
+                grow_from=grow_from,
+                allow_dangling=True,
+                num_joins=num_joins,
+            )
+        assert gloops == [(3,)]
+
+    @pytest.mark.parametrize("grow_from", ["all", "any"])
+    @pytest.mark.parametrize("max_size", [None, "min"])
+    def test_auto_dangling_mixed_targets_still_generate(
+        self, grow_from, max_size
+    ):
+        # site 3 dangles but site 1 is in two loops, so the size still
+        # resolves, and dangling regions only add to the non-dangling ones
+        psi = qtn.TN_from_edges_rand(
+            [(0, 1), (1, 2), (2, 0), (0, 3), (1, 4), (4, 5), (5, 2)],
+            D=2,
+            phys_dim=2,
+            seed=42,
+        )
+        sites = (3, 1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            nondangling = self.get_gloops(
+                psi, max_size, sites=sites, grow_from=grow_from
+            )
+            dangling = self.get_gloops(
+                psi,
+                max_size,
+                sites=sites,
+                grow_from=grow_from,
+                allow_dangling=True,
+            )
+        assert set(nondangling) < set(dangling)
+        # the dangling target only appears in the dangling regions
+        assert not any(3 in gloop for gloop in nondangling)
+        assert any(3 in gloop for gloop in dangling)
+
+    @pytest.mark.parametrize("grow_from", ["all", "any"])
+    def test_auto_dangling_num_joins_is_nonempty(self, grow_from):
+        psi = qtn.TN_from_edges_rand(self.edges, D=2, phys_dim=2, seed=42)
+        gloops = self.get_gloops(
+            psi,
+            sites=(0, 3),
+            grow_from=grow_from,
+            allow_dangling=True,
+            num_joins=2,
+        )
+        assert gloops
 
     def test_num_joins_grows_from_local_gloops(self):
         # each join generates only base loops intersecting the current patches

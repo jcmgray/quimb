@@ -958,19 +958,25 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             **kwargs,
         )
 
-    def _gloop_region(self, where, gloops, num_joins=1):
+    def _gloop_region(self, where, gloops, num_joins=1, allow_dangling=False):
         """The set of sites needed to evaluate a generalized-loop expansion of
         size ``gloops`` around ``where``. An explicit set of loops contributes
-        exactly its sites; an integer max-size or ``None`` (smallest loop) is
-        turned into a conservative graph-distance radius (a loop of ``C`` sites
-        reaches at most ``~C // 2`` hops out and back). Each further join can
-        extend the loop by at most the same radius.
+        exactly its sites. An integer max-size, or ``None`` for the smallest
+        loop, is turned into a conservative graph-distance radius. A
+        non-dangling loop of ``C`` sites reaches at most ``~C // 2`` hops out
+        and back. A region with a dangling target reaches at most ``C - 2``
+        hops. Each further join can extend the loop by at most the same
+        radius.
         """
         if gloops is None:
-            # smallest non-trivial loop ~ one unit-cell plaquette
+            # smallest non-trivial loop ~ one unit-cell plaquette, adding one
+            # then covers all cases where target sites are danglers
             radius = max(self.geometry.get_cell_size()) + 1
         elif isinstance(gloops, int):
-            radius = gloops // 2 + 1
+            if allow_dangling:
+                radius = max(0, gloops - 2)
+            else:
+                radius = gloops // 2 + 1
         else:
             # explicit loops: union their sites (plus where), already exact
             sites = set(where)
@@ -990,6 +996,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         *,
         max_size=None,
         num_joins=1,
+        allow_dangling=True,
         info=None,
         **kwargs,
     ):
@@ -1020,6 +1027,9 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             How many overlapping generalized loops can be joined together.
             Typically only vary this with `gloops`/`max_size` set to ``None``
             or the explicit smallest loop size.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded generalized loops.
         info : dict, optional
             A cache for intermediate contraction results. This can be reused
             across different loop settings while the tensor network, gauges,
@@ -1035,7 +1045,9 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         if gloops is None:
             gloops = max_size
 
-        fragment_sites = self._gloop_region(where, gloops, num_joins)
+        fragment_sites = self._gloop_region(
+            where, gloops, num_joins, allow_dangling
+        )
 
         fragment, fragment_gauges = self.build_fragment_with_gauges(
             fragment_sites, gauges
@@ -1051,6 +1063,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             gauges=fragment_gauges,
             normalized=normalized,
             num_joins=num_joins,
+            allow_dangling=allow_dangling,
             info=info,
             **kwargs,
         )
@@ -1064,6 +1077,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         normalized=True,
         max_size=None,
         num_joins=1,
+        allow_dangling=True,
         info=None,
         return_all=False,
         **kwargs,
@@ -1093,6 +1107,9 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             How many overlapping generalized loops can be joined together.
             Typically only vary this with `gloops`/`max_size` set to ``None``
             or the explicit smallest loop size.
+        allow_dangling : bool, optional
+            Whether target sites can have fewer than two internal bonds in
+            yielded generalized loops.
         info : dict, optional
             A cache for intermediate contraction results. This can be reused
             across different loop settings while the tensor network, gauges,
@@ -1114,7 +1131,8 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
         for where in terms:
             where_sites.update(ensure_inf_2d_sites(where))
         fragment, fragment_gauges = self.build_fragment_with_gauges(
-            self._gloop_region(where_sites, gloops, num_joins), gauges
+            self._gloop_region(where_sites, gloops, num_joins, allow_dangling),
+            gauges,
         )
         if (info is not None) and ("neighbors" in info):
             # this cache depends on the particular finite fragment
@@ -1126,6 +1144,7 @@ class PEPSInfinite2D(TensorNetworkInfinite2DFlat):
             gauges=fragment_gauges,
             normalized=normalized,
             num_joins=num_joins,
+            allow_dangling=allow_dangling,
             info=info,
             return_all=return_all,
             **kwargs,
