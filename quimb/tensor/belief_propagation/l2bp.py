@@ -201,7 +201,7 @@ class L2BP(BeliefPropagationCommon):
 
             def _symmetrize_fn(x):
                 N = ar.ndim(x)
-                perm = (*range(N // 2, N), *range(0, N // 2))
+                perm = (*range(N // 2, N), *range(N // 2))
                 # XXX: do this blockwise for block/fermi arrays?
                 return x + _conj(_transpose(x, perm))
 

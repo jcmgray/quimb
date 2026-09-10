@@ -368,7 +368,7 @@ class CircuitMPS(CircuitBase):
         # we will uniformly sample, and post-select on, the remaining qubits
         fix_qubits = tuple(q for q in qubits if q not in where)
 
-        result = dict()
+        result = {}
         for _ in range(C):
             # generate a random bit-string for the fixed qubits
             for q in fix_qubits:
@@ -843,7 +843,7 @@ class CircuitMPSLazy(CircuitMPS):
         self.compress_opts.setdefault("max_bond", max_bond)
         self.compress_opts.setdefault("cutoff", cutoff)
         self.compress_opts.setdefault("method", method)
-        self._uncompressed_sites = dict()
+        self._uncompressed_sites = {}
         self.compress_every = compress_every
 
     @property

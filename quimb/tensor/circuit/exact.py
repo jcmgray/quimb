@@ -1244,7 +1244,7 @@ class Circuit(CircuitBase):
         # group the ordering e.g. ((5, 3), (4, 2))
         groups = self._group_order(order, group_size)
 
-        result = dict()
+        result = {}
         for _ in range(C):
             for where in groups:
                 # key - (tuple[int] where, tuple[tuple[int q, str b])
@@ -1462,7 +1462,7 @@ class Circuit(CircuitBase):
         # we will uniformly sample, and post-select on, the remaining qubits
         fix_qubits = tuple(q for q in qubits if q not in where)
 
-        result = dict()
+        result = {}
         for _ in range(C):
             # generate a random bit-string for the fixed qubits
             for q in fix_qubits:
@@ -1811,10 +1811,10 @@ class Circuit(CircuitBase):
         rehs = []
         result = {q: "0" for q in range(self.N)}
 
-        for circs_wheres in _progbar(circs_wheres, disable=not progbar):
+        for cw in _progbar(circs_wheres, disable=not progbar):
             # get the next circuit and the new group of qubits
-            circ_g = circs_wheres["circuit"]
-            where = circs_wheres["where"]
+            circ_g = cw["circuit"]
+            where = cw["where"]
 
             # remove the new group of qubits from our current result
             for q in where:

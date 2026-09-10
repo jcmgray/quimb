@@ -28,7 +28,7 @@ class TestLocalHam2DConstruct:
         if H2_type == "default":
             H2 = qu.rand_herm(4)
         elif H2_type == "manual":
-            H2 = dict()
+            H2 = {}
             for i, j in itertools.product(range(Lx), range(Ly)):
                 if i + 1 < Lx:
                     H2[(i, j), (i + 1, j)] = qu.rand_herm(4)
@@ -40,7 +40,7 @@ class TestLocalHam2DConstruct:
         elif H1_type == "default":
             H1 = qu.rand_herm(2)
         elif H1_type == "manual":
-            H1 = dict()
+            H1 = {}
             for i, j in itertools.product(range(Lx), range(Ly)):
                 H1[i, j] = qu.rand_herm(2)
 
@@ -52,7 +52,7 @@ class TestLocalHam2DConstruct:
             assert len({id(x) for x in ham.terms.values()}) == 1
 
         print(ham)
-        fig, ax = ham.draw()
+        fig, _ax = ham.draw()
         plt.close(fig)
 
     @pytest.mark.parametrize("Lx", [4, 5])

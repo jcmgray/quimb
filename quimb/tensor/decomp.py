@@ -3229,7 +3229,7 @@ def compute_oblique_projectors(
 
     .. math::
 
-        A' = Q_L P_L P_R' Q_R
+        A' = Q_L R_L P_L P_R R_R Q_R
 
     Parameters
     ----------

@@ -14,7 +14,6 @@ from .bp_common import (
 
 
 def _compute_all_hyperind_messages_tree_batched(bm):
-    """ """
     ndim = len(bm)
     xp = ar.get_namespace(bm)
 
@@ -58,7 +57,6 @@ def _compute_all_hyperind_messages_tree_batched(bm):
 
 
 def _compute_all_hyperind_messages_prod_batched(bm, smudge_factor=1e-12):
-    """ """
     xp = ar.get_namespace(bm)
 
     ndim = len(bm)
