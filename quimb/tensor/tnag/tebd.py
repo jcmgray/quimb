@@ -913,7 +913,18 @@ class TEBDSweepMixin:
         ftmp = self.logdir / f".progress.json.{os.getpid()}"
         with open(ftmp, "w") as f:
             json.dump(payload, f, default=str)
-        os.replace(ftmp, self.logdir / "progress.json")
+
+        # windows: replace can fail if file being read, so retry a few times
+        pause = 0.01
+        for _ in range(5):
+            try:
+                os.replace(ftmp, self.logdir / "progress.json")
+                return
+            except OSError:
+                time.sleep(pause)
+                pause *= 2
+
+        ftmp.unlink(missing_ok=True)
 
     def check_stop_file(self):
         """Check for a ``"STOP"`` file in ``logdir``, and if present remove it

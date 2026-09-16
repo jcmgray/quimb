@@ -264,7 +264,31 @@ class TestProgressLog:
         # once at the start, then only for the single rewrite
         assert len(ndraws) == 2
 
-    def test_load_progress_accepts_the_file_itself(self, tmp_path):
+    def test_write_survives_a_failing_replace(self, tmp_path, monkeypatch):
+        import os
+        import time
+
+        # windows raises while a reader has the destination file open
+        def failing_replace(src, dst):
+            raise PermissionError("file in use")
+
+        su = self.get_su(logdir=tmp_path, log_every=100)
+        su.evolve(1)
+        before = qu.load_progress_log(tmp_path)
+
+        pauses = []
+        monkeypatch.setattr(os, "replace", failing_replace)
+        monkeypatch.setattr(time, "sleep", pauses.append)
+        su.evolve(1)
+
+        # the run should carry on, leaving no stray temporary files
+        assert su.n == 2
+        assert qu.load_progress_log(tmp_path) == before
+        assert [f.name for f in tmp_path.iterdir()] == ["progress.json"]
+        # both writes should back off before giving up
+        assert pauses == [0.01, 0.02, 0.04, 0.08, 0.16] * 2
+
+    def test_load_progress_log_accepts_the_file_itself(self, tmp_path):
         su = self.get_su(logdir=tmp_path)
         su.evolve(2)
         assert qu.load_progress_log(tmp_path / "progress.json") == (
@@ -329,11 +353,11 @@ class TestProgressLog:
         assert during[0] is before
 
     def test_graceful_interrupt_finishes_the_sweep(self):
-        import os
         import signal
 
+        # note os.kill with SIGINT would simply terminate us on windows
         su = self.get_su()
-        su.callback = lambda su: os.kill(os.getpid(), signal.SIGINT)
+        su.callback = lambda su: signal.raise_signal(signal.SIGINT)
         su.evolve(10)
         # the sweep should have completed, leaving a usable state
         assert 0 < su.n < 10
