@@ -202,3 +202,139 @@ class TestGetTrotterGates:
             0,
             0,
         )
+
+
+class TestProgressLog:
+    def get_su(self, **kwargs):
+        edges = qtn.edges_2d_square(2, 3)
+        psi = qtn.TN_from_edges_rand(edges, D=2, phys_dim=2)
+        ham = qtn.LocalHamGen(H2={e: qu.ham_heis(2) for e in edges})
+        return qtn.SimpleUpdateGen(
+            psi, ham, D=2, compute_energy_every=1, progbar=False, **kwargs
+        )
+
+    def test_writes_data_that_matches_the_run(self, tmp_path):
+        su = self.get_su(logdir=tmp_path)
+        su.evolve(5)
+
+        payload = qu.load_progress_log(tmp_path)
+        assert payload["cls"] == "SimpleUpdateGen"
+        assert payload["running"] is False
+        assert payload["info"]["n"] == 5
+        assert payload["elapsed"] > 0.0
+        assert payload["data"]["energies"]["y"] == approx(list(su.energies))
+        assert payload["data"]["energies"]["x"] == approx(list(su.energy_ns))
+        assert payload["data"]["gauge_diffs"]["yscale"] == "log"
+
+    def test_watch_only_redraws_when_the_file_changes(
+        self, tmp_path, monkeypatch
+    ):
+        import json
+        import time
+
+        import quimb.utils_plot as up
+
+        su = self.get_su(logdir=tmp_path)
+        su.evolve(3)
+
+        # pretend the run is still going
+        fprogress = tmp_path / "progress.json"
+        payload = json.loads(fprogress.read_text())
+        payload["running"] = True
+        fprogress.write_text(json.dumps(payload))
+
+        ndraws = []
+        monkeypatch.setattr(
+            up, "plot_multi_series_zoom", lambda data, **kw: ndraws.append(1)
+        )
+
+        nsleeps = []
+
+        def fake_sleep(interval):
+            nsleeps.append(1)
+            if len(nsleeps) == 5:
+                # the run finishes, rewriting the file
+                payload["running"] = False
+                fprogress.write_text(json.dumps(payload))
+
+        monkeypatch.setattr(time, "sleep", fake_sleep)
+        up.plot_progress_log(tmp_path, watch=True, clear_previous=False)
+
+        assert len(nsleeps) == 5
+        # once at the start, then only for the single rewrite
+        assert len(ndraws) == 2
+
+    def test_load_progress_accepts_the_file_itself(self, tmp_path):
+        su = self.get_su(logdir=tmp_path)
+        su.evolve(2)
+        assert qu.load_progress_log(tmp_path / "progress.json") == (
+            qu.load_progress_log(tmp_path)
+        )
+
+    def test_log_every(self, tmp_path):
+        seen = []
+        su = self.get_su(logdir=tmp_path, log_every=10)
+        su.callback = lambda su: seen.append(
+            qu.load_progress_log(tmp_path)["info"]["n"]
+        )
+        su.evolve(12)
+        # written once at the start, then only at the tenth sweep
+        assert seen == [0] * 9 + [10] * 3
+        assert qu.load_progress_log(tmp_path)["info"]["n"] == 12
+
+    def test_stop_file_stops_after_current_sweep(self, tmp_path):
+        su = self.get_su(logdir=tmp_path)
+        su.evolve(2)
+        assert su.n == 2
+
+        (tmp_path / "STOP").touch()
+        su.evolve(10)
+        assert su.n == 2
+        # the state should still be usable, and the file consumed
+        assert su.get_state().max_bond() == 2
+        assert not (tmp_path / "STOP").exists()
+
+        # a following call should not be stopped by the stale file
+        su.evolve(2)
+        assert su.n == 4
+
+    def test_stop_file_survives_energy_convergence_check(self, tmp_path):
+        # the energy check must not clobber an externally requested stop
+        su = self.get_su(logdir=tmp_path, tol_energy_diff=0.0)
+        (tmp_path / "STOP").touch()
+        su.evolve(10)
+        assert su.n == 0
+
+    def test_graceful_interrupt_handler(self):
+        import signal
+
+        before = signal.getsignal(signal.SIGINT)
+        during = []
+
+        def record(su):
+            during.append(signal.getsignal(signal.SIGINT))
+
+        # the handler should be installed during the run, and restored after
+        su = self.get_su()
+        su.callback = record
+        su.evolve(1)
+        assert during[0] is not before
+        assert signal.getsignal(signal.SIGINT) is before
+
+        # unless turned off
+        during.clear()
+        su = self.get_su(graceful_interrupt=False)
+        su.callback = record
+        su.evolve(1)
+        assert during[0] is before
+
+    def test_graceful_interrupt_finishes_the_sweep(self):
+        import os
+        import signal
+
+        su = self.get_su()
+        su.callback = lambda su: os.kill(os.getpid(), signal.SIGINT)
+        su.evolve(10)
+        # the sweep should have completed, leaving a usable state
+        assert 0 < su.n < 10
+        assert su.get_state().max_bond() == 2

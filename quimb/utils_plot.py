@@ -255,3 +255,91 @@ def plot_multi_series_zoom(
     axs[-1, 1].set_xlabel(f"{xlabel} (zoom)")
 
     return fig, axs
+
+
+def _progress_log_file(path):
+    """Resolve ``path``, which can be a log directory or the file itself, to
+    the progress file.
+    """
+    import pathlib
+
+    path = pathlib.Path(path)
+    if path.is_dir():
+        path = path / "progress.json"
+    return path
+
+
+def load_progress_log(path):
+    """Load the progress data written by a running TEBD or simple update
+    evolution, see
+    :meth:`quimb.tensor.tnag.tebd.TEBDSweepMixin.write_progress_log`.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Either the log directory the run was given, or the ``"progress.json"``
+        file within it.
+
+    Returns
+    -------
+    dict
+        With keys ``"cls"``, ``"info"``, ``"time"``, ``"elapsed"``,
+        ``"running"`` and ``"data"``, the last being the series to plot.
+    """
+    import json
+
+    with open(_progress_log_file(path), "r") as f:
+        return json.load(f)
+
+
+def plot_progress_log(path, watch=False, interval=1.0, **kwargs):
+    """Plot the progress of a TEBD or simple update evolution, which can still
+    be running, possibly in another process.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Either the log directory the run was given, or the ``"progress.json"``
+        file within it.
+    watch : bool, optional
+        Whether to keep reloading and redrawing until the run reports that it
+        has finished. Only redraws when the file has actually been rewritten.
+        Intended for use in a notebook.
+    interval : float, optional
+        How many seconds to wait between checks when watching.
+    kwargs
+        Supplied to :func:`plot_multi_series_zoom`.
+
+    Returns
+    -------
+    fig, axs : matplotlib.Figure, tuple[matplotlib.Axes]
+    """
+    import time
+
+    fname = _progress_log_file(path)
+
+    def stamp():
+        st = fname.stat()
+        return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+    last = stamp()
+    payload = load_progress_log(fname)
+    out = plot_multi_series_zoom(payload["data"], **kwargs)
+
+    if not watch:
+        return out
+
+    kwargs.setdefault("clear_previous", True)
+    while payload["running"]:
+        time.sleep(interval)
+
+        # each write replaces the file, so nothing to do if it is unchanged
+        current = stamp()
+        if current == last:
+            continue
+
+        last = current
+        payload = load_progress_log(fname)
+        out = plot_multi_series_zoom(payload["data"], **kwargs)
+
+    return out

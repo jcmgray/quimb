@@ -45,6 +45,9 @@ Release notes for `quimb`.
 - Add [`distance_from_overlaps`](#distance_from_overlaps) to compute normalized distances and infidelities directly from three precomputed overlaps.
 - Add [`TensorNetwork.insert_projectors_between_regions`](#TensorNetwork.insert_projectors_between_regions) to insert already computed projector arrays between tensor-network regions.
 - Infinite 2D generalized-loop expectations accept ``max_size`` and ``num_joins`` loop-generation options. Their ``info`` cache can be reused across different loop settings while the state, gauges, and operators are unchanged.
+- TEBD and simple update classes ([`TEBDGen`](#TEBDGen), [`SimpleUpdateGen`](#SimpleUpdateGen), [`TEBD2D`](#TEBD2D), [`SimpleUpdate`](#SimpleUpdate), and their subclasses) accept ``logdir``. The run then writes its progress data to ``"progress.json"`` in that directory every ``log_every`` sweeps. Use [`plot_progress_log`](#plot_progress_log) to plot a run from another process while it is still going, with ``watch=True`` to keep redrawing, whenever the file changes, until the run finishes, or [`load_progress_log`](#load_progress_log) to get the raw data.
+- TEBD and simple update classes: creating a file called ``"STOP"`` in ``logdir`` stops the run gracefully, after the current sweep. The file is removed once seen.
+- TEBD and simple update classes: the first interrupt (Ctrl-C) during [`evolve`](#TEBDSweepMixin.evolve) now also stops the run after the current sweep, rather than part way through it. A second interrupt stops immediately, as before. Set ``graceful_interrupt=False`` for the old behavior.
 - Compression functions now accept tag *groups* in ``site_tags``. A tag in a group selects tensors with that tag. A nested sequence selects tensors with every tag. See [`parse_site_tag_groups`](#parse_site_tag_groups). The 1D, 2D, and arbitrary-geometry compression wrappers also accept custom `method` callables.
 
 
