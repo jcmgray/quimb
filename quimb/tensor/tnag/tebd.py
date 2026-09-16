@@ -3,7 +3,12 @@
 import array
 import collections
 import itertools
+import json
+import os
+import pathlib
 import random
+import signal
+import time
 from collections.abc import Iterable
 
 from autoray import do, to_numpy
@@ -733,6 +738,9 @@ class TEBDSweepMixin:
         callback=None,
         keep_best=False,
         plot_every=None,
+        logdir=None,
+        log_every=1,
+        graceful_interrupt=True,
         progbar=True,
     ):
         self.imag = imag
@@ -746,6 +754,14 @@ class TEBDSweepMixin:
         self.tol = tol
         self.tol_energy_diff = tol_energy_diff
         self.plot_every = plot_every
+        self.graceful_interrupt = graceful_interrupt
+
+        # progress logging, for inspection from another process
+        self.logdir = None if logdir is None else pathlib.Path(logdir)
+        if self.logdir is not None:
+            self.logdir.mkdir(parents=True, exist_ok=True)
+        self.log_every = log_every
+        self._time_started = None
 
         # default time step to use
         self.tau = tau
@@ -846,6 +862,71 @@ class TEBDSweepMixin:
 
         self.postlayer()
 
+    def write_progress_log(self, running=True):
+        """Write the current progress data to ``"progress.json"`` in
+        ``logdir``, so that another process can inspect and plot the run while
+        it is still going, see :func:`~quimb.utils_plot.plot_progress_log`.
+
+        Parameters
+        ----------
+        running : bool, optional
+            Whether the run is still in progress, recorded in the file so that
+            a watching process knows when to stop reloading it.
+        """
+        if self.logdir is None:
+            return
+
+        def to_list(xs):
+            try:
+                # much faster than iterating, for array.array and ndarray
+                return xs.tolist()
+            except AttributeError:
+                return [float(x) for x in xs]
+
+        data = {}
+        for name, series in self.assemble_plot_data().items():
+            if not isinstance(series, dict):
+                series = {"y": series}
+            d = {"y": to_list(series["y"])}
+            if "x" in series:
+                d["x"] = to_list(series["x"])
+            for key in ("yscale", "label", "color"):
+                if key in series:
+                    d[key] = series[key]
+            data[name] = d
+
+        now = time.time()
+        payload = {
+            "cls": self.__class__.__name__,
+            "info": self._get_repr_info(),
+            "time": now,
+            "elapsed": (
+                None
+                if self._time_started is None
+                else now - self._time_started
+            ),
+            "running": bool(running),
+            "data": data,
+        }
+
+        # write to a temporary file first so readers never see a partial one
+        ftmp = self.logdir / f".progress.json.{os.getpid()}"
+        with open(ftmp, "w") as f:
+            json.dump(payload, f, default=str)
+        os.replace(ftmp, self.logdir / "progress.json")
+
+    def check_stop_file(self):
+        """Check for a ``"STOP"`` file in ``logdir``, and if present remove it
+        and request that the run stops after the current sweep.
+        """
+        if self.logdir is None:
+            return
+
+        fstop = self.logdir / "STOP"
+        if fstop.exists():
+            fstop.unlink(missing_ok=True)
+            self.stop = True
+
     def _set_progbar_description(self, pbar):
         desc = f"n={self._n}, D={self.D}, tau={float(self.last_tau):.3g}"
         if getattr(self, "gauge_diffs", None):
@@ -873,8 +954,34 @@ class TEBDSweepMixin:
 
         pbar = Progbar(total=steps, disable=not progbar)
 
+        def _sigint_handler(signum, frame):
+            # restore so that a second interrupt takes effect immediately
+            signal.signal(signal.SIGINT, old_handler)
+            self.stop = True
+            pbar.write(
+                "Interrupted: stopping after the current sweep, "
+                "interrupt again to stop immediately."
+            )
+
+        old_handler = None
+        if self.graceful_interrupt:
+            try:
+                old_handler = signal.signal(signal.SIGINT, _sigint_handler)
+                if old_handler is None:
+                    # handler was not set from python, restore the default
+                    old_handler = signal.default_int_handler
+            except ValueError:
+                # not the main thread, can't install a handler
+                pass
+
+        self._time_started = time.time()
+        self.write_progress_log()
+
         try:
             for it, tau in zip(range(steps), taus):
+                # an external process might have requested a stop
+                self.check_stop_file()
+
                 # anything required by both energy and sweep
                 self.presweep()
 
@@ -887,8 +994,9 @@ class TEBDSweepMixin:
                     self._set_progbar_description(pbar)
 
                     # check for convergence
-                    self.stop = (self.tol_energy_diff is not None) and (
-                        self.energy_diffs[-1] < self.tol_energy_diff
+                    self.stop = self.stop or (
+                        (self.tol_energy_diff is not None)
+                        and (self.energy_diffs[-1] < self.tol_energy_diff)
                     )
 
                 if self.stop:
@@ -903,6 +1011,9 @@ class TEBDSweepMixin:
                 self._n += 1
                 pbar.update()
                 self._set_progbar_description(pbar)
+
+                if self.log_every and (self._n % self.log_every == 0):
+                    self.write_progress_log()
 
                 if (self.callback is not None) and self.callback(self):
                     break
@@ -925,6 +1036,9 @@ class TEBDSweepMixin:
             # allow the user to interupt early
             pass
         finally:
+            if old_handler is not None:
+                signal.signal(signal.SIGINT, old_handler)
+            self.write_progress_log(running=False)
             pbar.close()
 
     # ------- abstract methods that subclasses might want to override ------- #
@@ -1447,6 +1561,19 @@ class TEBDGen(
         attribute.
     plot_every : int, optional
         Whether to plot the energy and energy difference every this many steps.
+    logdir : str or pathlib.Path, optional
+        If given, a directory to write the progress data to, as
+        ``"progress.json"``, so that another process can inspect and plot the
+        run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
+        Creating a file called ``"STOP"`` in this directory then stops the run
+        gracefully, after the current sweep.
+    log_every : int, optional
+        How often to write the progress data, if ``logdir`` is given. Each
+        write rewrites the whole file, so raise this for very long runs.
+    graceful_interrupt : bool, optional
+        Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
+        and treat it as a request to stop after the current sweep. A second
+        interrupt then stops immediately, as usual.
     progbar : bool, optional
         Whether to show a progress bar during evolution.
 
@@ -1500,6 +1627,9 @@ class TEBDGen(
         callback=None,
         keep_best=False,
         plot_every=None,
+        logdir=None,
+        log_every=1,
+        graceful_interrupt=True,
         progbar=True,
     ):
         self.setup_sweep_opts(
@@ -1514,6 +1644,9 @@ class TEBDGen(
             callback=callback,
             keep_best=keep_best,
             plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            graceful_interrupt=graceful_interrupt,
             progbar=progbar,
         )
         self.setup_gate_opts(
@@ -1602,6 +1735,19 @@ class SimpleUpdateGen(
         attribute.
     plot_every : int, optional
         Whether to plot the energy and energy difference every this many steps.
+    logdir : str or pathlib.Path, optional
+        If given, a directory to write the progress data to, as
+        ``"progress.json"``, so that another process can inspect and plot the
+        run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
+        Creating a file called ``"STOP"`` in this directory then stops the run
+        gracefully, after the current sweep.
+    log_every : int, optional
+        How often to write the progress data, if ``logdir`` is given. Each
+        write rewrites the whole file, so raise this for very long runs.
+    graceful_interrupt : bool, optional
+        Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
+        and treat it as a request to stop after the current sweep. A second
+        interrupt then stops immediately, as usual.
     progbar : bool, optional
         Whether to show a progress bar during evolution.
 
@@ -1669,6 +1815,9 @@ class SimpleUpdateGen(
         callback=None,
         keep_best=False,
         plot_every=None,
+        logdir=None,
+        log_every=1,
+        graceful_interrupt=True,
         progbar=True,
     ):
         self.setup_sweep_opts(
@@ -1683,6 +1832,9 @@ class SimpleUpdateGen(
             callback=callback,
             keep_best=keep_best,
             plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            graceful_interrupt=graceful_interrupt,
             progbar=progbar,
         )
         self.setup_gate_opts(

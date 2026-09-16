@@ -455,6 +455,19 @@ class TEBD2D(
         attribute.
     plot_every : int, optional
         Whether to plot the energy and energy difference every this many steps.
+    logdir : str or pathlib.Path, optional
+        If given, a directory to write the progress data to, as
+        ``"progress.json"``, so that another process can inspect and plot the
+        run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
+        Creating a file called ``"STOP"`` in this directory then stops the run
+        gracefully, after the current sweep.
+    log_every : int, optional
+        How often to write the progress data, if ``logdir`` is given. Each
+        write rewrites the whole file, so raise this for very long runs.
+    graceful_interrupt : bool, optional
+        Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
+        and treat it as a request to stop after the current sweep. A second
+        interrupt then stops immediately, as usual.
     progbar : bool, optional
         Whether to show a progress bar during evolution.
 
@@ -509,6 +522,9 @@ class TEBD2D(
         callback=None,
         keep_best=False,
         plot_every=None,
+        logdir=None,
+        log_every=1,
+        graceful_interrupt=True,
         progbar=True,
     ):
         self.setup_sweep_opts(
@@ -523,6 +539,9 @@ class TEBD2D(
             callback=callback,
             keep_best=keep_best,
             plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            graceful_interrupt=graceful_interrupt,
             progbar=progbar,
         )
         self.setup_gate_opts(
@@ -624,6 +643,19 @@ class SimpleUpdate(
         attribute.
     plot_every : int, optional
         Whether to plot the energy and energy difference every this many steps.
+    logdir : str or pathlib.Path, optional
+        If given, a directory to write the progress data to, as
+        ``"progress.json"``, so that another process can inspect and plot the
+        run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
+        Creating a file called ``"STOP"`` in this directory then stops the run
+        gracefully, after the current sweep.
+    log_every : int, optional
+        How often to write the progress data, if ``logdir`` is given. Each
+        write rewrites the whole file, so raise this for very long runs.
+    graceful_interrupt : bool, optional
+        Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
+        and treat it as a request to stop after the current sweep. A second
+        interrupt then stops immediately, as usual.
     progbar : bool, optional
         Whether to show a progress bar during evolution.
 
@@ -692,6 +724,9 @@ class SimpleUpdate(
         callback=None,
         keep_best=False,
         plot_every=None,
+        logdir=None,
+        log_every=1,
+        graceful_interrupt=True,
         progbar=True,
     ):
         self.setup_sweep_opts(
@@ -706,6 +741,9 @@ class SimpleUpdate(
             callback=callback,
             keep_best=keep_best,
             plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            graceful_interrupt=graceful_interrupt,
             progbar=progbar,
         )
         self.setup_gate_opts(
