@@ -598,31 +598,20 @@ requires_symmray = pytest.mark.skipif(
 )
 
 
+def _positive_message_dense(m):
+    import autoray as ar
+
+    if m.fermionic and not m.indices[1].dual:
+        m = m.phase_flip(1)
+    return ar.to_numpy(m.to_dense())
+
+
 @requires_symmray
 @pytest.mark.parametrize("fermionic", [False, True])
 @pytest.mark.parametrize("odd", [False, True])
 @pytest.mark.parametrize("reverse", [False, True])
 class TestSymmetricMessages:
     """Check compression across parity and bond orientation."""
-
-    @pytest.fixture(autouse=True)
-    def _known_bad(self, request, fermionic, odd, reverse):
-        # reversed fermionic bonds produce non-PSD messages
-        if not (fermionic and reverse):
-            return
-        # message reuse fails at both parities
-        # contraction fails only when the tensor parity is odd
-        reads_messages = any(
-            name in request.node.name
-            for name in ("positive_messages", "compress_twice")
-        )
-        if odd or reads_messages:
-            request.applymarker(
-                pytest.mark.xfail(
-                    reason="reversed bond dualness signs fermionic messages",
-                    strict=True,
-                )
-            )
 
     @staticmethod
     def _scalar_tn(fermionic, odd, reverse, dtype="float64", seed=42):
@@ -678,7 +667,7 @@ class TestSymmetricMessages:
         bp.compress(max_bond=64, cutoff=0.0, inplace=True)
 
         for m in bp.messages.values():
-            d = np.asarray(m.to_dense())
+            d = _positive_message_dense(m)
             d = d / np.linalg.norm(d)
             assert_allclose(d, d.conj().T, atol=1e-12)
             assert np.linalg.eigvalsh(d).min() > -1e-12
@@ -715,3 +704,351 @@ class TestSymmetricMessages:
         bp.iterate(tol=1e-13)
         for key, m in bp.messages.items():
             assert float((m / m.norm() - old[key]).norm()) < 1e-8
+
+
+@requires_symmray
+@pytest.mark.parametrize("duals", ["reversed", "canonical", "random"])
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("charge", [0, 1])
+class TestSymmrayFermionicEnvironments:
+    @staticmethod
+    def make_tree(duals, flat, charge, phys_dim=2):
+        import symmray as sr
+
+        return sr.TN_abelian_from_edges_rand(
+            "Z2",
+            [(0, 1), (1, 2), (1, 3)],
+            bond_dim=4,
+            phys_dim=phys_dim,
+            fermionic=True,
+            flat=flat,
+            subsizes="equal",
+            duals=duals,
+            site_charge=lambda site: charge,
+            dtype="complex128",
+            seed=42,
+        )
+
+    @staticmethod
+    def check_messages(bp):
+        for (ix, tid), m in bp.messages.items():
+            assert not m.dummy_modes
+            d = _positive_message_dense(m)
+            assert_allclose(d, d.conj().T, atol=1e-10)
+            assert np.linalg.eigvalsh(d).min() > -1e-10
+            t = bp.tn.tensor_map[tid]
+            assert m.duals[1] != t.data.duals[t.inds.index(ix)]
+
+    def test_tree_norm_and_conditioning(self, duals, flat, charge):
+        tn = self.make_tree(duals, flat, charge)
+        bp = qbp.D2BP(tn)
+        assert bp.normalize == "L2"
+        assert bp.distance == "L2"
+        self.check_messages(bp)
+        bp.run(max_iterations=10, tol=1e-12)
+        self.check_messages(bp)
+        assert bp.contract() == pytest.approx(tn.norm() ** 2, rel=1e-10)
+
+        for key, m in bp.messages.items():
+            lazy = (-m).phase_global()
+            assert_allclose(
+                bp._normalize_fn(lazy).to_dense(),
+                bp._normalize_fn(m).to_dense(),
+                atol=1e-12,
+            )
+            d = _positive_message_dense(m)
+            s2, w = np.linalg.eigh(d)
+            s = np.sqrt(np.clip(s2, 0.0, None))
+            expected = (w * (s + 0.01 * s.max()) ** 1.5) @ w.conj().T
+            mc = bp.get_message(key, power=0.75, smudge=0.01)
+            assert_allclose(_positive_message_dense(mc), expected, atol=1e-10)
+
+        bp.power = 0.75
+        bp.smudge = 0.01
+        bp.iterate()
+        self.check_messages(bp)
+
+    @pytest.mark.parametrize(
+        "where, tids_region",
+        [
+            ((1,), None),
+            ((0, 1), None),
+            ((0, 2), (0, 1, 2)),
+            ((0, 2), (0, 1, 2, 3)),
+        ],
+    )
+    def test_cluster_density_matrix(
+        self, duals, flat, charge, where, tids_region
+    ):
+        tn = self.make_tree(duals, flat, charge)
+        bp = qbp.D2BP(tn)
+        bp.run(max_iterations=10, tol=1e-12)
+        # include the connecting path so the tree environment is exact
+        rho = bp.partial_trace(
+            where, tids_region=tids_region, normalized=False
+        ).to_dense()
+        exact = tn.partial_trace_exact(where, normalized=False).to_dense()
+        assert_allclose(
+            rho / np.trace(rho), exact / np.trace(exact), atol=1e-12
+        )
+
+    def test_direct_environments(self, duals, flat, charge, monkeypatch):
+        import autoray as ar
+
+        tn = self.make_tree(duals, flat, charge)
+        bp = qbp.D2BP(tn, update="parallel")
+        t = bp.tn.tensor_map[1]
+        out = next(ix for ix in t.inds if ix not in bp.output_inds)
+        (neighbor,) = (tid for tid in tn.ind_map[out] if tid != 1)
+
+        # independently weight both copies with square-root factors
+        weighted = t.copy()
+        for ix in t.inds:
+            if ix == out or ix in bp.output_inds:
+                continue
+            m = bp.messages[ix, 1]
+            s2, w = m.eigh()
+            s = ar.do("sqrt", ar.do("clip", s2, 0.0, None))
+            weighted.gate_(qtn.decomp.ldmul(s, ar.dag(w)), ix)
+        expected = ar.do(
+            "gram", weighted.data, axes=weighted.inds.index(out)
+        ).to_dense()
+        expected /= np.linalg.norm(expected)
+
+        def no_factorization(*args, **kwargs):
+            raise AssertionError("environment message was factorized")
+
+        monkeypatch.setattr(type(m), "eigh", no_factorization)
+        with monkeypatch.context() as patch:
+
+            def no_gate(*args, **kwargs):
+                raise AssertionError("environment message was eagerly gated")
+
+            patch.setattr(qtn.Tensor, "gate_", no_gate)
+            bp.iterate()
+            actual = bp.messages[out, neighbor].to_dense()
+            assert_allclose(actual, expected, atol=1e-12)
+
+            bp.run(max_iterations=10, tol=1e-12)
+            assert bp.contract() == pytest.approx(tn.norm() ** 2, rel=1e-10)
+            bp.get_cluster_norm((0, 1)).contract(all)
+            local = tn._select_tids((1,), virtual=False)
+            rest = tuple(ix for ix in t.inds if ix != out)
+            for side in ("left", "right"):
+                local.compute_reduced_factor(side, rest, (out,), gauges=bp)
+
+        compressed = tn.insert_compressor_between_regions(
+            [tn.site_tag(0)],
+            [tn.site_tag(1)],
+            gauges=bp,
+            max_bond=4,
+            cutoff=0.0,
+        )
+        assert compressed.distance_normalized(tn) < 1e-7
+
+    def test_gate_and_reuse(self, duals, flat, charge, request):
+        import symmray as sr
+
+        if flat:
+            # the tree has leaves, so reduce-split gating makes a size-1 bond
+            request.applymarker(
+                pytest.mark.xfail(
+                    reason="flat fusing assumes every grouped axis carries "
+                    "all charges, so the size-1 reduced bond breaks it",
+                    strict=True,
+                )
+            )
+
+        tn = self.make_tree(duals, flat, charge)
+        bp = qbp.D2BP(tn)
+        bp.run(max_iterations=10, tol=1e-12)
+        gate = sr.utils.get_rand(
+            "Z2",
+            (2, 2, 2, 2),
+            duals=(False, False, True, True),
+            fermionic=True,
+            flat=flat,
+            subsizes="equal",
+            dtype="complex128",
+            seed=43,
+        )
+        expected = tn.gate(gate, (0, 1), contract=False)
+        bp.gate_(gate, (0, 1), max_bond=8, contract="reduce-split")
+        assert bp.tn.distance_normalized(expected) < 1e-7
+        self.check_messages(bp)
+
+        # truncation changes the bond, then another gate reuses the messages
+        bp.gate_(gate, (0, 1), max_bond=2)
+        self.check_messages(bp)
+        assert bp.tn.bond_size(0, 1) <= 2
+        bp.run(max_iterations=10, tol=1e-12)
+        self.check_messages(bp)
+        assert bp.contract() == pytest.approx(bp.tn.norm() ** 2, rel=1e-10)
+
+        one_site_gate = sr.utils.get_rand(
+            "Z2",
+            (2, 2),
+            duals=(False, True),
+            fermionic=True,
+            flat=flat,
+            subsizes="equal",
+            dtype="complex128",
+            seed=44,
+        )
+        bp.gate_(one_site_gate, (1,))
+        bp.run(max_iterations=10, tol=1e-12)
+        assert bp.contract() == pytest.approx(bp.tn.norm() ** 2, rel=1e-10)
+
+    def test_projector_truncation(self, duals, flat, charge):
+        tn = self.make_tree(duals, flat, charge, phys_dim=4)
+        bp = qbp.D2BP(tn)
+        bp.run(max_iterations=10, tol=1e-12)
+        compressed = tn.insert_compressor_between_regions(
+            [tn.site_tag(0)],
+            [tn.site_tag(1)],
+            gauges=bp,
+            max_bond=2,
+            cutoff=0.0,
+        )
+        x = tn.to_dense(
+            (tn.site_ind(0),),
+            tuple(tn.site_ind(i) for i in (1, 2, 3)),
+        )
+        u, _, v = qtn.decomp.svd_truncated(x, max_bond=2, cutoff=0.0)
+        expected_error = (x - u @ v).norm()
+        assert expected_error > 0.0
+        assert compressed.distance(tn) == pytest.approx(
+            expected_error, rel=1e-9
+        )
+
+    def test_gauge_temp_restores_after_error(self, duals, flat, charge):
+        bp = qbp.D2BP(self.make_tree(duals, flat, charge))
+        bp.run(max_iterations=10, tol=1e-12)
+        local = bp.tn.select(1)
+        before = local.tensors[0].data.copy()
+        with (
+            pytest.raises(ValueError, match="test error"),
+            bp.gauge_temp(local),
+        ):
+            raise ValueError("test error")
+        after = local.tensors[0].data
+        assert float((after - before).norm()) < 1e-10
+        assert after.duals == before.duals
+
+
+class TestMessageMaintenance:
+    @pytest.mark.parametrize(
+        "fermionic", [False, pytest.param(True, marks=requires_symmray)]
+    )
+    @pytest.mark.parametrize("strip_exponent", [False, True])
+    def test_normalize_refreshes_expressions(self, fermionic, strip_exponent):
+        if fermionic:
+            tn = TestSymmrayFermionicEnvironments.make_tree("random", False, 1)
+        else:
+            tn = qtn.MPS_rand_state(4, 3, dtype="complex128", seed=42)
+        bp = qbp.D2BP(tn, local_convergence=False)
+        bp.run(max_iterations=10, tol=1e-12)
+        bp.normalize_tensors(strip_exponent=strip_exponent)
+        for (ix, dest), (_, data) in bp.exprs.items():
+            (src,) = (tid for tid in bp.tn.ind_map[ix] if tid != dest)
+            assert data[0] is bp.tensor_dual_map[src].data
+            assert data[1] is bp.tn.tensor_map[src].data
+        reference = qbp.D2BP(
+            bp.tn,
+            messages={k: v.copy() for k, v in bp.messages.items()},
+            local_convergence=False,
+        )
+        reference.sign = bp.sign
+        reference.exponent = bp.exponent
+        bp.iterate()
+        reference.iterate()
+        for key in bp.messages:
+            assert (
+                bp._distance_fn(bp.messages[key], reference.messages[key])
+                < 1e-12
+            )
+        assert bp.contract() == pytest.approx(reference.contract(), rel=1e-10)
+        if not strip_exponent:
+            assert bp.contract() == pytest.approx(bp.tn.norm() ** 2, rel=1e-10)
+
+    def test_complex_gate_message_order(self):
+        tn = qtn.MPS_rand_state(4, 3, dtype="complex128", seed=42)
+        bp = qbp.D2BP(tn)
+        bp.run(max_iterations=10, tol=1e-12)
+        bp.gate_(qu.rand_uni(4, seed=43), (1, 2), max_bond=8)
+        with bp.gauge_temp(bp.tn.select_any(["I1", "I2"])):
+            ta, tb = bp.tn[1], bp.tn[2]
+            left, (ix,), right = qtn.group_inds(ta, tb)
+            a = ta.to_dense(left, (ix,))
+            b = tb.to_dense((ix,), right)
+            expected = (a.conj().T @ a, (b @ b.conj().T).T)
+            for tensor, m in zip((tb, ta), expected):
+                (tid,) = bp.tn._get_tids_from_tags(tensor.tags)
+                actual = bp.messages[ix, tid]
+                assert_allclose(actual, m, atol=1e-10)
+
+    @pytest.mark.parametrize("where", [(1,), (1, 2)])
+    def test_gate_rejects_external_tn(self, where):
+        tn = qtn.MPS_rand_state(4, 3, dtype="complex128", seed=42)
+        bp = qbp.D2BP(tn)
+        external = bp.tn.copy()
+        gate = qu.rand_uni(2 ** len(where), seed=43)
+        with pytest.raises(ValueError, match="managed tensor network"):
+            bp.gate_(gate, where, tn=external)
+        assert external.distance_normalized(bp.tn) < 1e-12
+
+
+@requires_symmray
+@pytest.mark.parametrize("backend", ["jax", "torch"])
+@pytest.mark.parametrize("flat", [False, True])
+def test_symmray_fermionic_bp_backend(backend, flat, request):
+    import autoray as ar
+    import symmray as sr
+
+    module = pytest.importorskip(backend)
+    if backend == "jax":
+        module.config.update("jax_enable_x64", True)
+    tn = TestSymmrayFermionicEnvironments.make_tree("random", flat, 1)
+    tn.apply_to_arrays(lambda x: ar.to(x, backend))
+    bp = qbp.D2BP(tn, power=0.75, smudge=0.01)
+    bp.run(max_iterations=10, tol=1e-10)
+    compressed = tn.insert_compressor_between_regions(
+        [tn.site_tag(0)],
+        [tn.site_tag(1)],
+        gauges=bp,
+        max_bond=4,
+        cutoff=0.0,
+    )
+    compressed_np = compressed.copy()
+    tn_np = tn.copy()
+    compressed_np.apply_to_arrays(lambda x: ar.to(x, "numpy"))
+    tn_np.apply_to_arrays(lambda x: ar.to(x, "numpy"))
+    assert_allclose(
+        compressed_np.to_dense().to_dense(),
+        tn_np.to_dense().to_dense(),
+        atol=1e-7,
+    )
+    gate = sr.utils.get_rand(
+        "Z2",
+        (2, 2, 2, 2),
+        duals=(False, False, True, True),
+        fermionic=True,
+        flat=flat,
+        subsizes="equal",
+        dtype="complex128",
+        seed=43,
+    )
+    gate = qtn.Tensor(gate, inds="abcd").to(backend=backend).data
+    if flat:
+        # BP and compression work; only the following degree-1 gate is blocked
+        request.applymarker(
+            pytest.mark.xfail(
+                reason="flat reduce-split gating of a degree-1 site is "
+                "blocked by symmray fuse handling",
+                strict=True,
+            )
+        )
+    bp.gate_(gate, (0, 1), max_bond=2)
+    bp.iterate()
+    for m in bp.messages.values():
+        assert m.backend == backend

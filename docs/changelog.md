@@ -15,6 +15,7 @@ Release notes for `quimb`.
 
 **Enhancements:**
 
+- Support fermionic BP projector compression with ``method="projector", canonize="bp"``, and fermionic gates with [`D2BP.gate_`](#D2BP.gate_). BP messages are stored as positive fermionic operators so message updates and projector environments can use messages directly without square-root factorizations.
 - 1D tensor-network compression: add successive deterministic compression (``method="sdc"``) and the ``sdc-oversample``, ``sdcr``, and ``sdcr-oversample`` variants. These methods are based on https://arxiv.org/abs/2601.19650. ``sdc`` forms the low-rank left environments with ``method="svd:eig"``, whereas ``sdcr`` uses a cheap randomized SVD.
 - [`MatrixProductOperator.gate_sandwich_with_auto_swap`](#MatrixProductOperator.gate_sandwich_with_auto_swap): apply a two-site gate sandwich and keep the MPO in canonical form. The method tracks the orthogonality center and can strip the center tensor's exponent. For long-range gates, it swaps the sites together and then restores their positions.
 - 1D compression: ``src``, ``srcmps``, and ``fit`` now create random tensors with ``autoray.random.array`` (autoray v0.10.0 or newer). The tensors match the device and dtype. These methods and their oversampling variants accept a ``seed`` or random generator. By default, they use the backend's global random state.
@@ -71,6 +72,8 @@ Release notes for `quimb`.
 - [`TEBD`](#TEBD): fix ``order=4``, which was only second-order accurate. The Suzuki weight was ``1 / (4 * 4**(1/3))`` instead of ``1 / (4 - 4**(1/3))``. The method now converges at fourth order. For a Heisenberg chain with ``dt=0.05``, it is about 1,000 times more accurate. The correct weights include a negative value, so part of each fourth-order step now evolves backward. [`trotter_schedule`](#trotter_schedule) now supplies the step schedule. ``order=1`` is also accepted.
 - [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized): apply the wrapping term of a cyclic chain with its sites in the correct order. The old order caused error linear in ``x`` instead of quadratic. Terms that are symmetric under a site swap, such as Heisenberg terms, were not affected.
 - [`tensor_network_distance`](#tensor_network_distance): use the magnitude of complex overlaps when computing infidelity. Previously it used only the real part, making infidelity depend incorrectly on the relative phase.
+- [`D2BP.normalize_tensors`](#D2BP.normalize_tensors) refreshes cached contraction inputs after rescaling tensors. Single-site [`D2BP.gate_`](#D2BP.gate_) refreshes expressions, distinct supplied networks are rejected to keep cached state consistent, and complex two-site gates store both messages in bra-ket order.
+- [`D2BP.gauge_temp`](#D2BP.gauge_temp) restores gauges when its body raises. Message conditioning and gauge insertion scale `smudge` by the largest eigenvalue, including spectra stored in unsorted symmetry blocks.
 
 
 ## v1.15.0 (2026-08-10)

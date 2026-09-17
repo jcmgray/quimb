@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import operator
 
 import numpy
 from autoray import (
@@ -223,6 +224,41 @@ def ndim(array):
         return array.ndim
     except AttributeError:
         return len(array.shape)
+
+
+@compose
+def gram(x, axes=-1):
+    """Contract ``conj(x)`` with ``x`` over all axes except ``axes``.
+
+    The open axes of the conjugate copy precede those of the original copy,
+    each in their original order.
+    """
+    try:
+        axes = (operator.index(axes),)
+    except TypeError:
+        try:
+            axes = tuple(map(operator.index, axes))
+        except TypeError:
+            raise TypeError(
+                "axes must be an integer or iterable of integers"
+            ) from None
+
+    n = ndim(x)
+    axes = tuple(ax + n if ax < 0 else ax for ax in axes)
+    if not axes:
+        raise ValueError("axes must contain at least one axis")
+    if any((ax < 0) or (ax >= n) for ax in axes):
+        raise ValueError(f"axes {axes} are out of bounds for ndim {n}")
+    if len(set(axes)) != len(axes):
+        raise ValueError("axes cannot contain duplicates")
+
+    contracted = tuple(i for i in range(n) if i not in axes)
+    return do(
+        "tensordot",
+        do("conj", x),
+        x,
+        axes=(contracted, contracted),
+    )
 
 
 @compose

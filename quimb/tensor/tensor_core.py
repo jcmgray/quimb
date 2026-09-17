@@ -10184,6 +10184,8 @@ class TensorNetwork:
             method absorbs vector gauges into a copy of the local tensor
             network. It puts conditioned gauges on the contracted boundary,
             and raw square roots on the internal and open indices.
+            BP messages are inserted directly between the bra and ket,
+            without square-root factorization.
         gauge_smudge : float, optional
             For simple-update gauges, add this relative value before this
             method applies ``gauge_power``. For D2BP messages, add it to the
@@ -10251,7 +10253,6 @@ class TensorNetwork:
         tn = self
         bra_map = dict(ixmap)
         environment_tensors = []
-        message_inds = oset()
         if gauges:
             from .belief_propagation.d2bp import D2BP
 
@@ -10300,7 +10301,6 @@ class TensorNetwork:
 
                     bix = rand_uuid()
                     bra_map[ix] = bix
-                    message_inds.add(bix)
                     environment_tensors.append(Tensor(m, inds=(bix, ix)))
 
             else:
@@ -10309,13 +10309,8 @@ class TensorNetwork:
                 )
 
         # contract to dense array
-        bra = tn.reindex(bra_map)
-        if bra.isfermionic():
-            # message tensors already carry the required fermionic phases
-            phase_inds = bra._outer_inds - message_inds
-        else:
-            phase_inds = None
-        bra.conj_(output_inds=phase_inds)
+        # operator messages use the usual outer-leg conjugation phases
+        bra = tn.reindex(bra_map).conj()
         tnd = bra & tn
         for tm in environment_tensors:
             tnd |= tm

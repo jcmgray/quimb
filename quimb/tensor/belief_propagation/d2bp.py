@@ -1,10 +1,33 @@
 """Dense 2-norm belief propagation for standard PEPS like tensor networks, with
 one tensor per site and no hyper indices. This is the basic 'quantum' BP.
 
-TODO:
-- [ ] cache gauges computed from messages until out-of-date
-- [ ] fix fermionic compress and gate (non-hermitian messages currently?)
-- [ ] store conditioned messages separately?
+A fermionic message has two representations, differing by a single
+``phase_flip(0)``, which negates the odd-parity sectors of the bra axis and is
+its own inverse. The flip is intrinsic to the doubled contraction.
+
+- ``C`` is the raw contraction of the bra with the ket over everything except
+  one bond, leaving that bond's bra and ket legs open, in ``(bra, ket)`` order.
+  A BP update expression returns ``C``.
+- ``M = C.phase_flip(0)`` is the stored message, and the representation in
+  which symmray's fermionic ``eigh()`` reports a nonnegative spectrum.
+
+Storing ``M`` lets conditioning, gauge insertion and hermitization treat a
+message as an operator. To use it as an environment, insert ``M`` directly
+between the bra and ket, using the usual fermionic contraction rules. Message
+updates and direct environment contractions do not require square-root
+factors. Gauge insertion still computes them. autoray's default ``gram``
+composes conjugation and contraction, and symmray overrides it to build ``M``
+directly and cancel paired conjugate dummy modes.
+
+Convert between the representations with ``phase_flip(0)``:
+
+- after a BP update, convert the result ``C`` to ``M`` before storing it
+- before calling ``squared_op_to_reduced_factor``, convert ``M`` to ``C``.
+  That routine also applies a separate flip based on the bond orientation
+- when contracting the two messages on a bond to a scalar, convert only one
+  of them to ``C``
+
+TODO: cache gauges computed from messages until out of date.
 """
 
 import contextlib
@@ -15,6 +38,7 @@ import operator
 import autoray as ar
 
 import quimb.tensor as qtn
+from quimb.tensor.array_ops import isfermionic
 from quimb.tensor.networking import NetworkPatch
 from quimb.utils import check_opt, ensure_dict, oset
 
@@ -43,6 +67,13 @@ def _parse_global_gloops(tn, gloops=None):
     return gloops
 
 
+def _message_to_reduced_factor(m, *args, **kwargs):
+    if isfermionic(m):
+        # reduced-factor extraction expects C rather than the stored M
+        m = m.phase_flip(0)
+    return qtn.decomp.squared_op_to_reduced_factor(m, *args, **kwargs)
+
+
 @functools.lru_cache(maxsize=128)
 def _get_message_conditioner(power=1.0, smudge=0.0, backend=None):
     """Get a function that conditions squared BP messages spectrally. Return
@@ -58,16 +89,18 @@ def _get_message_conditioner(power=1.0, smudge=0.0, backend=None):
                 _eigh = ar.DoFunc("linalg.eigh")
                 _clip = ar.DoFunc("clip")
                 _sqrt = ar.DoFunc("sqrt")
+                _max = ar.DoFunc("max")
             else:
                 _eigh = ar.get_lib_fn(backend, "linalg.eigh")
                 _clip = ar.get_lib_fn(backend, "clip")
                 _sqrt = ar.get_lib_fn(backend, "sqrt")
+                _max = ar.get_lib_fn(backend, "max")
 
             def conditioner(m):
                 el, ev = _eigh(m)
                 el = _clip(el, 0.0, None)
                 el = _sqrt(el)
-                el = el + smudge * el[-1]
+                el = el + smudge * _max(el)
                 el = el**2
                 return ev @ qtn.decomp.ldmul(el, ar.dag(ev))
 
@@ -91,16 +124,18 @@ def _get_message_conditioner(power=1.0, smudge=0.0, backend=None):
                 _eigh = ar.DoFunc("linalg.eigh")
                 _clip = ar.DoFunc("clip")
                 _sqrt = ar.DoFunc("sqrt")
+                _max = ar.DoFunc("max")
             else:
                 _eigh = ar.get_lib_fn(backend, "linalg.eigh")
                 _clip = ar.get_lib_fn(backend, "clip")
                 _sqrt = ar.get_lib_fn(backend, "sqrt")
+                _max = ar.get_lib_fn(backend, "max")
 
             def conditioner(m):
                 el, ev = _eigh(m)
                 el = _clip(el, 0.0, None)
                 el = _sqrt(el)
-                el = el + smudge * el[-1]
+                el = el + smudge * _max(el)
                 el = el ** (2 * power)
                 return ev @ qtn.decomp.ldmul(el, ar.dag(ev))
 
@@ -165,6 +200,8 @@ class D2BP(BeliefPropagationCommon):
         'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
         but also normalizes the phase of the message, by default used for
         complex dtypes.
+        Fermionic messages default to Frobenius norm normalization without
+        changing their global phase.
     distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
         How to compute the distance between messages to check for convergence.
         If None choose automatically. If a callable, it should take two
@@ -173,6 +210,7 @@ class D2BP(BeliefPropagationCommon):
         norms. 'L2phased' is like 'L2' but also normalizes the phases of the
         messages, by default used for complex dtypes if phased normalization is
         not already being used.
+        Fermionic messages default to the Frobenius norm of their difference.
     local_convergence : bool, optional
         Whether to allow messages to locally converge - i.e. if all their
         input messages have converged then stop updating them.
@@ -205,6 +243,13 @@ class D2BP(BeliefPropagationCommon):
         inplace=False,
         **contract_opts,
     ):
+        self._fermionic = tn.isfermionic()
+        if self._fermionic:
+            # phase normalization can negate positive fermionic operators
+            if normalize is None:
+                normalize = "L2"
+            if distance is None:
+                distance = "L2"
         super().__init__(
             tn=tn,
             damping=damping,
@@ -291,6 +336,12 @@ class D2BP(BeliefPropagationCommon):
         ``tid`` along index ``ix``. If you change these directly, note that
         D2BP keeps the conditioned copies separately. See
         ``_get_message_conditioned`` and ``_messages_conditioned``.
+
+        Fermionic messages are positive fermionic operators in ``(bra, ket)``
+        order, with conjugate dummy modes removed. They connect the bra and
+        ket copies and can be contracted into either side first.
+        Their spectra from ``eigh()`` are positive, although their dense block
+        matrices can have negative odd-sector eigenvalues.
         """
         return self._messages
 
@@ -377,19 +428,16 @@ class D2BP(BeliefPropagationCommon):
             ix_neighbors[ix] = tidn
 
             if (ix, tid) not in self.messages:
-                # only create missing messages
-                # fermions: use select here to generate initial cluster phases
-                k = self.tn._select_tids([tidn], virtual=False)
-                b = k.conj().reindex({ix: ixc})
-                m = (b | k).to_dense((ixc,), (ix,))
+                kt = self.tn.tensor_map[tidn]
+                m = ar.do("gram", kt.data, axes=kt.inds.index(ix))
                 m = self._normalize_fn(m)
                 self.messages[ix, tid] = m
 
             # make sure touch_map entry exists
             self.touch_map.setdefault((ix, tid), {})
 
-        # phase only output legs when forming a fermionic conjugate
-        t_dag = t.conj(output_inds=self.output_inds)
+        # include the norm-conjugation phases on every leg of this local bra
+        t_dag = t.conj(output_inds=t.inds)
         t_dag.reindex_(self.index_dual_map)
 
         self.tensor_dual_map[tid] = t_dag
@@ -469,6 +517,9 @@ class D2BP(BeliefPropagationCommon):
 
             # contract update!
             m = expr(x, xc, *ms)
+            if self._fermionic:
+                # the expression returns C, while messages store M
+                m = m.phase_flip(0)
 
             # for stability enforce hermiticity
             m = m + ar.dag(m)
@@ -620,8 +671,8 @@ class D2BP(BeliefPropagationCommon):
             tlog = ar.do("log10", tabs)
             nfact = (tsgn * tabs) ** 0.5
             t /= nfact
-            # keep cached dual tensor in sync
-            self.tensor_dual_map[tid] /= ar.do("conj", nfact)
+            # refresh both the dual tensor and captured expression inputs
+            self._init_tid(tid)
             if strip_exponent:
                 self.sign = tsgn * self.sign
                 self.exponent = tlog + self.exponent
@@ -659,6 +710,9 @@ class D2BP(BeliefPropagationCommon):
             tida, tidb = tids
             ml = self.messages[ix, tidb]
             mr = self.messages[ix, tida]
+            if self._fermionic:
+                # the scalar overlap takes C against the opposing stored M
+                ml = ml.phase_flip(0)
             mval = qtn.array_contract(
                 (ml, mr), ((1, 2), (1, 2)), (), **self.contract_opts
             )
@@ -1084,8 +1138,6 @@ class D2BP(BeliefPropagationCommon):
         """
         tn = self.tn if inplace else self.tn.copy()
 
-        fermionic = tn.isfermionic()
-
         reduce_opts = ensure_dict(reduce_opts)
         compress_opts = kwargs | ensure_dict(compress_opts)
         compress_opts.setdefault("max_bond", max_bond)
@@ -1108,20 +1160,16 @@ class D2BP(BeliefPropagationCommon):
             dim_left = ta.size // dim_bond
             ml_raw = self.messages[ix, tidb]
             ml = ml_raw if conditioner is None else conditioner(ml_raw)
-            Ra = qtn.decomp.squared_op_to_reduced_factor(
+            Ra = _message_to_reduced_factor(
                 ml, dim_left, dim_bond, right=True, **reduce_opts
             )
 
             tb = tn.tensor_map[tidb]
             dim_right = tb.size // dim_bond
             mr_raw = self.messages[ix, tida]
-            if fermionic:
-                # transpose without fermionic phases to match matrix axis order
-                mr_raw = mr_raw.transpose(phase=False)
-            else:
-                mr_raw = ar.do("transpose", mr_raw)
+            mr_raw = ar.do("transpose", mr_raw)
             mr = mr_raw if conditioner is None else conditioner(mr_raw)
-            Rb = qtn.decomp.squared_op_to_reduced_factor(
+            Rb = _message_to_reduced_factor(
                 mr, dim_bond, dim_right, right=False, **reduce_opts
             )
 
@@ -1138,26 +1186,17 @@ class D2BP(BeliefPropagationCommon):
             if inplace:
                 if conditioner is not None:
                     # messages are stored raw, so project the raw factors
-                    Ra = qtn.decomp.squared_op_to_reduced_factor(
+                    Ra = _message_to_reduced_factor(
                         ml_raw, dim_left, dim_bond, right=True, **reduce_opts
                     )
-                    Rb = qtn.decomp.squared_op_to_reduced_factor(
+                    Rb = _message_to_reduced_factor(
                         mr_raw, dim_bond, dim_right, right=False, **reduce_opts
                     )
                 new_Ra = Ra @ Pa
-                if fermionic:
-                    new_ml = new_Ra.dagger_compose_left() @ new_Ra
-                else:
-                    new_ml = ar.dag(new_Ra) @ new_Ra
-                self.messages[ix, tidb] = new_ml
+                self.messages[ix, tidb] = ar.do("gram", new_Ra, axes=1)
 
                 new_Rb = Pb @ Rb
-                if fermionic:
-                    new_mr = new_Rb @ new_Rb.dagger_compose_right()
-                    new_mr = new_mr.transpose(phase=False)
-                else:
-                    new_mr = ar.do("transpose", new_Rb @ ar.dag(new_Rb))
-                self.messages[ix, tida] = new_mr
+                self.messages[ix, tida] = ar.do("gram", new_Rb, axes=0)
 
                 self._messages_conditioned.pop((ix, tidb), None)
                 self._messages_conditioned.pop((ix, tida), None)
@@ -1238,6 +1277,7 @@ class D2BP(BeliefPropagationCommon):
         _eigh = ar.get_lib_fn(self.backend, "linalg.eigh")
         _clip = ar.get_lib_fn(self.backend, "clip")
         _sqrt = ar.get_lib_fn(self.backend, "sqrt")
+        _max = ar.get_lib_fn(self.backend, "max")
 
         outer = [] if return_gauges is not None else None
 
@@ -1255,7 +1295,7 @@ class D2BP(BeliefPropagationCommon):
             s2, W = _eigh(m)
             s = _sqrt(_clip(s2, 0.0, None))
             if smudge != 0.0:
-                s = s + smudge * s[-1]
+                s = s + smudge * _max(s)
             if power != 1.0:
                 s = s**power
             msqrt = qtn.decomp.ldmul(s, ar.dag(W))
@@ -1282,10 +1322,12 @@ class D2BP(BeliefPropagationCommon):
             Whether to un-gauge the outer indices of the tensor network.
         """
         outer = self.gauge_insert(tn)
-        yield outer
-        if ungauge_outer:
-            for t, ix, msqrt_inv in outer:
-                t.gate_(msqrt_inv, ix)
+        try:
+            yield outer
+        finally:
+            if ungauge_outer:
+                for t, ix, msqrt_inv in outer:
+                    t.gate_(msqrt_inv, ix)
 
     def gate_(
         self,
@@ -1299,19 +1341,29 @@ class D2BP(BeliefPropagationCommon):
         **gate_opts,
     ):
         """Apply a gate to the tensor network at the specified sites, using
-        the current messages to gauge the tensors.
+        the current messages to gauge the tensors. A distinct tensor network
+        is not supported because the messages and contraction expressions are
+        tied to this instance's managed network.
         """
-        if len(where) == 1:
-            # single site gate
-            self.tn.gate_(G, where, contract=True)
-            return
-
-        gate_opts.setdefault("contract", "reduce-split")
-
         if tn is None:
             tn = self.tn
+        elif tn is not self.tn:
+            raise ValueError(
+                "D2BP.gate_ can only update its managed tensor network."
+            )
+
+        if len(where) == 1:
+            # single site gate
+            tn.gate_(G, where, contract=True)
+            tids = tn._get_tids_from_tags(tn.site_tag(where[0]))
+            self.update_touched_from_tids(*tids)
+            for tid in tids:
+                self._init_tid(tid)
+            return
+
         site_tags = tuple(map(tn.site_tag, where))
         tn_where = tn.select_any(site_tags)
+        gate_opts.setdefault("contract", "reduce-split")
 
         with self.gauge_temp(tn_where):
             # contract and split the gate
@@ -1331,13 +1383,11 @@ class D2BP(BeliefPropagationCommon):
             (tidb,) = tn._get_tids_from_tags(tagb)
             ta = tn.tensor_map[tida]
             tb = tn.tensor_map[tidb]
-            lix, (ix,), rix = qtn.group_inds(ta, tb)
+            _, (ix,), _ = qtn.group_inds(ta, tb)
 
             # make use of the fact that we already have gauged tensors
-            A = ta.to_dense(lix, (ix,))
-            B = tb.to_dense((ix,), rix)
-            ma = ar.dag(A) @ A
-            mb = B @ ar.dag(B)
+            ma = ar.do("gram", ta.data, axes=ta.inds.index(ix))
+            mb = ar.do("gram", tb.data, axes=tb.inds.index(ix))
 
             self.messages[ix, tidb] = ma
             self.messages[ix, tida] = mb
@@ -1372,7 +1422,9 @@ class D2BP(BeliefPropagationCommon):
         TensorNetwork
         """
         k = self.tn._select_tids(tids, virtual=False)
-        b = qtn.TensorNetwork(self.tensor_dual_map[tid] for tid in tids)
+
+        # conjugate the cluster jointly, phasing only its outer legs
+        b = k.conj().reindex(self.index_dual_map)
 
         if partial_trace_map:
             # open up the bra indices

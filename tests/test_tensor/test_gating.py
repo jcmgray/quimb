@@ -5,6 +5,55 @@ import quimb as qu
 import quimb.tensor as qtn
 
 
+@pytest.mark.parametrize("fermionic", [False, True])
+@pytest.mark.parametrize(
+    "flat",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.xfail(
+                reason="flat fusing assumes every grouped axis carries all "
+                "charges, so the size-1 reduced bond breaks it",
+                strict=True,
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("where", [(0, 1), (1, 2)])
+def test_symmray_reduce_split_empty_group(fermionic, flat, where):
+    sr = pytest.importorskip("symmray")
+    tn = sr.TN_abelian_from_edges_rand(
+        "Z2",
+        [(0, 1), (1, 2)],
+        bond_dim=4,
+        phys_dim=2,
+        fermionic=fermionic,
+        flat=flat,
+        subsizes="equal",
+        duals="random",
+        site_charge=lambda site: 1,
+        dtype="complex128",
+        seed=42,
+    )
+    gate = sr.utils.get_rand(
+        "Z2",
+        (2, 2, 2, 2),
+        duals=(False, False, True, True),
+        fermionic=fermionic,
+        flat=flat,
+        subsizes="equal",
+        dtype="complex128",
+        seed=43,
+    )
+    exact = tn.gate(gate, where, contract=False)
+    actual = tn.gate(gate, where, contract="reduce-split", cutoff=0.0)
+    # compare amplitudes directly, including the global odd-parity case
+    assert_allclose(
+        actual.to_dense().to_dense(), exact.to_dense().to_dense(), atol=1e-10
+    )
+
+
 @pytest.mark.parametrize(
     "contract",
     (
