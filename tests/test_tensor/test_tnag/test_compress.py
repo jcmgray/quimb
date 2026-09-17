@@ -43,7 +43,7 @@ def test_compress_projector_bp_canonize():
 @pytest.mark.parametrize("bond_orientation", bond_orientations)
 @pytest.mark.parametrize("direction", ["xmin", "xmax", "ymin", "ymax"])
 def test_compress_projector_symmetric(
-    symmetry, canonize, bond_orientation, direction, request
+    symmetry, canonize, bond_orientation, direction
 ):
     """Check exact boundary contraction with local projectors.
 
@@ -54,15 +54,6 @@ def test_compress_projector_symmetric(
     if canonize == "bp":
         # isolate phase errors with a tightly converged BP gauge
         canonize_opts = {"max_iterations": 1000, "tol": 5e-13}
-
-        if symmetry != "abelian":
-            # BP messages do not retain the full fermionic phase frame
-            request.applymarker(
-                pytest.mark.xfail(
-                    reason="BP messages lose the fermionic phase frame",
-                    strict=False,
-                )
-            )
 
     # use distinct random data for each case
     seed = qu.utils.hash_kwargs_to_int(

@@ -35,6 +35,16 @@ requires_cotengra = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize("axes", [0, -1, (0, 2)])
+def test_composed_gram(axes):
+    x = np.arange(24).reshape(2, 3, 4) * (1 + 1j)
+    open_axes = (axes,) if isinstance(axes, int) else axes
+    open_axes = tuple(ax % x.ndim for ax in open_axes)
+    contracted = tuple(i for i in range(x.ndim) if i not in open_axes)
+    expected = np.tensordot(x.conj(), x, axes=(contracted, contracted))
+    assert_allclose(ar.do("gram", x, axes=axes), expected)
+
+
 def test_gauge_conditioner_relative_smudge():
     g = np.array([0.2, 2.0])
     condition = _get_gauge_conditioner(power=0.5, smudge=0.1)
