@@ -189,9 +189,13 @@ class SimpleUpdateInfinite2D(SimpleUpdateGen):
     """
 
     def __init__(
-        self, psi0, ham, *args, compute_energy_per_site=True, **kwargs
+        self,
+        psi0=None,
+        ham=None,
+        *args,
+        compute_energy_per_site=True,
+        **kwargs,
     ):
-        # default energy to per-site, the standard quoted quantity
         super().__init__(
             psi0,
             ham,

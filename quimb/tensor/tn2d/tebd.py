@@ -464,6 +464,16 @@ class TEBD2D(
     log_every : int, optional
         How often to write the progress data, if ``logdir`` is given. Each
         write rewrites the whole file, so raise this for very long runs.
+    checkpoint_every : int, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
+        final checkpoint is also written when :meth:`evolve` completes.
+    resume : bool, optional
+        Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
+        state and evolution options. In this case, ``psi0`` and ``ham`` can be
+        omitted (supplying either gives a warning). The current init supplies
+        the callback, plotting, progress, logging, and checkpoint settings. Set
+        ``checkpoint_every`` again to continue checkpointing. If the file does
+        not exist, ``psi0`` and ``ham`` are required.
     graceful_interrupt : bool, optional
         Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
         and treat it as a request to stop after the current sweep. A second
@@ -502,8 +512,8 @@ class TEBD2D(
 
     def __init__(
         self,
-        psi0,
-        ham,
+        psi0=None,
+        ham=None,
         tau=0.01,
         D=None,
         cutoff=1e-10,
@@ -524,9 +534,27 @@ class TEBD2D(
         plot_every=None,
         logdir=None,
         log_every=1,
+        checkpoint_every=None,
+        resume=False,
         graceful_interrupt=True,
         progbar=True,
     ):
+        if self.setup_session_opts(
+            callback=callback,
+            plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            checkpoint_every=checkpoint_every,
+            graceful_interrupt=graceful_interrupt,
+            progbar=progbar,
+            resume=resume,
+            compute_energy_fn=compute_energy_fn,
+            psi0=psi0,
+            ham=ham,
+        ):
+            # the checkpoint supplies the full run state
+            return
+
         self.setup_sweep_opts(
             psi0,
             ham,
@@ -536,13 +564,7 @@ class TEBD2D(
             second_order_reflect=second_order_reflect,
             tol=tol,
             tol_energy_diff=tol_energy_diff,
-            callback=callback,
             keep_best=keep_best,
-            plot_every=plot_every,
-            logdir=logdir,
-            log_every=log_every,
-            graceful_interrupt=graceful_interrupt,
-            progbar=progbar,
         )
         self.setup_gate_opts(
             D=D,
@@ -652,6 +674,16 @@ class SimpleUpdate(
     log_every : int, optional
         How often to write the progress data, if ``logdir`` is given. Each
         write rewrites the whole file, so raise this for very long runs.
+    checkpoint_every : int, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
+        final checkpoint is also written when :meth:`evolve` completes.
+    resume : bool, optional
+        Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
+        state and evolution options. In this case, ``psi0`` and ``ham`` can be
+        omitted (supplying either gives a warning). This call supplies the
+        callback, plotting, progress, logging, and checkpoint settings. Set
+        ``checkpoint_every`` again to continue checkpointing. If the file does
+        not exist, ``psi0`` and ``ham`` are required.
     graceful_interrupt : bool, optional
         Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
         and treat it as a request to stop after the current sweep. A second
@@ -698,8 +730,8 @@ class SimpleUpdate(
 
     def __init__(
         self,
-        psi0: PEPS,
-        ham: LocalHam2D,
+        psi0: PEPS = None,
+        ham: LocalHam2D = None,
         tau=0.01,
         D=None,
         chi=None,
@@ -726,9 +758,27 @@ class SimpleUpdate(
         plot_every=None,
         logdir=None,
         log_every=1,
+        checkpoint_every=None,
+        resume=False,
         graceful_interrupt=True,
         progbar=True,
     ):
+        if self.setup_session_opts(
+            callback=callback,
+            plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            checkpoint_every=checkpoint_every,
+            graceful_interrupt=graceful_interrupt,
+            progbar=progbar,
+            resume=resume,
+            compute_energy_fn=compute_energy_fn,
+            psi0=psi0,
+            ham=ham,
+        ):
+            # the checkpoint supplies the full run state
+            return
+
         self.setup_sweep_opts(
             psi0,
             ham,
@@ -738,13 +788,7 @@ class SimpleUpdate(
             second_order_reflect=second_order_reflect,
             tol=tol,
             tol_energy_diff=tol_energy_diff,
-            callback=callback,
             keep_best=keep_best,
-            plot_every=plot_every,
-            logdir=logdir,
-            log_every=log_every,
-            graceful_interrupt=graceful_interrupt,
-            progbar=progbar,
         )
         self.setup_gate_opts(
             D=D,

@@ -6,9 +6,11 @@ import itertools
 import json
 import os
 import pathlib
+import pickle
 import random
 import signal
 import time
+import warnings
 from collections.abc import Iterable
 
 from autoray import do, to_numpy
@@ -24,6 +26,53 @@ from ...utils_plot import default_to_neutral_style
 from ..drawing import get_colors, get_positions
 from ..tensor_core import Tensor
 from ..tnag.core import TensorNetworkGenVector
+
+
+class _DynamicRandomOrdering:
+    """Return a new random sequential ordering for each sweep."""
+
+    def __init__(self, ham):
+        self.ham = ham
+
+    def __call__(self):
+        return self.ham.get_auto_ordering("random_sequential")
+
+
+# a callable that refers to the driver can raise RecursionError during pickling
+_PICKLE_ERRORS = (
+    pickle.PickleError,
+    TypeError,
+    AttributeError,
+    RecursionError,
+)
+
+
+def _save_checkpoint_file(driver, path):
+    with open(path, "wb") as f:
+        pickle.dump(driver, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _load_checkpoint_file(path):
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def _replace_with_retry(temp_path, dest_path):
+    """Replace a file atomically. Retry if the destination is busy.
+
+    Return ``True`` if the replacement succeeds.
+    """
+    pause = 0.01
+    for _ in range(5):
+        try:
+            os.replace(temp_path, dest_path)
+            return True
+        except OSError:
+            time.sleep(pause)
+            pause *= 2
+
+    temp_path.unlink(missing_ok=True)
+    return False
 
 
 def edge_coloring(
@@ -307,6 +356,12 @@ class LocalHamGen:
         convenient compatibility with ``compute_local_expectation``.
         """
         return iter(self.terms)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # loaded objects have new ids, so clear the id-based cache
+        state["_op_cache"] = collections.defaultdict(dict)
+        return state
 
     def _convert_from_qarray_cached(self, x):
         cache = self._op_cache["convert_from_qarray"]
@@ -725,6 +780,91 @@ class TEBDSweepMixin:
     to create different algorithms.
     """
 
+    # true only during a retry without supplied callables
+    _drop_callables = False
+
+    def setup_session_opts(
+        self,
+        callback=None,
+        plot_every=None,
+        logdir=None,
+        log_every=1,
+        checkpoint_every=None,
+        graceful_interrupt=True,
+        progbar=True,
+        resume=False,
+        compute_energy_fn=None,
+        psi0=None,
+        ham=None,
+    ):
+        """Set session options and resume from ``"checkpoint.pkl"`` if
+        requested. Session options always use the values from this call.
+
+        ``psi0`` and ``ham`` are not used if a checkpoint is loaded. A warning
+        is raised if either is supplied.
+
+        Returns
+        -------
+        bool
+            ``True`` if a checkpoint was loaded. The caller must then skip
+            the remaining setup.
+        """
+        logdir = None if logdir is None else pathlib.Path(logdir)
+        if (logdir is None) and ((checkpoint_every is not None) or resume):
+            raise ValueError(
+                "`logdir` is required when checkpointing or resuming."
+            )
+
+        self.resumed = False
+        if resume:
+            checkpoint_path = logdir / "checkpoint.pkl"
+            if checkpoint_path.exists():
+                checkpoint = _load_checkpoint_file(checkpoint_path)
+                if type(checkpoint) is not type(self):
+                    raise TypeError(
+                        f"Checkpoint contains {type(checkpoint).__name__}. "
+                        f"Expected {type(self).__name__}."
+                    )
+                self.__dict__.update(checkpoint.__dict__)
+                self.resumed = True
+
+                if (psi0 is not None) or (ham is not None):
+                    warnings.warn(
+                        f"Loaded checkpoint at n={self._n}. The checkpoint "
+                        "overrides the supplied run inputs and evolution "
+                        "options.",
+                        UserWarning,
+                    )
+
+        self.callback = callback
+        self.plot_every = plot_every
+        self.logdir = logdir
+        self.log_every = log_every
+        self.checkpoint_every = checkpoint_every
+        self.graceful_interrupt = graceful_interrupt
+        self.progbar = progbar
+
+        if logdir is not None:
+            logdir.mkdir(parents=True, exist_ok=True)
+
+        if self.resumed:
+            dropped_callables = self.__dict__.pop("_dropped_callables", False)
+            if self.compute_energy_fn is None:
+                # use the current function if the checkpoint has none
+                self.compute_energy_fn = compute_energy_fn
+                if dropped_callables and (compute_energy_fn is None):
+                    warnings.warn(
+                        "The checkpoint does not contain "
+                        "`compute_energy_fn`. Future energies use the default "
+                        "and can differ from earlier values.",
+                        UserWarning,
+                    )
+        else:
+            self._time_started = None
+            self._elapsed = 0.0
+
+        return self.resumed
+
     def setup_sweep_opts(
         self,
         psi0: TensorNetworkGenVector,
@@ -735,33 +875,22 @@ class TEBDSweepMixin:
         second_order_reflect=False,
         tol=None,
         tol_energy_diff=None,
-        callback=None,
         keep_best=False,
-        plot_every=None,
-        logdir=None,
-        log_every=1,
-        graceful_interrupt=True,
-        progbar=True,
     ):
         self.imag = imag
         if not imag:
             raise NotImplementedError("Real time evolution not tested yet.")
 
+        if (psi0 is None) or (ham is None):
+            raise ValueError(
+                "`psi0` and `ham` are required for a new run. Omit them only "
+                "when `resume=True` loads a checkpoint from `logdir`."
+            )
+
         self.state = psi0
         self.ham = ham
-        self.progbar = progbar
-        self.callback = callback
         self.tol = tol
         self.tol_energy_diff = tol_energy_diff
-        self.plot_every = plot_every
-        self.graceful_interrupt = graceful_interrupt
-
-        # progress logging, for inspection from another process
-        self.logdir = None if logdir is None else pathlib.Path(logdir)
-        if self.logdir is not None:
-            self.logdir.mkdir(parents=True, exist_ok=True)
-        self.log_every = log_every
-        self._time_started = None
 
         # default time step to use
         self.tau = tau
@@ -809,17 +938,66 @@ class TEBDSweepMixin:
     @ordering.setter
     def ordering(self, value):
         if value is None:
-
-            def dynamic_random():
-                return self.ham.get_auto_ordering("random_sequential")
-
-            self._ordering = dynamic_random
+            self._ordering = _DynamicRandomOrdering(self.ham)
         elif isinstance(value, str):
             self._ordering = self.ham.get_auto_ordering(value)
         elif callable(value):
             self._ordering = value
         else:
             self._ordering = tuple(value)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+
+        if state["_time_started"] is not None:
+            state["_elapsed"] += time.time() - state["_time_started"]
+        state["_time_started"] = None
+
+        # remove the marker set by an earlier checkpoint write
+        state.pop("_dropped_callables", None)
+
+        if state.pop("_drop_callables", False):
+            # retry without supplied callables
+            state["callback"] = None
+            state["compute_energy_fn"] = None
+            ordering = state["_ordering"]
+            if callable(ordering) and not isinstance(
+                ordering, _DynamicRandomOrdering
+            ):
+                state["_ordering"] = _DynamicRandomOrdering(self.ham)
+            state["_dropped_callables"] = True
+
+        return state
+
+    @classmethod
+    def from_checkpoint(cls, path):
+        """Load a run from a checkpoint.
+
+        Parameters
+        ----------
+        path : str or pathlib.Path
+            The log directory or its ``"checkpoint.pkl"`` file.
+
+        Returns
+        -------
+        TEBDSweepMixin
+            The saved run.
+        """
+        path = pathlib.Path(path)
+        if path.is_dir():
+            path = path / "checkpoint.pkl"
+
+        driver = _load_checkpoint_file(path)
+        if type(driver) is not cls:
+            raise TypeError(
+                f"Checkpoint contains {type(driver).__name__}. "
+                f"Expected {cls.__name__}."
+            )
+
+        # write logs and checkpoints beside the loaded file
+        driver.logdir = path.parent
+
+        return driver
 
     def sweep(self, tau):
         r"""Perform a full sweep of gates at every pair.
@@ -900,31 +1078,60 @@ class TEBDSweepMixin:
             "cls": self.__class__.__name__,
             "info": self._get_repr_info(),
             "time": now,
-            "elapsed": (
-                None
-                if self._time_started is None
-                else now - self._time_started
+            "elapsed": self._elapsed
+            + (
+                0.0 if self._time_started is None else now - self._time_started
             ),
             "running": bool(running),
             "data": data,
         }
 
-        # write to a temporary file first so readers never see a partial one
-        ftmp = self.logdir / f".progress.json.{os.getpid()}"
-        with open(ftmp, "w") as f:
+        # replace the old file only after the new file is complete
+        temp_path = self.logdir / f".progress.json.{os.getpid()}"
+        with open(temp_path, "w") as f:
             json.dump(payload, f, default=str)
 
-        # windows: replace can fail if file being read, so retry a few times
-        pause = 0.01
-        for _ in range(5):
-            try:
-                os.replace(ftmp, self.logdir / "progress.json")
-                return
-            except OSError:
-                time.sleep(pause)
-                pause *= 2
+        _replace_with_retry(temp_path, self.logdir / "progress.json")
 
-        ftmp.unlink(missing_ok=True)
+    def write_checkpoint(self):
+        """Write the full run state to ``"checkpoint.pkl"`` in ``logdir``.
+
+        Write to a temporary file, then replace the current checkpoint. If
+        pickling fails, retry without supplied callables. Warn if the
+        checkpoint cannot be written.
+        """
+        if self.logdir is None:
+            return
+
+        temp_path = self.logdir / f".checkpoint.pkl.{os.getpid()}"
+        try:
+            _save_checkpoint_file(self, temp_path)
+        except _PICKLE_ERRORS:
+            self._drop_callables = True
+            try:
+                _save_checkpoint_file(self, temp_path)
+            except _PICKLE_ERRORS as error:
+                warnings.warn(
+                    f"Could not write the checkpoint: {error!r}", UserWarning
+                )
+                temp_path.unlink(missing_ok=True)
+                return
+            finally:
+                del self._drop_callables
+
+            warnings.warn(
+                "The checkpoint omitted `callback` and "
+                "`compute_energy_fn`. It also replaced any custom ordering "
+                "callable. One of these values cannot be pickled.",
+                UserWarning,
+            )
+
+        if not _replace_with_retry(temp_path, self.logdir / "checkpoint.pkl"):
+            warnings.warn(
+                "Could not replace `checkpoint.pkl`. The old file is "
+                "unchanged.",
+                UserWarning,
+            )
 
     def check_stop_file(self):
         """Check for a ``"STOP"`` file in ``logdir``, and if present remove it
@@ -1023,8 +1230,15 @@ class TEBDSweepMixin:
                 pbar.update()
                 self._set_progbar_description(pbar)
 
-                if self.log_every and (self._n % self.log_every == 0):
-                    self.write_progress_log()
+                if it != steps - 1:
+                    # final step is handled after loop, so don't double write
+                    if self.log_every and (self._n % self.log_every == 0):
+                        self.write_progress_log()
+
+                    if self.checkpoint_every and (
+                        self._n % self.checkpoint_every == 0
+                    ):
+                        self.write_checkpoint()
 
                 if (self.callback is not None) and self.callback(self):
                     break
@@ -1043,12 +1257,19 @@ class TEBDSweepMixin:
             if self.plot_every:
                 self.plot(clear_previous=True)
 
+            # save after normal or graceful completion
+            if self.checkpoint_every:
+                self.write_checkpoint()
+
         except KeyboardInterrupt:
             # allow the user to interupt early
             pass
         finally:
             if old_handler is not None:
                 signal.signal(signal.SIGINT, old_handler)
+            if self._time_started is not None:
+                self._elapsed += time.time() - self._time_started
+                self._time_started = None
             self.write_progress_log(running=False)
             pbar.close()
 
@@ -1581,6 +1802,16 @@ class TEBDGen(
     log_every : int, optional
         How often to write the progress data, if ``logdir`` is given. Each
         write rewrites the whole file, so raise this for very long runs.
+    checkpoint_every : int, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
+        final checkpoint is also written when :meth:`evolve` completes.
+    resume : bool, optional
+        Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
+        state and evolution options. In this case, ``psi0`` and ``ham`` can be
+        omitted (supplying either gives a warning). This call supplies the
+        callback, plotting, progress, logging, and checkpoint settings. Set
+        ``checkpoint_every`` again to continue checkpointing. If the file does
+        not exist, ``psi0`` and ``ham`` are required.
     graceful_interrupt : bool, optional
         Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
         and treat it as a request to stop after the current sweep. A second
@@ -1619,8 +1850,8 @@ class TEBDGen(
 
     def __init__(
         self,
-        psi0: TensorNetworkGenVector,
-        ham: LocalHamGen,
+        psi0: TensorNetworkGenVector = None,
+        ham: LocalHamGen = None,
         tau=0.01,
         D=None,
         cutoff=1e-10,
@@ -1640,9 +1871,27 @@ class TEBDGen(
         plot_every=None,
         logdir=None,
         log_every=1,
+        checkpoint_every=None,
+        resume=False,
         graceful_interrupt=True,
         progbar=True,
     ):
+        if self.setup_session_opts(
+            callback=callback,
+            plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            checkpoint_every=checkpoint_every,
+            graceful_interrupt=graceful_interrupt,
+            progbar=progbar,
+            resume=resume,
+            compute_energy_fn=compute_energy_fn,
+            psi0=psi0,
+            ham=ham,
+        ):
+            # the checkpoint supplies the full run state
+            return
+
         self.setup_sweep_opts(
             psi0,
             ham,
@@ -1652,13 +1901,7 @@ class TEBDGen(
             second_order_reflect=second_order_reflect,
             tol=tol,
             tol_energy_diff=tol_energy_diff,
-            callback=callback,
             keep_best=keep_best,
-            plot_every=plot_every,
-            logdir=logdir,
-            log_every=log_every,
-            graceful_interrupt=graceful_interrupt,
-            progbar=progbar,
         )
         self.setup_gate_opts(
             D=D,
@@ -1755,6 +1998,16 @@ class SimpleUpdateGen(
     log_every : int, optional
         How often to write the progress data, if ``logdir`` is given. Each
         write rewrites the whole file, so raise this for very long runs.
+    checkpoint_every : int, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
+        final checkpoint is also written when :meth:`evolve` completes.
+    resume : bool, optional
+        Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
+        state and evolution options. In this case, ``psi0`` and ``ham`` can be
+        omitted (supplying either gives a warning). This call supplies the
+        callback, plotting, progress, logging, and checkpoint settings. Set
+        ``checkpoint_every`` again to continue checkpointing. If the file does
+        not exist, ``psi0`` and ``ham`` are required.
     graceful_interrupt : bool, optional
         Whether to intercept the first interrupt (Ctrl-C) during ``evolve``
         and treat it as a request to stop after the current sweep. A second
@@ -1801,8 +2054,8 @@ class SimpleUpdateGen(
 
     def __init__(
         self,
-        psi0: TensorNetworkGenVector,
-        ham: LocalHamGen,
+        psi0: TensorNetworkGenVector = None,
+        ham: LocalHamGen = None,
         tau=0.01,
         D=None,
         cutoff=1e-10,
@@ -1828,9 +2081,27 @@ class SimpleUpdateGen(
         plot_every=None,
         logdir=None,
         log_every=1,
+        checkpoint_every=None,
+        resume=False,
         graceful_interrupt=True,
         progbar=True,
     ):
+        if self.setup_session_opts(
+            callback=callback,
+            plot_every=plot_every,
+            logdir=logdir,
+            log_every=log_every,
+            checkpoint_every=checkpoint_every,
+            graceful_interrupt=graceful_interrupt,
+            progbar=progbar,
+            resume=resume,
+            compute_energy_fn=compute_energy_fn,
+            psi0=psi0,
+            ham=ham,
+        ):
+            # the checkpoint supplies the full run state
+            return
+
         self.setup_sweep_opts(
             psi0,
             ham,
@@ -1840,13 +2111,7 @@ class SimpleUpdateGen(
             second_order_reflect=second_order_reflect,
             tol=tol,
             tol_energy_diff=tol_energy_diff,
-            callback=callback,
             keep_best=keep_best,
-            plot_every=plot_every,
-            logdir=logdir,
-            log_every=log_every,
-            graceful_interrupt=graceful_interrupt,
-            progbar=progbar,
         )
         self.setup_gate_opts(
             D=D,

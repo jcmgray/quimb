@@ -1,4 +1,5 @@
 import pickle
+import warnings
 
 import numpy as np
 import pytest
@@ -362,3 +363,333 @@ class TestProgressLog:
         # the sweep should have completed, leaving a usable state
         assert 0 < su.n < 10
         assert su.get_state().max_bond() == 2
+
+
+class DriverMonitor:
+    """Record completed steps and keep a reference to the driver."""
+
+    def __init__(self, su):
+        self.su = su
+        self.seen = []
+
+    def __call__(self, su):
+        self.seen.append(su.n)
+        return False
+
+
+def constant_energy(_su):
+    return -1.234
+
+
+class TestCheckpointing:
+    def get_su(self, **kwargs):
+        kwargs.setdefault("progbar", False)
+        kwargs.setdefault("compute_energy_every", 1)
+        edges = qtn.edges_2d_square(2, 3)
+        psi = qtn.TN_from_edges_rand(edges, D=2, phys_dim=2, seed=42)
+        ham = qtn.LocalHamGen(H2={e: qu.ham_heis(2) for e in edges})
+        return qtn.SimpleUpdateGen(psi, ham, D=2, **kwargs)
+
+    @staticmethod
+    def assert_same_state(actual, expected):
+        for tensor_actual, tensor_expected in zip(actual._psi, expected._psi):
+            np.testing.assert_allclose(
+                tensor_actual.data, tensor_expected.data
+            )
+        assert len(actual.gauges) == len(expected.gauges)
+        for gauge_actual, gauge_expected in zip(
+            actual.gauges.values(), expected.gauges.values()
+        ):
+            np.testing.assert_allclose(gauge_actual, gauge_expected)
+
+    def test_default_ordering_can_be_pickled(self):
+        su = self.get_su()
+        loaded = pickle.loads(pickle.dumps(su))
+        assert callable(loaded.ordering)
+        loaded.evolve(1)
+        assert loaded.n == 1
+
+    def test_resume_warns_if_psi_or_ham_is_supplied(self, tmp_path):
+        su = self.get_su(logdir=tmp_path, checkpoint_every=1)
+        su.evolve(2)
+
+        with pytest.warns(UserWarning, match="overrides the supplied"):
+            resumed = self.get_su(logdir=tmp_path, resume=True)
+        assert resumed.n == 2
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            loaded = qtn.SimpleUpdateGen(logdir=tmp_path, resume=True)
+        assert loaded.n == 2
+
+    def test_periodic_checkpoint_and_resume(self, tmp_path):
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=2,
+        )
+        su.evolve(5)
+
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        saved_from_file = qtn.SimpleUpdateGen.from_checkpoint(
+            tmp_path / "checkpoint.pkl"
+        )
+        assert saved_from_file.n == saved.n
+        assert saved.n == 5
+        resumed = self.get_su(logdir=tmp_path, resume=True)
+        assert resumed.n == saved.n
+        assert resumed.energies == saved.energies
+        assert resumed.energy_ns == saved.energy_ns
+        assert resumed.gauge_diffs == saved.gauge_diffs
+        self.assert_same_state(resumed, saved)
+
+    def test_resumed_run_matches_uninterrupted_run(self, tmp_path):
+        edges = tuple(qtn.edges_2d_square(2, 3))
+        full = self.get_su(ordering=edges)
+        full.evolve(4)
+
+        split = self.get_su(
+            ordering=edges,
+            logdir=tmp_path,
+            checkpoint_every=2,
+        )
+        split.evolve(2)
+        resumed = self.get_su(
+            ordering=edges,
+            logdir=tmp_path,
+            resume=True,
+        )
+        resumed.evolve(2)
+
+        assert resumed.n == full.n
+        assert resumed.energies == full.energies
+        assert resumed.energy_ns == full.energy_ns
+        assert resumed.gauge_diffs == full.gauge_diffs
+        self.assert_same_state(resumed, full)
+
+    def test_stop_file_writes_checkpoint(self, tmp_path):
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=100,
+        )
+        su.evolve(1)
+        (tmp_path / "STOP").touch()
+        su.evolve(10)
+
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert saved.n == su.n == 1
+
+    def test_resume_false_ignores_checkpoint(self, tmp_path):
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=1,
+        )
+        su.evolve(1)
+        fresh = self.get_su(logdir=tmp_path)
+        assert fresh.n == 0
+
+    def test_logdir_does_not_enable_checkpointing(self, tmp_path):
+        su = self.get_su(logdir=tmp_path)
+        su.evolve(1)
+        assert not (tmp_path / "checkpoint.pkl").exists()
+
+    def test_resume_does_not_need_psi_or_ham(self, tmp_path):
+        su = self.get_su(logdir=tmp_path, checkpoint_every=1)
+        su.evolve(2)
+
+        resumed = qtn.SimpleUpdateGen(logdir=tmp_path, resume=True)
+        assert resumed.resumed
+        assert resumed.n == 2
+        self.assert_same_state(resumed, su)
+
+        resumed.evolve(1)
+        assert resumed.n == 3
+
+    def test_resume_skips_the_initial_equilibration(
+        self, tmp_path, monkeypatch
+    ):
+        su = self.get_su(
+            logdir=tmp_path, checkpoint_every=1, equilibrate_start=True
+        )
+        su.evolve(1)
+
+        calls = []
+        original = qtn.SimpleUpdateGen.equilibrate
+
+        def record_equilibration(self, *args, **kwargs):
+            calls.append(1)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(
+            qtn.SimpleUpdateGen,
+            "equilibrate",
+            record_equilibration,
+        )
+        qtn.SimpleUpdateGen(logdir=tmp_path, resume=True)
+        assert not calls
+
+    def test_starting_fresh_still_needs_psi_and_ham(self, tmp_path):
+        with pytest.raises(ValueError, match="psi0"):
+            qtn.SimpleUpdateGen(logdir=tmp_path, resume=True)
+
+    def test_resume_with_no_checkpoint_starts_fresh(self, tmp_path):
+        su = self.get_su(logdir=tmp_path, resume=True)
+        assert su.n == 0
+
+    def test_resume_keeps_session_options(self, tmp_path):
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=1,
+        )
+        su.evolve(1)
+
+        callback = lambda _su: False
+        resumed = self.get_su(
+            logdir=tmp_path,
+            resume=True,
+            callback=callback,
+            progbar=True,
+            plot_every=7,
+        )
+        assert resumed.callback is callback
+        assert resumed.progbar is True
+        assert resumed.plot_every == 7
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"checkpoint_every": 1}, {"resume": True}]
+    )
+    def test_checkpointing_requires_logdir(self, kwargs):
+        with pytest.raises(ValueError, match="logdir"):
+            self.get_su(**kwargs)
+
+    @pytest.mark.parametrize("steps", [4, 5])
+    def test_final_checkpoint_after_normal_completion(self, tmp_path, steps):
+        su = self.get_su(logdir=tmp_path, checkpoint_every=2)
+        su.evolve(steps)
+
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert saved.n == su.n == steps
+        assert saved.energies == su.energies
+        assert saved.energy_ns == su.energy_ns
+
+    def test_string_ordering_is_unchanged_after_reload(self, tmp_path):
+        su = self.get_su(
+            ordering="random_sequential",
+            logdir=tmp_path,
+            checkpoint_every=1,
+        )
+        su.evolve(1)
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert tuple(saved._ordering) == tuple(su._ordering)
+
+    def test_lambda_ordering_is_omitted(self, tmp_path):
+        su = self.get_su(
+            ordering=lambda: list(qtn.edges_2d_square(2, 3)),
+            logdir=tmp_path,
+            checkpoint_every=1,
+        )
+        with pytest.warns(UserWarning, match="cannot be pickled"):
+            su.evolve(1)
+        assert su.n == 1
+
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert saved.ordering.ham is saved.ham
+        saved.evolve(1)
+        assert saved.n == 2
+
+    def test_energy_options_come_from_the_checkpoint(self, tmp_path):
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=1,
+            compute_energy_fn=constant_energy,
+            compute_energy_every=3,
+        )
+        su.evolve(1)
+
+        resumed = self.get_su(
+            logdir=tmp_path, resume=True, compute_energy_every=7
+        )
+        assert resumed.compute_energy_fn is constant_energy
+        assert resumed.compute_energy_every == 3
+
+    def test_lambda_energy_fn_falls_back_to_supplied(self, tmp_path):
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=1,
+            compute_energy_fn=lambda _su: -1.234,
+        )
+        with pytest.warns(UserWarning, match="`compute_energy_fn`"):
+            su.evolve(1)
+
+        replacement = lambda _su: -5.678
+        resumed = self.get_su(
+            logdir=tmp_path, resume=True, compute_energy_fn=replacement
+        )
+        assert resumed.compute_energy_fn is replacement
+
+    def test_callback_with_driver_reference_is_checkpointed(self, tmp_path):
+        # pickle must preserve the callback's reference back to the driver
+        su = self.get_su(logdir=tmp_path, checkpoint_every=1)
+        su.callback = DriverMonitor(su)
+        su.evolve(2)
+        assert su.callback.seen == [1, 2]
+
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert saved.callback is not None
+        assert saved.callback.su is saved
+
+    def test_unpicklable_callback_does_not_stop_run(self, tmp_path):
+        su = self.get_su(logdir=tmp_path, checkpoint_every=1)
+        su.callback = lambda su: False
+        with pytest.warns(UserWarning, match="cannot be pickled"):
+            su.evolve(2)
+        assert su.n == 2
+        assert qtn.SimpleUpdateGen.from_checkpoint(tmp_path).n == 2
+
+    def test_moved_checkpoint_uses_new_directory(self, tmp_path):
+        old_dir = tmp_path / "old"
+        su = self.get_su(logdir=old_dir, checkpoint_every=1)
+        su.evolve(1)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        (new_dir / "checkpoint.pkl").write_bytes(
+            (old_dir / "checkpoint.pkl").read_bytes()
+        )
+
+        moved = qtn.SimpleUpdateGen.from_checkpoint(new_dir)
+        assert moved.logdir == new_dir
+        moved.checkpoint_every = 1
+        moved.evolve(1)
+        assert (new_dir / "progress.json").exists()
+        assert qtn.SimpleUpdateGen.from_checkpoint(new_dir).n == 2
+        assert qtn.SimpleUpdateGen.from_checkpoint(old_dir).n == 1
+
+    def test_ham_op_cache_is_not_checkpointed(self, tmp_path):
+        su = self.get_su(logdir=tmp_path, checkpoint_every=1)
+        su.evolve(1)
+        assert su.ham._op_cache["expm"]
+
+        # loaded objects have new ids, so the cache must be empty
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert not saved.ham._op_cache["expm"]
+        saved.evolve(1)
+        assert saved.n == 2
+
+    def test_wrong_class_in_checkpoint_raises(self, tmp_path):
+        su = self.get_su(logdir=tmp_path, checkpoint_every=1)
+        su.evolve(1)
+        with pytest.raises(TypeError, match="SimpleUpdateGen"):
+            qtn.TEBDGen.from_checkpoint(tmp_path)
+
+    def test_lambda_callback_is_omitted(self, tmp_path):
+        callback = lambda _su: False
+        su = self.get_su(
+            logdir=tmp_path,
+            checkpoint_every=1,
+            callback=callback,
+        )
+        with pytest.warns(UserWarning, match="cannot be pickled"):
+            su.evolve(1)
+
+        saved = qtn.SimpleUpdateGen.from_checkpoint(tmp_path)
+        assert saved.callback is None

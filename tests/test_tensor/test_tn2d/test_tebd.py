@@ -1,6 +1,7 @@
 import importlib
 import itertools
 
+import numpy as np
 import pytest
 
 import quimb as qu
@@ -76,6 +77,33 @@ class TestLocalHam2DConstruct:
 
 
 class TestSimpleUpdate:
+    def test_checkpoint_can_be_resumed(self, tmp_path):
+        psi = qtn.PEPS.rand(2, 2, bond_dim=2, seed=42)
+        ham = qtn.ham_2d_heis(2, 2)
+        su = qtn.SimpleUpdate(
+            psi,
+            ham,
+            D=2,
+            compute_energy_final=False,
+            logdir=tmp_path,
+            checkpoint_every=1,
+            progbar=False,
+        )
+        su.evolve(1)
+
+        resumed = qtn.SimpleUpdate(
+            psi,
+            ham,
+            D=2,
+            compute_energy_final=False,
+            logdir=tmp_path,
+            resume=True,
+            progbar=False,
+        )
+        assert resumed.n == su.n
+        for actual, expected in zip(resumed._psi, su._psi):
+            np.testing.assert_allclose(actual.data, expected.data)
+
     @pytest.mark.parametrize("backend", ["numpy", pytorch_case])
     def test_heis_small(self, backend):
         Lx = 3
