@@ -17,6 +17,7 @@ from autoray import do, to_numpy
 
 from ...core import eye, kron, qarray
 from ...utils import (
+    Every,
     ExponentialGeometricRollingDiffMean,
     ensure_dict,
     tree_map,
@@ -800,6 +801,9 @@ class TEBDSweepMixin:
         """Set session options and resume from ``"checkpoint.pkl"`` if
         requested. Session options always use the values from this call.
 
+        ``log_every`` and ``checkpoint_every`` each take either a number of
+        sweeps, or a duration such as ``"10mins"``.
+
         ``psi0`` and ``ham`` are not used if a checkpoint is loaded. A warning
         is raised if either is supplied.
 
@@ -906,6 +910,28 @@ class TEBDSweepMixin:
         self.keep_best = bool(keep_best)
         self.best = {"energy": float("inf"), "state": None, "it": None}
         self.stop = False
+
+    @property
+    def log_every(self):
+        """How often to write the progress log, either a number of sweeps or
+        a duration like ``"10mins"``.
+        """
+        return self._log_every.spec
+
+    @log_every.setter
+    def log_every(self, value):
+        self._log_every = Every(value)
+
+    @property
+    def checkpoint_every(self):
+        """How often to write the checkpoint, either a number of sweeps or a
+        duration like ``"10mins"``.
+        """
+        return self._checkpoint_every.spec
+
+    @checkpoint_every.setter
+    def checkpoint_every(self, value):
+        self._checkpoint_every = Every(value)
 
     @property
     def state(self):
@@ -1193,6 +1219,8 @@ class TEBDSweepMixin:
                 pass
 
         self._time_started = time.time()
+        self._log_every.reset()
+        self._checkpoint_every.reset()
         self.write_progress_log()
 
         try:
@@ -1232,12 +1260,10 @@ class TEBDSweepMixin:
 
                 if it != steps - 1:
                     # final step is handled after loop, so don't double write
-                    if self.log_every and (self._n % self.log_every == 0):
+                    if self._log_every.due(self._n):
                         self.write_progress_log()
 
-                    if self.checkpoint_every and (
-                        self._n % self.checkpoint_every == 0
-                    ):
+                    if self._checkpoint_every.due(self._n):
                         self.write_checkpoint()
 
                 if (self.callback is not None) and self.callback(self):
@@ -1258,7 +1284,7 @@ class TEBDSweepMixin:
                 self.plot(clear_previous=True)
 
             # save after normal or graceful completion
-            if self.checkpoint_every:
+            if self._checkpoint_every:
                 self.write_checkpoint()
 
         except KeyboardInterrupt:
@@ -1799,12 +1825,15 @@ class TEBDGen(
         run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
         Creating a file called ``"STOP"`` in this directory then stops the run
         gracefully, after the current sweep.
-    log_every : int, optional
-        How often to write the progress data, if ``logdir`` is given. Each
-        write rewrites the whole file, so raise this for very long runs.
-    checkpoint_every : int, optional
-        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
-        final checkpoint is also written when :meth:`evolve` completes.
+    log_every : int or str, optional
+        How often to write the progress data, if ``logdir`` is given. Either
+        a number of sweeps, or a duration such as ``"10mins"``. Each write
+        rewrites the whole file, so raise this for very long runs or when
+        sweeps are very quick.
+    checkpoint_every : int or str, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` this often. Either a number
+        of sweeps, or a duration such as ``"10mins"``. A final checkpoint is
+        also written when :meth:`evolve` completes.
     resume : bool, optional
         Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
         state and evolution options. In this case, ``psi0`` and ``ham`` can be
@@ -1995,12 +2024,15 @@ class SimpleUpdateGen(
         run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
         Creating a file called ``"STOP"`` in this directory then stops the run
         gracefully, after the current sweep.
-    log_every : int, optional
-        How often to write the progress data, if ``logdir`` is given. Each
-        write rewrites the whole file, so raise this for very long runs.
-    checkpoint_every : int, optional
-        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
-        final checkpoint is also written when :meth:`evolve` completes.
+    log_every : int or str, optional
+        How often to write the progress data, if ``logdir`` is given. Either
+        a number of sweeps, or a duration such as ``"10mins"``. Each write
+        rewrites the whole file, so raise this for very long runs or when
+        sweeps are very quick.
+    checkpoint_every : int or str, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` this often. Either a number
+        of sweeps, or a duration such as ``"10mins"``. A final checkpoint is
+        also written when :meth:`evolve` completes.
     resume : bool, optional
         Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
         state and evolution options. In this case, ``psi0`` and ``ham`` can be

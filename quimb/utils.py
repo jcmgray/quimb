@@ -4,6 +4,8 @@ import collections
 import functools
 import itertools
 import math
+import re
+import time
 from importlib.util import find_spec
 
 try:
@@ -563,6 +565,148 @@ class ExponentialGeometricRollingDiffMean:
 
         self.y_prev = y
         self.x_prev = x
+
+
+_TIME_UNITS = {
+    "s": 1.0,
+    "sec": 1.0,
+    "secs": 1.0,
+    "second": 1.0,
+    "seconds": 1.0,
+    "m": 60.0,
+    "min": 60.0,
+    "mins": 60.0,
+    "minute": 60.0,
+    "minutes": 60.0,
+    "h": 3600.0,
+    "hr": 3600.0,
+    "hrs": 3600.0,
+    "hour": 3600.0,
+    "hours": 3600.0,
+    "d": 86400.0,
+    "day": 86400.0,
+    "days": 86400.0,
+}
+
+_TIME_SPEC_RE = re.compile(r"([0-9]*\.?[0-9]+)\s*([a-z]*)")
+
+
+def parse_time_spec(spec):
+    """Parse a duration into a number of seconds.
+
+    Parameters
+    ----------
+    spec : str, int or float
+        Either a number of seconds, or a string such as ``"30s"``,
+        ``"10mins"``, ``"1.5 hours"`` or ``"1h30m"``. The recognized units are
+        seconds, minutes, hours and days, with common abbreviations. A bare
+        number is taken as seconds.
+
+    Returns
+    -------
+    float
+        The duration in seconds.
+
+    Examples
+    --------
+
+        >>> parse_time_spec("10mins")
+        600.0
+
+        >>> parse_time_spec("1h30m")
+        5400.0
+
+    """
+    if not isinstance(spec, str):
+        return float(spec)
+
+    total = None
+    for value, unit in _TIME_SPEC_RE.findall(spec.strip().lower()):
+        if unit and (unit not in _TIME_UNITS):
+            raise ValueError(f"Unknown time unit '{unit}' in '{spec}'.")
+        total = (total or 0.0) + float(value) * _TIME_UNITS.get(unit, 1.0)
+
+    if total is None:
+        raise ValueError(f"Could not parse '{spec}' as a duration.")
+
+    return total
+
+
+class Every:
+    """Tracker for whether a periodic action is due, measured either in counts
+    or in wall clock time.
+
+    Parameters
+    ----------
+    spec : None, int or str
+        ``None`` or ``0`` to never be due, an integer to be due every ``spec``
+        counts, or a duration such as ``"10mins"`` to be due at most that
+        often, see :func:`parse_time_spec`. The first check of a duration
+        starts the clock rather than reporting due.
+
+    Examples
+    --------
+
+        >>> every = Every("10mins")
+        >>> every.due()
+        False
+
+    """
+
+    def __init__(self, spec):
+        self.spec = spec
+
+        if isinstance(spec, str):
+            self.every = None
+            self.interval = parse_time_spec(spec)
+            if self.interval <= 0.0:
+                raise ValueError(f"'{spec}' is not a positive duration.")
+        elif spec:
+            self.every = int(spec)
+            self.interval = None
+        else:
+            self.every = None
+            self.interval = None
+
+        self.last = None
+
+    def __bool__(self):
+        """Whether the action ever happens at all."""
+        return (self.every is not None) or (self.interval is not None)
+
+    def due(self, count=None):
+        """Whether the action is due now, restarting the clock if so.
+
+        Parameters
+        ----------
+        count : int, optional
+            The current count, required for a count based tracker.
+        """
+        if self.every is not None:
+            return count % self.every == 0
+
+        if self.interval is None:
+            return False
+
+        now = time.time()
+
+        if self.last is None:
+            # first check just starts the clock
+            self.last = now
+            return False
+
+        if now - self.last < self.interval:
+            return False
+
+        self.last = now
+        return True
+
+    def reset(self):
+        """Restart the clock of a time based tracker."""
+        self.last = None
+
+    def __repr__(self):
+        return f"<Every({self.spec!r})>"
 
 
 def gen_bipartitions(it):

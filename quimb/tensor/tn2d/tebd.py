@@ -461,12 +461,15 @@ class TEBD2D(
         run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
         Creating a file called ``"STOP"`` in this directory then stops the run
         gracefully, after the current sweep.
-    log_every : int, optional
-        How often to write the progress data, if ``logdir`` is given. Each
-        write rewrites the whole file, so raise this for very long runs.
-    checkpoint_every : int, optional
-        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
-        final checkpoint is also written when :meth:`evolve` completes.
+    log_every : int or str, optional
+        How often to write the progress data, if ``logdir`` is given. Either
+        a number of sweeps, or a duration such as ``"10mins"``. Each write
+        rewrites the whole file, so raise this for very long runs or when
+        sweeps are very quick.
+    checkpoint_every : int or str, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` this often. Either a number
+        of sweeps, or a duration such as ``"10mins"``. A final checkpoint is
+        also written when :meth:`evolve` completes.
     resume : bool, optional
         Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
         state and evolution options. In this case, ``psi0`` and ``ham`` can be
@@ -671,12 +674,15 @@ class SimpleUpdate(
         run while it is going, see :func:`~quimb.utils_plot.plot_progress_log`.
         Creating a file called ``"STOP"`` in this directory then stops the run
         gracefully, after the current sweep.
-    log_every : int, optional
-        How often to write the progress data, if ``logdir`` is given. Each
-        write rewrites the whole file, so raise this for very long runs.
-    checkpoint_every : int, optional
-        Write ``"checkpoint.pkl"`` in ``logdir`` after this many sweeps. A
-        final checkpoint is also written when :meth:`evolve` completes.
+    log_every : int or str, optional
+        How often to write the progress data, if ``logdir`` is given. Either
+        a number of sweeps, or a duration such as ``"10mins"``. Each write
+        rewrites the whole file, so raise this for very long runs or when
+        sweeps are very quick.
+    checkpoint_every : int or str, optional
+        Write ``"checkpoint.pkl"`` in ``logdir`` this often. Either a number
+        of sweeps, or a duration such as ``"10mins"``. A final checkpoint is
+        also written when :meth:`evolve` completes.
     resume : bool, optional
         Load ``"checkpoint.pkl"`` from ``logdir`` if present. It supplies the
         state and evolution options. In this case, ``psi0`` and ``ham`` can be

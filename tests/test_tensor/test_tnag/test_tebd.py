@@ -307,6 +307,28 @@ class TestProgressLog:
         assert seen == [0] * 9 + [10] * 3
         assert qu.load_progress_log(tmp_path)["info"]["n"] == 12
 
+    def test_log_every_time_spec(self, tmp_path, monkeypatch):
+        import time
+
+        now = 1000.0
+        monkeypatch.setattr(time, "time", lambda: now)
+
+        seen = []
+        su = self.get_su(logdir=tmp_path, log_every="10mins")
+        assert su.log_every == "10mins"
+
+        def callback(su):
+            nonlocal now
+            seen.append(qu.load_progress_log(tmp_path)["info"]["n"])
+            # each sweep takes a minute
+            now += 60.0
+
+        su.callback = callback
+        su.evolve(12)
+        # written once at the start, then only after ten minutes have passed
+        assert seen == [0] * 10 + [11] * 2
+        assert qu.load_progress_log(tmp_path)["info"]["n"] == 12
+
     def test_stop_file_stops_after_current_sweep(self, tmp_path):
         su = self.get_su(logdir=tmp_path)
         su.evolve(2)
@@ -377,6 +399,25 @@ class DriverMonitor:
         return False
 
 
+class SweepClock:
+    """Advance a fake clock by a minute each sweep, and record the number of
+    sweeps the current checkpoint holds.
+    """
+
+    def __init__(self, logdir, step=60.0):
+        self.logdir = logdir
+        self.step = step
+        self.now = 1000.0
+        self.written = []
+
+    def __call__(self, su):
+        if (self.logdir / "checkpoint.pkl").exists():
+            saved = qtn.SimpleUpdateGen.from_checkpoint(self.logdir)
+            self.written.append(saved.n)
+        self.now += self.step
+        return False
+
+
 def constant_energy(_su):
     return -1.234
 
@@ -421,6 +462,23 @@ class TestCheckpointing:
             warnings.simplefilter("error")
             loaded = qtn.SimpleUpdateGen(logdir=tmp_path, resume=True)
         assert loaded.n == 2
+
+    def test_checkpoint_every_time_spec(self, tmp_path, monkeypatch):
+        import time
+
+        # a picklable callback, since it gets checkpointed itself
+        clock = SweepClock(tmp_path)
+        monkeypatch.setattr(time, "time", lambda: clock.now)
+
+        su = self.get_su(
+            logdir=tmp_path, checkpoint_every="10mins", callback=clock
+        )
+        assert su.checkpoint_every == "10mins"
+        su.evolve(12)
+
+        # written only once ten minutes have passed, then finally at the end
+        assert clock.written == [11, 11]
+        assert qtn.SimpleUpdateGen.from_checkpoint(tmp_path).n == 12
 
     def test_periodic_checkpoint_and_resume(self, tmp_path):
         su = self.get_su(
