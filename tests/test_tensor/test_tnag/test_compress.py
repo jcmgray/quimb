@@ -71,7 +71,7 @@ def test_compress_projector_symmetric(
         # prevent truncation
         max_bond=8,
         cutoff=0.0,
-        mode="projector",
+        method="projector",
         canonize=canonize,
         canonize_opts=canonize_opts,
         sequence=(direction,),

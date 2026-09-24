@@ -7,6 +7,9 @@ from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
+from quimb.tensor.environments import all_blocks
+
+from .. import requires_symmray
 
 dtypes = ["float32", "float64", "complex64", "complex128"]
 
@@ -401,7 +404,7 @@ class TestMatrixProductState:
     @pytest.mark.parametrize(
         "keep", [(2, 3, 4, 6, 8), slice(-2, 4), slice(3, -1, -1), [1]]
     )
-    def test_partial_trace(self, rescale, keep):
+    def test_partial_trace_to_mpo(self, rescale, keep):
         n = 10
         p = qtn.MPS_rand_state(n, 7)
         r = p.partial_trace_to_mpo(
@@ -822,10 +825,283 @@ class TestMatrixProductState:
         terms = {(i, i + 1): qu.rand_herm(4) for i in range(9)}
 
         ex = psi.compute_local_expectation_exact(terms)
-        xa = psi.compute_local_expectation(terms, method="canonical")
+        xa = psi.compute_local_expectation(terms, route="canonical")
         assert xa == pytest.approx(ex)
-        xb = psi.compute_local_expectation(terms, method="envs")
+        xb = psi.compute_local_expectation(terms, route="envs")
         assert xb == pytest.approx(ex)
+
+    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("normalized", [False, True])
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_compute_local_expectation_via_envs(
+        self, cyclic, normalized, schedule
+    ):
+        psi = qtn.MPS_rand_state(
+            6, 3, cyclic=cyclic, dtype="complex128", seed=42
+        )
+        terms = {
+            2: qu.rand_herm(2),
+            (5, 0): qu.rand_herm(4),
+            (0, 5): qu.rand_herm(4),
+            (0, 3): qu.rand_herm(4),
+            (4, 0): qu.rand_herm(4),
+        }
+
+        expected = psi.compute_local_expectation_exact(
+            {
+                (where,) if isinstance(where, int) else where: G
+                for where, G in terms.items()
+            },
+            normalized=normalized,
+        )
+        actual = psi.compute_local_expectation_via_envs(
+            terms, normalized=normalized, schedule=schedule
+        )
+        actual_all = psi.compute_local_expectation_via_envs(
+            terms,
+            normalized=normalized,
+            return_all=True,
+            schedule=schedule,
+        )
+
+        assert actual == pytest.approx(expected)
+        assert sum(actual_all.values()) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_compute_partial_traces(self, cyclic):
+        psi = qtn.MPS_rand_state(
+            6, 3, cyclic=cyclic, dtype="complex128", seed=42
+        )
+        wheres = [2, (1, 2), (3, 1), (2, 3, 4)]
+        rhos = psi.compute_partial_traces(wheres)
+
+        assert set(rhos) == set(wheres)
+        for where in wheres:
+            expected = psi.partial_trace_exact(where)
+            assert rhos[where] == pytest.approx(expected)
+
+    @pytest.mark.parametrize("keep", [2, (3, 1), [0, 5]])
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_partial_trace(self, cyclic, keep):
+        psi = qtn.MPS_rand_state(
+            6, 3, cyclic=cyclic, dtype="complex128", seed=42
+        )
+        rho = psi.partial_trace(keep)
+        expected = psi.partial_trace_exact(keep)
+        assert rho == pytest.approx(expected)
+
+    def test_compute_local_expectation_method_deprecated(self):
+        psi = qtn.MPS_rand_state(6, 3, seed=42)
+        terms = {2: qu.pauli("Z")}
+        expected = psi.compute_local_expectation(terms, route="envs")
+        with pytest.warns(FutureWarning, match="route"):
+            actual = psi.compute_local_expectation(terms, method="envs")
+        assert actual == pytest.approx(expected)
+
+    @pytest.mark.parametrize("route", ["canonical", "envs"])
+    def test_partial_trace_normalized_return(self, route):
+        psi = qtn.MPS_rand_state(6, 3, dtype="complex128", seed=42)
+        psi.multiply_(2.0)
+        rho, nfactor = psi.partial_trace(
+            (3, 1), normalized="return", route=route
+        )
+        rho_ex, nfactor_ex = psi.partial_trace_exact(
+            (3, 1), normalized="return"
+        )
+        assert nfactor == pytest.approx(nfactor_ex)
+        assert rho == pytest.approx(rho_ex)
+
+    @pytest.mark.parametrize("route", ["canonical", "envs"])
+    def test_partial_trace_get_tn(self, route):
+        psi = qtn.MPS_rand_state(6, 3, dtype="complex128", seed=42)
+        tn = psi.partial_trace((3, 1), route=route, get="tn")
+        assert isinstance(tn, qtn.TensorNetwork)
+        rho = tn.to_dense(("k3", "k1"), ("b3", "b1"))
+        rho = rho / rho.trace()
+        assert rho == pytest.approx(psi.partial_trace_exact((3, 1)))
+
+    @pytest.mark.parametrize("G_form", ["matrix", "array"])
+    @pytest.mark.parametrize("where", [2, (3, 1), [0, 5]])
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_local_expectation(self, cyclic, where, G_form):
+        psi = qtn.MPS_rand_state(
+            6, 3, cyclic=cyclic, dtype="complex128", seed=42
+        )
+        n = 1 if isinstance(where, int) else len(where)
+        G = qu.rand_herm(2**n, seed=7)
+        expected = psi.local_expectation_exact(G, where)
+        if G_form == "array":
+            G = G.reshape((2,) * 2 * n)
+        assert psi.local_expectation(G, where) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("route", ["canonical", "envs"])
+    def test_compute_local_expectation_normalized_return(self, route):
+        psi = qtn.MPS_rand_state(6, 3, dtype="complex128", seed=42)
+        psi.multiply_(2.0)
+        terms = {2: qu.rand_herm(2, seed=7), (3, 1): qu.rand_herm(4, seed=8)}
+        expecs = psi.compute_local_expectation(
+            terms, normalized="return", return_all=True, route=route
+        )
+        for where, G in terms.items():
+            expec, nfactor = expecs[where]
+            expec_ex, nfactor_ex = psi.local_expectation_exact(
+                G, where, normalized="return"
+            )
+            assert expec == pytest.approx(expec_ex)
+            assert nfactor == pytest.approx(nfactor_ex)
+
+        total = psi.compute_local_expectation(
+            terms, normalized="return", route=route
+        )
+        assert total == pytest.approx(psi.compute_local_expectation(terms))
+
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_compute_partial_traces_canonical(self, inplace):
+        psi = qtn.MPS_rand_state(6, 3, dtype="complex128", seed=42)
+        wheres = [4, (1, 2), (3, 1)]
+        expected = {where: psi.partial_trace_exact(where) for where in wheres}
+        info = {}
+        rhos = psi.compute_partial_traces_canonical(
+            wheres, info=info, inplace=inplace
+        )
+        for where in wheres:
+            assert rhos[where] == pytest.approx(expected[where])
+
+    @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])
+    @pytest.mark.parametrize("route", ["canonical", "envs"])
+    def test_compute_partial_traces_get(self, route, get):
+        psi = qtn.MPS_rand_state(6, 3, dtype="complex128", seed=42)
+        wheres = [2, (3, 1)]
+        rhos = psi.compute_partial_traces(wheres, route=route, get=get)
+
+        for where in wheres:
+            rho = rhos[where]
+            expected = psi.partial_trace_exact(where, get=get)
+            if get == "tensor":
+                assert rho.inds == expected.inds
+                rho, expected = rho.data, expected.data
+            assert rho == pytest.approx(expected)
+
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_compute_local_expectation_dispatch(self, cyclic):
+        psi = qtn.MPS_rand_state(
+            6, 3, cyclic=cyclic, dtype="complex128", seed=42
+        )
+        terms = {
+            2: qu.rand_herm(2),
+            (1, 2): qu.rand_herm(4),
+            (3, 1): qu.rand_herm(4),
+        }
+        expected = psi.compute_local_expectation_exact(
+            {
+                (where,) if isinstance(where, int) else where: G
+                for where, G in terms.items()
+            }
+        )
+        assert psi.compute_local_expectation(terms) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("normalized", [False, True])
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_compute_partial_traces_via_envs(
+        self, cyclic, normalized, schedule
+    ):
+        psi = qtn.MPS_rand_state(
+            6, 3, cyclic=cyclic, dtype="complex128", seed=42
+        )
+        psi.equalize_norms_(1.0)
+        wheres = [2, (5, 0), (0, 5), (0, 3), (1, 2, 3)]
+        rhos = psi.compute_partial_traces_via_envs(
+            wheres, normalized=normalized, schedule=schedule
+        )
+
+        assert set(rhos) == set(wheres)
+        for where in wheres:
+            expected = psi.partial_trace_exact(where, normalized=normalized)
+            assert rhos[where] == pytest.approx(expected)
+
+    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    def test_compute_block_environments(self, schedule):
+        psi = qtn.MPS_rand_state(6, 3, cyclic=True, seed=42)
+        psi.equalize_norms_(1.0)
+        norm = psi.make_norm()
+        expected = norm.contract()
+        environments = norm.compute_block_environments(
+            all_blocks(6, 2), schedule=schedule
+        )
+
+        for (start, _), environment in environments.items():
+            assert isinstance(environment, qtn.TensorNetwork)
+            tags = [norm.site_tag(start), norm.site_tag(start + 1)]
+            actual = (norm.select_any(tags) | environment).contract()
+            assert actual == pytest.approx(expected)
+
+    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    def test_compute_block_environments_blocks(self, schedule):
+        psi = qtn.MPS_rand_state(6, 3, cyclic=True, seed=42)
+        norm = psi.make_norm()
+        expected = norm.contract()
+        blocks = [(0, 1), (0, 2), (4, 3), (5, 2), (3, 6)]
+        environments = norm.compute_block_environments(
+            blocks, schedule=schedule
+        )
+
+        assert set(environments) == set(blocks)
+        for (start, size), environment in environments.items():
+            tags = [norm.site_tag((start + d) % 6) for d in range(size)]
+            actual = (norm.select_any(tags) | environment).contract()
+            assert actual == pytest.approx(expected)
+
+    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_gen_block_environments(self, cyclic, schedule):
+        psi = qtn.MPS_rand_state(6, 3, cyclic=cyclic, seed=42)
+        psi.exponent = 1.5
+        norm = psi.make_norm()
+        expected = norm.contract()
+        blocks = all_blocks(6, 2, cyclic=cyclic)
+        environments = norm.gen_block_environments(blocks, schedule=schedule)
+        # a lazy iterator, not a dict
+        assert iter(environments) is environments
+
+        yielded = []
+        for (start, size), environment in environments:
+            yielded.append((start, size))
+            tags = [norm.site_tag((start + d) % 6) for d in range(size)]
+            actual = (norm.select_any(tags) | environment).contract()
+            assert actual == pytest.approx(expected)
+        assert sorted(yielded) == sorted(blocks)
+
+    def test_compute_open_environments(self):
+        psi = qtn.MPS_rand_state(6, 3, cyclic=False, seed=42)
+        norm = psi.make_norm()
+        expected = norm.contract()
+        environments = norm.compute_block_environments(
+            all_blocks(6, 2, cyclic=False)
+        )
+
+        assert tuple(environments) == tuple((start, 2) for start in range(5))
+        for (start, _), environment in environments.items():
+            assert isinstance(environment, qtn.TensorNetwork)
+            tags = [norm.site_tag(start), norm.site_tag(start + 1)]
+            actual = (norm.select_any(tags) | environment).contract()
+            assert actual == pytest.approx(expected)
+
+    @pytest.mark.parametrize("cyclic", [False, True])
+    def test_is_cyclic(self, cyclic):
+        psi = qtn.MPS_rand_state(6, 3, cyclic=cyclic, seed=42)
+        assert psi.is_cyclic() is cyclic
+        assert psi.make_norm().is_cyclic() is cyclic
+
+    @pytest.mark.parametrize("L", [1, 2])
+    def test_is_cyclic_short_ambiguous(self, L):
+        arrays = [np.random.randn(3, 3, 2) for _ in range(L)]
+        psi = qtn.MatrixProductState(arrays)
+        assert not psi.is_cyclic()
+        environments = psi.make_norm().compute_block_environments(
+            all_blocks(L, L), cyclic=True
+        )
+        assert tuple(environments) == tuple((start, L) for start in range(L))
 
     def test_single_site_constructor(self):
         arrays = [np.random.randn(2)]
@@ -843,6 +1119,69 @@ class TestMatrixProductState:
         assert mps.num_tensors == 1
         assert mps.num_indices == 2
         assert mps.cyclic
+
+
+@requires_symmray
+@pytest.mark.parametrize("cyclic", [False, True])
+@pytest.mark.parametrize("fermionic", [False, True])
+class TestSymmrayPartialTraces:
+    @staticmethod
+    def make_mps(fermionic, cyclic):
+        import symmray as sr
+
+        return sr.MPS_abelian_rand(
+            "Z2",
+            6,
+            bond_dim=4,
+            cyclic=cyclic,
+            fermionic=fermionic,
+            subsizes="equal",
+            dtype="complex128",
+            seed=42,
+        )
+
+    @staticmethod
+    def get_info(psi, route, cyclic):
+        if cyclic and route == "canonical":
+            pytest.skip("canonical route needs open boundaries")
+        # the whole chain as the orthogonality center skips the check for
+        # it, which needs `eye` and so fails for symmray arrays
+        return {"cur_orthog": (0, psi.L - 1)}
+
+    @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])
+    @pytest.mark.parametrize("route", ["envs", "canonical"])
+    def test_compute_partial_traces(self, fermionic, cyclic, route, get):
+        psi = self.make_mps(fermionic, cyclic)
+        info = self.get_info(psi, route, cyclic)
+        wheres = [2, (5, 0), (1, 2), (3, 1)]
+        rhos = psi.compute_partial_traces(
+            wheres, route=route, info=info, get=get
+        )
+
+        assert set(rhos) == set(wheres)
+        for where in wheres:
+            rho = rhos[where]
+            expected = psi.partial_trace_exact(where, get=get)
+            if get == "tensor":
+                assert rho.inds == expected.inds
+                rho, expected = rho.data, expected.data
+            assert rho.to_dense() == pytest.approx(expected.to_dense())
+
+    @pytest.mark.parametrize("route", ["envs", "canonical"])
+    def test_compute_local_expectation(self, fermionic, cyclic, route):
+        import symmray as sr
+
+        psi = self.make_mps(fermionic, cyclic)
+        info = self.get_info(psi, route, cyclic)
+        edges = [(i, (i + 1) % psi.L) for i in range(psi.L - 1 + cyclic)]
+        if fermionic:
+            terms = sr.ham_fermi_hubbard_spinless_from_edges("Z2", edges)
+        else:
+            terms = sr.ham_heisenberg_from_edges("Z2", edges)
+
+        expected = psi.compute_local_expectation_exact(terms)
+        actual = psi.compute_local_expectation(terms, route=route, info=info)
+        assert actual == pytest.approx(expected)
 
 
 class TestMatrixProductOperator:

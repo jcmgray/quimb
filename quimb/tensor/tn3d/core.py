@@ -18,13 +18,13 @@ from ..tensor_core import (
     bonds_size,
     oset,
     parse_site_tag_groups,
-    rand_uuid,
     tags_to_oset,
 )
 from ..tnag.core import (
     LatticeBondMap,
     TensorNetworkGen,
     TensorNetworkGenVector,
+    get_bra_inds,
 )
 
 
@@ -3412,7 +3412,7 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
             k.gauge_simple_insert(gauges)
 
         kix = [self.site_ind(i, j, k) for i, j, k in keep]
-        bix = [rand_uuid() for _ in kix]
+        bix = get_bra_inds(self, keep, warn=get == "tn")
 
         b = k.H.reindex_(dict(zip(kix, bix))).retag_({"KET": "BRA"})
         rho_tn = k | b
@@ -3506,8 +3506,8 @@ class PEPS3D(TensorNetwork3DVector, TensorNetwork3DFlat):
 
         # cut the bonds between target norm sites to make density matrix
         tags = [tn_cell.site_tag(*site) for site in keep]
-        kix = [f"k{i},{j},{k}" for i, j, k in keep]
-        bix = [f"b{i},{j},{k}" for i, j, k in keep]
+        kix = [self.site_ind(site) for site in keep]
+        bix = get_bra_inds(self, keep, warn=get == "tn")
         for tag, ind_k, ind_b in zip(tags, kix, bix):
             tn_cell.cut_between((tag, "KET"), (tag, "BRA"), ind_k, ind_b)
 

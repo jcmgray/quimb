@@ -160,34 +160,34 @@ def test_oversample_final_options_precedence(method):
 
 # compression options, including fit sweep counts
 boundary_options = {
-    "direct": {"mode": "direct"},
-    "dm": {"mode": "dm"},
-    "zipup": {"mode": "zipup"},
-    "zipup-oversample": {"mode": "zipup-oversample"},
-    "sdc": {"mode": "sdc"},
-    "sdc-oversample": {"mode": "sdc-oversample"},
-    "sdcr": {"mode": "sdcr"},
-    "sdcr-oversample": {"mode": "sdcr-oversample"},
+    "direct": {"method": "direct"},
+    "dm": {"method": "dm"},
+    "zipup": {"method": "zipup"},
+    "zipup-oversample": {"method": "zipup-oversample"},
+    "sdc": {"method": "sdc"},
+    "sdc-oversample": {"method": "sdc-oversample"},
+    "sdcr": {"method": "sdcr"},
+    "sdcr-oversample": {"method": "sdcr-oversample"},
     "fit-bsz1": {
-        "mode": "fit",
+        "method": "fit",
         "bsz": 1,
         "tn_fit": "zipup",
         "max_iterations": 6,
     },
     "fit-bsz2": {
-        "mode": "fit",
+        "method": "fit",
         "bsz": 2,
         "tn_fit": "zipup",
         "max_iterations": 6,
     },
     "fit-bsz2-odd-iters": {
-        "mode": "fit",
+        "method": "fit",
         "bsz": 2,
         "tn_fit": "zipup",
         "max_iterations": 5,
     },
     "fit-bsz1-odd-iters": {
-        "mode": "fit",
+        "method": "fit",
         "bsz": 1,
         "tn_fit": "zipup",
         "max_iterations": 5,
@@ -366,7 +366,7 @@ def test_fmps_mpo_fitting(
         **{range_key: boundary_range},
         max_bond=128,
         cutoff=0.0,
-        mode="fit",
+        method="fit",
         tol=1e-5,
         tn_fit="zipup",
         bsz=2,
@@ -400,8 +400,8 @@ def test_dm_truncating_matches_direct(symmetry, bond_orientation, direction):
         "cutoff": 0.0,
         "sequence": (direction,),
     }
-    value_dm = tn.contract_boundary(mode="dm", **contraction_options)
-    value_direct = tn.contract_boundary(mode="direct", **contraction_options)
+    value_dm = tn.contract_boundary(method="dm", **contraction_options)
+    value_direct = tn.contract_boundary(method="direct", **contraction_options)
     assert value_dm == pytest.approx(value_direct, rel=1e-8)
 
 

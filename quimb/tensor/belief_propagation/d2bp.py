@@ -40,6 +40,10 @@ import autoray as ar
 import quimb.tensor as qtn
 from quimb.tensor.array_ops import isfermionic
 from quimb.tensor.networking import NetworkPatch
+from quimb.tensor.tnag.core import (
+    contract_reduced_density_matrix,
+    get_bra_inds,
+)
 from quimb.utils import check_opt, ensure_dict, oset
 
 from .bp_common import (
@@ -966,7 +970,7 @@ class D2BP(BeliefPropagationCommon):
 
         # get a mapping of ket indices to bra indices on target sites
         kix = [self.tn.site_ind(coo) for coo in where]
-        bix = [qtn.rand_uuid() for _ in where]
+        bix = get_bra_inds(self.tn, where)
         partial_trace_map = dict(zip(kix, bix))
         output_inds = (*kix, *bix)
 
@@ -1459,15 +1463,29 @@ class D2BP(BeliefPropagationCommon):
         ----------
         where : sequence[hashable]
             The sites to from the reduced density matrix of.
-        get : {'tn', 'tensor', 'array', 'matrix'}, optional
-            The type of object to return. If 'tn', return the uncontracted
-            tensor network object. If 'tensor', return the labelled density
-            operator as a `Tensor`. If 'array', return the unfused raw array
-            with 2 * len(where) dimensions. If 'matrix', fuse the ket and bra
-            indices and return this 2D matrix.
+        normalized : bool or "return", optional
+            Whether to normalize the result to unit trace. If "return", return
+            the trace separately, without dividing by it.
+            Ignored if ``get="tn"``, which returns the unnormalized network
+            without a separate trace.
+        tids_region : sequence[int], optional
+            The tensors to contract exactly, with messages on the boundary.
+            By default only the tensors at ``where``.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            How to return the reduced density matrix:
+
+            - 'matrix': a dense matrix, with the ket sites fused into rows
+              and the bra sites fused into columns.
+            - 'array': the raw array, with one axis per ket site then one
+              axis per bra site.
+            - 'tensor': a :class:`~quimb.tensor.tensor_core.Tensor` with the
+              ket and bra indices.
+            - 'tn': the uncontracted tensor network.
+
         bra_ind_id : str, optional
-            If ``get="tn"``, how to label the bra indices. If None, use the
-            default based on the current site_ind_id.
+            Supply a format string to label the bra indices. By default swap
+            the leading ``k`` of each ket index for ``b``, see
+            :func:`~quimb.tensor.tnag.core.get_bra_inds`.
         optimize : str or PathOptimizer, optional
             The path optimizer to use when contracting the tensor network.
         contract_opts
@@ -1475,18 +1493,16 @@ class D2BP(BeliefPropagationCommon):
 
         Returns
         -------
-        TensorNetwork or Tensor or array
+        array or Tensor or TensorNetwork or (array, float) or (Tensor, float)
         """
         # get a mapping of ket indices to bra indices on target sites
-        if bra_ind_id is None:
-            bra_ind_id = "b" + self.tn.site_ind_id[1:]
-        bra_ind_starmap = bra_ind_id.count("{}") > 1
         kix = [self.tn.site_ind(coo) for coo in where]
-        if bra_ind_starmap:
+        if bra_ind_id is None:
+            bix = get_bra_inds(self.tn, where, warn=get in ("tn", "tensor"))
+        elif bra_ind_id.count("{}") > 1:
             bix = [bra_ind_id.format(*coo) for coo in where]
         else:
             bix = [bra_ind_id.format(coo) for coo in where]
-        output_inds = (*kix, *bix)
         partial_trace_map = dict(zip(kix, bix))
 
         # get target region
@@ -1498,24 +1514,15 @@ class D2BP(BeliefPropagationCommon):
             tids_region, partial_trace_map=partial_trace_map
         )
 
-        if get == "tn":
-            return tn
-
-        t = tn.contract(
-            output_inds=output_inds, optimize=optimize, **contract_opts
+        return contract_reduced_density_matrix(
+            tn,
+            kix,
+            bix,
+            normalized=normalized,
+            get=get,
+            optimize=optimize,
+            **contract_opts,
         )
-
-        if normalized:
-            t /= t.trace(kix, bix)
-
-        if get == "tensor":
-            return t
-        elif get == "array":
-            return t.data
-        elif get == "matrix":
-            return t.to_dense(kix, bix)
-        else:
-            raise ValueError(f"Unknown get option: {get}")
 
     def partial_trace_gloop_expand(
         self,

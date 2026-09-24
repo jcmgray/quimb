@@ -1,10 +1,10 @@
 """Classes and algorithms related to 2D tensor networks."""
 
 import functools
+import warnings
 from collections import defaultdict
 from itertools import combinations, cycle, product
 from numbers import Integral
-from operator import add
 
 import autoray as ar
 
@@ -18,6 +18,11 @@ from ...utils import (
 )
 from ...utils import progbar as Progbar
 from .. import decomp
+from ..environments import (
+    find_1d_block,
+    gen_compressed_environments,
+    gen_exact_environments,
+)
 from ..tensor_core import (
     Tensor,
     TensorNetwork,
@@ -33,6 +38,8 @@ from ..tnag.core import (
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
+    expectations_from_rhos,
+    partial_traces_from_environment,
     tensor_network_ag_sum,
 )
 
@@ -266,6 +273,12 @@ class Rotator2D:
     @functools.cached_property
     def sweep_other(self):
         return range(self.jmin, self.jmax + 1)
+
+    def rotate(self, a, b):
+        """Rotate a pair such as a coordinate ``(i, j)`` or a block size
+        between the real and rotated frames. This is its own inverse.
+        """
+        return (a, b) if self.plane == "x" else (b, a)
 
     @functools.cached_property
     def cyclic_x(self):
@@ -1469,12 +1482,13 @@ class TensorNetwork2D(TensorNetworkGen):
         from_which,
         max_bond,
         cutoff=0.0,
-        method="eigh",
+        similarity_method=None,
         renorm=False,
         optimize="auto-hq",
         opposite_envs=None,
         equalize_norms=False,
         contract_boundary_opts=None,
+        compress_opts=None,
     ):
         """Contract the boundary of this 2D TN using the 'full bond'
         environment information obtained from a boundary contraction in the
@@ -1495,9 +1509,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Cut-off value to used to truncate singular values in the boundary
             contraction - only for the opposite direction environment
             contraction.
-        method : {'eigh', 'eig', 'svd', 'biorthog'}, optional
+        similarity_method : {'eigh', 'eig', 'svd', 'biorthog'}, optional
             Which similarity decomposition method to use to compress the full
-            bond environment.
+            bond environment, a shortcut for
+            ``compress_opts=dict(method=...)``. By default ``'eigh'``.
         renorm : bool, optional
             Whether to renormalize the isometric projection or not.
         optimize : str or PathOptimize, optimize
@@ -1508,9 +1523,19 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_opts
             Other options given to the opposite direction environment
             contraction.
+        compress_opts : dict, optional
+            Options supplied to
+            :func:`~quimb.tensor.decomp.similarity_compress` when compressing
+            each full bond environment.
         """
         if equalize_norms:
             raise NotImplementedError
+
+        compress_opts = ensure_dict(compress_opts)
+        if similarity_method is not None:
+            compress_opts["method"] = similarity_method
+        compress_opts.setdefault("method", "eigh")
+        compress_opts.setdefault("renorm", renorm)
 
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
         contract_boundary_opts.setdefault("max_bond", max_bond)
@@ -1620,7 +1645,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 E = tn_be.to_dense([rcut], [lcut], optimize=optimize)
 
                 Cl, Cr = decomp.similarity_compress(
-                    E, max_bond, method=method, renorm=renorm
+                    E, max_bond, **compress_opts
                 )
 
                 # insert compressors back in base TN
@@ -1748,7 +1773,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -1756,9 +1781,13 @@ class TensorNetwork2D(TensorNetworkGen):
         **contract_boundary_opts,
     ):
         """Unified entrypoint for contracting any rectangular patch of tensors
-        from any direction, with any boundary method.
+        from any direction, with any boundary ``method``: ``'mps'`` (the
+        default), ``'full-bond'``, ``'projector2d'`` or any 1D compression
+        method, see
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
+        ``mode`` is a deprecated alias of ``method``.
         """
-        # check_opt("mode", mode, ("mps", "projector", "full-bond"))
+        method = _parse_boundary_method(method, contract_boundary_opts)
 
         tn = self if inplace else self.copy()
 
@@ -1767,29 +1796,29 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_opts["yrange"] = yrange
         contract_boundary_opts["from_which"] = from_which
         contract_boundary_opts["max_bond"] = max_bond
+        contract_boundary_opts["compress_opts"] = compress_opts
 
-        if mode == "full-bond":
+        if method == "full-bond":
             tn._contract_boundary_full_bond(**contract_boundary_opts)
             return tn
 
         contract_boundary_opts["cutoff"] = cutoff
-        contract_boundary_opts["compress_opts"] = compress_opts
 
-        if mode == "projector2d":
+        if method == "projector2d":
             tn._contract_boundary_projector(**contract_boundary_opts)
             return tn
 
-        # mode == 'mps' options
+        # method == 'mps' options
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["layer_tags"] = layer_tags
         contract_boundary_opts["sweep_reverse"] = sweep_reverse
 
-        if mode == "mps":
+        if method == "mps":
             tn._contract_boundary_core(**contract_boundary_opts)
             return tn
 
         tn._contract_boundary_core_via_1d(
-            method=mode, **contract_boundary_opts
+            method=method, **contract_boundary_opts
         )
         return tn
 
@@ -1805,7 +1834,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -1873,7 +1902,7 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
         layer_tags : None or sequence[str], optional
             If ``None``, all tensors at each coordinate pair
@@ -1895,6 +1924,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmax, contract_boundary_from_ymin,
         contract_boundary_from_ymax
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
             yrange=yrange,
@@ -1902,7 +1932,7 @@ class TensorNetwork2D(TensorNetworkGen):
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            mode=mode,
+            method=method,
             layer_tags=layer_tags,
             sweep_reverse=sweep_reverse,
             compress_opts=compress_opts,
@@ -1922,7 +1952,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         inplace=False,
         sweep_reverse=False,
@@ -1990,7 +2020,7 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
         layer_tags : None or str, optional
             If ``None``, all tensors at each coordinate pair
@@ -2012,6 +2042,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_ymin,
         contract_boundary_from_ymax
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
             yrange=yrange,
@@ -2019,7 +2050,7 @@ class TensorNetwork2D(TensorNetworkGen):
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            mode=mode,
+            method=method,
             layer_tags=layer_tags,
             sweep_reverse=sweep_reverse,
             compress_opts=compress_opts,
@@ -2039,7 +2070,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -2124,7 +2155,7 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
         layer_tags : None or str, optional
             If ``None``, all tensors at each coordinate pair
@@ -2146,6 +2177,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_xmax,
         contract_boundary_from_ymax
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
             yrange=yrange,
@@ -2153,7 +2185,7 @@ class TensorNetwork2D(TensorNetworkGen):
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            mode=mode,
+            method=method,
             layer_tags=layer_tags,
             sweep_reverse=sweep_reverse,
             compress_opts=compress_opts,
@@ -2173,7 +2205,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         sweep_reverse=False,
         compress_opts=None,
@@ -2257,7 +2289,7 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
         layer_tags : None or str, optional
             If ``None``, all tensors at each coordinate pair
@@ -2279,6 +2311,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_xmax,
         contract_boundary_from_ymin
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
             yrange=yrange,
@@ -2286,7 +2319,7 @@ class TensorNetwork2D(TensorNetworkGen):
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            mode=mode,
+            method=method,
             layer_tags=layer_tags,
             sweep_reverse=sweep_reverse,
             compress_opts=compress_opts,
@@ -2484,7 +2517,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         compress_opts=None,
         sequence=None,
@@ -2535,7 +2568,7 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond', ...}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary, can also be any of
             the generic 1D or arbgeom methods.
         layer_tags : None or sequence of str, optional
@@ -2590,14 +2623,15 @@ class TensorNetwork2D(TensorNetworkGen):
             Supplied to :meth:`contract_boundary_from`, including compression
             and canonization options.
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
-        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["method"] = method
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["layer_tags"] = layer_tags
         contract_boundary_opts["compress_opts"] = compress_opts
 
-        if mode == "full-bond":
+        if method == "full-bond":
             # set shared storage for opposite direction boundary contractions,
             #     this will be lazily filled by _contract_boundary_full_bond
             contract_boundary_opts.setdefault("opposite_envs", {})
@@ -2687,10 +2721,165 @@ class TensorNetwork2D(TensorNetworkGen):
         envs = kwargs["envs"]
         kwargs["opposite_envs"] = envs
         for _, env_compute in zip(range(1, n), cycle([fn_b, fn_a])):
-            env_compute(mode="full-bond", **kwargs)
+            env_compute(method="full-bond", **kwargs)
 
         tn = envs[lbl_a, mid] | envs[lbl_b, mid + 1]
         return tn.contract(all, optimize=optimize)
+
+    def gen_block_environments(
+        self,
+        direction,
+        blocks,
+        max_bond,
+        *,
+        cyclic=None,
+        compress_fn=None,
+        schedule="auto",
+        method=None,
+        layer_tags=None,
+        cutoff=None,
+        canonize=True,
+        optimize="auto-hq",
+        equalize_norms=False,
+        compress_opts=None,
+        **compress_method_opts,
+    ):
+        """Generate compressed row or column environments, each yielded as
+        soon as it is ready, so only the environments still needed are kept in
+        memory. See
+        :func:`~quimb.tensor.environments.gen_compressed_environments`.
+
+        Parameters
+        ----------
+        direction : {'x', 'y'}
+            Compute environments for blocks of rows or columns respectively.
+        blocks : sequence of tuple[int, int]
+            The ``(start, size)`` blocks of rows or columns, which can have
+            different sizes, all computed together in one sweep. Use
+            :func:`~quimb.tensor.environments.all_blocks` to get every block
+            of one size.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to
+            ``cutoff`` alone, which is not recommended in 2D.
+        cyclic : bool, optional
+            Periodicity along ``direction``. By default infer it from the
+            network.
+        compress_fn : {None, 'ag', '1d', '2d'}, optional
+            Which compression function to use along the other direction, see
+            :func:`~quimb.tensor.environments.gen_compressed_environments`.
+            By default use '1d' if the other direction is open, and 'ag' if
+            it is periodic.
+        schedule : {'auto', 'tree', 'cut'}, optional
+            Environment construction schedule, only relevant if ``cyclic``.
+            By default use 'tree', which never compresses two environments
+            together. The 'cut' schedule uses fewer compressions but can
+            degrade the approximation by combining two already compressed
+            environments.
+        method : str or callable, optional
+            The compression method, supplied to ``compress_fn``. By default
+            use its own default method.
+        layer_tags : None or sequence[str], optional
+            Add the tensors at each row or column one layer at a time in this
+            order, compressing after each.
+        cutoff : float, optional
+            Compression cutoff. By default use the default of the compression
+            function.
+        canonize : bool or str, optional
+            Canonicalization option supplied to the compressor.
+        optimize : str, optional
+            Contraction path optimizer supplied to the compressor.
+        equalize_norms : bool or float, optional
+            Whether to equalize tensor norms after each compression.
+        compress_opts : dict, optional
+            Additional options supplied to the compressor.
+        compress_method_opts
+            Additional options supplied to the compression method.
+
+        Yields
+        ------
+        block : tuple[int, int]
+            The ``(start, size)`` block.
+        environment : TensorNetwork
+            The environment of ``block``, which also carries the original
+            network's ``.exponent``.
+        """
+        check_opt("direction", direction, ("x", "y"))
+        r2d = Rotator2D(self, None, None, direction + "min")
+        if cyclic is None:
+            cyclic = r2d.is_cyclic_x()
+        if compress_fn is None:
+            compress_fn = "ag" if r2d.is_cyclic_y() else "1d"
+
+        environments = gen_compressed_environments(
+            self,
+            tuple(map(r2d.x_tag, r2d.sweep)),
+            tuple(map(r2d.y_tag, r2d.sweep_other)),
+            blocks,
+            max_bond,
+            cyclic=cyclic,
+            compress_fn=compress_fn,
+            schedule=schedule,
+            method=method,
+            layer_tags=layer_tags,
+            cutoff=cutoff,
+            canonize=canonize,
+            optimize=optimize,
+            equalize_norms=equalize_norms,
+            compress_opts=compress_opts,
+            **compress_method_opts,
+        )
+        for block, environment in environments:
+            environment.exponent += self.exponent
+            yield block, environment
+
+    def compute_block_environments(
+        self,
+        direction,
+        blocks,
+        max_bond,
+        *,
+        cutoff=None,
+        method=None,
+        **kwargs,
+    ):
+        """Compute compressed row or column environments for blocks of rows
+        or columns. See :meth:`gen_block_environments` for the options, and
+        to process them one at a time.
+
+        Parameters
+        ----------
+        direction : {'x', 'y'}
+            Compute environments for blocks of rows or columns respectively.
+        blocks : sequence of tuple[int, int]
+            The ``(start, size)`` blocks of rows or columns.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
+            alone, which is not recommended in 2D.
+        cutoff : float, optional
+            Compression cutoff. By default use the default of the compression
+            function.
+        method : str or callable, optional
+            The compression method, see :meth:`gen_block_environments`.
+        kwargs
+            Supplied to :meth:`gen_block_environments`.
+
+        Returns
+        -------
+        dict[tuple[int, int], TensorNetwork]
+            The environment for each ``(start, size)`` block.
+        """
+        return dict(
+            self.gen_block_environments(
+                direction,
+                blocks,
+                max_bond,
+                cutoff=cutoff,
+                method=method,
+                **kwargs,
+            )
+        )
 
     def compute_environments(
         self,
@@ -2701,7 +2890,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         dense=False,
         compress_opts=None,
@@ -2727,11 +2916,11 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize : bool, optional
             Whether to canonicalize along each MPS environment before
             compressing.
-        mode : {'mps', 'projector', 'full-bond'}, optional
+        method : {'mps', 'projector', 'full-bond', ...}, optional
             Which contraction method to use for the environments.
         layer_tags : str or iterable[str], optional
             If this 2D TN is multi-layered (e.g. a bra and a ket), and
-            ``mode == 'mps'``, contract and compress each specified layer
+            ``method == 'mps'``, contract and compress each specified layer
             separately, for a cheaper contraction.
         dense : bool, optional
             Whether to use dense tensors for the environments.
@@ -2758,6 +2947,7 @@ class TensorNetwork2D(TensorNetworkGen):
             A dictionary of the environments, with keys of the form
             ``(from_which, row_or_col_index)``.
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         tn = self.copy()
 
         r2d = Rotator2D(tn, xrange, yrange, from_which)
@@ -2766,7 +2956,7 @@ class TensorNetwork2D(TensorNetworkGen):
         if envs is None:
             envs = {}
 
-        if mode == "full-bond":
+        if method == "full-bond":
             # set shared storage for opposite env contractions
             contract_boundary_opts.setdefault("opposite_envs", {})
 
@@ -2798,7 +2988,7 @@ class TensorNetwork2D(TensorNetworkGen):
                     from_which=from_which,
                     max_bond=max_bond,
                     cutoff=cutoff,
-                    mode=mode,
+                    method=method,
                     canonize=canonize,
                     layer_tags=layer_tags,
                     compress_opts=compress_opts,
@@ -2856,7 +3046,7 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=True,
         dense=False,
-        mode="mps",
+        method=None,
         layer_tags=None,
         compress_opts=None,
         envs=None,
@@ -2903,7 +3093,7 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         dense : bool, optional
             If true, contract the boundary in as a single dense tensor.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the boundary compression.
         layer_tags : None or sequence[str], optional
             If ``None``, all tensors at each coordinate pair
@@ -2928,10 +3118,11 @@ class TensorNetwork2D(TensorNetworkGen):
             The two environment tensor networks of row ``i`` will be stored in
             ``x_envs['xmin', i]`` and ``x_envs['xmax', i]``.
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["canonize"] = canonize
-        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["method"] = method
         contract_boundary_opts["dense"] = dense
         contract_boundary_opts["layer_tags"] = layer_tags
         contract_boundary_opts["compress_opts"] = compress_opts
@@ -2951,7 +3142,7 @@ class TensorNetwork2D(TensorNetworkGen):
         cutoff=1e-10,
         canonize=True,
         dense=False,
-        mode="mps",
+        method=None,
         layer_tags=None,
         compress_opts=None,
         envs=None,
@@ -3012,7 +3203,7 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         dense : bool, optional
             If true, contract the boundary in as a single dense tensor.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the boundary compression.
         layer_tags : None or sequence[str], optional
             If ``None``, all tensors at each coordinate pair
@@ -3035,10 +3226,11 @@ class TensorNetwork2D(TensorNetworkGen):
             The two environment tensor networks of column ``j`` will be stored
             in ``y_envs['ymin', j]`` and ``y_envs['ymax', j]``.
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["canonize"] = canonize
-        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["method"] = method
         contract_boundary_opts["dense"] = dense
         contract_boundary_opts["layer_tags"] = layer_tags
         contract_boundary_opts["compress_opts"] = compress_opts
@@ -3308,7 +3500,7 @@ class TensorNetwork2D(TensorNetworkGen):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=None,
         first_contract=None,
         second_dense=None,
@@ -3347,7 +3539,7 @@ class TensorNetwork2D(TensorNetworkGen):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the boundary compression.
         layer_tags : None or sequence[str], optional
             If ``None``, all tensors at each coordinate pair
@@ -3381,13 +3573,10 @@ class TensorNetwork2D(TensorNetworkGen):
             startings coordinate of the plaquette being the first and the size
             of the plaquette being the second pair.
         """
-        if first_contract is None:
-            if x_bsz > y_bsz:
-                first_contract = "y"
-            elif (y_bsz > x_bsz) or (self.Lx >= self.Ly):
-                first_contract = "x"
-            else:
-                first_contract = "y"
+        method = _parse_boundary_method(method, compute_environment_opts)
+        first_contract = _choose_plaquette_first_contract(
+            self, x_bsz, y_bsz, first_contract
+        )
 
         compute_env_fn = {
             "x": self._compute_plaquette_environments_x_first,
@@ -3400,11 +3589,146 @@ class TensorNetwork2D(TensorNetworkGen):
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            mode=mode,
+            method=method,
             layer_tags=layer_tags,
             compress_opts=compress_opts,
             second_dense=second_dense,
             **compute_environment_opts,
+        )
+
+    def compute_plaquette_environments_via_envs(
+        self,
+        x_bsz=2,
+        y_bsz=2,
+        *,
+        max_bond,
+        starts=None,
+        cyclic=None,
+        first_contract=None,
+        schedule="auto",
+        second_schedule="auto",
+        second_dense=None,
+        method=None,
+        layer_tags=None,
+        cutoff=None,
+        canonize=True,
+        optimize="auto-hq",
+        equalize_norms=False,
+        compress_opts=None,
+        contract_opts=None,
+        **compress_method_opts,
+    ):
+        """Compute the environments of plaquettes, which can wrap around
+        periodic boundaries, using the environment planner for open or
+        periodic boundaries. The first direction is contracted
+        approximately, then each strip is contracted along its length, exactly
+        or approximately depending on ``second_dense``. See
+        :meth:`compute_plaquette_environments` for the boundary contraction
+        version, only for open boundaries.
+
+        Parameters
+        ----------
+        x_bsz, y_bsz : int, optional
+            Plaquette size in each direction.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
+            alone, which is not recommended in 2D.
+        starts : sequence of tuple[int, int], optional
+            The ``(i, j)`` plaquette starts to compute. By default compute
+            every valid start.
+        cyclic : bool or tuple[bool, bool], optional
+            Periodicity in each direction. By default infer it.
+        first_contract : {'x', 'y'}, optional
+            Direction to contract approximately first.
+        schedule : {'auto', 'tree', 'cut'}, optional
+            Construction schedule of the approximate environments in the
+            first direction, see :meth:`gen_block_environments`.
+        second_schedule : {'auto', 'tree', 'cut'}, optional
+            Construction schedule of the environments along each strip, in
+            the second direction. By default use 'cut' for exact
+            environments, and 'tree' for compressed ones.
+        second_dense : bool, optional
+            Whether to contract the environments along each strip exactly.
+            By default only do so for strips one plane wide, and compress
+            wider strips along the strip, as in the first direction.
+        method : str or callable, optional
+            The compression method, see
+            :func:`~quimb.tensor.environments.gen_compressed_environments`.
+            By default use the default method of the compression function for
+            each direction.
+        layer_tags : None or sequence[str], optional
+            Contract the tensors of each plane one layer at a time, in this
+            order.
+        cutoff : float, optional
+            Compression cutoff. By default use the default of the compression
+            function.
+        canonize : bool or str, optional
+            Canonicalization option supplied to the compressor.
+        optimize : str, optional
+            Contraction path optimizer supplied to the compressor, and the
+            default for ``contract_opts``.
+        equalize_norms : bool or float, optional
+            Whether to equalize tensor norms after each compression.
+        compress_opts : dict, optional
+            Additional options supplied to the compressor.
+        contract_opts : dict, optional
+            Options for the exact contractions along each strip, see
+            ``second_dense``. ``optimize`` is the default path optimizer.
+        compress_method_opts
+            Additional options supplied to the compression method.
+
+        Returns
+        -------
+        dict[((int, int), (int, int)), TensorNetwork]
+            Plaquette environments keyed by start and size.
+        """
+        cyclic_x, cyclic_y = _normalize_2d_cyclic(self, cyclic)
+        if not 1 <= x_bsz <= self.Lx:
+            raise ValueError("x_bsz must satisfy 1 <= x_bsz <= Lx")
+        if not 1 <= y_bsz <= self.Ly:
+            raise ValueError("y_bsz must satisfy 1 <= y_bsz <= Ly")
+        nx = self.Lx if cyclic_x else self.Lx - x_bsz + 1
+        ny = self.Ly if cyclic_y else self.Ly - y_bsz + 1
+
+        if starts is None:
+            starts = tuple(product(range(nx), range(ny)))
+        else:
+            starts = tuple(sorted(set(starts)))
+
+        if not starts:
+            return {}
+        if any(not (0 <= i < nx and 0 <= j < ny) for i, j in starts):
+            raise ValueError(
+                f"starts must lie in range(0, {nx}) x range(0, {ny})"
+            )
+
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
+        environment_opts = dict(
+            max_bond=max_bond,
+            schedule=schedule,
+            layer_tags=layer_tags,
+            cutoff=cutoff,
+            method=method,
+            canonize=canonize,
+            optimize=optimize,
+            equalize_norms=equalize_norms,
+            compress_opts=compress_opts,
+            **compress_method_opts,
+        )
+        return dict(
+            _gen_plaquette_environments_via_envs(
+                self,
+                tuple((start, (x_bsz, y_bsz)) for start in starts),
+                cyclic_x,
+                cyclic_y,
+                first_contract,
+                second_schedule,
+                contract_opts,
+                environment_opts,
+                second_dense=second_dense,
+            )
         )
 
     def coarse_grain_hotrg(
@@ -3783,7 +4107,7 @@ class TensorNetwork2D(TensorNetworkGen):
         canonize=False,
         canonize_opts=None,
         lazy=False,
-        mode="projector",
+        method=None,
         sequence=None,
         xmin=None,
         xmax=None,
@@ -3825,7 +4149,7 @@ class TensorNetwork2D(TensorNetworkGen):
         lazy : bool, optional
             Whether to contract the coarse graining projectors or leave them
             in the tensor network lazily. Default is to contract them.
-        mode : str, optional
+        method : str, optional
             The method to perform the boundary contraction. Defaults to
             ``'projector'``.
         sequence : sequence of {'xmin', 'xmax', 'ymin', 'ymax'}, optional
@@ -3904,7 +4228,10 @@ class TensorNetwork2D(TensorNetworkGen):
 
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
-        contract_boundary_opts["mode"] = mode
+        method = _parse_boundary_method(
+            method, contract_boundary_opts, default="projector"
+        )
+        contract_boundary_opts["method"] = method
         contract_boundary_opts["lazy"] = lazy
         contract_boundary_opts["canonize"] = canonize
         contract_boundary_opts["canonize_opts"] = canonize_opts
@@ -3947,9 +4274,186 @@ class TensorNetwork2D(TensorNetworkGen):
     contract_ctmrg_ = functools.partialmethod(contract_ctmrg, inplace=True)
 
 
+def _parse_boundary_method(method, opts, default="mps"):
+    """Get the boundary contraction ``method``, handling ``mode``, its
+    deprecated alias, if it is in ``opts``.
+    """
+    if "mode" in opts:
+        warnings.warn(
+            "`mode` is deprecated, use `method` instead.",
+            FutureWarning,
+            stacklevel=3,
+        )
+        mode = opts.pop("mode")
+        if (method is not None) and (mode == "full-bond"):
+            # `method` used to select the full bond similarity decomposition
+            opts.setdefault("similarity_method", method)
+        method = mode
+    if method is None:
+        method = default
+    return method
+
+
 def is_lone_coo(where):
     """Check if ``where`` has been specified as a single coordinate pair."""
     return (len(where) == 2) and (isinstance(where[0], Integral))
+
+
+def _normalize_2d_cyclic(tn, cyclic):
+    if cyclic is None:
+        return tn.is_cyclic_x(), tn.is_cyclic_y()
+    if isinstance(cyclic, bool):
+        return cyclic, cyclic
+    return tuple(cyclic)
+
+
+def _choose_plaquette_first_contract(tn, x_bsz, y_bsz, first_contract):
+    if first_contract is None:
+        if x_bsz > y_bsz:
+            first_contract = "y"
+        elif (y_bsz > x_bsz) or (tn.Lx >= tn.Ly):
+            first_contract = "x"
+        else:
+            first_contract = "y"
+    check_opt("first_contract", first_contract, ("x", "y"))
+    return first_contract
+
+
+def _gen_plaquette_environments_via_envs(
+    tn,
+    plaquettes,
+    cyclic_x,
+    cyclic_y,
+    first_contract,
+    second_schedule,
+    contract_opts,
+    environment_opts,
+    second_dense=None,
+):
+    """Generate the environments of possibly wrapped plaquettes, given as
+    ``((i, j), (x_bsz, y_bsz))`` and possibly of different sizes. Each
+    plaquette is contracted approximately in a first direction, then along
+    the remaining strip in the second direction. Unless ``first_contract``
+    is given, the first direction is chosen for each plaquette to keep its
+    strip narrowest, so there is at most one approximate first sweep per
+    direction. Each block in the first direction then has one sweep along
+    its strip, exact if ``second_dense``, which by default it is only for
+    strips one plane wide.
+    """
+    # the first direction is 'x' in each rotated frame
+    rotators = {d: Rotator2D(tn, None, None, d + "min") for d in "xy"}
+
+    # start by finding the second direction blocks needed for each first
+    # direction block, in each direction
+    blocks_by_direction = {"x": defaultdict(set), "y": defaultdict(set)}
+    for (i, j), (x_bsz, y_bsz) in plaquettes:
+        # contract first along the direction that keeps the strip narrow
+        direction = _choose_plaquette_first_contract(
+            tn, x_bsz, y_bsz, first_contract
+        )
+        # get plaquette start and size in absolute coordinates
+        r2d = rotators[direction]
+        first, second = r2d.rotate(i, j)
+        first_bsz, second_bsz = r2d.rotate(x_bsz, y_bsz)
+        # group 'second' sizes by which 'first' block they belong to
+        blocks_by_direction[direction][first, first_bsz].add(
+            (second, second_bsz)
+        )
+
+    # for each direction used as a first direction, one approximate sweep
+    # computes the environments of all its first direction blocks
+    for direction, second_blocks_by_first in blocks_by_direction.items():
+        if not second_blocks_by_first:
+            continue
+
+        r2d = rotators[direction]
+        first_tag, second_tag = r2d.x_tag, r2d.y_tag
+        first_cyclic, second_cyclic = r2d.rotate(cyclic_x, cyclic_y)
+        first_length = len(r2d.sweep)
+
+        first_envs = tn.gen_block_environments(
+            direction,
+            tuple(second_blocks_by_first),
+            cyclic=first_cyclic,
+            compress_fn="ag" if second_cyclic else "1d",
+            **environment_opts,
+        )
+        second_tags = tuple(map(second_tag, r2d.sweep_other))
+
+        # each first environment is used then dropped as soon as it is ready
+        for (first, first_bsz), first_env in first_envs:
+            first_block_tags = tuple(
+                first_tag(first + d) for d in range(first_bsz)
+            )
+            # the first block of planes and its environment, contracted along
+            # the second direction next
+            strip = tn.select_any(first_block_tags, virtual=False) | first_env
+            second_blocks = tuple(second_blocks_by_first[first, first_bsz])
+
+            # by default only contract strips one plane wide exactly
+            if second_dense is None:
+                dense = first_bsz < 2
+            else:
+                dense = second_dense
+
+            if dense:
+                second_envs = gen_exact_environments(
+                    strip,
+                    second_tags,
+                    second_blocks,
+                    cyclic=second_cyclic,
+                    schedule=second_schedule,
+                    contract_opts=contract_opts,
+                )
+            else:
+                # compress along the strip
+                if first_cyclic:
+                    # a single piece, connected to both ends of the block
+                    if first_bsz < first_length:
+                        first_block_tags += (first_tag(first + first_bsz),)
+                else:
+                    # a piece either side, unless the block is at an edge
+                    if first > 0:
+                        first_block_tags = (
+                            first_tag(first - 1),
+                            *first_block_tags,
+                        )
+                    if first + first_bsz < first_length:
+                        first_block_tags += (first_tag(first + first_bsz),)
+
+                second_envs = gen_compressed_environments(
+                    strip,
+                    second_tags,
+                    first_block_tags,
+                    second_blocks,
+                    cyclic=second_cyclic,
+                    compress_fn="ag" if first_cyclic else "1d",
+                    **{**environment_opts, "schedule": second_schedule},
+                )
+
+            for (second, second_bsz), second_env in second_envs:
+                # the second environment, plus the first environment tensors
+                # bordering the plaquette itself
+                target_tags = tuple(
+                    second_tag(second + d) for d in range(second_bsz)
+                )
+                edge_env = first_env.select_any(target_tags, virtual=False)
+                environment = TensorNetwork((second_env, edge_env))
+                environment.exponent += first_env.exponent
+                # rotate back to the real frame
+                p = (
+                    r2d.rotate(first, second),
+                    r2d.rotate(first_bsz, second_bsz),
+                )
+                yield p, environment
+
+
+def _find_plaquette(where, Lx, Ly, cyclic_x, cyclic_y):
+    coos = (where,) if is_lone_coo(where) else tuple(where)
+    xs, ys = zip(*coos)
+    i, x_bsz = find_1d_block(xs, Lx, cyclic_x)
+    j, y_bsz = find_1d_block(ys, Ly, cyclic_y)
+    return (i, j), (x_bsz, y_bsz)
 
 
 class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
@@ -4130,7 +4634,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=("KET", "BRA"),
         compress_opts=None,
         sequence=None,
@@ -4151,7 +4655,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond', ...}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary, can also be any of
             the generic 1D or arbgeom methods.
         layer_tags : None or sequence of str, optional
@@ -4179,12 +4683,13 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         -------
         scalar
         """
+        method = _parse_boundary_method(method, contract_opts)
         norm = self.make_norm(layer_tags=layer_tags)
         return norm.contract_boundary(
             max_bond=max_bond,
             cutoff=cutoff,
             canonize=canonize,
-            mode=mode,
+            method=method,
             layer_tags=layer_tags,
             compress_opts=compress_opts,
             sequence=sequence,
@@ -4197,65 +4702,61 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             **contract_opts,
         )
 
-    def compute_local_expectation(
+    def compute_partial_traces_boundary(
         self,
-        terms,
-        max_bond=None,
+        wheres,
+        max_bond,
         *,
-        cutoff=1e-10,
+        normalized=True,
+        get="matrix",
+        cutoff=None,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=("KET", "BRA"),
-        normalized=False,
         autogroup=True,
         contract_optimize="auto-hq",
-        return_all=False,
         plaquette_envs=None,
         plaquette_map=None,
         **plaquette_env_options,
     ):
-        r"""Compute the sum of many local expecations by essentially forming
-        the reduced density matrix of all required plaquettes. If you supply
-        ``normalized=True`` each expecation is locally normalized, which a) is
-        usually more accurate and b) doesn't require a separate normalization
-        boundary contraction.
+        """Compute reduced density matrices using the boundary contraction
+        plaquette environments of :meth:`compute_plaquette_environments`. Only
+        for open boundaries.
 
         Parameters
         ----------
-        terms : dict[tuple[tuple[int], array]
-            A dictionary mapping site coordinates to raw operators, which will
-            be supplied to
-            :meth:`~quimb.tensor.tn2d.core.TensorNetwork2DVector.gate`. The
-            keys should either be a single coordinate - ``(i, j)`` - describing
-            a single site operator, or a pair of coordinates -
-            ``((i_a, j_a), (i_b, j_b))`` describing a two site operator.
-        max_bond : int, optional
-            The maximum boundary dimension, AKA 'chi'. The default of ``None``
-            means truncation is left purely to ``cutoff`` and is not
-            recommended in 2D.
+        wheres : sequence of coordinate or sequence of coordinates
+            The site or sites to keep for each reduced density matrix, either
+            a single coordinate ``(i, j)`` or a pair of coordinates.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to
+            ``cutoff`` alone, which is not recommended in 2D.
+        normalized : bool or "return", optional
+            Normalize each reduced density matrix to unit trace. If "return",
+            give each as ``(rho, trace)`` without dividing by the trace.
+            Ignored if ``get="tn"``, which returns the unnormalized network
+            without a separate trace.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            How to return each reduced density matrix, see
+            :meth:`compute_partial_traces`.
         cutoff : float, optional
             Cut-off value to used to truncate singular values in the boundary
-            contraction.
+            contraction. By default ``1e-10``.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
         layer_tags : None or sequence of str, optional
             If given, perform a multilayer contraction, contracting the inner
             sites in each layer into the boundary individually.
-        normalized : bool, optional
-            If True, normalize the value of each local expectation by the local
-            norm: $\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]$.
         autogroup : bool, optional
-            If ``True`` (the default), group terms into horizontal and vertical
-            sets to be computed separately (usually more efficient) if
-            possible.
+            If ``True`` (the default), group sites into horizontal and
+            vertical sets to be computed separately (usually more efficient)
+            if possible.
         contract_optimize : str, optional
-            Contraction path finder to use for contracting the local plaquette
-            expectation (and optionally normalization).
-        return_all : bool, optional
-            Whether to the return all the values individually as a dictionary
-            of coordinates to tuple[local_expectation, local_norm].
+            Contraction path finder to use for contracting each local
+            reduced density matrix.
         plaquette_envs : None or dict, optional
             Supply precomputed plaquette environments.
         plaquette_map : None, dict, optional
@@ -4264,24 +4765,28 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             calculated automatically otherwise.
         plaquette_env_options
             Supplied to :meth:`compute_plaquette_environments` to generate the
-            plaquette environments, equivalent to approximately performing the
-            partial trace.
+            plaquette environments.
 
         Returns
         -------
-        scalar or dict
+        dict[coordinate or tuple[coordinate], array or Tensor or TensorNetwork]
+            The reduced density matrix for each ``where``, with sites in the
+            order of ``where``.
         """
+        method = _parse_boundary_method(method, plaquette_env_options)
+        if cutoff is None:
+            cutoff = 1e-10
         norm, ket, bra = self.make_norm(return_all=True)
 
         if plaquette_envs is None:
             plaquette_env_options["max_bond"] = max_bond
             plaquette_env_options["cutoff"] = cutoff
             plaquette_env_options["canonize"] = canonize
-            plaquette_env_options["mode"] = mode
+            plaquette_env_options["method"] = method
             plaquette_env_options["layer_tags"] = layer_tags
 
             plaquette_envs = {}
-            for x_bsz, y_bsz in calc_plaquette_sizes(terms.keys(), autogroup):
+            for x_bsz, y_bsz in calc_plaquette_sizes(wheres, autogroup):
                 plaquette_envs.update(
                     norm.compute_plaquette_environments(
                         x_bsz=x_bsz, y_bsz=y_bsz, **plaquette_env_options
@@ -4289,48 +4794,573 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
                 )
 
         if plaquette_map is None:
-            # work out which plaquettes to use for which terms
+            # work out which plaquettes to use for which sites
             plaquette_map = calc_plaquette_map(plaquette_envs)
 
-        # now group the terms into just the plaquettes we need
-        plaq2coo = defaultdict(list)
-        for where, G in terms.items():
-            p = plaquette_map[where]
-            plaq2coo[p].append((where, G))
+        # now group the sites into just the plaquettes we need
+        wheres_by_plaquette = defaultdict(list)
+        for where in wheres:
+            sites = (where,) if is_lone_coo(where) else tuple(sorted(where))
+            key = sites[0] if len(sites) == 1 else sites
+            wheres_by_plaquette[plaquette_map[key]].append(where)
 
-        expecs = {}
-        for p in plaq2coo:
-            # site tags for the plaquette
-            sites = tuple(map(ket.site_tag, plaquette_to_sites(p)))
-
-            # view the ket portion as 2d vector so we can gate it
-            ket_local = ket.select_any(sites)
-            ket_local.view_as_(TensorNetwork2DVector, like=self)
-            bra_and_env = bra.select_any(sites) | plaquette_envs[p]
-
-            # compute local estimation of norm for this plaquette
-            if normalized:
-                norm_i0j0 = (ket_local | bra_and_env).contract(
-                    all, optimize=contract_optimize
+        rhos = {}
+        for p, p_wheres in wheres_by_plaquette.items():
+            tags = tuple(map(ket.site_tag, plaquette_to_sites(p)))
+            ket_local = ket.select_any(tags, virtual=False)
+            bra_local = bra.select_any(tags, virtual=False)
+            rhos.update(
+                partial_traces_from_environment(
+                    self,
+                    p_wheres,
+                    ket_local,
+                    bra_local,
+                    plaquette_envs[p],
+                    normalized=normalized,
+                    get=get,
+                    optimize=contract_optimize,
                 )
-            else:
-                norm_i0j0 = None
+            )
 
-            # for each local term on plaquette compute expectation
-            for where, G in plaq2coo[p]:
-                expec_ij = (
-                    ket_local.gate(G, where, contract=False) | bra_and_env
-                ).contract(all, optimize=contract_optimize)
+        return rhos
 
-                expecs[where] = expec_ij, norm_i0j0
+    def compute_partial_traces_via_envs(
+        self,
+        wheres,
+        max_bond,
+        *,
+        normalized=True,
+        get="matrix",
+        autogroup=True,
+        cyclic=None,
+        first_contract=None,
+        schedule="auto",
+        second_schedule="auto",
+        second_dense=None,
+        method=None,
+        layer_tags=("KET", "BRA"),
+        cutoff=None,
+        canonize=True,
+        optimize="auto-hq",
+        equalize_norms=False,
+        compress_opts=None,
+        contract_opts=None,
+        **compress_method_opts,
+    ):
+        """Compute reduced density matrices using the plaquette environments
+        of :meth:`compute_plaquette_environments_via_envs`, for open or
+        periodic boundaries. Each plaquette is contracted approximately first
+        in one direction, with one sweep covering every plaquette size for
+        that direction, then along its strip in the second direction.
 
-        if return_all:
-            return expecs
+        Parameters
+        ----------
+        wheres : sequence of coordinate or sequence of coordinates
+            The site or sites to keep for each reduced density matrix. Sites
+            can cross either periodic boundary.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to
+            ``cutoff`` alone, which is not recommended in 2D.
+        normalized : bool or "return", optional
+            Normalize each reduced density matrix to unit trace. If "return",
+            give each as ``(rho, trace)`` without dividing by the trace.
+            Ignored if ``get="tn"``, which returns the unnormalized network
+            without a separate trace.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            How to return each reduced density matrix, see
+            :meth:`compute_partial_traces`.
+        autogroup : bool, optional
+            If ``True`` (the default), drop any plaquette size contained in
+            another size that is needed anyway, for example using 2x2
+            plaquettes for 1x2 and 2x1 sites when 2x2 sites need them, as
+            :meth:`compute_partial_traces_boundary` does. If ``False``, use a
+            single plaquette size that covers every set of sites. Either way,
+            each set of sites uses the smallest remaining plaquette containing
+            it, starting at its own sites, so that sets of sites can share
+            plaquettes, for example both bonds of a site in one 2x2
+            plaquette.
+        cyclic : bool or tuple[bool, bool], optional
+            Periodicity in each direction. By default infer it.
+        first_contract : {'x', 'y'}, optional
+            Direction to contract approximately first, for every plaquette.
+            By default choose it for each plaquette so that its strip is as
+            narrow as possible, for example 'x' for a 1x2
+            plaquette and 'y' for a 2x1 plaquette, at the cost of one
+            approximate sweep in each direction.
+        schedule : {'auto', 'tree', 'cut'}, optional
+            Construction schedule of the approximate environments in the
+            first direction, see :meth:`gen_block_environments`.
+        second_schedule : {'auto', 'tree', 'cut'}, optional
+            Construction schedule of the environments along each strip, in
+            the second direction. By default use 'cut' for exact
+            environments, and 'tree' for compressed ones.
+        second_dense : bool, optional
+            Whether to contract the environments along each strip exactly.
+            By default only do so for strips one plane wide, and compress
+            wider strips along the strip, as in the first direction.
+        method : str or callable, optional
+            The compression method, see
+            :func:`~quimb.tensor.environments.gen_compressed_environments`.
+            By default use the default method of the compression function for
+            each direction.
+        layer_tags : None or sequence[str], optional
+            Contract the tensors of each plane one layer at a time, in this
+            order. By default contract the ket and bra layers separately.
+        cutoff : float, optional
+            Compression cutoff. By default use the default of the compression
+            function.
+        canonize : bool or str, optional
+            Canonicalization option supplied to the compressor.
+        optimize : str, optional
+            Contraction path optimizer supplied to the compressor, and the
+            default for ``contract_opts``.
+        equalize_norms : bool or float, optional
+            Whether to equalize tensor norms after each compression.
+        compress_opts : dict, optional
+            Additional options supplied to the compressor.
+        contract_opts : dict, optional
+            Options for the exact contractions, of the environments along
+            each strip if ``second_dense``, and of each reduced density
+            matrix. ``optimize`` is the default path optimizer.
+        compress_method_opts
+            Additional options supplied to the compression method.
 
-        if normalized:
-            return functools.reduce(add, (e / n for e, n in expecs.values()))
+        Returns
+        -------
+        dict[coordinate or tuple[coordinate], array or Tensor or TensorNetwork]
+            The reduced density matrix for each ``where``, with sites in the
+            order of ``where``.
+        """
+        cyclic_x, cyclic_y = _normalize_2d_cyclic(self, cyclic)
+        norm, ket, bra = self.make_norm(return_all=True)
+        plaquettes = {
+            where: _find_plaquette(where, self.Lx, self.Ly, cyclic_x, cyclic_y)
+            for where in wheres
+        }
+        sizes = {size for _, size in plaquettes.values()}
+        if autogroup:
+            # drop sizes contained in another, e.g. 1x2 and 2x1 in 2x2
+            sizes = {
+                a
+                for a in sizes
+                if not any(
+                    a != b and a[0] <= b[0] and a[1] <= b[1] for b in sizes
+                )
+            }
+        else:
+            # a single plaquette size that covers every set of sites
+            sizes = {tuple(map(max, zip(*sizes)))}
 
-        return functools.reduce(add, (e for e, _ in expecs.values()))
+        for where, ((i, j), (x_bsz, y_bsz)) in plaquettes.items():
+            # the smallest remaining size containing these sites, starting
+            # at their own block so that sites can share plaquettes
+            x_bsz, y_bsz = min(
+                (b for b in sizes if x_bsz <= b[0] and y_bsz <= b[1]),
+                key=lambda b: (b[0] * b[1], b),
+            )
+            if not cyclic_x:
+                i = min(i, self.Lx - x_bsz)
+            if not cyclic_y:
+                j = min(j, self.Ly - y_bsz)
+            plaquettes[where] = (i, j), (x_bsz, y_bsz)
+
+        wheres_by_plaquette = defaultdict(list)
+        for where, p in plaquettes.items():
+            wheres_by_plaquette[p].append(where)
+
+        contract_opts = ensure_dict(contract_opts)
+        contract_opts.setdefault("optimize", optimize)
+        environment_opts = dict(
+            max_bond=max_bond,
+            schedule=schedule,
+            layer_tags=layer_tags,
+            cutoff=cutoff,
+            method=method,
+            canonize=canonize,
+            optimize=optimize,
+            equalize_norms=equalize_norms,
+            compress_opts=compress_opts,
+            **compress_method_opts,
+        )
+        plaquette_envs = _gen_plaquette_environments_via_envs(
+            norm,
+            tuple(wheres_by_plaquette),
+            cyclic_x,
+            cyclic_y,
+            first_contract,
+            second_schedule,
+            contract_opts,
+            environment_opts,
+            second_dense=second_dense,
+        )
+
+        rhos = {}
+        for p, environment in plaquette_envs:
+            (i, j), (x_bsz, y_bsz) = p
+            tags = tuple(
+                ket.site_tag((i + di) % self.Lx, (j + dj) % self.Ly)
+                for di in range(x_bsz)
+                for dj in range(y_bsz)
+            )
+            ket_local = ket.select_any(tags, virtual=False)
+            bra_local = bra.select_any(tags, virtual=False)
+            rhos.update(
+                partial_traces_from_environment(
+                    self,
+                    wheres_by_plaquette[p],
+                    ket_local,
+                    bra_local,
+                    environment,
+                    normalized=normalized,
+                    get=get,
+                    **contract_opts,
+                )
+            )
+
+        return rhos
+
+    def compute_partial_traces(
+        self,
+        wheres,
+        max_bond,
+        *,
+        cutoff=None,
+        method=None,
+        normalized=True,
+        get="matrix",
+        route=None,
+        **kwargs,
+    ):
+        """Compute many local reduced density matrices at once, each from the
+        environment of a plaquette containing its sites.
+
+        Parameters
+        ----------
+        wheres : sequence of coordinate or sequence of coordinates
+            The site or sites to keep for each reduced density matrix.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to
+            ``cutoff`` alone, which is not recommended in 2D.
+        cutoff : float, optional
+            The cutoff used when compressing the environments. By default use
+            the default of the compression function, or ``1e-10`` for
+            ``route='boundary'``.
+        method : str or callable, optional
+            The compression method, see
+            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
+            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
+            By default use the default of each.
+        normalized : bool or "return", optional
+            Normalize each reduced density matrix to unit trace. If "return",
+            give each as ``(rho, trace)`` without dividing by the trace.
+            Ignored if ``get="tn"``, which returns the unnormalized network
+            without a separate trace.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            How to return each reduced density matrix:
+
+            - 'matrix': a dense matrix, with the ket sites fused into rows
+              and the bra sites fused into columns.
+            - 'array': the raw array, with one axis per ket site then one
+              axis per bra site.
+            - 'tensor': a :class:`~quimb.tensor.tensor_core.Tensor` with the
+              ket and bra indices.
+            - 'tn': the uncontracted tensor network.
+        route : {None, 'boundary', 'envs'}, optional
+            How to compute the plaquette environments. By default use
+            ``'envs'`` if either direction is periodic and ``'boundary'``
+            otherwise.
+
+            - 'boundary': boundary contraction from each side, see
+              :meth:`compute_partial_traces_boundary`. Only for open
+              boundaries.
+            - 'envs': an approximate sweep in one direction, then sweeps
+              along each strip in the other direction, see
+              :meth:`compute_partial_traces_via_envs`.
+
+        kwargs
+            Supplied to the method chosen by ``route``.
+
+        Returns
+        -------
+        dict[coordinate or tuple[coordinate], array or Tensor or TensorNetwork]
+            The reduced density matrix for each ``where``, with sites in the
+            order of ``where``.
+        """
+        if route is None:
+            cyclic = self.is_cyclic_x() or self.is_cyclic_y()
+            route = "envs" if cyclic else "boundary"
+        check_opt("route", route, ("boundary", "envs"))
+
+        if route == "envs":
+            fn = self.compute_partial_traces_via_envs
+        else:
+            fn = self.compute_partial_traces_boundary
+        return fn(
+            wheres,
+            max_bond,
+            cutoff=cutoff,
+            method=method,
+            normalized=normalized,
+            get=get,
+            **kwargs,
+        )
+
+    def partial_trace(
+        self,
+        keep,
+        max_bond,
+        *,
+        cutoff=None,
+        method=None,
+        normalized=True,
+        get="matrix",
+        route=None,
+        **kwargs,
+    ):
+        """Compute the reduced density matrix of the sites ``keep``. See
+        :meth:`compute_partial_traces` for the options, and for many sets of
+        sites at once.
+
+        Parameters
+        ----------
+        keep : coordinate or sequence of coordinates
+            The site or sites to keep.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to
+            ``cutoff`` alone, which is not recommended in 2D.
+        cutoff : float, optional
+            The cutoff used when compressing the environments. By default use
+            the default of the compression function, or ``1e-10`` for
+            ``route='boundary'``.
+        method : str or callable, optional
+            The compression method, see
+            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
+            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
+            By default use the default of each.
+        normalized : bool or "return", optional
+            Normalize the reduced density matrix to unit trace. If "return",
+            give ``(rho, trace)`` without dividing by the trace. Ignored if
+            ``get="tn"``, which returns the unnormalized network without a
+            separate trace.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            How to return the reduced density matrix, see
+            :meth:`compute_partial_traces`.
+        route : {None, 'boundary', 'envs'}, optional
+            How to compute the plaquette environment, see
+            :meth:`compute_partial_traces`.
+        kwargs
+            Supplied to :meth:`compute_partial_traces`.
+
+        Returns
+        -------
+        array or Tensor or TensorNetwork or (array, float) or (Tensor, float)
+        """
+        keep = tuple(keep) if is_lone_coo(keep) else tuple(map(tuple, keep))
+        return self.compute_partial_traces(
+            (keep,),
+            max_bond,
+            cutoff=cutoff,
+            method=method,
+            normalized=normalized,
+            get=get,
+            route=route,
+            **kwargs,
+        )[keep]
+
+    def compute_local_expectation_via_envs(
+        self,
+        terms,
+        max_bond,
+        *,
+        cutoff=None,
+        method=None,
+        normalized=True,
+        return_all=False,
+        **kwargs,
+    ):
+        """Compute many local expectations at once, as ``tr(rho G)`` with each
+        reduced density matrix ``rho`` from
+        :meth:`compute_partial_traces_via_envs`, for open or periodic
+        boundaries.
+
+        Parameters
+        ----------
+        terms : dict[coordinate or tuple[coordinate], array_like]
+            The local terms to compute values for. Sites can cross either
+            periodic boundary.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
+            alone, which is not recommended in 2D.
+        cutoff : float, optional
+            Compression cutoff. By default use the default of the compression
+            function.
+        method : str or callable, optional
+            The compression method, see
+            :meth:`compute_partial_traces_via_envs`.
+        normalized : bool or "return", optional
+            Normalize each local reduced density matrix to unit trace. If
+            "return" and ``return_all=True``, give each term as
+            ``(expec, trace)`` without dividing by the trace.
+        return_all : bool, optional
+            Whether to return each expectation in ``terms`` separately or sum
+            them all together (the default).
+        kwargs
+            Supplied to :meth:`compute_partial_traces_via_envs`.
+
+        Returns
+        -------
+        scalar or dict
+        """
+        return self.compute_local_expectation(
+            terms,
+            max_bond,
+            cutoff=cutoff,
+            method=method,
+            normalized=normalized,
+            return_all=return_all,
+            route="envs",
+            **kwargs,
+        )
+
+    def compute_local_expectation(
+        self,
+        terms,
+        max_bond,
+        *,
+        cutoff=None,
+        method=None,
+        normalized=True,
+        return_all=False,
+        route=None,
+        **kwargs,
+    ):
+        r"""Compute the sum of many local expectations, as ``tr(rho G)`` with
+        each reduced density matrix ``rho`` from
+        :meth:`compute_partial_traces`. By default each is locally normalized,
+        :math:`\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]`, which a) is
+        usually more accurate and b) doesn't require a separate
+        normalization boundary contraction.
+
+        Parameters
+        ----------
+        terms : dict[coordinate or tuple[coordinate], array_like]
+            A dictionary mapping site coordinates to raw operators, given as
+            matrices or with one axis per ket site then one axis per bra
+            site. The keys should either be a single coordinate - ``(i, j)``
+            - describing a single site operator, or a sequence of coordinates
+            - ``((i_a, j_a), (i_b, j_b))`` - describing a multi site operator.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
+            alone, which is not recommended in 2D.
+        cutoff : float, optional
+            The cutoff used when compressing the environments. By default use
+            the default of the compression function, or ``1e-10`` for
+            ``route='boundary'``.
+        method : str or callable, optional
+            The compression method, see
+            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
+            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
+            By default use the default of each.
+        normalized : bool or "return", optional
+            Normalize each local reduced density matrix to unit trace. If
+            "return" and ``return_all=True``, give each term as
+            ``(expec, trace)`` without dividing by the trace.
+        return_all : bool, optional
+            Whether to return each expectation in ``terms`` separately or sum
+            them all together (the default).
+        route : {None, 'boundary', 'envs'}, optional
+            How to compute the plaquette environments, see
+            :meth:`compute_partial_traces`. By default use ``'envs'`` if
+            either direction is periodic and ``'boundary'`` otherwise.
+        kwargs
+            Supplied to :meth:`compute_partial_traces_boundary` or
+            :meth:`compute_partial_traces_via_envs`, depending on ``route``.
+
+        Returns
+        -------
+        scalar or dict
+        """
+        rhos = self.compute_partial_traces(
+            tuple(terms),
+            max_bond,
+            cutoff=cutoff,
+            method=method,
+            normalized=normalized,
+            get="array",
+            route=route,
+            **kwargs,
+        )
+        return expectations_from_rhos(
+            terms, rhos, normalized=normalized, return_all=return_all
+        )
+
+    def local_expectation(
+        self,
+        G,
+        where,
+        max_bond,
+        *,
+        cutoff=None,
+        method=None,
+        normalized=True,
+        route=None,
+        **kwargs,
+    ):
+        """Compute the local expectation ``tr(rho G)`` of operator ``G`` at
+        sites ``where``, with ``rho`` from :meth:`partial_trace`. See
+        :meth:`compute_local_expectation` for many terms at once.
+
+        Parameters
+        ----------
+        G : array_like
+            The local operator, as a matrix or with one axis per ket site
+            then one axis per bra site.
+        where : coordinate or sequence of coordinates
+            The site or sites to compute the expectation at.
+        max_bond : int or None
+            The maximum bond dimension of the compressed environments, AKA
+            'chi'. Supply ``None`` explicitly to leave truncation to
+            ``cutoff`` alone, which is not recommended in 2D.
+        cutoff : float, optional
+            The cutoff used when compressing the environments. By default use
+            the default of the compression function, or ``1e-10`` for
+            ``route='boundary'``.
+        method : str or callable, optional
+            The compression method, see
+            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
+            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
+            By default use the default of each.
+        normalized : bool or "return", optional
+            Normalize the reduced density matrix to unit trace. If "return",
+            give ``(expec, trace)`` without dividing by the trace.
+        route : {None, 'boundary', 'envs'}, optional
+            How to compute the plaquette environment, see
+            :meth:`compute_partial_traces`.
+        kwargs
+            Supplied to :meth:`compute_partial_traces`.
+
+        Returns
+        -------
+        scalar or (scalar, scalar)
+        """
+        where = (
+            tuple(where) if is_lone_coo(where) else tuple(map(tuple, where))
+        )
+        return self.compute_local_expectation(
+            {where: G},
+            max_bond,
+            cutoff=cutoff,
+            method=method,
+            normalized=normalized,
+            return_all=True,
+            route=route,
+            **kwargs,
+        )[where]
 
     def normalize(
         self,
@@ -4338,7 +5368,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         *,
         cutoff=1e-10,
         canonize=True,
-        mode="mps",
+        method=None,
         layer_tags=("KET", "BRA"),
         balance_bonds=False,
         equalize_norms=False,
@@ -4358,7 +5388,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             contraction.
         canonize : bool, optional
             Whether to sweep one way with canonization before compressing.
-        mode : {'mps', 'full-bond'}, optional
+        method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
         layer_tags : None or sequence of str, optional
             If given, perform a multilayer contraction, contracting the inner
@@ -4376,10 +5406,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             :meth:`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_boundary`,
             by default, two layer contraction will be used.
         """
+        method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["canonize"] = canonize
-        contract_boundary_opts["mode"] = mode
+        contract_boundary_opts["method"] = method
         contract_boundary_opts["layer_tags"] = layer_tags
 
         norm = self.make_norm()
