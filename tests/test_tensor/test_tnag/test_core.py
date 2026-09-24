@@ -434,6 +434,21 @@ class TestGetBraInds:
 
 
 class TestReducedDensityMatrices:
+    @pytest.mark.parametrize("method", ["exact", "cluster"])
+    def test_compute_local_expectation_return_norm(self, method):
+        psi = qtn.MPS_rand_state(4, 2, seed=42) * 3
+        terms = {(0,): qu.pauli("Z"), (1,): qu.pauli("X")}
+        compute = getattr(psi, f"compute_local_expectation_{method}")
+        raw = compute(terms, normalized=False, return_all=True)
+        normalized = compute(terms, normalized=True, return_all=True)
+        pairs = compute(terms, normalized="return", return_all=True)
+
+        for where, (expec, trace) in pairs.items():
+            assert expec == pytest.approx(raw[where])
+            assert expec / trace == pytest.approx(normalized[where])
+        total = compute(terms, normalized="return")
+        assert total == pytest.approx(sum(normalized.values()))
+
     @pytest.mark.parametrize("get", ["matrix", "array", "tensor", "tn"])
     @pytest.mark.parametrize("normalized", [False, True, "return"])
     def test_contract_reduced_density_matrix(self, normalized, get):

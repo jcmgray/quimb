@@ -11,6 +11,9 @@ Release notes for `quimb`.
 - 1D ``zipup`` compression now defaults to ``cutoff_mode="rel"`` for its pseudo-canonical truncations.
 - [`HilbertSpace`](#HilbertSpace): site ordering is now immutable. ``set_ordering`` raises ``TypeError``. Use the new [`with_ordering`](#HilbertSpace.with_ordering) method to create a space with a different ordering.
 - [`fermi_hubbard_from_edges`](#fermi_hubbard_from_edges): the default is now ``order="interleaved"``. This alternates the spins at each coordinate instead of grouping them. The on-site interaction is then register-local, so the MPO bond dimension does not grow with system size. The cost is one extra Jordan-Wigner Z per hopping term and a ~10% slower matrix-vector product. The register layout changes. Rebuild anything keyed by rank or flat configuration. Use ``order="blocked"`` for the old layout.
+- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation) now forms the reduced density matrix of each term and computes ``tr(rho G)``. It now normalizes each term locally by default (``normalized=True``). With ``return_all=True`` it returns plain values, or ``(expec, trace)`` pairs with ``normalized="return"``. ``max_bond`` is now required, supply ``None`` explicitly for no limit.
+- Partial traces format bra indices by swapping the leading ``k`` of each ket index for ``b``, for example ``"k1,2"`` becomes ``"b1,2"``. If any name is already used, they fall back to random uuids. This changes the index names from [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact), [`make_reduced_density_matrix`](#TensorNetworkGenVector.make_reduced_density_matrix) and the 3D partial traces. See [`get_bra_inds`](#get_bra_inds).
+- Cluster expectations now default to ``smudge=1e-12`` and ``optimize="auto-hq"``, matching cluster partial traces.
 
 
 **Enhancements:**
@@ -52,6 +55,29 @@ Release notes for `quimb`.
 - TEBD and simple update classes accept ``checkpoint_every``. When set, it saves the full run state to ``"checkpoint.pkl"`` in ``logdir``. A final checkpoint is also saved when [`evolve`](#TEBDSweepMixin.evolve) completes normally or stops gracefully. Set ``resume=True`` to continue from the checkpoint, or use ``from_checkpoint`` to load it directly. A resumed run gets its state and evolution options from the checkpoint. It skips initial setup, such as gauge equilibration. ``psi0`` and ``ham`` can be omitted. Supplying either raises a warning.
 - TEBD and simple update classes: ``log_every`` and ``checkpoint_every`` also accept a duration, such as ``"10mins"`` or ``"1h30m"``. The run then writes at most that often, rather than counting sweeps, which is useful when sweeps are very quick. See [`parse_time_spec`](#parse_time_spec).
 - Compression functions now accept tag *groups* in ``site_tags``. A tag in a group selects tensors with that tag. A nested sequence selects tensors with every tag. See [`parse_site_tag_groups`](#parse_site_tag_groups). The 1D, 2D, and arbitrary-geometry compression wrappers also accept custom `method` callables.
+- Add the ``quimb.tensor.environments`` module, to compute the environments of many blocks of sites or planes in one sweep, for open or periodic geometries:
+  - [`EnvironmentPlan`](#EnvironmentPlan) plans the moves, with the ``"tree"`` schedule, which never combines two environments, or the ``"cut"`` schedule, which uses linear work.
+  - [`gen_exact_environments`](#gen_exact_environments) and [`gen_compressed_environments`](#gen_compressed_environments) yield each environment as soon as it is ready. The compressed version uses a 1D, 2D or arbitrary geometry compressor, chosen with ``compress_fn``.
+  - [`execute_environment_plan`](#execute_environment_plan), [`all_blocks`](#all_blocks) and [`find_1d_block`](#find_1d_block).
+- 1D: partial traces and local expectations now also work for periodic MPS. Each dispatches on the geometry with ``route=None``, ``"canonical"`` or ``"envs"``:
+  - [`MatrixProductState.partial_trace`](#MatrixProductState.partial_trace) now gives the dense reduced density matrix, and [`compute_partial_traces`](#MatrixProductState.compute_partial_traces) gives many at once.
+  - [`compute_partial_traces_canonical`](#MatrixProductState.compute_partial_traces_canonical) and [`compute_partial_traces_via_envs`](#MatrixProductState.compute_partial_traces_via_envs) for each route.
+  - [`MatrixProductState.local_expectation`](#MatrixProductState.local_expectation), to go with [`compute_local_expectation`](#MatrixProductState.compute_local_expectation).
+  - [`TensorNetwork1D.gen_block_environments`](#TensorNetwork1D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork1D.compute_block_environments), for the exact environments of blocks of sites.
+  - [`TensorNetwork1D.is_cyclic`](#TensorNetwork1D.is_cyclic), to check whether the chain is periodic.
+- 2D: partial traces and local expectations now also work for periodic PEPS. Each dispatches on the geometry with ``route=None``, ``"boundary"`` or ``"envs"``, and takes the main options ``max_bond``, ``cutoff`` and ``method``:
+  - [`TensorNetwork2DVector.partial_trace`](#TensorNetwork2DVector.partial_trace) and [`compute_partial_traces`](#TensorNetwork2DVector.compute_partial_traces).
+  - [`compute_partial_traces_boundary`](#TensorNetwork2DVector.compute_partial_traces_boundary) and [`compute_partial_traces_via_envs`](#TensorNetwork2DVector.compute_partial_traces_via_envs) for each route.
+  - [`TensorNetwork2DVector.local_expectation`](#TensorNetwork2DVector.local_expectation) and [`compute_local_expectation_via_envs`](#TensorNetwork2DVector.compute_local_expectation_via_envs).
+  - [`TensorNetwork2D.gen_block_environments`](#TensorNetwork2D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork2D.compute_block_environments), for the compressed environments of blocks of rows or columns.
+  - [`compute_plaquette_environments_via_envs`](#TensorNetwork2D.compute_plaquette_environments_via_envs), for the environments of plaquettes, which can wrap around periodic boundaries.
+- 2D ``"envs"`` route: each plaquette is contracted approximately in a first direction, then along the strip this leaves. ``second_dense`` chooses whether the strip is contracted exactly, by default only for strips one plane wide. It also supports ``autogroup`` and ``first_contract``, as the boundary route does.
+- Add [`compute_partial_traces_exact`](#TensorNetworkGenVector.compute_partial_traces_exact) and [`compute_partial_traces_cluster`](#TensorNetworkGenVector.compute_partial_traces_cluster), to compute many reduced density matrices at once.
+- Partial traces accept ``get="tn"``, to return the uncontracted tensor network, and ``normalized="return"``, to return ``(rho, trace)`` without dividing by the trace. This includes [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact), [`partial_trace_cluster`](#TensorNetworkGenVector.partial_trace_cluster) and [`D2BP.partial_trace`](#D2BP.partial_trace).
+- 2D [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``method="full-bond"``: supply ``compress_opts``, for example ``compress_opts=dict(method="eigh")``, to configure the similarity decomposition, or use ``similarity_method`` as a shortcut.
+- 2D boundary contraction methods, such as [`contract_boundary`](#TensorNetwork2D.contract_boundary), [`compute_environments`](#TensorNetwork2D.compute_environments), [`compute_plaquette_environments`](#TensorNetwork2D.compute_plaquette_environments), [`compute_norm`](#TensorNetwork2DVector.compute_norm), [`normalize`](#TensorNetwork2DVector.normalize) and [`contract_ctmrg`](#TensorNetwork2D.contract_ctmrg), rename ``mode`` to ``method``. The old name still works but raises ``FutureWarning``. With ``mode="full-bond"``, a ``method`` given as well is taken as ``similarity_method``.
+- [`MatrixProductState.compute_local_expectation`](#MatrixProductState.compute_local_expectation): rename ``method`` to ``route``. The old name still works but raises ``FutureWarning``.
+- Rename ``MatrixProductState.partial_trace_to_dense_canonical`` to [`partial_trace_canonical`](#MatrixProductState.partial_trace_canonical). The old name still works but raises a warning.
 
 
 **Bug fixes:**
@@ -79,6 +105,12 @@ Release notes for `quimb`.
 - [`tensor_network_distance`](#tensor_network_distance): use the magnitude of complex overlaps when computing infidelity. Previously it used only the real part, making infidelity depend incorrectly on the relative phase.
 - [`D2BP.normalize_tensors`](#D2BP.normalize_tensors) refreshes cached contraction inputs after rescaling tensors. Single-site [`D2BP.gate_`](#D2BP.gate_) refreshes expressions, distinct supplied networks are rejected to keep cached state consistent, and complex two-site gates store both messages in bra-ket order.
 - [`D2BP.gauge_temp`](#D2BP.gauge_temp) restores gauges when its body raises. Message conditioning and gauge insertion scale `smudge` by the largest eigenvalue, including spectra stored in unsorted symmetry blocks.
+- [`FullUpdate`](#FullUpdate): ``compute_energy`` now reuses its cached plaquette map, rather than rebuilding it.
+- [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact) with ``get="tensor"`` and ``normalized=True`` no longer raises ``AttributeError``.
+- [`local_expectation_exact`](#TensorNetworkGenVector.local_expectation_exact), [`local_expectation_cluster`](#TensorNetworkGenVector.local_expectation_cluster), [`partial_trace_cluster`](#TensorNetworkGenVector.partial_trace_cluster) and the arbitrary geometry [`partial_trace`](#TensorNetworkGenVector.partial_trace) and [`local_expectation`](#TensorNetworkGenVector.local_expectation) now accept a single site as ``where``, instead of raising ``TypeError``.
+- [`local_expectation_cluster`](#TensorNetworkGenVector.local_expectation_cluster) with ``max_bond`` now works on an MPS.
+- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation): two site terms given in reverse order, for example ``((1, 0), (0, 0))``, no longer raise ``KeyError`` with the boundary route.
+- [`compute_local_expectation_exact`](#TensorNetworkGenVector.compute_local_expectation_exact) and [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster): with ``normalized="return"`` and ``return_all=False``, sum the normalized expectations instead of concatenating expectation/trace tuples.
 
 
 ## v1.15.0 (2026-08-10)

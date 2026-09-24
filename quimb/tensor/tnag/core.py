@@ -2836,8 +2836,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, when exactly contracting the
             full tensor network.
-        normalized : bool, optional
-            Whether to normalize the result.
+        normalized : bool or "return", optional
+            Normalize each expectation by its trace. If "return", return
+            ``(expec, trace)`` pairs with ``return_all=True``, or sum the
+            normalized values with ``return_all=False``.
         return_all : bool, optional
             Whether to return all results, or just the summed expectation.
         rehearse : {False, 'tn', 'tree', True}, optional
@@ -3161,9 +3163,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         fillin=False,
         grow_from="all",
         gauges=None,
-        smudge=0.0,
+        smudge=1e-12,
         power=1.0,
-        optimize="auto",
+        optimize="auto-hq",
         max_bond=None,
         rehearse=False,
         **contract_opts,
@@ -3196,9 +3198,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The gate to compute the expecation of.
         where : node or sequence[node]
             The sites to compute the expectation at.
-        normalized : bool, optional
-            Whether to locally normalize the result, i.e. divide by the
-            expectation value of the identity.
+        normalized : bool or "return", optional
+            Normalize the expectation by its local trace. With
+            ``max_bond=None``, also accept "return" to give ``(expec, trace)``
+            without dividing by the trace.
         max_distance : int, optional
             The maximum graph distance to include tensors neighboring ``where``
             when computing the expectation. The default 0 means only the
@@ -3221,6 +3224,10 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
             used.
+        smudge : float, optional
+            A small value to add to the gauges before multiplying them in.
+        power : float, optional
+            The power to raise the gauges to before multiplying them in.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, when exactly contracting the
             local tensors.
@@ -3293,7 +3300,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         grow_from="all",
         normalized=True,
         gauges=None,
-        optimize="auto",
+        smudge=1e-12,
+        power=1.0,
+        optimize="auto-hq",
         max_bond=None,
         return_all=False,
         rehearse=False,
@@ -3347,14 +3356,18 @@ class TensorNetworkGenVector(TensorNetworkGen):
             If mode is 'loopunion', whether each loop should contain *all* of
             the initial tagged tensors, or just *any* of them (generating a
             larger region).
-        normalized : bool, optional
-            Whether to locally normalize the result, i.e. divide by the
-            expectation value of the identity. This implies that a different
-            normalization factor is used for each term.
+        normalized : bool or "return", optional
+            Normalize each expectation by its local trace. With
+            ``max_bond=None``, also accept "return": return ``(expec, trace)``
+            pairs if ``return_all=True``, otherwise sum the normalized values.
         gauges : dict[str, array_like], optional
             The store of gauge bonds, the keys being indices and the values
             being the vectors. Only bonds present in this dictionary will be
             used.
+        smudge : float, optional
+            A small value to add to the gauges before multiplying them in.
+        power : float, optional
+            The power to raise the gauges to before multiplying them in.
         optimize : str or PathOptimizer, optional
             The contraction path optimizer to use, when exactly contracting the
             local tensors.
@@ -3401,6 +3414,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
             fillin=fillin,
             grow_from=grow_from,
             gauges=gauges,
+            smudge=smudge,
+            power=power,
             optimize=optimize,
             rehearse=rehearse,
             max_bond=max_bond,
@@ -5033,6 +5048,10 @@ def _compute_expecs_maybe_in_parallel(
     if return_all or kwargs.get("rehearse", False):
         return expecs
 
+    if kwargs.get("normalized") == "return":
+        return functools.reduce(
+            add, (expec / trace for expec, trace in expecs.values())
+        )
     return functools.reduce(add, expecs.values())
 
 
