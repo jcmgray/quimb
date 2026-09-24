@@ -510,7 +510,8 @@ class D2BP(BeliefPropagationCommon):
 
         ncheck = len(self.touched)
         nconv = 0
-        max_mdiff = -1.0
+        # nan so that `run` never counts skipped distances as converged
+        max_mdiff = float("nan") if tol == 0.0 else -1.0
         new_touched = oset()
 
         def _compute_m(key):
@@ -536,21 +537,23 @@ class D2BP(BeliefPropagationCommon):
 
             old_m = self.messages[key]
 
-            # pre-damp distance
-            mdiff = self._distance_fn(old_m, new_m)
+            if tol == 0.0:
+                # skip redundant distance (e.g. for traced arrays)
+                new_touched.update(self.touch_map[key])
+            else:
+                # pre-damp distance
+                mdiff = self._distance_fn(old_m, new_m)
+
+                if mdiff > tol:
+                    # mark touching messages for update
+                    new_touched.update(self.touch_map[key])
+                else:
+                    nconv += 1
+                max_mdiff = max(max_mdiff, mdiff)
 
             if self.damping:
                 new_m = self._damping_fn(old_m, new_m)
 
-            # # post-damp distance
-            # mdiff = self._distance_fn(old_m, new_m)
-
-            if mdiff > tol:
-                # mark touching messages for update
-                new_touched.update(self.touch_map[key])
-            else:
-                nconv += 1
-            max_mdiff = max(max_mdiff, mdiff)
             self.messages[key] = new_m
             # the conditioned copy is out of date
             self._messages_conditioned.pop(key, None)
