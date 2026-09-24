@@ -2744,9 +2744,8 @@ class TensorNetwork2D(TensorNetworkGen):
         compress_opts=None,
         **compress_method_opts,
     ):
-        """Generate compressed row or column environments, each yielded as
-        soon as it is ready, so only the environments still needed are kept in
-        memory. See
+        """Yield compressed row or column environments as they are ready. Keep
+        cached environments only until their last use. See
         :func:`~quimb.tensor.environments.gen_compressed_environments`.
 
         Parameters
@@ -2759,9 +2758,9 @@ class TensorNetwork2D(TensorNetworkGen):
             :func:`~quimb.tensor.environments.all_blocks` to get every block
             of one size.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to
-            ``cutoff`` alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cyclic : bool, optional
             Periodicity along ``direction``. By default infer it from the
             network.
@@ -2854,9 +2853,9 @@ class TensorNetwork2D(TensorNetworkGen):
         blocks : sequence of tuple[int, int]
             The ``(start, size)`` blocks of rows or columns.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
-            alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cutoff : float, optional
             Compression cutoff. By default use the default of the compression
             function.
@@ -3618,22 +3617,23 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_opts=None,
         **compress_method_opts,
     ):
-        """Compute the environments of plaquettes, which can wrap around
-        periodic boundaries, using the environment planner for open or
-        periodic boundaries. The first direction is contracted
-        approximately, then each strip is contracted along its length, exactly
-        or approximately depending on ``second_dense``. See
-        :meth:`compute_plaquette_environments` for the boundary contraction
-        version, only for open boundaries.
+        """Compute plaquette environments for open or periodic boundaries.
+        Plaquettes can cross periodic boundaries. Compress in the first
+        direction, then contract along each remaining strip. Use
+        ``second_dense`` to choose exact or compressed contraction along the
+        strips.
+
+        See :meth:`compute_plaquette_environments` for contraction from open
+        boundaries.
 
         Parameters
         ----------
         x_bsz, y_bsz : int, optional
             Plaquette size in each direction.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
-            alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         starts : sequence of tuple[int, int], optional
             The ``(i, j)`` plaquette starts to compute. By default compute
             every valid start.
@@ -3645,18 +3645,15 @@ class TensorNetwork2D(TensorNetworkGen):
             Construction schedule of the approximate environments in the
             first direction, see :meth:`gen_block_environments`.
         second_schedule : {'auto', 'tree', 'cut'}, optional
-            Construction schedule of the environments along each strip, in
-            the second direction. By default use 'cut' for exact
-            environments, and 'tree' for compressed ones.
+            Schedule along each strip. By default use 'cut' for exact
+            contraction and 'tree' for compressed contraction.
         second_dense : bool, optional
-            Whether to contract the environments along each strip exactly.
-            By default only do so for strips one plane wide, and compress
-            wider strips along the strip, as in the first direction.
+            Whether to contract along each strip exactly. By default do so only
+            for strips of width one. Compress wider strips.
         method : str or callable, optional
-            The compression method, see
+            Compression method. By default use the compressor's default for
+            each direction. See
             :func:`~quimb.tensor.environments.gen_compressed_environments`.
-            By default use the default method of the compression function for
-            each direction.
         layer_tags : None or sequence[str], optional
             Contract the tensors of each plane one layer at a time, in this
             order.
@@ -4275,8 +4272,8 @@ class TensorNetwork2D(TensorNetworkGen):
 
 
 def _parse_boundary_method(method, opts, default="mps"):
-    """Get the boundary contraction ``method``, handling ``mode``, its
-    deprecated alias, if it is in ``opts``.
+    """Read the boundary contraction method, including the deprecated ``mode``
+    option in ``opts``.
     """
     if "mode" in opts:
         warnings.warn(
@@ -4295,7 +4292,7 @@ def _parse_boundary_method(method, opts, default="mps"):
 
 
 def is_lone_coo(where):
-    """Check if ``where`` has been specified as a single coordinate pair."""
+    """Check whether ``where`` is a single coordinate pair."""
     return (len(where) == 2) and (isinstance(where[0], Integral))
 
 
@@ -4330,38 +4327,36 @@ def _gen_plaquette_environments_via_envs(
     environment_opts,
     second_dense=None,
 ):
-    """Generate the environments of possibly wrapped plaquettes, given as
-    ``((i, j), (x_bsz, y_bsz))`` and possibly of different sizes. Each
-    plaquette is contracted approximately in a first direction, then along
-    the remaining strip in the second direction. Unless ``first_contract``
-    is given, the first direction is chosen for each plaquette to keep its
-    strip narrowest, so there is at most one approximate first sweep per
-    direction. Each block in the first direction then has one sweep along
-    its strip, exact if ``second_dense``, which by default it is only for
-    strips one plane wide.
+    """Yield environments for plaquettes ``((i, j), (x_bsz, y_bsz))``.
+    Plaquettes can differ in size and cross periodic boundaries.
+
+    First compress along one direction to leave a narrow strip. Unless
+    ``first_contract`` is set, choose this direction for each plaquette. Share
+    one sweep across all block sizes in each direction.
+
+    Then contract along each strip. By default, contract strips of width one
+    exactly and compress wider strips. Set ``second_dense`` to choose
+    explicitly.
     """
     # the first direction is 'x' in each rotated frame
     rotators = {d: Rotator2D(tn, None, None, d + "min") for d in "xy"}
 
-    # start by finding the second direction blocks needed for each first
-    # direction block, in each direction
+    # group strip targets by first direction and first block
     blocks_by_direction = {"x": defaultdict(set), "y": defaultdict(set)}
     for (i, j), (x_bsz, y_bsz) in plaquettes:
         # contract first along the direction that keeps the strip narrow
         direction = _choose_plaquette_first_contract(
             tn, x_bsz, y_bsz, first_contract
         )
-        # get plaquette start and size in absolute coordinates
+        # express the start and size in the rotated frame
         r2d = rotators[direction]
         first, second = r2d.rotate(i, j)
         first_bsz, second_bsz = r2d.rotate(x_bsz, y_bsz)
-        # group 'second' sizes by which 'first' block they belong to
         blocks_by_direction[direction][first, first_bsz].add(
             (second, second_bsz)
         )
 
-    # for each direction used as a first direction, one approximate sweep
-    # computes the environments of all its first direction blocks
+    # share one first sweep across block sizes in each direction
     for direction, second_blocks_by_first in blocks_by_direction.items():
         if not second_blocks_by_first:
             continue
@@ -4385,8 +4380,7 @@ def _gen_plaquette_environments_via_envs(
             first_block_tags = tuple(
                 first_tag(first + d) for d in range(first_bsz)
             )
-            # the first block of planes and its environment, contracted along
-            # the second direction next
+            # join the block and its environment for the second sweep
             strip = tn.select_any(first_block_tags, virtual=False) | first_env
             second_blocks = tuple(second_blocks_by_first[first, first_bsz])
 
@@ -4432,15 +4426,14 @@ def _gen_plaquette_environments_via_envs(
                 )
 
             for (second, second_bsz), second_env in second_envs:
-                # the second environment, plus the first environment tensors
-                # bordering the plaquette itself
+                # add the first environment's edges alongside the plaquette
                 target_tags = tuple(
                     second_tag(second + d) for d in range(second_bsz)
                 )
                 edge_env = first_env.select_any(target_tags, virtual=False)
                 environment = TensorNetwork((second_env, edge_env))
                 environment.exponent += first_env.exponent
-                # rotate back to the real frame
+                # return the plaquette in the original coordinates
                 p = (
                     r2d.rotate(first, second),
                     r2d.rotate(first_bsz, second_bsz),
@@ -4729,9 +4722,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             The site or sites to keep for each reduced density matrix, either
             a single coordinate ``(i, j)`` or a pair of coordinates.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to
-            ``cutoff`` alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         normalized : bool or "return", optional
             Normalize each reduced density matrix to unit trace. If "return",
             give each as ``(rho, trace)`` without dividing by the trace.
@@ -4794,10 +4787,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
                 )
 
         if plaquette_map is None:
-            # work out which plaquettes to use for which sites
+            # map each set of sites to a containing plaquette
             plaquette_map = calc_plaquette_map(plaquette_envs)
 
-        # now group the sites into just the plaquettes we need
+        # group site sets that share a plaquette
         wheres_by_plaquette = defaultdict(list)
         for where in wheres:
             sites = (where,) if is_lone_coo(where) else tuple(sorted(where))
@@ -4847,11 +4840,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         contract_opts=None,
         **compress_method_opts,
     ):
-        """Compute reduced density matrices using the plaquette environments
-        of :meth:`compute_plaquette_environments_via_envs`, for open or
-        periodic boundaries. Each plaquette is contracted approximately first
-        in one direction, with one sweep covering every plaquette size for
-        that direction, then along its strip in the second direction.
+        """Compute reduced density matrices for open or periodic boundaries.
+        Use compressed plaquette environments from
+        :meth:`compute_plaquette_environments_via_envs`. Share one sweep across
+        all plaquette sizes in each first direction, then contract along each
+        remaining strip.
 
         Parameters
         ----------
@@ -4859,9 +4852,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             The site or sites to keep for each reduced density matrix. Sites
             can cross either periodic boundary.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to
-            ``cutoff`` alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         normalized : bool or "return", optional
             Normalize each reduced density matrix to unit trace. If "return",
             give each as ``(rho, trace)`` without dividing by the trace.
@@ -4871,39 +4864,35 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             How to return each reduced density matrix, see
             :meth:`compute_partial_traces`.
         autogroup : bool, optional
-            If ``True`` (the default), drop any plaquette size contained in
-            another size that is needed anyway, for example using 2x2
-            plaquettes for 1x2 and 2x1 sites when 2x2 sites need them, as
-            :meth:`compute_partial_traces_boundary` does. If ``False``, use a
-            single plaquette size that covers every set of sites. Either way,
-            each set of sites uses the smallest remaining plaquette containing
-            it, starting at its own sites, so that sets of sites can share
-            plaquettes, for example both bonds of a site in one 2x2
-            plaquette.
+            Use larger requested plaquette sizes to cover smaller ones. For
+            requested sizes {3x1, 2x1, 2x2, 1x2, 1x3}, ``autogroup=True``
+            uses {3x1, 2x2, 1x3}. With ``autogroup=False``, use 3x3 for all.
+
+            For each set of sites, choose the smallest of these sizes that
+            fits, by area. In this example, use 3x1 for the 2x1 sites and
+            1x3 for the 1x2 sites. Enlarge the rectangle around the sites to
+            that size, keeping its start coordinate. At open boundaries,
+            shift it inward if needed to fit the lattice. Reuse an
+            environment when both the plaquette size and start match.
         cyclic : bool or tuple[bool, bool], optional
             Periodicity in each direction. By default infer it.
         first_contract : {'x', 'y'}, optional
-            Direction to contract approximately first, for every plaquette.
-            By default choose it for each plaquette so that its strip is as
-            narrow as possible, for example 'x' for a 1x2
-            plaquette and 'y' for a 2x1 plaquette, at the cost of one
-            approximate sweep in each direction.
+            Direction to compress first for all plaquettes. By default choose
+            it per plaquette to keep the strip narrow, e.g. 'x' for 1x2 and 'y'
+            for 2x1. This can require a sweep in each direction.
         schedule : {'auto', 'tree', 'cut'}, optional
             Construction schedule of the approximate environments in the
             first direction, see :meth:`gen_block_environments`.
         second_schedule : {'auto', 'tree', 'cut'}, optional
-            Construction schedule of the environments along each strip, in
-            the second direction. By default use 'cut' for exact
-            environments, and 'tree' for compressed ones.
+            Schedule along each strip. By default use 'cut' for exact
+            contraction and 'tree' for compressed contraction.
         second_dense : bool, optional
-            Whether to contract the environments along each strip exactly.
-            By default only do so for strips one plane wide, and compress
-            wider strips along the strip, as in the first direction.
+            Whether to contract along each strip exactly. By default do so only
+            for strips of width one. Compress wider strips.
         method : str or callable, optional
-            The compression method, see
+            Compression method. By default use the compressor's default for
+            each direction. See
             :func:`~quimb.tensor.environments.gen_compressed_environments`.
-            By default use the default method of the compression function for
-            each direction.
         layer_tags : None or sequence[str], optional
             Contract the tensors of each plane one layer at a time, in this
             order. By default contract the ket and bra layers separately.
@@ -4953,8 +4942,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             sizes = {tuple(map(max, zip(*sizes)))}
 
         for where, ((i, j), (x_bsz, y_bsz)) in plaquettes.items():
-            # the smallest remaining size containing these sites, starting
-            # at their own block so that sites can share plaquettes
+            # use the smallest remaining size that contains these sites
             x_bsz, y_bsz = min(
                 (b for b in sizes if x_bsz <= b[0] and y_bsz <= b[1]),
                 key=lambda b: (b[0] * b[1], b),
@@ -5040,9 +5028,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         wheres : sequence of coordinate or sequence of coordinates
             The site or sites to keep for each reduced density matrix.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to
-            ``cutoff`` alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
@@ -5128,9 +5116,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         keep : coordinate or sequence of coordinates
             The site or sites to keep.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to
-            ``cutoff`` alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
@@ -5192,9 +5180,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             The local terms to compute values for. Sites can cross either
             periodic boundary.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
-            alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cutoff : float, optional
             Compression cutoff. By default use the default of the compression
             function.
@@ -5238,25 +5226,25 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         route=None,
         **kwargs,
     ):
-        r"""Compute the sum of many local expectations, as ``tr(rho G)`` with
-        each reduced density matrix ``rho`` from
-        :meth:`compute_partial_traces`. By default each is locally normalized,
-        :math:`\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]`, which a) is
-        usually more accurate and b) doesn't require a separate
-        normalization boundary contraction.
+        r"""Compute local expectations as ``tr(rho G)``, using reduced density
+        matrices from :meth:`compute_partial_traces`. Return their sum by
+        default.
+
+        By default normalize each expectation by its local trace,
+        :math:`\langle O_i \rangle = Tr[\rho_p O_i] / Tr[\rho_p]`. This avoids
+        a separate norm contraction and usually improves accuracy.
 
         Parameters
         ----------
         terms : dict[coordinate or tuple[coordinate], array_like]
-            A dictionary mapping site coordinates to raw operators, given as
-            matrices or with one axis per ket site then one axis per bra
-            site. The keys should either be a single coordinate - ``(i, j)``
-            - describing a single site operator, or a sequence of coordinates
-            - ``((i_a, j_a), (i_b, j_b))`` - describing a multi site operator.
+            Local operators keyed by site or sites. Use ``(i, j)`` for one site
+            or ``((i_a, j_a), (i_b, j_b), ...)`` for several. Each operator can
+            be a matrix or an array with one axis per ket site followed by one
+            per bra site.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to ``cutoff``
-            alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
@@ -5323,9 +5311,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         where : coordinate or sequence of coordinates
             The site or sites to compute the expectation at.
         max_bond : int or None
-            The maximum bond dimension of the compressed environments, AKA
-            'chi'. Supply ``None`` explicitly to leave truncation to
-            ``cutoff`` alone, which is not recommended in 2D.
+            Maximum environment bond dimension, often called 'chi'. Supply
+            ``None`` to truncate using only ``cutoff``. This is not recommended
+            in 2D.
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for

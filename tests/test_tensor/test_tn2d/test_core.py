@@ -828,7 +828,7 @@ class Test2DContract:
             3, 4, 2, cyclic=cyclic, seed=42, dtype="complex128"
         )
         peps.equalize_norms_(1.0)
-        # mixed plaquette sizes, all from one outer sweep
+        # share one first sweep across plaquette sizes
         wheres = [
             (1, 1),
             ((0, 1), (0, 2)),
@@ -853,9 +853,9 @@ class Test2DContract:
     @pytest.mark.parametrize(
         "first_contract,autogroup,diagonal,expected_sweeps",
         [
-            # 1x2 and 2x1 plaquettes, each with 1 wide strips
+            # 1x2 and 2x1 plaquettes each leave strips of width one
             (None, True, False, {"x": {1}, "y": {1}}),
-            # one direction, so 2 wide strips for the 2x1 plaquettes
+            # one direction leaves strips of width two for 2x1 plaquettes
             ("x", True, False, {"x": {1, 2}}),
             # a single 2x2 plaquette size
             (None, False, False, {"x": {2}}),
@@ -897,7 +897,7 @@ class Test2DContract:
 
     @pytest.mark.parametrize(
         "second_dense,expected_nexact",
-        # the 1x3 plaquette has a 1 wide strip, the 2x2 plaquette 2 wide
+        # strip widths are one for 1x3 and two for 2x2
         [(None, 1), (True, 2), (False, 0)],
     )
     @pytest.mark.parametrize("cyclic", [False, True, (True, False)])
@@ -932,7 +932,7 @@ class Test2DContract:
 
     def test_compute_partial_traces_via_envs_contract_opts(self):
         peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype="complex128")
-        # a 1 wide and a 2 wide strip, both contracted exactly
+        # contract strips of width one and two exactly
         wheres = [((0, 0), (0, 1), (0, 2)), ((1, 1), (2, 2))]
         rhos = peps.compute_partial_traces_via_envs(
             wheres,
@@ -1085,7 +1085,7 @@ class Test2DContract:
             tag, is_cyclic, L = tn.y_tag(0), cyclic[1], shape[1]
         environment = tn.compute_block_environments(
             direction,
-            # the exact bond, from the L - 1 absorbed lines of bond 2
+            # each of the L - 1 contracted lines contributes a bond of size 2
             max_bond=2 ** (L - 1),
             blocks=((0, 1),),
             cyclic=is_cyclic,

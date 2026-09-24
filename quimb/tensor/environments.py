@@ -11,19 +11,17 @@ class EnvironmentMove(NamedTuple):
     Parameters
     ----------
     kind : {'init', 'contract', 'output', 'delete'}
-        The operation to perform. ``init`` constructs ``output_env`` from
-        ``input_sites``. ``contract`` constructs ``output_env`` from the
-        cached ``input_envs`` and any ``input_sites``. ``output`` exposes
-        ``input_envs`` as the environment of ``output_block``. ``delete``
-        removes ``input_envs`` after their final use.
+        ``init`` builds ``output_env`` from ``input_sites``. ``contract``
+        builds it from cached ``input_envs`` and any ``input_sites``.
+        ``output`` returns ``input_envs`` as the environment of
+        ``output_block``. ``delete`` removes them after their last use.
     output_env : tuple[int, int], optional
-        Key to store the result under. The tuple is the unwrapped half-open
-        site interval represented by the environment. I.e. it contains all
-        sites in ``[i % L for i in range(*output_env)]``.
+        Cache key ``(lo, hi)`` for the result. The environment contains sites
+        ``[i % L for i in range(lo, hi)]``. The bounds can exceed ``L``.
     input_envs : tuple[tuple[int, int], ...], optional
-        Keys of cached input environments. A tree-schedule ``contract`` has
-        one key and one input site. A cut-schedule ``contract`` can instead
-        have two environment keys and no input sites.
+        Keys of cached input environments. A 'tree' contraction uses one
+        environment and one site. A 'cut' contraction can also combine two
+        environments without adding a site.
     input_sites : tuple[int, ...], optional
         Original sites for an ``init`` or ``contract``, each reduced modulo
         the periodic length. The current schedules use at most one.
@@ -41,14 +39,12 @@ class EnvironmentMove(NamedTuple):
 class EnvironmentPlan:
     """Plan reusable environments for consecutive blocks in one dimension.
 
-    The default 'tree' schedule never contracts two intermediate environments
-    together and is thus suited for approximate contraction (where both might
-    be a large bond dimension object). The environments are also started
-    approximately opposite the target blocks.
+    The default 'tree' schedule adds one site at a time. It starts near the
+    opposite side of each target block. It suits approximate contraction,
+    where combining two large environments can be costly or less accurate.
 
-    The 'cut' schedule instead allows environments to be contracted with
-    each other, which is more efficient in terms of total 'moves', and thus
-    suited to exact contraction.
+    The 'cut' schedule can combine two cached environments. It suits exact
+    contraction and uses linear work for a full sweep.
 
     Parameters
     ----------
@@ -57,13 +53,15 @@ class EnvironmentPlan:
     cyclic : bool, optional
         Whether the sites have periodic boundary conditions.
     schedule : {'tree', 'cut'}, optional
-        How to share work between target blocks. ``'tree'`` uses ``O(L log L)``
-        site contractions and ``O(log L)`` active cache for a full periodic
-        sweep, without environment-environment contractions. ``'cut'``
-        cuts the ring once, builds left and right envs from the cut, and
-        merges one of each per target. It uses about ``3L`` contractions and
-        ``O(L)`` active cache for a full sweep. Ignored if not ``cyclic``,
-        where left and right envs grow from each end.
+        How to share work between target blocks. For a full periodic sweep:
+
+        - 'tree': add one site at a time, using ``O(L log L)`` contractions
+          and ``O(log L)`` cached environments.
+        - 'cut': build left and right environments from a fixed cut, then
+          combine them for each target. Uses about ``3L`` contractions and
+          ``O(L)`` cached environments.
+
+        Ignored for open boundaries, where environments grow from each end.
 
     Examples
     --------
@@ -134,9 +132,7 @@ class EnvironmentPlan:
         self.schedule = schedule
 
     def _init_tree_interval(self, lo, hi, moves):
-        """Given a target environment interval [lo, hi) for the tree schedule,
-        start a new environment at the middle and extend to cover the target.
-        """
+        """Build an environment for ``[lo, hi)``, starting at its midpoint."""
         mid = (lo + hi - 1) // 2
         env_key = (mid, mid + 1)
         moves.append(
@@ -149,14 +145,12 @@ class EnvironmentPlan:
         return self._extend_interval(env_key, (lo, hi), moves)
 
     def _extend_interval(self, env_key, target, moves):
-        """Given an existing environment at `env_key`, extend it to cover
-        `target` by alternately contracting in sites from either side.
+        """Extend ``env_key`` to ``target``, adding sites on alternate sides.
         """
         clo, chi = env_key
         tlo, thi = target
         take_right = True
 
-        # contract sites into env from either side until target is covered
         while (clo > tlo) or (chi < thi):
             if take_right and (chi < thi):
                 site = chi
@@ -188,8 +182,8 @@ class EnvironmentPlan:
         def build_group(group, parent_key=None):
             a = group[0][0]
             stop = max(start + size for start, size in group)
-            # get environment sites compatible with all targets, blocks are
-            # sorted by start so ``a`` is first, ``stop`` is the furthest end
+            # the common environment runs from the last block end to the
+            # first block start on the next turn of the ring
             #
             # .   .   .   .   .   .   .   .   .   .   .   .   .   .   .
             #         |+++++++++++++++++++++++++++++++)
@@ -199,17 +193,16 @@ class EnvironmentPlan:
             interval = (stop, a + L)
 
             if interval[0] >= interval[1]:
-                # no common environment, e.g. group is all sites still
+                # no sites lie outside all blocks in this group
                 env_key = None
             elif parent_key is None:
-                # first partition: start env near middle of common environment
+                # start at the middle of the common environment
                 env_key = self._init_tree_interval(*interval, moves)
             else:
-                # later partitions: extend parent envs in different directions
+                # reuse the parent environment
                 env_key = self._extend_interval(parent_key, interval, moves)
 
             if len(group) == 1:
-                # reached a single target block, output the corresponding env
                 moves.append(
                     EnvironmentMove(
                         "output",
@@ -219,7 +212,7 @@ class EnvironmentPlan:
                 )
                 return
 
-            # recurse depth first, extending parent from above different sides
+            # visit each half, extending the shared environment as needed
             mid = len(group) // 2
             build_group(group[:mid], env_key)
             build_group(group[mid:], env_key)
@@ -323,9 +316,7 @@ class EnvironmentPlan:
 
     @staticmethod
     def _add_deletes(moves):
-        """Add explicit ``delete`` moves after the last use of each
-        environment, so it can be removed from cache etc.
-        """
+        """Add a ``delete`` move after each environment's last use."""
         last_use = {}
         for i, move in enumerate(moves):
             for env_key in move.input_envs:
@@ -360,7 +351,7 @@ class EnvironmentPlan:
         Returns
         -------
         tuple[EnvironmentMove, ...]
-            Dependency-ordered environment operations.
+            Operations in execution order.
 
         Examples
         --------
@@ -573,20 +564,18 @@ def gen_exact_environments(
     schedule="auto",
     contract_opts=None,
 ):
-    """Generate environments of blocks of 'planes' by exact contraction,
-    each yielded as soon as it is ready. See
-    :func:`gen_compressed_environments` for the planes.
+    """Yield exact environments for blocks of planes. Each plane is a group
+    of tensors selected by one tag, e.g. a site in 1D or a row in 2D.
+    Yield each environment as soon as it is ready.
 
     Parameters
     ----------
     tn : TensorNetwork
         Tensor network containing the planes to contract.
     plane_tags : sequence of str
-        Ordered tags selecting the planes, which slice ``tn`` along the
-        direction the environments are built in, for example the sites of a
-        1D chain. The sequence length defines ``L``. Plane ``i`` is site
-        ``i`` of the :class:`EnvironmentPlan`, as in each move's
-        ``input_sites``.
+        One tag per plane, in order along the contraction direction.
+        The number of tags defines ``L``. Plane ``i`` is site ``i`` in the
+        :class:`EnvironmentPlan`.
     blocks : sequence of tuple[int, int]
         The ``(start, size)`` target blocks of planes, which can have
         different sizes.
@@ -597,9 +586,8 @@ def gen_exact_environments(
         default use 'cut', which uses linear work by permitting exact
         environment-environment contractions.
     contract_opts : dict, optional
-        Supplied to :meth:`TensorNetwork.contract`, always with
-        ``preserve_tensor=True`` so that environment boundary indices stay
-        open.
+        Supplied to :meth:`TensorNetwork.contract`. Always uses
+        ``preserve_tensor=True`` so even scalar environments remain tensors.
 
     Yields
     ------
@@ -661,13 +649,13 @@ def gen_compressed_environments(
     compress_opts=None,
     **compress_method_opts,
 ):
-    """Generate compressed environments of blocks of 'planes', each yielded
-    as soon as it is ready. The planes, selected by ``plane_tags``, slice
-    ``tn`` up along one direction, for example the rows of a 2D lattice.
-    Each environment is built by adding one plane at a time, and compressing
-    it along the transverse sites, selected by ``transverse_tags``, for
-    example the columns. With rows ``R0 ... R5`` and columns ``C0 ... C4``,
-    the environment of the block ``(2, 2)`` is::
+    """Yield compressed environments for blocks of planes. Each plane is a
+    group of tensors selected by one tag, e.g. a row in 2D. Add planes along
+    ``plane_tags`` and compress along ``transverse_tags``, e.g. the columns.
+    Yield each environment as soon as it is ready.
+
+    With rows ``R0 ... R5`` and columns ``C0 ... C4``, the environment of
+    block ``(2, 2)`` is::
 
         R0, R1  ●━━━━●━━━━●━━━━●━━━━●   compressed planes before the block
                 │    │    │    │    │
@@ -686,14 +674,12 @@ def gen_compressed_environments(
     tn : TensorNetwork
         Tensor network containing the planes to contract.
     plane_tags : sequence of str
-        Ordered tags selecting the planes, which slice ``tn`` along the
-        direction the environments are built in. The sequence length defines
-        ``L``. Plane ``i`` is site ``i`` of the :class:`EnvironmentPlan`, as
-        in each move's ``input_sites``.
+        One tag per plane, in order along the contraction direction.
+        The number of tags defines ``L``. Plane ``i`` is site ``i`` in the
+        :class:`EnvironmentPlan`.
     transverse_tags : sequence of str
-        Ordered tags selecting the sites within each plane, which each
-        environment is compressed along. Each tensor should have exactly
-        one.
+        Tags for sites within each plane, in compression order.
+        Each tensor must have exactly one of these tags.
     blocks : sequence of tuple[int, int]
         The ``(start, size)`` target blocks of planes, which can have
         different sizes.
@@ -721,10 +707,9 @@ def gen_compressed_environments(
         The compression method, supplied to ``compress_fn``. By default use
         its own default method.
     layer_tags : None or sequence[str], optional
-        Add the tensors of each plane one layer at a time in this order,
-        compressing after each. Each tensor goes in the first layer it has
-        the tag of, so a compressed environment of every layer is added with
-        the first layer.
+        Add each plane's layers in this order, compressing after each.
+        Assign each tensor to its first matching tag. A compressed tensor
+        with all layer tags is thus added with the first layer.
     cutoff : float, optional
         Compression cutoff, supplied to ``compress_fn``. By default use its
         own default cutoff.
@@ -772,13 +757,12 @@ def gen_compressed_environments(
     plan = EnvironmentPlan(len(plane_tags), cyclic=cyclic, schedule=schedule)
 
     def get_plane_layers(plane):
-        # select a copy because virtual combinations can mangle
+        # copy before combining networks, which can rename shared indices
         plane_tn = tn.select(plane_tags[plane], virtual=False)
         if layer_tags is None:
             return (plane_tn,)
 
-        # each tensor goes in the first layer it has the tag of
-        #   e.g. 2D first direction env tensors with all tags go in first
+        # assign tensors with several layer tags to the first matching layer
         layers = []
         for tag in layer_tags:
             if tag in plane_tn.tag_map:
@@ -792,7 +776,6 @@ def gen_compressed_environments(
         return tuple(layers)
 
     def compress(env):
-        # compress a tensor network w.r.t. transverse sites within plane
         return compressor(
             env,
             max_bond=max_bond,
@@ -805,7 +788,6 @@ def gen_compressed_environments(
         )
 
     def init(input_sites):
-        # initialize an environment from a raw input plane
         layers = [
             layer for plane in input_sites for layer in get_plane_layers(plane)
         ]

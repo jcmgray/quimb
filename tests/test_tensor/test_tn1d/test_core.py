@@ -1144,8 +1144,8 @@ class TestSymmrayPartialTraces:
     def get_info(psi, route, cyclic):
         if cyclic and route == "canonical":
             pytest.skip("canonical route needs open boundaries")
-        # the whole chain as the orthogonality center skips the check for
-        # it, which needs `eye` and so fails for symmray arrays
+        # mark the whole chain as the center to skip automatic detection
+        # detection uses eye, which symmray arrays do not support
         return {"cur_orthog": (0, psi.L - 1)}
 
     @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])

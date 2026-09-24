@@ -1462,15 +1462,15 @@ class D2BP(BeliefPropagationCommon):
         Parameters
         ----------
         where : sequence[hashable]
-            The sites to from the reduced density matrix of.
+            The sites to keep in the reduced density matrix.
         normalized : bool or "return", optional
             Whether to normalize the result to unit trace. If "return", return
             the trace separately, without dividing by it.
             Ignored if ``get="tn"``, which returns the unnormalized network
             without a separate trace.
         tids_region : sequence[int], optional
-            The tensors to contract exactly, with messages on the boundary.
-            By default only the tensors at ``where``.
+            Tensor tids to contract exactly, with messages on the boundary. By
+            default use only the tensors at ``where``.
         get : {'matrix', 'array', 'tensor', 'tn'}, optional
             How to return the reduced density matrix:
 
@@ -1483,8 +1483,8 @@ class D2BP(BeliefPropagationCommon):
             - 'tn': the uncontracted tensor network.
 
         bra_ind_id : str, optional
-            Supply a format string to label the bra indices. By default swap
-            the leading ``k`` of each ket index for ``b``, see
+            Format string for bra indices. By default replace a leading ``k``
+            with ``b``, or prepend ``b``. See
             :func:`~quimb.tensor.tnag.core.get_bra_inds`.
         optimize : str or PathOptimizer, optional
             The path optimizer to use when contracting the tensor network.

@@ -491,7 +491,7 @@ class TestReducedDensityMatrices:
     )
     def test_single_site_where(self, method):
         peps = qtn.PEPS.rand(2, 3, 2, seed=42, dtype="complex128")
-        # the generic methods, not any 2D specific ones
+        # use the generic contraction algorithms
         fn = functools.partial(getattr(TensorNetworkGenVector, method), peps)
         args = () if method.startswith("partial_trace") else (qu.pauli("Z"),)
         kwargs = {}
@@ -521,7 +521,7 @@ class TestReducedDensityMatrices:
             assert rhos[where] == pytest.approx(expected)
 
     def test_local_expectation_cluster_compressed_mps(self):
-        # uses the generic compressed method, not the 1D one
+        # use the generic compressed contraction
         psi = qtn.MPS_rand_state(6, 3, seed=42)
         Z = qu.pauli("Z")
         expec = psi.local_expectation_cluster(

@@ -631,9 +631,8 @@ class TensorNetwork1D(TensorNetworkGen):
         schedule="auto",
         **contract_opts,
     ):
-        """Generate the exact environments for blocks of sites, each yielded
-        as soon as it is ready, so only the environments still needed are
-        kept in memory.
+        """Yield exact environments for blocks of sites as they are ready.
+        Keep cached environments only until their last use.
 
         Parameters
         ----------
@@ -686,7 +685,7 @@ class TensorNetwork1D(TensorNetworkGen):
         schedule="auto",
         **contract_opts,
     ):
-        """Compute all needed exact environments for blocks of sites. See
+        """Compute exact environments for the requested blocks of sites. See
         :meth:`gen_block_environments` to process them one at a time.
 
         Parameters
@@ -710,9 +709,8 @@ class TensorNetwork1D(TensorNetworkGen):
         Returns
         -------
         dict[tuple[int, int], TensorNetwork]
-            The environment for each ``(start, size)`` block. Note that each
-            environment tensor network also carries the original networks
-            `.exponent`.
+            The environment for each ``(start, size)`` block, including the
+            original network's ``exponent``.
         """
         return dict(
             self.gen_block_environments(
@@ -2934,10 +2932,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     def partial_trace_canonical(
         self, where, normalized=True, info=None, get="matrix", **contract_opts
     ):
-        """Compute the dense local reduced density matrix by canonicalizing
-        around the target sites and then exactly contracting the local
-        tensors, with :meth:`partial_trace_exact`. Note this moves the
-        orthogonality around inplace, and records it in `info`.
+        """Compute a local reduced density matrix for an open MPS.
+        Canonicalize around the target sites inplace, then contract the local
+        tensors with :meth:`partial_trace_exact`. Record the center in
+        ``info``.
 
         Parameters
         ----------
@@ -2949,11 +2947,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             ``get="tn"``, which returns the unnormalized network without a
             separate trace.
         info : dict, optional
-            If supplied, will be used to infer and store various extra
-            information. Currently the key "cur_orthog" is used to store the
-            current orthogonality center. Its input value can be ``"calc"``, a
-            single site, or a pair of sites representing the min/max range,
-            inclusive. It will be updated to the actual range after.
+            Read and update the canonical center in ``info["cur_orthog"]``.
+            Supply ``"calc"`` to find it, a single site, or an inclusive
+            ``(min, max)`` range.
         get : {'matrix', 'array', 'tensor', 'tn'}, optional
             How to return the reduced density matrix, see
             :meth:`compute_partial_traces`.
@@ -2996,10 +2992,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         inplace=False,
         **contract_opts,
     ):
-        """Compute many dense local reduced density matrices, each with
-        :meth:`partial_trace_canonical`, visiting the sets of sites in an
-        order that moves the canonical center as little as possible. Only for
-        open boundaries.
+        """Compute local reduced density matrices for an open MPS. Use
+        :meth:`partial_trace_canonical` for each set of sites. If ``info``
+        contains a center range, visit sites nearest its start first.
+        Otherwise visit them from left to right.
 
         Parameters
         ----------
@@ -3042,7 +3038,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         cur_orthog = info.get("cur_orthog", "calc")
         if isinstance(cur_orthog, tuple):
-            # have a canonical center already -> start close to it
+            # start near the known canonical center
             order = sorted(
                 wheres,
                 key=lambda where: abs(first_site(where) - cur_orthog[0]),
@@ -3110,8 +3106,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             block = find_1d_block(sites, self.L, cyclic)
             wheres_by_interval.setdefault(block, []).append(where)
 
-        # one sweep covers every block size, each environment is used then
-        # dropped as soon as it is ready
+        # share one sweep across block sizes and use each environment as ready
         environments = norm.gen_block_environments(
             tuple(wheres_by_interval),
             cyclic=cyclic,
@@ -3279,9 +3274,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
     def local_expectation_canonical(
         self, G, where, normalized=True, info=None, **contract_opts
     ):
-        """Compute a local expectation value (via forming the reduced density
-        matrix). Note this moves the orthogonality around inplace, and records
-        it in `info`.
+        """Compute a local expectation from its reduced density matrix.
+        Canonicalize around the target sites inplace and record the center
+        in ``info``. Only for open boundaries.
 
         Parameters
         ----------
@@ -3293,11 +3288,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             Normalize the reduced density matrix to unit trace. If "return",
             give ``(expec, trace)`` without dividing by the trace.
         info : dict, optional
-            If supplied, will be used to infer and store various extra
-            information. Currently the key "cur_orthog" is used to store the
-            current orthogonality center. Its input value can be ``"calc"``, a
-            single site, or a pair of sites representing the min/max range,
-            inclusive. It will be updated to the actual range after.
+            Read and update the canonical center in ``info["cur_orthog"]``.
+            Supply ``"calc"`` to find it, a single site, or an inclusive
+            ``(min, max)`` range.
         contract_opts
             Passed to `tensor_contract` when computing the reduced local
             density matrix.
@@ -3327,9 +3320,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         inplace=False,
         **contract_opts,
     ):
-        """Compute many local expectations at once, via forming the relevant
-        reduced density matrices via canonicalization. This moves the
-        orthogonality around inplace, and records it in `info`.
+        """Compute local expectations from reduced density matrices of an
+        open MPS. Canonicalize around each set of sites, on a copy unless
+        ``inplace=True``.
 
         Parameters
         ----------
@@ -3343,11 +3336,9 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
             Whether to return each expectation in `terms` separately
             or sum them all together (the default).
         info : dict, optional
-            If supplied, will be used to infer and store various extra
-            information. Currently, the key "cur_orthog" is used to store the
-            current orthogonality center. Its input value can be ``"calc"``, a
-            single site, or a pair of sites representing the min/max range,
-            inclusive. It will be updated to the actual range after.
+            Read and update the canonical center in ``info["cur_orthog"]``.
+            Supply ``"calc"`` to find it, a single site, or an inclusive
+            ``(min, max)`` range. Updated only if ``inplace=True``.
         inplace : bool, optional
             Whether to perform the required canonicalizations inplace.
         contract_opts
@@ -3357,9 +3348,8 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
 
         Returns
         -------
-        float or dict[in or tuple[int], float]
-            The expecetation value(s), either summed or for each term if
-            `return_all=True`.
+        float or dict[int or tuple[int], float]
+            The sum, or each term's expectation if ``return_all=True``.
 
         See Also
         --------
@@ -3465,12 +3455,10 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
               if the canonical center is not already aligned.
 
         info : dict, optional
-            If supplied, and ``route='canonical'``, will be used to infer and
-            store various extra information. Currently the key "cur_orthog" is
-            used to store the current orthogonality center. Its input value can
-            be ``"calc"``, a single site, or a pair of sites representing the
-            min/max range, inclusive. It will be updated to the actual range
-            after.
+            For ``route='canonical'``, read the center from
+            ``info["cur_orthog"]``. Supply ``"calc"`` to find it, a single
+            site, or an inclusive ``(min, max)`` range. Update the stored
+            center if ``inplace=True``.
         inplace : bool, optional
             If ``route='canonical'``, whether to perform the required
             canonicalizations inplace or on a copy of the state.
@@ -3482,8 +3470,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         Returns
         -------
         float or dict[int or tuple[int], float]
-            The expecetation value(s), either summed or for each term if
-            `return_all=True`.
+            The sum, or each term's expectation if ``return_all=True``.
 
         See Also
         --------

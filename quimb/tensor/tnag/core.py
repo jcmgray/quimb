@@ -2063,11 +2063,9 @@ _LAZY_GATE_CONTRACT = {
 
 
 def get_bra_inds(tn, where, *, warn=False):
-    """Get names for the bra indices of the sites ``where``, when forming a
-    reduced density matrix. Swaps the leading ``k`` of each ket index for
-    ``b``, e.g. ``"k1,2"`` becomes ``"b1,2"``, or adds a leading ``b`` if
-    there is no ``k``. If any name already exists in ``tn``, falls back to
-    unique names.
+    """Name the bra indices for sites ``where``. Replace a leading ``k`` with
+    ``b``, e.g. ``"k1,2"`` becomes ``"b1,2"``. Otherwise prepend ``b``. If any
+    name already exists in ``tn``, use unique names for all bra indices.
 
     Parameters
     ----------
@@ -2098,8 +2096,8 @@ def get_bra_inds(tn, where, *, warn=False):
 def contract_reduced_density_matrix(
     tn, k_inds, b_inds, *, normalized=True, get="matrix", **contract_opts
 ):
-    """Contract a reduced density matrix tensor network, with open ket
-    indices ``k_inds`` and bra indices ``b_inds``, into the form ``get``.
+    """Contract a reduced density matrix network. Keep ket indices ``k_inds``
+    and bra indices ``b_inds`` open. Return the form specified by ``get``.
 
     Parameters
     ----------
@@ -2160,9 +2158,8 @@ def contract_reduced_density_matrix(
 
 
 def rho_expectation(rho, G):
-    """Compute ``tr(rho G)`` for a reduced density matrix ``rho``, given
-    either as a matrix or as an array with one axis per ket site then one axis
-    per bra site. ``G`` can be given in either form.
+    """Compute ``tr(rho G)``. Both arrays can be matrices or have one axis per
+    ket site followed by one per bra site.
 
     Parameters
     ----------
@@ -2177,7 +2174,7 @@ def rho_expectation(rho, G):
     """
     ndim = do("ndim", rho)
     if do("ndim", G) != ndim:
-        # supplied in the other form
+        # match the matrix or per-site shape of rho
         G = do("reshape", G, rho.shape)
     n = ndim // 2
     return do(
@@ -2199,9 +2196,9 @@ def partial_traces_from_environment(
     get="matrix",
     **contract_opts,
 ):
-    """Compute the reduced density matrix of each ``where`` in ``wheres``,
-    given the local ``ket`` and ``bra`` tensors covering every site in
-    ``wheres``, and the ``environment`` of the rest of the norm network.
+    """Compute reduced density matrices with a shared environment.
+    The local ``ket`` and ``bra`` must cover all requested sites. The
+    ``environment`` represents the rest of the norm network.
 
     Parameters
     ----------
@@ -2248,8 +2245,8 @@ def partial_traces_from_environment(
 
 
 def expectations_from_rhos(terms, rhos, *, normalized=True, return_all=False):
-    """Compute ``tr(rho G)`` for each term in ``terms``, with the matching
-    reduced density matrix from ``rhos``, given as arrays or matrices.
+    """Compute ``tr(rho G)`` for each operator in ``terms``. Read its reduced
+    density matrix from the matching key in ``rhos``.
 
     Parameters
     ----------
@@ -2569,9 +2566,8 @@ class TensorNetworkGenVector(TensorNetworkGen):
         mangle_append="*",
         layer_tags=("KET", "BRA"),
     ):
-        """Form the tensor network representation of the reduced density
-        matrix, taking special care to handle potential hyper inner and outer
-        indices.
+        """Build a reduced density matrix as a tensor network. Supports
+        internal and output indices shared by more than two tensors.
 
         Parameters
         ----------
@@ -2713,9 +2709,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         progbar=False,
         **contract_opts,
     ):
-        """Compute many reduced density matrices, each with
-        :meth:`partial_trace_exact`, by exactly contracting the full overlap
-        tensor network.
+        """Compute reduced density matrices for several sets of sites. Contract
+        the full overlap network separately for each with
+        :meth:`partial_trace_exact`.
 
         Parameters
         ----------
@@ -2733,11 +2729,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             How to return each reduced density matrix, see
             :meth:`partial_trace_exact`.
         rehearse : bool, optional
-            Whether to perform the computations or not, if ``True`` return a
-            rehearsal info dict for each.
+            If ``True``, return contraction information for each set of sites
+            without contracting.
         executor : Executor, optional
-            If supplied compute the reduced density matrices in parallel using
-            this executor.
+            Compute the reduced density matrices in parallel with this
+            executor.
         progbar : bool, optional
             Whether to show a progress bar.
         contract_opts
@@ -3079,9 +3075,9 @@ class TensorNetworkGenVector(TensorNetworkGen):
         progbar=False,
         **contract_opts,
     ):
-        """Compute many approximate reduced density matrices, each with
-        :meth:`partial_trace_cluster`, by contracting a local cluster of
-        tensors, potentially gauged with ``gauges``.
+        """Compute approximate reduced density matrices for sets of sites.
+        Contract a local cluster for each with :meth:`partial_trace_cluster`.
+        Supply ``gauges`` to include bond weights on the cluster boundary.
 
         Parameters
         ----------
@@ -3119,11 +3115,11 @@ class TensorNetworkGenVector(TensorNetworkGen):
             The contraction path optimizer to use, when exactly contracting the
             local tensors.
         rehearse : bool, optional
-            Whether to perform the computations or not, if ``True`` return a
-            rehearsal info dict for each.
+            If ``True``, return contraction information for each set of sites
+            without contracting.
         executor : Executor, optional
-            If supplied compute the reduced density matrices in parallel using
-            this executor.
+            Compute the reduced density matrices in parallel with this
+            executor.
         progbar : bool, optional
             Whether to show a progress bar.
         contract_opts
@@ -3260,7 +3256,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         )
 
         if max_bond is not None:
-            # this generic method, not a geometry specific one
+            # use the generic contraction algorithm
             return TensorNetworkGenVector.local_expectation(
                 k,
                 G=G,
@@ -4230,7 +4226,7 @@ class TensorNetworkGenVector(TensorNetworkGen):
         -------
         expec : float
         """
-        # this generic method, not a geometry specific one
+        # use the generic contraction algorithm
         rho = TensorNetworkGenVector.partial_trace(
             self,
             keep=where,
@@ -5042,7 +5038,7 @@ def _compute_expecs_maybe_in_parallel(
 
 def _tn_local_expectation(tn: TensorNetworkGenVector, *args, **kwargs):
     """Define as function for pickleability."""
-    # this generic method, not a geometry specific one
+    # use the generic contraction algorithm
     return TensorNetworkGenVector.local_expectation(tn, *args, **kwargs)
 
 
@@ -5052,12 +5048,12 @@ def _tn_local_expectation_cluster(tn: TensorNetworkGenVector, *args, **kwargs):
 
 
 def _tn_partial_trace_exact(tn: TensorNetworkGenVector, _, where, **kwargs):
-    """Define as function for pickleability, the operator slot is unused."""
+    """Module-level wrapper for pickling. The operator argument is unused."""
     return tn.partial_trace_exact(where, **kwargs)
 
 
 def _tn_partial_trace_cluster(tn: TensorNetworkGenVector, _, where, **kwargs):
-    """Define as function for pickleability, the operator slot is unused."""
+    """Module-level wrapper for pickling. The operator argument is unused."""
     return tn.partial_trace_cluster(where, **kwargs)
 
 
