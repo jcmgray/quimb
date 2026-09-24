@@ -1358,7 +1358,7 @@ class FullUpdate(TEBD2D):
         return self.state.compute_local_expectation(
             self.ham.terms,
             plaquette_envs=self.plaquette_envs,
-            plaquette_mapping=self.plaquette_mapping,
+            plaquette_map=self.plaquette_mapping,
             **self.compute_energy_opts,
         )
 

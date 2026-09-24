@@ -1,3 +1,4 @@
+import functools
 import itertools
 import warnings
 
@@ -7,6 +8,12 @@ from numpy.testing import assert_allclose
 
 import quimb as qu
 import quimb.tensor as qtn
+from quimb.tensor.tnag.core import (
+    TensorNetworkGenVector,
+    contract_reduced_density_matrix,
+    get_bra_inds,
+    rho_expectation,
+)
 
 
 @pytest.mark.parametrize(
@@ -401,6 +408,141 @@ def test_local_expectation_gloop_expand(grow_from):
         G, where, gloops=gloops, gauges=gauges, grow_from=grow_from
     )
     assert o_ex == pytest.approx(o_cl, rel=0.4, abs=0.01)
+
+
+class TestGetBraInds:
+    def test_names(self):
+        mps = qtn.MPS_rand_state(4, 2, seed=42)
+        assert get_bra_inds(mps, (0, 3)) == ("b0", "b3")
+        peps = qtn.PEPS.rand(2, 3, 2, seed=42)
+        assert get_bra_inds(peps, [(1, 2)]) == ("b1,2",)
+
+    def test_clash(self):
+        mps = qtn.MPS_rand_state(4, 2, seed=42)
+        mps.reindex_({mps.bond(0, 1): "b0"})
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            bix = get_bra_inds(mps, (0,))
+        assert bix != ("b0",)
+        with pytest.warns(UserWarning, match="already exist"):
+            get_bra_inds(mps, (0,), warn=True)
+
+    def test_partial_trace_exact_tensor(self):
+        peps = qtn.PEPS.rand(2, 2, 2, seed=42)
+        rho = peps.partial_trace_exact([(0, 0), (1, 1)], get="tensor")
+        assert set(rho.inds) == {"k0,0", "k1,1", "b0,0", "b1,1"}
+
+
+class TestReducedDensityMatrices:
+    @pytest.mark.parametrize("method", ["exact", "cluster"])
+    def test_compute_local_expectation_return_norm(self, method):
+        psi = qtn.MPS_rand_state(4, 2, seed=42) * 3
+        terms = {(0,): qu.pauli("Z"), (1,): qu.pauli("X")}
+        compute = getattr(psi, f"compute_local_expectation_{method}")
+        raw = compute(terms, normalized=False, return_all=True)
+        normalized = compute(terms, normalized=True, return_all=True)
+        pairs = compute(terms, normalized="return", return_all=True)
+
+        for where, (expec, trace) in pairs.items():
+            assert expec == pytest.approx(raw[where])
+            assert expec / trace == pytest.approx(normalized[where])
+        total = compute(terms, normalized="return")
+        assert total == pytest.approx(sum(normalized.values()))
+
+    @pytest.mark.parametrize("get", ["matrix", "array", "tensor", "tn"])
+    @pytest.mark.parametrize("normalized", [False, True, "return"])
+    def test_contract_reduced_density_matrix(self, normalized, get):
+        peps = qtn.PEPS.rand(2, 2, 2, seed=42, dtype="complex128")
+        k_inds, b_inds = ("k0,0", "k1,1"), ("b0,0", "b1,1")
+        tn = peps.make_reduced_density_matrix(((0, 0), (1, 1)))
+        rho_ex = tn.to_dense(k_inds, b_inds)
+        trace = rho_ex.trace()
+
+        rho = contract_reduced_density_matrix(
+            tn, k_inds, b_inds, normalized=normalized, get=get
+        )
+        if get == "tn":
+            assert rho is tn
+            return
+        if normalized == "return":
+            rho, nfactor = rho
+            assert nfactor == pytest.approx(trace)
+        if get == "tensor":
+            assert rho.inds == k_inds + b_inds
+            rho = rho.to_dense(k_inds, b_inds)
+        elif get == "array":
+            assert rho.shape == (2, 2, 2, 2)
+            rho = rho.reshape(4, 4)
+
+        expected = rho_ex / trace if normalized is True else rho_ex
+        assert rho == pytest.approx(expected)
+
+    def test_contract_reduced_density_matrix_bad_get(self):
+        peps = qtn.PEPS.rand(2, 2, 2, seed=42)
+        tn = peps.make_reduced_density_matrix(((0, 0),))
+        with pytest.raises(ValueError):
+            contract_reduced_density_matrix(tn, ("k0,0",), ("b0,0",), get="x")
+
+    def test_rho_expectation(self):
+        rho = qu.rand_rho(4, seed=42)
+        G = qu.rand_herm(4, seed=7)
+        expected = (G @ rho).trace()
+        rho_array = rho.reshape(2, 2, 2, 2)
+        G_array = G.reshape(2, 2, 2, 2)
+        for r in (rho, rho_array):
+            for g in (G, G_array):
+                assert rho_expectation(r, g) == pytest.approx(expected)
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "partial_trace_exact",
+            "partial_trace_cluster",
+            "partial_trace",
+            "local_expectation_exact",
+            "local_expectation_cluster",
+            "local_expectation",
+        ],
+    )
+    def test_single_site_where(self, method):
+        peps = qtn.PEPS.rand(2, 3, 2, seed=42, dtype="complex128")
+        # use the generic contraction algorithms
+        fn = functools.partial(getattr(TensorNetworkGenVector, method), peps)
+        args = () if method.startswith("partial_trace") else (qu.pauli("Z"),)
+        kwargs = {}
+        if method in ("partial_trace", "local_expectation"):
+            kwargs = {"max_bond": 64, "optimize": "greedy-compressed"}
+        elif method.endswith("cluster"):
+            kwargs = {"max_distance": 1}
+
+        single = fn(*args, (1, 1), **kwargs)
+        wrapped = fn(*args, ((1, 1),), **kwargs)
+        assert single == pytest.approx(wrapped)
+
+    def test_compute_partial_traces_exact_and_cluster(self):
+        peps = qtn.PEPS.rand(2, 3, 2, seed=42, dtype="complex128")
+        wheres = [(1, 1), ((0, 2), (0, 1))]
+
+        rhos = peps.compute_partial_traces_exact(wheres, get="array")
+        assert set(rhos) == set(wheres)
+        for where in wheres:
+            expected = peps.partial_trace_exact(where, get="array")
+            assert rhos[where] == pytest.approx(expected)
+
+        rhos = peps.compute_partial_traces_cluster(wheres, max_distance=1)
+        assert set(rhos) == set(wheres)
+        for where in wheres:
+            expected = peps.partial_trace_cluster(where, max_distance=1)
+            assert rhos[where] == pytest.approx(expected)
+
+    def test_local_expectation_cluster_compressed_mps(self):
+        # use the generic compressed contraction
+        psi = qtn.MPS_rand_state(6, 3, seed=42)
+        Z = qu.pauli("Z")
+        expec = psi.local_expectation_cluster(
+            Z, 2, max_distance=6, max_bond=64, optimize="greedy-compressed"
+        )
+        assert expec == pytest.approx(psi.local_expectation_exact(Z, 2))
 
 
 class TestGetLocalGloops:
