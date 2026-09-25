@@ -97,10 +97,13 @@ Release notes for `quimb`.
 - [`tensor_split`](#tensor_split): fix ``method='svd:rand'`` for complex and single precision arrays: use autoray random.array interface to match dtype and device.
 - [`tensor_split`](#tensor_split): fix ``method='svd:eig'`` with nonzero ``cutoff`` for single precision and numba
 - 1D compression: fix ``dm`` for fermionic tensor networks, including mixed bond orientations. Its eigendecomposition now keeps the same subspace as a direct SVD.
-- 1D compression: fix ``fit`` for fermionic tensor networks. Local updates now include dual-axis phases. Final conjugation now handles the total dummy-mode parity.
+- 1D compression: fix ``fit`` for fermionic tensor networks. Local updates now include dual-axis phases.
 - [`D2BP.compress`](#D2BP.compress) and [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric): preserve positive messages and full-rank identity matrices for fermionic tensor networks.
 - [`TensorNetwork.conj`](#TensorNetwork.conj): use ``output_inds`` to select the global output legs for fermionic conjugation phases. This also works for subnetworks.
 - [`Tensor.conj`](#Tensor.conj): add the same ``output_inds`` control for a single tensor.
+- [`TensorNetwork.conj`](#TensorNetwork.conj) and [`Tensor.conj`](#Tensor.conj): treat the dummy modes of odd parity fermionic arrays as outer legs, unless paired within the network. *Already paired* modes are 'vritually conjugated' / relabelled so they can be combined with the original network.
+- Projector compression (``method="projector"``) of odd parity fermionic norm networks: fix projectors coming out as zero, for every ``canonize`` option.
+- 1D compression: fix truncated ``dm`` compression of odd parity fermionic norm networks.
 - SRC compression: use QR, not SVD, by default to orthogonalize the sketched columns.
 - [`TEBD`](#TEBD): fix ``order=4``, which was only second-order accurate. The Suzuki weight was ``1 / (4 * 4**(1/3))`` instead of ``1 / (4 - 4**(1/3))``. The method now converges at fourth order. For a Heisenberg chain with ``dt=0.05``, it is about 1,000 times more accurate. The correct weights include a negative value, so part of each fourth-order step now evolves backward. [`trotter_schedule`](#trotter_schedule) now supplies the step schedule. ``order=1`` is also accepted.
 - [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized): apply the wrapping term of a cyclic chain with its sites in the correct order. The old order caused error linear in ``x`` instead of quadratic. Terms that are symmetric under a site swap, such as Heisenberg terms, were not affected.

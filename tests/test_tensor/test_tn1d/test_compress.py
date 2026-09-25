@@ -405,6 +405,40 @@ def test_dm_truncating_matches_direct(symmetry, bond_orientation, direction):
     assert value_dm == pytest.approx(value_direct, rel=1e-8)
 
 
+@requires_symmray
+@pytest.mark.parametrize("layer_tags", [None, ("KET", "BRA")])
+@pytest.mark.parametrize("direction", ["xmin", "xmax", "ymin", "ymax"])
+def test_dm_truncating_matches_direct_fermionic_norm(layer_tags, direction):
+    """Check truncated DM compression of the norm of an odd parity fermionic
+    PEPS, whose bra tensors carry dual dummy modes.
+    """
+    import symmray as sr
+
+    psi = sr.PEPS_fermionic_rand(
+        "Z2",
+        4,
+        4,
+        bond_dim=2,
+        phys_dim=2,
+        site_charge=lambda site: 1,
+        seed=7,
+        dist="uniform",
+        loc=-0.5,
+    )
+    norm = psi.make_norm()
+    contraction_options = {
+        "max_bond": 4,
+        "cutoff": 0.0,
+        "sequence": (direction,),
+        "layer_tags": layer_tags,
+    }
+    value_dm = norm.contract_boundary(method="dm", **contraction_options)
+    value_direct = norm.contract_boundary(
+        method="direct", **contraction_options
+    )
+    assert value_dm == pytest.approx(value_direct, rel=1e-8)
+
+
 @pytest.mark.parametrize("method", ["srcmps", "fit"])
 def test_tn_fit(method):
     psi = qtn.MPS_rand_state(4, 3, seed=7)

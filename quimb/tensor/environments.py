@@ -145,8 +145,7 @@ class EnvironmentPlan:
         return self._extend_interval(env_key, (lo, hi), moves)
 
     def _extend_interval(self, env_key, target, moves):
-        """Extend ``env_key`` to ``target``, adding sites on alternate sides.
-        """
+        """Extend ``env_key`` to ``target``, adding sites on alternate sides."""
         clo, chi = env_key
         tlo, thi = target
         take_right = True
