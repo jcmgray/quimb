@@ -983,6 +983,28 @@ class Test2DContract:
         assert nfactor == pytest.approx(nfactor_ex)
         assert rho == pytest.approx(rho_ex)
 
+    @pytest.mark.parametrize("route", ["boundary", "envs"])
+    def test_compute_local_expectation_progbar(self, route, capsys):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype="complex128")
+        G = qu.rand_herm(4, seed=7)
+        terms = {
+            (1, 1): qu.pauli("Z"),
+            ((0, 1), (0, 2)): G,
+            ((2, 1), (1, 1)): G,
+        }
+        expecs = peps.compute_local_expectation(
+            terms,
+            max_bond=64,
+            cutoff=1e-10,
+            route=route,
+            return_all=True,
+            progbar=True,
+        )
+        assert "3/3" in capsys.readouterr().err
+        for where, G in terms.items():
+            expected = peps.local_expectation_exact(G, where)
+            assert expecs[where] == pytest.approx(expected)
+
     @requires_symmray
     @pytest.mark.parametrize("autogroup", [False, True])
     @pytest.mark.parametrize("fermionic", [False, True])

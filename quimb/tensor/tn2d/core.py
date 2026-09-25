@@ -4710,6 +4710,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         contract_optimize="auto-hq",
         plaquette_envs=None,
         plaquette_map=None,
+        progbar=False,
         **plaquette_env_options,
     ):
         """Compute reduced density matrices using the boundary contraction
@@ -4756,6 +4757,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             Supply the mapping of which plaquettes (denoted by
             ``((x0, y0), (dx, dy))``) to use for which coordinates, it will be
             calculated automatically otherwise.
+        progbar : bool, optional
+            Whether to show a progress bar, with one step per reduced density
+            matrix.
         plaquette_env_options
             Supplied to :meth:`compute_plaquette_environments` to generate the
             plaquette environments.
@@ -4771,7 +4775,16 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             cutoff = 1e-10
         norm, ket, bra = self.make_norm(return_all=True)
 
+        if progbar:
+            pbar = Progbar(total=len(wheres))
+        else:
+            pbar = None
+
         if plaquette_envs is None:
+            if pbar is not None:
+                # all environments are computed before any rho
+                pbar.set_description("envs")
+
             plaquette_env_options["max_bond"] = max_bond
             plaquette_env_options["cutoff"] = cutoff
             plaquette_env_options["canonize"] = canonize
@@ -4797,6 +4810,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             key = sites[0] if len(sites) == 1 else sites
             wheres_by_plaquette[plaquette_map[key]].append(where)
 
+        if pbar is not None:
+            pbar.set_description("rdms")
+
         rhos = {}
         for p, p_wheres in wheres_by_plaquette.items():
             tags = tuple(map(ket.site_tag, plaquette_to_sites(p)))
@@ -4814,6 +4830,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
                     optimize=contract_optimize,
                 )
             )
+            if pbar is not None:
+                pbar.update(len(p_wheres))
+
+        if pbar is not None:
+            pbar.close()
 
         return rhos
 
@@ -4838,6 +4859,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         equalize_norms=False,
         compress_opts=None,
         contract_opts=None,
+        progbar=False,
         **compress_method_opts,
     ):
         """Compute reduced density matrices for open or periodic boundaries.
@@ -4912,6 +4934,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             Options for the exact contractions, of the environments along
             each strip if ``second_dense``, and of each reduced density
             matrix. ``optimize`` is the default path optimizer.
+        progbar : bool, optional
+            Whether to show a progress bar, with one step per reduced density
+            matrix.
         compress_method_opts
             Additional options supplied to the compression method.
 
@@ -4983,6 +5008,12 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             second_dense=second_dense,
         )
 
+        if progbar:
+            # environments are generated lazily, so this tracks the full cost
+            pbar = Progbar(total=len(wheres), desc="rdms")
+        else:
+            pbar = None
+
         rhos = {}
         for p, environment in plaquette_envs:
             (i, j), (x_bsz, y_bsz) = p
@@ -5005,6 +5036,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
                     **contract_opts,
                 )
             )
+            if pbar is not None:
+                pbar.update(len(wheres_by_plaquette[p]))
+
+        if pbar is not None:
+            pbar.close()
 
         return rhos
 
@@ -5018,6 +5054,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         normalized=True,
         get="matrix",
         route=None,
+        progbar=False,
         **kwargs,
     ):
         """Compute many local reduced density matrices at once, each from the
@@ -5067,6 +5104,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
               along each strip in the other direction, see
               :meth:`compute_partial_traces_via_envs`.
 
+        progbar : bool, optional
+            Whether to show a progress bar, with one step per reduced density
+            matrix.
         kwargs
             Supplied to the method chosen by ``route``.
 
@@ -5092,6 +5132,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             method=method,
             normalized=normalized,
             get=get,
+            progbar=progbar,
             **kwargs,
         )
 
@@ -5167,6 +5208,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         method=None,
         normalized=True,
         return_all=False,
+        progbar=False,
         **kwargs,
     ):
         """Compute many local expectations at once, as ``tr(rho G)`` with each
@@ -5196,6 +5238,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         return_all : bool, optional
             Whether to return each expectation in ``terms`` separately or sum
             them all together (the default).
+        progbar : bool, optional
+            Whether to show a progress bar, with one step per reduced density
+            matrix.
         kwargs
             Supplied to :meth:`compute_partial_traces_via_envs`.
 
@@ -5211,6 +5256,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             normalized=normalized,
             return_all=return_all,
             route="envs",
+            progbar=progbar,
             **kwargs,
         )
 
@@ -5224,6 +5270,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         normalized=True,
         return_all=False,
         route=None,
+        progbar=False,
         **kwargs,
     ):
         r"""Compute local expectations as ``tr(rho G)``, using reduced density
@@ -5265,6 +5312,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             How to compute the plaquette environments, see
             :meth:`compute_partial_traces`. By default use ``'envs'`` if
             either direction is periodic and ``'boundary'`` otherwise.
+        progbar : bool, optional
+            Whether to show a progress bar, with one step per reduced density
+            matrix.
         kwargs
             Supplied to :meth:`compute_partial_traces_boundary` or
             :meth:`compute_partial_traces_via_envs`, depending on ``route``.
@@ -5281,6 +5331,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             normalized=normalized,
             get="array",
             route=route,
+            progbar=progbar,
             **kwargs,
         )
         return expectations_from_rhos(
