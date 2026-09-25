@@ -29,6 +29,7 @@ from ..tensor_core import (
     TensorNetwork,
     bonds,
     ensure_dict,
+    get_inner_dummy_labels,
     oset,
     parse_site_tag_groups,
     rand_uuid,
@@ -525,6 +526,9 @@ def tensor_network_1d_compress_dm(
     bra = ket.H
     # doing this means forming the norm doesn't do its own mangling
     bra.mangle_inner_()
+    # needed to conjugate the right environments consistently with `bra`:
+    # e.g. if `tn` is strip of a norm network, dummy modes already paired
+    inner_dummy_labels = get_inner_dummy_labels(ket) if fermion else ()
     # form the overlapping double layer TN
     norm = bra & ket
     # open the bra's indices back up
@@ -664,7 +668,10 @@ def tensor_network_1d_compress_dm(
             exponent += result_exponent
 
         # derive the bra environment by conjugating and relabeling the ket
-        right_env_bra = right_env_ket.conj(output_inds=(new_bonds["k", i],))
+        right_env_bra = right_env_ket.conj(
+            output_inds=(new_bonds["k", i],),
+            inner_dummy_labels=inner_dummy_labels,
+        )
         right_env_bra.reindex_(
             {ix: kb_indmap[ix] for ix in right_env_bra.inds}
         )
@@ -3295,11 +3302,6 @@ def tensor_network_1d_compress_fit(
 
     tn_fit.drop_tags("__FIT__")
     tn_fit.conj_()
-    if tn_fit.isfermionic():
-        # correct the sign from double fermionic conjugation
-        total_dummy_parity = sum(t.data.dummy_parity for t in tn_fit)
-        t = tn_fit[site_tags[0]]
-        t.modify(data=t.data.phase_global(parity=total_dummy_parity))
 
     if normalize:
         if reverse:

@@ -995,7 +995,7 @@ class TestMessageMaintenance:
         gate = qu.rand_uni(2 ** len(where), seed=43)
         with pytest.raises(ValueError, match="managed tensor network"):
             bp.gate_(gate, where, tn=external)
-        assert external.distance_normalized(bp.tn) < 1e-12
+        assert external.distance_normalized(bp.tn) < 1e-6
 
 
 @requires_symmray

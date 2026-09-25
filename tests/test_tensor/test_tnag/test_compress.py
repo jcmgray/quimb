@@ -78,3 +78,41 @@ def test_compress_projector_symmetric(
     )
 
     assert value == pytest.approx(expected, rel=1e-10)
+
+
+@requires_symmray
+@pytest.mark.parametrize("canonize", [False, True, "layered", "bp"])
+@pytest.mark.parametrize("layer_tags", [None, ("KET", "BRA")])
+@pytest.mark.parametrize("cyclic", [False, True])
+def test_compress_projector_fermionic_norm(canonize, layer_tags, cyclic):
+    """Check exact boundary contraction of the norm of an odd parity
+    fermionic PEPS. Its bra tensors carry dual dummy modes, which pair with
+    those of the ket tensors.
+    """
+    import symmray as sr
+
+    psi = sr.PEPS_fermionic_rand(
+        "Z2",
+        3,
+        3,
+        bond_dim=2,
+        phys_dim=2,
+        cyclic=cyclic,
+        site_charge=lambda site: 1,
+        seed=7,
+        dist="uniform",
+        loc=-0.5,
+    )
+    norm = psi.make_norm()
+    expected = norm.contract(all, optimize="auto-hq")
+
+    value = norm.contract_boundary(
+        # prevent truncation
+        max_bond=256,
+        cutoff=0.0,
+        method="projector",
+        canonize=canonize,
+        layer_tags=layer_tags,
+    )
+
+    assert value == pytest.approx(expected, rel=1e-8)

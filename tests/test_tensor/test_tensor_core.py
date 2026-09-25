@@ -23,7 +23,7 @@ from quimb.tensor import (
 )
 from quimb.tensor.tensor_core import _get_gauge_conditioner
 
-from . import jax_case, pytorch_case, tensorflow_case
+from . import jax_case, pytorch_case, requires_symmray, tensorflow_case
 
 requires_autograd = pytest.mark.skipif(
     importlib.util.find_spec("autograd") is None,
@@ -1080,6 +1080,34 @@ class TestTensorNetwork:
 
         for i, arr in enumerate((a_data, b_data, c_data)):
             assert_allclose(tn[f"I{i}"].data, arr.conj())
+
+    @requires_symmray
+    def test_conj_fermionic_dummy_modes(self):
+        import symmray as sr
+
+        psi = sr.PEPS_fermionic_rand(
+            "Z2",
+            2,
+            2,
+            bond_dim=2,
+            phys_dim=2,
+            site_charge=lambda site: 1,
+            seed=42,
+        )
+        norm = psi.make_norm()
+        # a dummy mode pair from site (0, 0), and an unpaired dual one
+        region = qtn.TensorNetwork(
+            [*norm.select_tensors("I0,0"), norm["BRA", "I0,1"]]
+        )
+        oix = region.outer_inds()
+        t = region.contract(output_inds=oix, preserve_tensor=True)
+
+        x = (region.conj() & region).contract()
+        assert x == pytest.approx(t.data.norm() ** 2)
+
+        # conjugating twice gives back the original
+        tcc = region.conj().conj().contract(output_inds=oix)
+        tcc.data.test_allclose(t.data)
 
     def test_multiply(self):
         a = rand_tensor((2, 3, 4), inds=["0", "1", "2"], tags="red")

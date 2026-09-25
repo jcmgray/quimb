@@ -1998,6 +1998,26 @@ def maybe_unwrap(
     return result
 
 
+def get_inner_dummy_labels(tensors):
+    """Get the labels of the fermionic dummy modes that are paired within
+    ``tensors``. These are 'inner bonds', and thus not phased like dual outer
+    legs.
+
+    Parameters
+    ----------
+    tensors : TensorNetwork or sequence of Tensor
+        The tensors to check.
+
+    Returns
+    -------
+    set
+    """
+    counts = collections.Counter(
+        m.label for t in tensors if t.isfermionic() for m in t.data.dummy_modes
+    )
+    return {label for label, count in counts.items() if count > 1}
+
+
 # --------------------------------------------------------------------------- #
 #                                Tensor Class                                 #
 # --------------------------------------------------------------------------- #
@@ -2735,7 +2755,7 @@ class Tensor:
         new_ind_pair_diag, inplace=True
     )
 
-    def conj(self, inplace=False, output_inds=None):
+    def conj(self, inplace=False, output_inds=None, inner_dummy_labels=()):
         """Conjugate this tensor's data without changing its indices.
 
         Parameters
@@ -2745,27 +2765,43 @@ class Tensor:
         output_inds : sequence of str, optional
             Only matters if this tensor is fermionic. If so, which indices to
             consider as 'outer' indices of a global network, if any of those
-            are non-dual, the corresponding axes are phase-flipped to give the
+            are dual, the corresponding axes are phase-flipped to give the
             correct local fermionic signs. Unlike `TensorNetwork.conj`, no
-            indices are automatically inferred.
+            indices are automatically inferred. If given, even if empty, the
+            dummy modes of odd parity fermionic arrays are also treated as
+            outer legs, and phased in the same way, unless listed in
+            ``inner_dummy_labels``.
+        inner_dummy_labels : collection, optional
+            Only matters if this tensor is fermionic. Labels of dummy modes
+            whose conjugate partner is elsewhere in the network, see
+            :func:`get_inner_dummy_labels`. Like inner bonds, these get no
+            phase. They are relabelled, so that the conjugate network can be
+            combined with the original.
 
         Returns
         -------
         Tensor
         """
         t = self if inplace else self.copy()
-        t.modify(apply=conj, left_inds=t.left_inds)
 
-        if output_inds and t.isfermionic():
-            data = t.data
-            axs = tuple(
-                ax
-                for ax, ix in enumerate(t.inds)
-                if (ix in output_inds) and not data.indices[ax].dual
+        if not t.isfermionic():
+            t.modify(apply=conj, left_inds=t.left_inds)
+            return t
+
+        if output_inds is None:
+            phase_dual = False
+        else:
+            phase_dual = tuple(
+                ax for ax, ix in enumerate(t.inds) if ix in output_inds
             )
-            if axs:
-                t.modify(data=data.phase_flip(*axs))
 
+        t.modify(
+            data=t.data.conj(
+                phase_dual=phase_dual,
+                inner_dummy_labels=inner_dummy_labels,
+            ),
+            left_inds=t.left_inds,
+        )
         return t
 
     conj_ = functools.partialmethod(conj, inplace=True)
@@ -4881,7 +4917,10 @@ class TensorNetwork:
             If the tensor data is fermionic, whether to phase flip any dual
             outer indices, to ensure the correct behavior when forming local
             cluster states. By default ``True``. See `output_inds` for which
-            indices are considered outer.
+            indices are considered outer. Dummy modes of odd parity arrays are
+            treated as outer legs too, unless their conjugate partner is in
+            this network. Such paired dummy modes are always relabelled, so
+            that the conjugate network can be combined with the original.
         inplace : bool, optional
             Whether to perform the conjugation inplace or not.
 
@@ -4900,8 +4939,16 @@ class TensorNetwork:
         else:
             phase_inds = None
 
+        if tn.isfermionic():
+            inner_dummy_labels = get_inner_dummy_labels(tn)
+        else:
+            inner_dummy_labels = ()
+
         for t in tn:
-            t.conj_(output_inds=phase_inds)
+            t.conj_(
+                output_inds=phase_inds,
+                inner_dummy_labels=inner_dummy_labels,
+            )
 
         if mangle_inner:
             append = None if mangle_inner is True else str(mangle_inner)
@@ -12923,7 +12970,7 @@ class PTensor(Tensor):
         """
         self._data.add_function(fn)
 
-    def conj(self, inplace=False, output_inds=None):
+    def conj(self, inplace=False, output_inds=None, inner_dummy_labels=()):
         """Conjugate this parametrized tensor lazily.
 
         Parameters
@@ -12934,6 +12981,8 @@ class PTensor(Tensor):
             Indices to treat as outputs when applying fermionic conjugation
             phases. Fermionic output phases are not supported for parametrized
             tensors.
+        inner_dummy_labels : collection, optional
+            Unused, since fermionic output phases are not supported.
         """
         if output_inds and self.isfermionic():
             raise NotImplementedError(
