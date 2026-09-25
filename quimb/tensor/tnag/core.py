@@ -5043,7 +5043,8 @@ def _compute_expecs_maybe_in_parallel(
     if progbar:
         results = Progbar(results, total=len(terms))
 
-    expecs = dict(zip(terms.keys(), results))
+    # exhaust the progress iterator so it closes
+    expecs = dict(zip(terms.keys(), results, strict=True))
 
     if return_all or kwargs.get("rehearse", False):
         return expecs

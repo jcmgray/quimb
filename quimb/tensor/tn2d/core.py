@@ -38,7 +38,10 @@ from ..tnag.core import (
     TensorNetworkGen,
     TensorNetworkGenOperator,
     TensorNetworkGenVector,
+    _compute_expecs_maybe_in_parallel,
+    contract_reduced_density_matrix,
     expectations_from_rhos,
+    get_bra_inds,
     partial_traces_from_environment,
     tensor_network_ag_sum,
 )
@@ -4449,6 +4452,30 @@ def _find_plaquette(where, Lx, Ly, cyclic_x, cyclic_y):
     return (i, j), (x_bsz, y_bsz)
 
 
+def _grow_1d_block(start, size, max_distance, L, cyclic):
+    """Grow a block on both sides. Clip open blocks to the lattice. A
+    periodic block can cross the boundary but must leave one site outside.
+    """
+    if not cyclic:
+        stop = min(start + size + max_distance, L)
+        start = max(start - max_distance, 0)
+        return start, stop - start
+
+    new_size = size + 2 * max_distance
+    if new_size >= L:
+        raise ValueError(
+            f"A cluster of size {new_size} would cover all {L} sites of a "
+            "periodic direction. Use `max_distance` at most "
+            f"{(L - 1 - size) // 2} here."
+        )
+    return (start - max_distance) % L, new_size
+
+
+def _tn_partial_trace_cluster_boundary(tn, _, where, **kwargs):
+    """Use a module-level function for executor pickling. Ignore the term."""
+    return tn.partial_trace_cluster_boundary(where, **kwargs)
+
+
 class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
     """Mixin class  for a 2D square lattice vector TN, i.e. one with a single
     physical index per site.
@@ -5044,6 +5071,222 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
 
         return rhos
 
+    def partial_trace_cluster_boundary(
+        self,
+        keep,
+        max_bond,
+        *,
+        max_distance=1,
+        gauges=None,
+        cutoff=None,
+        method=None,
+        canonize=True,
+        layer_tags=("KET", "BRA"),
+        first_contract=None,
+        cyclic=None,
+        normalized=True,
+        get="matrix",
+        smudge=1e-12,
+        power=1.0,
+        optimize="auto-hq",
+        compress_opts=None,
+        **contract_boundary_opts,
+    ):
+        """Compute an approximate reduced density matrix from a local
+        rectangular cluster. Grow the smallest rectangle containing ``keep``
+        by ``max_distance`` sites on each side. Insert simple update bond
+        ``gauges`` if supplied. Sweep one axis inward until at most one row
+        or column remains on each side of the kept sites. Contract the
+        remaining network exactly.
+
+        The cluster can cross a periodic boundary. It is treated as an open
+        network, so it supports the usual boundary compression methods,
+        including 1D methods.
+
+        Parameters
+        ----------
+        keep : coordinate or sequence of coordinates
+            Sites to keep. They can cross either periodic boundary.
+        max_bond : int or None
+            Maximum boundary bond dimension, often called 'chi'. Use ``None``
+            to truncate using only ``cutoff``.
+        max_distance : int, optional
+            Number of sites to add on each side. Must be non-negative. Open
+            boundaries clip the cluster to the lattice. Each periodic
+            direction must have at least one site outside the cluster.
+        gauges : dict[str, array_like], optional
+            Simple update bond gauges keyed by index. Only matching bonds
+            receive a gauge.
+        cutoff : float, optional
+            Singular value cutoff for boundary compression. Defaults to
+            ``1e-10``.
+        method : {'mps', 'full-bond', 'projector2d', ...}, optional
+            Boundary compression method. Any 1D compression method is also
+            accepted. Defaults to ``'mps'``.
+        canonize : bool, optional
+            Whether to canonize before compressing.
+        layer_tags : None or sequence of str, optional
+            Tags for the ket and bra layers. If given, contract the layers
+            separately.
+        first_contract : {'x', 'y'}, optional
+            Axis to sweep. By default, choose the one that leaves the
+            narrowest strip.
+        cyclic : bool or tuple[bool, bool], optional
+            Periodicity in each direction. By default, infer it.
+        normalized : bool or "return", optional
+            Normalize to unit trace. If ``"return"``, return ``(rho, trace)``
+            without dividing by the trace. Ignored for ``get="tn"``.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            Return a matrix, array, tensor, or the uncontracted network.
+            ``'tn'`` returns the remaining strip without a separate trace.
+        smudge : float, optional
+            Value added to gauges before insertion, relative to the largest
+            gauge value.
+        power : float, optional
+            Power applied to gauges before insertion.
+        optimize : str or PathOptimizer, optional
+            Path optimizer for the final contraction.
+        compress_opts : None or dict, optional
+            Additional boundary compression options.
+        contract_boundary_opts
+            Additional options passed to :meth:`contract_boundary`.
+
+        Returns
+        -------
+        array or Tensor or TensorNetwork or (array, float) or (Tensor, float)
+        """
+        if max_distance < 0:
+            raise ValueError(
+                f"`max_distance` must be non-negative, got {max_distance}."
+            )
+        keep = (tuple(keep),) if is_lone_coo(keep) else tuple(map(tuple, keep))
+        method = _parse_boundary_method(method, contract_boundary_opts)
+        if cutoff is None:
+            cutoff = 1e-10
+
+        cyclic_x, cyclic_y = _normalize_2d_cyclic(self, cyclic)
+        (i, j), (x_bsz, y_bsz) = _find_plaquette(
+            keep, self.Lx, self.Ly, cyclic_x, cyclic_y
+        )
+        x0, nx = _grow_1d_block(i, x_bsz, max_distance, self.Lx, cyclic_x)
+        y0, ny = _grow_1d_block(j, y_bsz, max_distance, self.Ly, cyclic_y)
+
+        # map global coordinates to the open cluster
+        xs = {(x0 + dx) % self.Lx: dx for dx in range(nx)}
+        ys = {(y0 + dy) % self.Ly: dy for dy in range(ny)}
+        site_map = {
+            self.site_tag(x, y): self.site_tag(dx, dy)
+            for x, dx in xs.items()
+            for y, dy in ys.items()
+        }
+
+        k = self.select_any(tuple(site_map), virtual=False)
+        if gauges is not None:
+            k.gauge_simple_insert(gauges, smudge=smudge, power=power)
+        k.retag_(
+            {
+                **site_map,
+                **{self.x_tag(x): self.x_tag(dx) for x, dx in xs.items()},
+                **{self.y_tag(y): self.y_tag(dy) for y, dy in ys.items()},
+            }
+        )
+        k.view_as_(TensorNetwork2D, like=self, Lx=nx, Ly=ny)
+
+        # keep the physical ket and bra indices separate at these sites
+        _, ket, bra = k.make_norm(layer_tags=layer_tags, return_all=True)
+        k_inds = tuple(map(self.site_ind, keep))
+        b_inds = get_bra_inds(self, keep, warn=get in ("tensor", "tn"))
+        bra.reindex_(dict(zip(k_inds, b_inds)))
+        rho_tn = ket.combine(bra, virtual=True, check_collisions=False)
+
+        first_contract = _choose_plaquette_first_contract(
+            k, x_bsz, y_bsz, first_contract
+        )
+        rho_tn.contract_boundary_(
+            max_bond,
+            cutoff=cutoff,
+            canonize=canonize,
+            method=method,
+            layer_tags=layer_tags,
+            compress_opts=compress_opts,
+            sequence=(f"{first_contract}min", f"{first_contract}max"),
+            around=tuple((xs[x % self.Lx], ys[y % self.Ly]) for x, y in keep),
+            **contract_boundary_opts,
+        )
+
+        return contract_reduced_density_matrix(
+            rho_tn,
+            k_inds,
+            b_inds,
+            normalized=normalized,
+            get=get,
+            optimize=optimize,
+        )
+
+    def compute_partial_traces_cluster_boundary(
+        self,
+        wheres,
+        max_bond,
+        *,
+        max_distance=1,
+        gauges=None,
+        normalized=True,
+        get="matrix",
+        executor=None,
+        progbar=False,
+        **kwargs,
+    ):
+        """Compute reduced density matrices for many sets of sites. Use a
+        separate rectangular cluster for each set. See
+        :meth:`partial_trace_cluster_boundary`.
+
+        Parameters
+        ----------
+        wheres : sequence of coordinate or sequence of coordinates
+            Sites to keep for each reduced density matrix. Each set can cross
+            either periodic boundary.
+        max_bond : int or None
+            Maximum boundary bond dimension, often called 'chi'. Use ``None``
+            to truncate using only ``cutoff``.
+        max_distance : int, optional
+            Number of sites to add on each side. Must be non-negative.
+        gauges : dict[str, array_like], optional
+            Simple update bond gauges keyed by index.
+        normalized : bool or "return", optional
+            Normalize each reduced density matrix to unit trace. If
+            ``"return"``, return each as ``(rho, trace)`` without dividing by
+            the trace. Ignored for ``get="tn"``.
+        get : {'matrix', 'array', 'tensor', 'tn'}, optional
+            Return each result as a matrix, array, tensor, or uncontracted
+            network.
+        executor : Executor, optional
+            Run the computations in parallel with this executor.
+        progbar : bool, optional
+            Whether to show one progress step per reduced density matrix.
+        kwargs
+            Additional options for :meth:`partial_trace_cluster_boundary`.
+
+        Returns
+        -------
+        dict[coordinate or tuple[coordinate], array or Tensor or TensorNetwork]
+            The reduced density matrix for each ``where``, with sites in the
+            order of ``where``.
+        """
+        return _compute_expecs_maybe_in_parallel(
+            fn=_tn_partial_trace_cluster_boundary,
+            tn=self,
+            terms=dict.fromkeys(wheres),
+            return_all=True,
+            executor=executor,
+            progbar=progbar,
+            max_bond=max_bond,
+            max_distance=max_distance,
+            gauges=gauges,
+            normalized=normalized,
+            get=get,
+            **kwargs,
+        )
+
     def compute_partial_traces(
         self,
         wheres,
@@ -5071,12 +5314,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
-            ``route='boundary'``.
+            ``route='boundary'`` and ``route='cluster_boundary'``.
         method : str or callable, optional
-            The compression method, see
-            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
-            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
-            By default use the default of each.
+            Compression method for the selected route. By default, use that
+            route's default.
         normalized : bool or "return", optional
             Normalize each reduced density matrix to unit trace. If "return",
             give each as ``(rho, trace)`` without dividing by the trace.
@@ -5092,8 +5333,8 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             - 'tensor': a :class:`~quimb.tensor.tensor_core.Tensor` with the
               ket and bra indices.
             - 'tn': the uncontracted tensor network.
-        route : {None, 'boundary', 'envs'}, optional
-            How to compute the plaquette environments. By default use
+        route : {None, 'boundary', 'envs', 'cluster_boundary'}, optional
+            How to compute each reduced density matrix. By default, use
             ``'envs'`` if either direction is periodic and ``'boundary'``
             otherwise.
 
@@ -5103,6 +5344,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             - 'envs': an approximate sweep in one direction, then sweeps
               along each strip in the other direction, see
               :meth:`compute_partial_traces_via_envs`.
+            - 'cluster_boundary': contract a separate cluster around each set
+              of sites, with optional simple update gauges, see
+              :meth:`partial_trace_cluster_boundary`.
 
         progbar : bool, optional
             Whether to show a progress bar, with one step per reduced density
@@ -5119,10 +5363,12 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         if route is None:
             cyclic = self.is_cyclic_x() or self.is_cyclic_y()
             route = "envs" if cyclic else "boundary"
-        check_opt("route", route, ("boundary", "envs"))
+        check_opt("route", route, ("boundary", "envs", "cluster_boundary"))
 
         if route == "envs":
             fn = self.compute_partial_traces_via_envs
+        elif route == "cluster_boundary":
+            fn = self.compute_partial_traces_cluster_boundary
         else:
             fn = self.compute_partial_traces_boundary
         return fn(
@@ -5163,12 +5409,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
-            ``route='boundary'``.
+            ``route='boundary'`` and ``route='cluster_boundary'``.
         method : str or callable, optional
-            The compression method, see
-            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
-            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
-            By default use the default of each.
+            Compression method for the selected route. By default, use that
+            route's default.
         normalized : bool or "return", optional
             Normalize the reduced density matrix to unit trace. If "return",
             give ``(rho, trace)`` without dividing by the trace. Ignored if
@@ -5177,7 +5421,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         get : {'matrix', 'array', 'tensor', 'tn'}, optional
             How to return the reduced density matrix, see
             :meth:`compute_partial_traces`.
-        route : {None, 'boundary', 'envs'}, optional
+        route : {None, 'boundary', 'envs', 'cluster_boundary'}, optional
             How to compute the plaquette environment, see
             :meth:`compute_partial_traces`.
         kwargs
@@ -5260,6 +5504,73 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             **kwargs,
         )
 
+    def compute_local_expectation_cluster_boundary(
+        self,
+        terms,
+        max_bond,
+        *,
+        max_distance=1,
+        gauges=None,
+        cutoff=None,
+        method=None,
+        normalized=True,
+        return_all=False,
+        progbar=False,
+        **kwargs,
+    ):
+        """Compute local expectations as ``tr(rho G)``. Form each reduced
+        density matrix ``rho`` from a separate rectangular cluster. See
+        :meth:`partial_trace_cluster_boundary`.
+
+        Parameters
+        ----------
+        terms : dict[coordinate or tuple[coordinate], array_like]
+            Local terms keyed by site or sites. Sites can cross either
+            periodic boundary. Each term should be a matrix or an array with
+            one axis per ket site, then one axis per bra site.
+        max_bond : int or None
+            Maximum boundary bond dimension, often called 'chi'. Use ``None``
+            to truncate using only ``cutoff``.
+        max_distance : int, optional
+            Number of sites to add on each side. Must be non-negative.
+        gauges : dict[str, array_like], optional
+            Simple update bond gauges keyed by index.
+        cutoff : float, optional
+            Singular value cutoff for boundary compression. Defaults to
+            ``1e-10``.
+        method : str or callable, optional
+            Boundary compression method. Defaults to ``'mps'``.
+        normalized : bool or "return", optional
+            Normalize each reduced density matrix to unit trace. If
+            ``"return"`` and ``return_all=True``, return ``(expec, trace)``
+            for each term without dividing by the trace. If ``"return"`` and
+            ``return_all=False``, divide each value by its trace before summing.
+        return_all : bool, optional
+            Whether to return each expectation. By default, return their sum.
+        progbar : bool, optional
+            Whether to show one progress step per reduced density matrix.
+        kwargs
+            Additional options for
+            :meth:`compute_partial_traces_cluster_boundary`.
+
+        Returns
+        -------
+        scalar or dict
+        """
+        return self.compute_local_expectation(
+            terms,
+            max_bond,
+            max_distance=max_distance,
+            gauges=gauges,
+            cutoff=cutoff,
+            method=method,
+            normalized=normalized,
+            return_all=return_all,
+            route="cluster_boundary",
+            progbar=progbar,
+            **kwargs,
+        )
+
     def compute_local_expectation(
         self,
         terms,
@@ -5295,12 +5606,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
-            ``route='boundary'``.
+            ``route='boundary'`` and ``route='cluster_boundary'``.
         method : str or callable, optional
-            The compression method, see
-            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
-            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
-            By default use the default of each.
+            Compression method for the selected route. By default, use that
+            route's default.
         normalized : bool or "return", optional
             Normalize each local reduced density matrix to unit trace. If
             "return" and ``return_all=True``, give each term as
@@ -5308,16 +5617,15 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         return_all : bool, optional
             Whether to return each expectation in ``terms`` separately or sum
             them all together (the default).
-        route : {None, 'boundary', 'envs'}, optional
-            How to compute the plaquette environments, see
+        route : {None, 'boundary', 'envs', 'cluster_boundary'}, optional
+            How to compute each reduced density matrix, see
             :meth:`compute_partial_traces`. By default use ``'envs'`` if
             either direction is periodic and ``'boundary'`` otherwise.
         progbar : bool, optional
             Whether to show a progress bar, with one step per reduced density
             matrix.
         kwargs
-            Supplied to :meth:`compute_partial_traces_boundary` or
-            :meth:`compute_partial_traces_via_envs`, depending on ``route``.
+            Additional options for the selected route.
 
         Returns
         -------
@@ -5368,17 +5676,15 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         cutoff : float, optional
             The cutoff used when compressing the environments. By default use
             the default of the compression function, or ``1e-10`` for
-            ``route='boundary'``.
+            ``route='boundary'`` and ``route='cluster_boundary'``.
         method : str or callable, optional
-            The compression method, see
-            :meth:`compute_partial_traces_boundary` for ``route='boundary'``
-            and :meth:`compute_partial_traces_via_envs` for ``route='envs'``.
-            By default use the default of each.
+            Compression method for the selected route. By default, use that
+            route's default.
         normalized : bool or "return", optional
             Normalize the reduced density matrix to unit trace. If "return",
             give ``(expec, trace)`` without dividing by the trace.
-        route : {None, 'boundary', 'envs'}, optional
-            How to compute the plaquette environment, see
+        route : {None, 'boundary', 'envs', 'cluster_boundary'}, optional
+            How to compute the reduced density matrix, see
             :meth:`compute_partial_traces`.
         kwargs
             Supplied to :meth:`compute_partial_traces`.

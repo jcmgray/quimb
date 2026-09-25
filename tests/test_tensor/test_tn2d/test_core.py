@@ -1087,6 +1087,143 @@ class Test2DContract:
         )
         assert actual == pytest.approx(expected)
 
+    @pytest.mark.parametrize("layer_tags", [None, ("KET", "BRA"), ("K", "B")])
+    @pytest.mark.parametrize("method", [None, "dm", "projector2d"])
+    @pytest.mark.parametrize(
+        "where", [(1, 1), ((0, 1), (0, 2)), ((2, 1), (1, 1)), ((0, 0), (1, 1))]
+    )
+    def test_partial_trace_cluster_boundary_open(
+        self, where, method, layer_tags
+    ):
+        peps = qtn.PEPS.rand(3, 4, 2, seed=42, dtype="complex128")
+        # the clipped cluster covers the whole lattice
+        rho = peps.partial_trace_cluster_boundary(
+            where, 64, max_distance=4, method=method, layer_tags=layer_tags
+        )
+        assert rho == pytest.approx(peps.partial_trace_exact(where))
+
+    @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])
+    @pytest.mark.parametrize("normalized", [False, True, "return"])
+    def test_partial_trace_cluster_boundary_get(self, get, normalized):
+        peps = qtn.PEPS.rand(3, 4, 2, seed=42, dtype="complex128")
+        where = ((1, 2), (1, 1))
+        rho = peps.partial_trace_cluster_boundary(
+            where, 64, max_distance=4, get=get, normalized=normalized
+        )
+        expected = peps.partial_trace_exact(
+            where, get=get, normalized=normalized
+        )
+        if normalized == "return":
+            rho, nfactor = rho
+            expected, nfactor_ex = expected
+            assert nfactor == pytest.approx(nfactor_ex)
+        if get == "tensor":
+            assert rho.inds == expected.inds
+            rho, expected = rho.data, expected.data
+        assert rho == pytest.approx(expected)
+
+    @pytest.mark.parametrize(
+        "where,xs,ys",
+        [
+            # across the x boundary
+            (((6, 3), (0, 3)), (4, 5, 6, 0, 1, 2), (1, 2, 3, 4, 5)),
+            # across the y boundary
+            (((3, 6), (3, 0)), (1, 2, 3, 4, 5), (4, 5, 6, 0, 1, 2)),
+            # around the corner
+            ((0, 0), (5, 6, 0, 1, 2), (5, 6, 0, 1, 2)),
+        ],
+    )
+    def test_partial_trace_cluster_boundary_periodic(self, where, xs, ys):
+        peps = qtn.PEPS.rand(7, 7, 2, cyclic=True, seed=7, dtype="complex128")
+        gauges = {}
+        peps.gauge_all_simple_(gauges=gauges, max_iterations=10)
+        rho = peps.partial_trace_cluster_boundary(
+            where, 64, max_distance=2, gauges=gauges
+        )
+        # contract the same gauged cluster exactly
+        k = peps.select_any(
+            [peps.site_tag(x, y) for x in xs for y in ys], virtual=False
+        )
+        k.gauge_simple_insert(gauges, smudge=1e-12)
+        assert rho == pytest.approx(k.partial_trace_exact(where))
+
+    def test_partial_trace_cluster_boundary_too_large(self):
+        peps = qtn.PEPS.rand(5, 6, 2, cyclic=True, seed=7)
+        # 1 + 2 * 2 sites covers the whole periodic x direction
+        with pytest.raises(ValueError, match="at most 1"):
+            peps.partial_trace_cluster_boundary((0, 0), 8, max_distance=2)
+        # open directions clip to the lattice
+        peps = qtn.PEPS.rand(5, 6, 2, cyclic=(False, True), seed=7)
+        rho = peps.partial_trace_cluster_boundary((0, 0), 64, max_distance=2)
+        assert rho.shape == (2, 2)
+
+    def test_partial_trace_cluster_boundary_negative_distance(self):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=7)
+        with pytest.raises(ValueError, match="non-negative"):
+            peps.partial_trace_cluster_boundary((0, 0), 8, max_distance=-1)
+
+    def test_compute_local_expectation_cluster_boundary(self, capsys):
+        peps = qtn.PEPS.rand(5, 5, 2, cyclic=True, seed=7, dtype="complex128")
+        gauges = {}
+        peps.gauge_all_simple_(gauges=gauges, max_iterations=10)
+        G = qu.rand_herm(4, seed=7)
+        terms = {
+            (1, 1): qu.pauli("Z"),
+            ((4, 1), (0, 1)): G,
+            ((2, 4), (2, 0)): G,
+        }
+        opts = {"max_bond": 16, "max_distance": 1, "gauges": gauges}
+        expecs = peps.compute_local_expectation(
+            terms,
+            route="cluster_boundary",
+            return_all=True,
+            progbar=True,
+            **opts,
+        )
+        assert "3/3" in capsys.readouterr().err
+        for where, G in terms.items():
+            rho = peps.partial_trace_cluster_boundary(where, **opts)
+            assert expecs[where] == pytest.approx(np.trace(rho @ G))
+
+        total = peps.compute_local_expectation_cluster_boundary(terms, **opts)
+        assert total == pytest.approx(sum(expecs.values()))
+
+    @requires_symmray
+    @pytest.mark.parametrize("cyclic", [False, True])
+    @pytest.mark.parametrize("fermionic", [False, True])
+    def test_partial_trace_cluster_boundary_symmray(self, fermionic, cyclic):
+        import symmray as sr
+
+        L = 7 if cyclic else 3
+        opts = {"bond_dim": 2, "phys_dim": 2, "cyclic": cyclic, "seed": 7}
+        if fermionic:
+            # odd parity, so the bra tensors carry dual dummy modes
+            peps = sr.PEPS_fermionic_rand(
+                "Z2", L, L, site_charge=lambda site: 1, **opts
+            )
+        else:
+            peps = sr.PEPS_abelian_rand("Z2", L, L, **opts)
+        gauges = {}
+        peps.gauge_all_simple_(gauges=gauges, max_iterations=10)
+
+        if cyclic:
+            # across the x boundary
+            where = ((6, 2), (0, 2))
+            xs, ys = (4, 5, 6, 0, 1, 2), (0, 1, 2, 3, 4)
+        else:
+            # the clipped cluster covers the whole lattice
+            where = ((1, 1), (1, 2))
+            xs = ys = range(L)
+        rho = peps.partial_trace_cluster_boundary(
+            where, 64, max_distance=2, gauges=gauges, get="array"
+        )
+        k = peps.select_any(
+            [peps.site_tag(x, y) for x in xs for y in ys], virtual=False
+        )
+        k.gauge_simple_insert(gauges, smudge=1e-12)
+        expected = k.partial_trace_exact(where, get="array")
+        rho.test_allclose(expected)
+
     @pytest.mark.parametrize("direction", ["x", "y"])
     @pytest.mark.parametrize(
         "shape,cyclic",
