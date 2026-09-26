@@ -2399,16 +2399,21 @@ class TensorNetwork2D(TensorNetworkGen):
             if sequence is None:
                 sequence = ("xmin", "xmax", "ymin", "ymax")
 
-            target_xmin = min(x[0] for x in around)
-            target_xmax = max(x[0] for x in around)
-            target_ymin = min(x[1] for x in around)
-            target_ymax = max(x[1] for x in around)
+            # stop each side this far from the target region
+            offset = max_separation
+            target_xmin = min(x[0] for x in around) - offset
+            target_xmax = max(x[0] for x in around) + offset
+            target_ymin = min(x[1] for x in around) - offset
+            target_ymax = max(x[1] for x in around) + offset
             target_check = {
-                "xmin": lambda x: x >= target_xmin - 1,
-                "xmax": lambda x: x <= target_xmax + 1,
-                "ymin": lambda y: y >= target_ymin - 1,
-                "ymax": lambda y: y <= target_ymax + 1,
+                "xmin": lambda x: x >= target_xmin,
+                "xmax": lambda x: x <= target_xmax,
+                "ymin": lambda y: y >= target_ymin,
+                "ymax": lambda y: y <= target_ymax,
             }
+            # but keep at least two rows or columns, merging them into one
+            # would only add a compression before the exact contraction
+            max_separation = max(max_separation, 1)
 
         if sequence is None:
             # contract in both sides along short dimension -> less compression
@@ -2594,8 +2599,11 @@ class TensorNetwork2D(TensorNetworkGen):
         ymax : int, optional
             The initial right boundary column, defaults to ``Ly - 1``..
         max_separation : int, optional
-            If ``around is None``, when any two sides become this far apart
-            simply contract the remaining tensor network.
+            When any two sides become this far apart simply contract the
+            remaining tensor network. If ``around`` is given, also stop each
+            side this many rows or columns from the target region. With ``0``
+            the boundaries absorb the edge rows or columns of the region, but
+            leave at least two.
         max_unfinished : int, optional
             If ``around is None``, when this many sides are still not within
             ``max_separation`` simply contract the remaining tensor network.
@@ -4166,8 +4174,11 @@ class TensorNetwork2D(TensorNetworkGen):
         ymax : int, optional
             The initial right boundary column, defaults to ``Ly - 1``..
         max_separation : int, optional
-            If ``around is None``, when any two sides become this far apart
-            simply contract the remaining tensor network.
+            When any two sides become this far apart simply contract the
+            remaining tensor network. If ``around`` is given, also stop each
+            side this many rows or columns from the target region. With ``0``
+            the boundaries absorb the edge rows or columns of the region, but
+            leave at least two.
         around : None or sequence of (int, int), optional
             If given, don't contract the square of sites bounding these
             coordinates.
@@ -5077,6 +5088,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         max_bond,
         *,
         max_distance=1,
+        max_separation=1,
         gauges=None,
         cutoff=None,
         method=None,
@@ -5095,9 +5107,9 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         """Compute an approximate reduced density matrix from a local
         rectangular cluster. Grow the smallest rectangle containing ``keep``
         by ``max_distance`` sites on each side. Insert simple update bond
-        ``gauges`` if supplied. Sweep one axis inward until at most one row
-        or column remains on each side of the kept sites. Contract the
-        remaining network exactly.
+        ``gauges`` if supplied. Sweep one axis inward until at most
+        ``max_separation`` rows or columns remain on each side of the kept
+        sites. Contract the remaining network exactly.
 
         The cluster can cross a periodic boundary. It is treated as an open
         network, so it supports the usual boundary compression methods,
@@ -5114,6 +5126,15 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             Number of sites to add on each side. Must be non-negative. Open
             boundaries clip the cluster to the lattice. Each periodic
             direction must have at least one site outside the cluster.
+        max_separation : int or 0.5, optional
+            Number of rows or columns to leave uncompressed on each side of
+            the kept sites. With ``0``, the boundaries also absorb the rows
+            or columns holding the kept sites, keeping their indices open,
+            until two remain. This is cheaper but less accurate. With
+            ``0.5``, one boundary absorbs the ket layer of the kept row or
+            column, and the other boundary absorbs the bra layer. This needs
+            the kept sites to lie in a single row or column across the swept
+            axis.
         gauges : dict[str, array_like], optional
             Simple update bond gauges keyed by index. Only matching bonds
             receive a gauge.
@@ -5191,17 +5212,55 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             }
         )
         k.view_as_(TensorNetwork2D, like=self, Lx=nx, Ly=ny)
+        first_contract = _choose_plaquette_first_contract(
+            k, x_bsz, y_bsz, first_contract
+        )
+        around = tuple((xs[x % self.Lx], ys[y % self.Ly]) for x, y in keep)
 
         # keep the physical ket and bra indices separate at these sites
         _, ket, bra = k.make_norm(layer_tags=layer_tags, return_all=True)
         k_inds = tuple(map(self.site_ind, keep))
         b_inds = get_bra_inds(self, keep, warn=get in ("tensor", "tn"))
         bra.reindex_(dict(zip(k_inds, b_inds)))
-        rho_tn = ket.combine(bra, virtual=True, check_collisions=False)
 
-        first_contract = _choose_plaquette_first_contract(
-            k, x_bsz, y_bsz, first_contract
-        )
+        if max_separation == 0.5:
+            # split the kept row or column in two, ket layer first, so that
+            # each boundary absorbs one layer
+            axis = "xy".index(first_contract)
+            lines = {coo[axis] for coo in around}
+            if len(lines) != 1:
+                raise ValueError(
+                    "`max_separation=0.5` needs the kept sites in a single "
+                    f"row or column across the swept axis, got {keep}."
+                )
+            (t,) = lines
+            line_tag_id = (self.x_tag_id, self.y_tag_id)[axis]
+            for layer, start in ((ket, t + 1), (bra, t)):
+                # use the tag ids directly, `site_tag` would wrap around
+                retag = {}
+                for coo in product(range(nx), range(ny)):
+                    new = list(coo)
+                    if coo[axis] >= start:
+                        new[axis] += 1
+                    retag[self.site_tag_id.format(*coo)] = (
+                        self.site_tag_id.format(*new)
+                    )
+                for a in range(start, (nx, ny)[axis]):
+                    retag[line_tag_id.format(a)] = line_tag_id.format(a + 1)
+                layer.retag_(retag)
+
+            # the bra halves of the kept sites are now one line further on
+            around += tuple(
+                (x + 1, y) if axis == 0 else (x, y + 1) for x, y in around
+            )
+            max_separation = 0
+            if axis == 0:
+                nx += 1
+            else:
+                ny += 1
+
+        rho_tn = ket.combine(bra, virtual=True, check_collisions=False)
+        rho_tn.view_as_(TensorNetwork2D, like=k, Lx=nx, Ly=ny)
         rho_tn.contract_boundary_(
             max_bond,
             cutoff=cutoff,
@@ -5210,7 +5269,8 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             layer_tags=layer_tags,
             compress_opts=compress_opts,
             sequence=(f"{first_contract}min", f"{first_contract}max"),
-            around=tuple((xs[x % self.Lx], ys[y % self.Ly]) for x, y in keep),
+            around=around,
+            max_separation=max_separation,
             **contract_boundary_opts,
         )
 

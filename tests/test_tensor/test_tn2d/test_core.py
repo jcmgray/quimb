@@ -1087,19 +1087,29 @@ class Test2DContract:
         )
         assert actual == pytest.approx(expected)
 
+    @pytest.mark.parametrize("max_separation", [0, 0.5, 1])
     @pytest.mark.parametrize("layer_tags", [None, ("KET", "BRA"), ("K", "B")])
     @pytest.mark.parametrize("method", [None, "dm", "projector2d"])
     @pytest.mark.parametrize(
         "where", [(1, 1), ((0, 1), (0, 2)), ((2, 1), (1, 1)), ((0, 0), (1, 1))]
     )
     def test_partial_trace_cluster_boundary_open(
-        self, where, method, layer_tags
+        self, where, method, layer_tags, max_separation
     ):
         peps = qtn.PEPS.rand(3, 4, 2, seed=42, dtype="complex128")
-        # the clipped cluster covers the whole lattice
-        rho = peps.partial_trace_cluster_boundary(
-            where, 64, max_distance=4, method=method, layer_tags=layer_tags
+        opts = dict(
+            max_distance=4,
+            max_separation=max_separation,
+            method=method,
+            layer_tags=layer_tags,
         )
+        if max_separation == 0.5 and where == ((0, 0), (1, 1)):
+            # half lines need the kept sites in a single row or column
+            with pytest.raises(ValueError, match="single row or column"):
+                peps.partial_trace_cluster_boundary(where, 64, **opts)
+            return
+        # the clipped cluster covers the whole lattice
+        rho = peps.partial_trace_cluster_boundary(where, 64, **opts)
         assert rho == pytest.approx(peps.partial_trace_exact(where))
 
     @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])
@@ -1189,9 +1199,12 @@ class Test2DContract:
         assert total == pytest.approx(sum(expecs.values()))
 
     @requires_symmray
+    @pytest.mark.parametrize("max_separation", [0, 0.5, 1])
     @pytest.mark.parametrize("cyclic", [False, True])
     @pytest.mark.parametrize("fermionic", [False, True])
-    def test_partial_trace_cluster_boundary_symmray(self, fermionic, cyclic):
+    def test_partial_trace_cluster_boundary_symmray(
+        self, fermionic, cyclic, max_separation
+    ):
         import symmray as sr
 
         L = 7 if cyclic else 3
@@ -1215,7 +1228,12 @@ class Test2DContract:
             where = ((1, 1), (1, 2))
             xs = ys = range(L)
         rho = peps.partial_trace_cluster_boundary(
-            where, 64, max_distance=2, gauges=gauges, get="array"
+            where,
+            64,
+            max_distance=2,
+            max_separation=max_separation,
+            gauges=gauges,
+            get="array",
         )
         k = peps.select_any(
             [peps.site_tag(x, y) for x in xs for y in ys], virtual=False
