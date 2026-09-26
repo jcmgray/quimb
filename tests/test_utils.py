@@ -5,9 +5,11 @@ import pytest
 from quimb.utils import (
     Every,
     deprecated,
+    load_from_disk,
     oset,
     parse_time_spec,
     raise_cant_find_library_function,
+    save_to_disk,
 )
 
 
@@ -167,3 +169,35 @@ class TestEvery:
     def test_bad_duration(self):
         with pytest.raises(ValueError, match="positive duration"):
             Every("0s")
+
+
+class TestSaveToDisk:
+    @pytest.mark.parametrize("atomic", [False, True])
+    @pytest.mark.parametrize("ext", [".dmp", ".gz"])
+    def test_roundtrip(self, tmp_path, atomic, ext):
+        pytest.importorskip("joblib")
+        fname = tmp_path / f"obj{ext}"
+        save_to_disk({"a": [1, 2, 3]}, fname, atomic=atomic)
+        assert load_from_disk(fname) == {"a": [1, 2, 3]}
+        assert [p.name for p in tmp_path.iterdir()] == [fname.name]
+
+    def test_atomic_overwrite(self, tmp_path):
+        pytest.importorskip("joblib")
+        fname = tmp_path / "obj.dmp"
+        save_to_disk(1, fname)
+        save_to_disk(2, fname, atomic=True)
+        assert load_from_disk(fname) == 2
+
+    def test_atomic_failure_keeps_old_file(self, tmp_path):
+        pytest.importorskip("joblib")
+
+        class Unpicklable:
+            def __reduce__(self):
+                raise RuntimeError("boom")
+
+        fname = tmp_path / "obj.dmp"
+        save_to_disk(1, fname)
+        with pytest.raises(RuntimeError, match="boom"):
+            save_to_disk(Unpicklable(), fname, atomic=True)
+        assert load_from_disk(fname) == 1
+        assert [p.name for p in tmp_path.iterdir()] == [fname.name]

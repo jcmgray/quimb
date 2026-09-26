@@ -4,8 +4,10 @@ import collections
 import functools
 import itertools
 import math
+import os
 import re
 import time
+import uuid
 from importlib.util import find_spec
 
 try:
@@ -308,11 +310,46 @@ def format_number_with_error(x, err):
     return f"{x:.{abs(exponent) + 1}f}({mantissa}){suffix}"
 
 
-def save_to_disk(obj, fname, **dump_opts):
-    """Save an object to disk using joblib.dump."""
+def save_to_disk(obj, fname, *, atomic=False, **dump_opts):
+    """Save an object to disk using joblib.dump.
+
+    Parameters
+    ----------
+    obj : object
+        The object to save.
+    fname : str or path-like
+        The file to save to. Compression is inferred from the extension as
+        usual for joblib.
+    atomic : bool, optional
+        If True, write to a temporary file in the same directory first, then
+        rename it to ``fname``. This means ``fname`` is never left partly
+        written, for example if the process is killed during the dump.
+    dump_opts
+        Supplied to ``joblib.dump``.
+
+    Returns
+    -------
+    list[str]
+        The names of the files written.
+    """
     import joblib
 
-    return joblib.dump(obj, fname, **dump_opts)
+    if not atomic:
+        return joblib.dump(obj, fname, **dump_opts)
+
+    fname = os.fspath(fname)
+    dirname, basename = os.path.split(fname)
+    # keep basename at the end so joblib infers the same compression
+    tmpname = os.path.join(dirname, f".tmp-{uuid.uuid4().hex}-{basename}")
+    try:
+        joblib.dump(obj, tmpname, **dump_opts)
+        os.replace(tmpname, fname)
+    except BaseException:
+        if os.path.exists(tmpname):
+            os.remove(tmpname)
+        raise
+
+    return [fname]
 
 
 def load_from_disk(fname, **load_opts):

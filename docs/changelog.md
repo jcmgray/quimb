@@ -83,6 +83,7 @@ Release notes for `quimb`.
 - 2D boundary contraction methods, such as [`contract_boundary`](#TensorNetwork2D.contract_boundary), [`compute_environments`](#TensorNetwork2D.compute_environments), [`compute_plaquette_environments`](#TensorNetwork2D.compute_plaquette_environments), [`compute_norm`](#TensorNetwork2DVector.compute_norm), [`normalize`](#TensorNetwork2DVector.normalize) and [`contract_ctmrg`](#TensorNetwork2D.contract_ctmrg), rename ``mode`` to ``method``. The old name still works but raises ``FutureWarning``. With ``mode="full-bond"``, a ``method`` given as well is taken as ``similarity_method``.
 - [`MatrixProductState.compute_local_expectation`](#MatrixProductState.compute_local_expectation): rename ``method`` to ``route``. The old name still works but raises ``FutureWarning``.
 - Rename ``MatrixProductState.partial_trace_to_dense_canonical`` to [`partial_trace_canonical`](#MatrixProductState.partial_trace_canonical). The old name still works but raises a warning.
+- [`save_to_disk`](#save_to_disk): add ``atomic`` option, to write to a temporary file and then rename it, so the target is never left partly written.
 
 
 **Bug fixes:**
