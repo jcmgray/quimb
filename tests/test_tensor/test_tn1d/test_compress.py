@@ -439,6 +439,80 @@ def test_dm_truncating_matches_direct_fermionic_norm(layer_tags, direction):
     assert value_dm == pytest.approx(value_direct, rel=1e-8)
 
 
+def make_fermionic_long_range_tn():
+    """An odd parity fermionic PEPS ordered as a 1D snake, so that the
+    vertical bonds (0, 0)-(1, 0) and (0, 1)-(1, 1) are long range.
+    """
+    import symmray as sr
+
+    psi = sr.PEPS_fermionic_rand(
+        "Z2", 2, 3, bond_dim=2, phys_dim=2, site_charge=lambda site: 1, seed=3
+    )
+    snake = [(0, 0), (0, 1), (0, 2), (1, 2), (1, 1), (1, 0)]
+    site_tags = [psi.site_tag(*site) for site in snake]
+    return psi, site_tags
+
+
+@requires_symmray
+@pytest.mark.parametrize(
+    "method",
+    [
+        "dm",
+        "zipup",
+        "zipup-oversample",
+        "sdc",
+        "sdc-oversample",
+        "sdcr",
+        "sdcr-oversample",
+    ],
+)
+@pytest.mark.parametrize("sweep_reverse", [False, True])
+def test_fermionic_long_range_exact(method, sweep_reverse):
+    """Check exact compression of a fermionic network with long range bonds,
+    which these methods handle without inserting identities.
+    """
+    psi, site_tags = make_fermionic_long_range_tn()
+    new = qtn.tensor_network_1d_compress(
+        psi,
+        max_bond=8,
+        method=method,
+        site_tags=site_tags,
+        sweep_reverse=sweep_reverse,
+    )
+    assert new.max_bond() <= 8
+    expected = (psi.conj() & psi).contract()
+    assert (new.conj() & psi).contract() == pytest.approx(expected, rel=1e-8)
+    assert (new.conj() & new).contract() == pytest.approx(expected, rel=1e-8)
+
+
+@requires_symmray
+@pytest.mark.parametrize("sweep_reverse", [False, True])
+def test_dm_truncating_fermionic_long_range(sweep_reverse):
+    """Check truncated DM compression of a fermionic network with long range
+    bonds against an exact zipup followed by a truncating SVD sweep.
+    """
+    psi, site_tags = make_fermionic_long_range_tn()
+    compress_opts = {
+        "max_bond": 2,
+        "site_tags": site_tags,
+        "sweep_reverse": sweep_reverse,
+    }
+    new_dm = qtn.tensor_network_1d_compress(psi, method="dm", **compress_opts)
+    new_ref = qtn.tensor_network_1d_compress(
+        psi,
+        method="zipup-oversample",
+        # exact zipup so only the final sweep truncates
+        max_bond_oversample=8,
+        **compress_opts,
+    )
+    overlap_dm = (new_dm.conj() & psi).contract()
+    overlap_ref = (new_ref.conj() & psi).contract()
+    assert overlap_dm == pytest.approx(overlap_ref, rel=1e-8)
+    norm_dm = (new_dm.conj() & new_dm).contract()
+    norm_ref = (new_ref.conj() & new_ref).contract()
+    assert norm_dm == pytest.approx(norm_ref, rel=1e-8)
+
+
 @pytest.mark.parametrize("method", ["srcmps", "fit"])
 def test_tn_fit(method):
     psi = qtn.MPS_rand_state(4, 3, seed=7)

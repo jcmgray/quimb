@@ -27,7 +27,6 @@ from ..tensor_builder import TN_matching
 from ..tensor_core import (
     Tensor,
     TensorNetwork,
-    bonds,
     ensure_dict,
     get_inner_dummy_labels,
     oset,
@@ -43,8 +42,9 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
     """Check that ``tn`` is 1D-like with OBC, i.e. 1) that each tensor has
     exactly one of the given ``site_tags``. If not, raise a ValueError. 2) That
     there are no hyper indices. And 3) that there are only bonds within sites
-    or between nearest neighbor sites. This issue can be optionally
-    automatically fixed by inserting a string of identity tensors.
+    or between nearest neighbor sites. Long range bonds can optionally be
+    fixed by inserting a string of identity tensors, or simply allowed, for
+    methods that handle them directly.
 
     Parameters
     ----------
@@ -53,8 +53,10 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
     site_tags : sequence of str, optional
         The tags to use to group and order the tensors from ``tn``. If not
         given, uses ``tn.site_tags``.
-    fix_bonds : bool, optional
-        Whether to fix the bond structure by inserting identity tensors.
+    fix_bonds : bool or None, optional
+        How to handle long range bonds. If ``True``, insert a string of
+        identity tensors along each. If ``False``, raise a ValueError. If
+        ``None``, allow them and leave them as they are.
     inplace : bool, optional
         Whether to perform the fix inplace or not.
 
@@ -108,6 +110,9 @@ def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
             ta, tb = tb, ta
 
         if sb - sa > 1:
+            if fix_bonds is None:
+                # long range bond allowed
+                continue
             if not fix_bonds:
                 raise ValueError(
                     f"Tensor {ta} and {tb} are not nearest "
@@ -505,7 +510,9 @@ def tensor_network_1d_compress_dm(
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
     N = len(site_tags)
 
-    ket = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    ket = enforce_1d_like(
+        tn, site_tags=site_tags, fix_bonds=None, inplace=inplace
+    )
     fermion = ket.isfermionic()
 
     # partition outer indices, and create conjugate bra indices
@@ -808,7 +815,9 @@ def tensor_network_1d_compress_zipup(
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
     N = len(site_tags)
 
-    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    tn = enforce_1d_like(
+        tn, site_tags=site_tags, fix_bonds=None, inplace=inplace
+    )
 
     # calculate the local site (outer) indices
     site_inds = [
@@ -1467,12 +1476,15 @@ def tensor_network_1d_compress_sdc(
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
     L = len(site_tags)
 
-    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    tn = enforce_1d_like(
+        tn, site_tags=site_tags, fix_bonds=None, inplace=inplace
+    )
 
     # first segment the tensor network into local sites
     local_tns = []
     local_inds = []
-    local_bonds = []
+    cut_bonds = []
+    cut = oset()
     output_inds = tn._outer_inds
     for i in range(L):
         # local network
@@ -1481,8 +1493,10 @@ def tensor_network_1d_compress_sdc(
         # outer indices found on this site
         oix = oset.from_dict(tni.ind_map).intersection(output_inds)
         local_inds.append(oix)
-        if i > 0:
-            local_bonds.append(bonds(local_tns[i - 1], tni))
+        # all bonds (inc. long range) between sites <= i and sites > i
+        vix = tni._outer_inds - output_inds
+        cut = (cut - vix) | (vix - cut)
+        cut_bonds.append(cut)
 
     left_envs = {}
     left_env_inds = {}
@@ -1503,7 +1517,7 @@ def tensor_network_1d_compress_sdc(
             ts.insert(0, left_envs[i])
             left_inds = (*left_env_inds[i], *left_inds)
         next_bix = rand_uuid()
-        right_inds = local_bonds[i]
+        right_inds = cut_bonds[i]
 
         t = tensor_contract(
             *ts,
@@ -2099,7 +2113,9 @@ def tensor_network_1d_compress_src(
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
     L = len(site_tags)
 
-    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    tn = enforce_1d_like(
+        tn, site_tags=site_tags, fix_bonds=None, inplace=inplace
+    )
 
     if seed is not None:
         xp = tn.get_namespace()
@@ -2110,7 +2126,8 @@ def tensor_network_1d_compress_src(
     # first we segment the tensor network into local sites
     local_tns = []
     local_inds = []
-    local_bonds = []
+    cut_bonds = []
+    cut = oset()
     output_inds = tn._outer_inds
     for i in range(L):
         # local network
@@ -2119,8 +2136,10 @@ def tensor_network_1d_compress_src(
         # outer indices found on this site
         oix = oset.from_dict(tni.ind_map).intersection(output_inds)
         local_inds.append(oix)
-        if i > 0:
-            local_bonds.append(bonds(local_tns[i - 1], tni))
+        # all bonds (inc. long range) between sites <= i and sites > i
+        vix = tni._outer_inds - output_inds
+        cut = (cut - vix) | (vix - cut)
+        cut_bonds.append(cut)
 
     # first we form the left environment tensors with sampling noise
     left_envs = {}
@@ -2155,8 +2174,8 @@ def tensor_network_1d_compress_src(
             output_inds=(
                 # batch index is hyper, so we have to specify it
                 Bix,
-                # other outputs are any shared bonds between sites
-                *local_bonds[i - 1],
+                # other outputs are all bonds crossing the cut
+                *cut_bonds[i - 1],
             ),
             **contract_opts,
         )
