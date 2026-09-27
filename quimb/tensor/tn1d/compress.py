@@ -191,7 +191,8 @@ def tensor_network_1d_compress_direct(
         that the output tensor network is in right canonical form.
     canonize : bool, optional
         Whether to canonicalize the network in one direction before compressing
-        in the other.
+        in the other. If `False` long range indices are handled by inserting
+        identities.
     cutoff_mode : {"rsum2", "rel", ...}, optional
         The mode to use when truncating the singular values of the decomposed
         tensors. See :func:`~quimb.tensor.tensor_split`.
@@ -254,7 +255,13 @@ def tensor_network_1d_compress_direct(
         site_tags = tuple(reversed(site_tags))
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
 
-    new = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    new = enforce_1d_like(
+        tn,
+        site_tags=site_tags,
+        # canonizing moves long range bonds along, else insert identities
+        fix_bonds=None if canonize else True,
+        inplace=inplace,
+    )
 
     # contract the first site group
     new.contract_tags_(site_tags[0], **contract_opts)
@@ -270,9 +277,26 @@ def tensor_network_1d_compress_direct(
         #         i-1 i
 
         if canonize:
-            # shift canonical center rightwards
+            # bonds of site i-1 to sites other than i-2 or i are long range
+            ta, tb = new[site_tags[i - 1]], new[site_tags[i]]
+            neighbor_inds = set(tb.inds)
+            if i > 1:
+                neighbor_inds.update(new[site_tags[i - 2]].inds)
+            swap_inds = [
+                ix
+                for ix in ta.inds
+                if (ix not in neighbor_inds) and (ix not in new._outer_inds)
+            ]
+
+            # shift canonical center rightwards, moving long range bonds
+            # onto site i, until they become nearest neighbor bonds
             new.canonize_between(
-                site_tags[i - 1], site_tags[i], **canonize_opts
+                site_tags[i - 1],
+                site_tags[i],
+                swap_inds=swap_inds or None,
+                # the sites might only be joined by long range bonds
+                create_bond=bool(swap_inds),
+                **canonize_opts,
             )
             #     │ │ │ │ │ │ │ │ │ │
             #     ▶━▶━▶━▶━▶─○─○─○─○─○

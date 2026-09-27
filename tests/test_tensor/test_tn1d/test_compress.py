@@ -457,6 +457,7 @@ def make_fermionic_long_range_tn():
 @pytest.mark.parametrize(
     "method",
     [
+        "direct",
         "dm",
         "zipup",
         "zipup-oversample",
@@ -469,7 +470,8 @@ def make_fermionic_long_range_tn():
 @pytest.mark.parametrize("sweep_reverse", [False, True])
 def test_fermionic_long_range_exact(method, sweep_reverse):
     """Check exact compression of a fermionic network with long range bonds,
-    which these methods handle without inserting identities.
+    which these methods handle without inserting identities, which symmray
+    arrays do not support.
     """
     psi, site_tags = make_fermionic_long_range_tn()
     new = qtn.tensor_network_1d_compress(
@@ -486,9 +488,10 @@ def test_fermionic_long_range_exact(method, sweep_reverse):
 
 
 @requires_symmray
+@pytest.mark.parametrize("method", ["direct", "dm"])
 @pytest.mark.parametrize("sweep_reverse", [False, True])
-def test_dm_truncating_fermionic_long_range(sweep_reverse):
-    """Check truncated DM compression of a fermionic network with long range
+def test_truncating_fermionic_long_range(method, sweep_reverse):
+    """Check truncated compression of a fermionic network with long range
     bonds against an exact zipup followed by a truncating SVD sweep.
     """
     psi, site_tags = make_fermionic_long_range_tn()
@@ -497,7 +500,7 @@ def test_dm_truncating_fermionic_long_range(sweep_reverse):
         "site_tags": site_tags,
         "sweep_reverse": sweep_reverse,
     }
-    new_dm = qtn.tensor_network_1d_compress(psi, method="dm", **compress_opts)
+    new = qtn.tensor_network_1d_compress(psi, method=method, **compress_opts)
     new_ref = qtn.tensor_network_1d_compress(
         psi,
         method="zipup-oversample",
@@ -505,12 +508,12 @@ def test_dm_truncating_fermionic_long_range(sweep_reverse):
         max_bond_oversample=8,
         **compress_opts,
     )
-    overlap_dm = (new_dm.conj() & psi).contract()
+    overlap = (new.conj() & psi).contract()
     overlap_ref = (new_ref.conj() & psi).contract()
-    assert overlap_dm == pytest.approx(overlap_ref, rel=1e-8)
-    norm_dm = (new_dm.conj() & new_dm).contract()
+    assert overlap == pytest.approx(overlap_ref, rel=1e-8)
+    norm = (new.conj() & new).contract()
     norm_ref = (new_ref.conj() & new_ref).contract()
-    assert norm_dm == pytest.approx(norm_ref, rel=1e-8)
+    assert norm == pytest.approx(norm_ref, rel=1e-8)
 
 
 @pytest.mark.parametrize("method", ["srcmps", "fit"])
