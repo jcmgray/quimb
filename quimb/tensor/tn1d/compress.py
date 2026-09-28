@@ -19,6 +19,7 @@ network can locally have arbitrary structure and outer indices.
 import collections
 import functools
 import itertools
+import math
 import warnings
 
 from autoray import do
@@ -450,10 +451,16 @@ def tensor_network_1d_compress_dm(
     """Compress any 1D-like tensor network using the 'density matrix' method
     (https://tensornetwork.org/mps/algorithms/denmat_mpo_mps/).
 
-    While this has the same scaling as the direct method, in practice it can
-    often be faster, especially at large bond dimensions. Potentially there are
-    some situations where the direct method is more stable with regard to
-    precision, since the density matrix method works in the 'squared' picture.
+    This typically scales better the 'direct' by a factor of 'D' (the inner
+    bond dimension for MPS-MPO compression e.g.) and uses pure contraction and
+    a hermitian eigendecomposition which can suit GPUs. While it can take the
+    full spectrum into account during truncation, it only has sqrt(precision)
+    compared to most other methods since it works with the squared singular
+    values. As such its relative accuracy is limited to ~1e-8 for float64.
+
+    When a site's outer density matrix size is larger than the internal rank
+    (for example during two layer norm contractions), a QR reduction is used
+    to form a smaller core (see 'QR-SVD' in https://arxiv.org/abs/2406.09769).
 
     Parameters
     ----------
@@ -602,53 +609,128 @@ def tensor_network_1d_compress_dm(
     exponent = 0.0
 
     for i in range(N - 1, 0, -1):
-        # form the reduced density matrix
-        #
-        #                          ket_site_inds[i]
-        #          │   ┃           :  new_bonds["k", i + 1]
-        #       ╔══K══REk          │  ┃
-        #      LE            =>    rhoi
-        #       ╚══B══REb          │  ┃
-        #          │   ┃           :  new_bonds["b", i + 1]
-        #                          bra_site_inds[i]
-        #     i-1  i  i+1
-        #
-        rho_tensors = [
-            left_envs[i],
-            *ket.select_tensors(site_tags[i]),
-            *bra.select_tensors(site_tags[i]),
-        ]
         left_inds = list(ket_site_inds[i])
         right_inds = list(bra_site_inds[i])
         if right_env_ket is not None:
-            rho_tensors.extend([right_env_ket, right_env_bra])
             left_inds.append(new_bonds["k", i + 1])
             right_inds.append(new_bonds["b", i + 1])
 
-        # contract and then split it
-        #
-        #                    │  ┃  ... left_inds
-        #     │  ┃           UUUU
-        #     │  ┃            ┃
-        #     rhoi    =>      s    ... bix, with size max_bond
-        #     │  ┃            ┃
-        #     │  ┃           UHUH
-        #                    │  ┃  ... right_inds
-        #
-        rhoi = tensor_contract(*rho_tensors, **contract_opts)
+        # ket side bonds of left environment bound rank of rho
+        lk_inds = [ix for ix in left_envs[i].inds if ix in ket.ind_map]
+        rank = math.prod(map(left_envs[i].ind_size, lk_inds))
+        size = math.prod(map(ket.ind_size, ket_site_inds[i]))
+        if right_env_ket is not None:
+            size *= right_env_ket.ind_size(new_bonds["k", i + 1])
 
-        if fermion:
-            _phase_dm_operator(rhoi, left_inds, right_inds)
-
-        # construct the conjugate projector separately below
+        # construct conjugate projector separately below
         bix = rand_uuid()
-        U = rhoi.split(
-            left_inds=left_inds,
-            right_inds=right_inds,
-            get="tensors",
-            bond_ind=bix,
-            **compress_opts,
-        )[0]
+
+        if size > rank:
+            # rho explicilty rank deficient, so QR ket side instead
+            #
+            #          │   ┃                │  ┃  ... left_inds
+            #       ═══K══REk     =>        QQQQ
+            #      :                         ┃   ... qix
+            #      :                       ══R
+            #      lk_inds                :
+            #     i-1  i  i+1
+            #
+            x_tensors = list(ket.select_tensors(site_tags[i]))
+            if right_env_ket is not None:
+                x_tensors.append(right_env_ket)
+            xi = tensor_contract(*x_tensors, **contract_opts)
+
+            qix = rand_uuid()
+            tq, tr = xi.split(
+                left_inds=left_inds,
+                right_inds=lk_inds,
+                method="qr",
+                absorb="right",
+                cutoff=0.0,
+                get="tensors",
+                bond_ind=qix,
+                # keep Q even with no dummy modes, like the eigh projectors
+                **({"charge_side": "right"} if fermion else {}),
+            )
+
+            # form the smaller core, which has same spectrum as rho
+            #
+            #          ┃   ... qix
+            #       ╔══R                     ┃
+            #      LE            =>          si
+            #       ╚══R*                    ┃
+            #          ┃   ... qix_b
+            #
+            # conjugate like the right environment, qix being the outer index
+            qix_b = rand_uuid()
+            trb = tr.conj(
+                output_inds=(qix,),
+                inner_dummy_labels=inner_dummy_labels,
+            )
+            trb.reindex_({qix: qix_b, **{ix: kb_indmap[ix] for ix in lk_inds}})
+            si = tensor_contract(tr, left_envs[i], trb, **contract_opts)
+
+            if fermion:
+                _phase_dm_operator(si, (qix,), (qix_b,))
+
+            # split it, then map the eigenvectors back with Q
+            #
+            #                   │  ┃         │  ┃  ... left_inds
+            #      ┃            QQQQ         UUUU
+            #      si    =>      ┃     =>     ┃   ... bix
+            #      ┃             W
+            #                    ┃
+            #
+            tw = si.split(
+                left_inds=(qix,),
+                right_inds=(qix_b,),
+                get="tensors",
+                bond_ind=bix,
+                **compress_opts,
+            )[0]
+            U = tq @ tw
+        else:
+            # form the reduced density matrix
+            #
+            #                          ket_site_inds[i]
+            #          │   ┃           :  new_bonds["k", i + 1]
+            #       ╔══K══REk          │  ┃
+            #      LE            =>    rhoi
+            #       ╚══B══REb          │  ┃
+            #          │   ┃           :  new_bonds["b", i + 1]
+            #                          bra_site_inds[i]
+            #     i-1  i  i+1
+            #
+            rho_tensors = [
+                left_envs[i],
+                *ket.select_tensors(site_tags[i]),
+                *bra.select_tensors(site_tags[i]),
+            ]
+            if right_env_ket is not None:
+                rho_tensors.extend([right_env_ket, right_env_bra])
+
+            # contract and then split it
+            #
+            #                    │  ┃  ... left_inds
+            #     │  ┃           UUUU
+            #     │  ┃            ┃
+            #     rhoi    =>      s    ... bix, with size max_bond
+            #     │  ┃            ┃
+            #     │  ┃           UHUH
+            #                    │  ┃  ... right_inds
+            #
+            rhoi = tensor_contract(*rho_tensors, **contract_opts)
+
+            if fermion:
+                _phase_dm_operator(rhoi, left_inds, right_inds)
+
+            U = rhoi.split(
+                left_inds=left_inds,
+                right_inds=right_inds,
+                get="tensors",
+                bond_ind=bix,
+                **compress_opts,
+            )[0]
 
         # turn bond into 'virtual right' indices
         #

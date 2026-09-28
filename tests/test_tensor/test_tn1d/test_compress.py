@@ -439,6 +439,148 @@ def test_dm_truncating_matches_direct_fermionic_norm(layer_tags, direction):
     assert value_dm == pytest.approx(value_direct, rel=1e-8)
 
 
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+@pytest.mark.parametrize(
+    "dm_opts,direct_opts",
+    [
+        pytest.param(
+            {"max_bond": 3, "cutoff": 0.0},
+            {"max_bond": 3, "cutoff": 0.0},
+            id="max_bond",
+        ),
+        # dm truncates the squares of the singular values that direct sees
+        pytest.param(
+            {"max_bond": 16, "cutoff": 1e-4, "cutoff_mode": "rel"},
+            {"max_bond": 16, "cutoff": 1e-2, "cutoff_mode": "rel"},
+            id="rel",
+        ),
+        pytest.param(
+            {"max_bond": 16, "cutoff": 1e-3, "cutoff_mode": "rsum1"},
+            {"max_bond": 16, "cutoff": 1e-3, "cutoff_mode": "rsum2"},
+            id="rsum1",
+        ),
+    ],
+)
+def test_dm_layered_norm_matches_direct(dtype, dm_opts, direct_opts):
+    """Check truncated DM compression of a layered norm, where each site's
+    density matrix is larger than its rank, so is not formed explicitly.
+    """
+    peps = qtn.PEPS.rand(4, 4, bond_dim=2, phys_dim=2, seed=7, dtype=dtype)
+    norm = peps.make_norm()
+    # make the absolute scale of the eigenvalues meaningful
+    norm.multiply_(1 / norm.contract(), spread_over="all")
+    contraction_options = {
+        "layer_tags": ("KET", "BRA"),
+        "sequence": ("ymin",),
+    }
+    value_dm = norm.contract_boundary(
+        method="dm", **dm_opts, **contraction_options
+    )
+    value_direct = norm.contract_boundary(
+        method="direct", **direct_opts, **contraction_options
+    )
+    # check that truncation happened
+    assert value_dm != pytest.approx(1.0, rel=1e-6)
+    assert value_dm == pytest.approx(value_direct, rel=1e-8)
+
+
+@requires_symmray
+@pytest.mark.parametrize("direction", ["xmin", "xmax", "ymin", "ymax"])
+def test_dm_layered_norm_matches_direct_abelian(direction):
+    """Check truncated DM compression of a layered norm with non-fermionic
+    block sparse arrays, whose density matrices are not formed explicitly.
+    """
+    import symmray as sr
+
+    psi = sr.PEPS_abelian_rand("Z2", 4, 4, bond_dim=2, phys_dim=2, seed=7)
+    norm = psi.make_norm()
+    contraction_options = {
+        "max_bond": 4,
+        "cutoff": 0.0,
+        "layer_tags": ("KET", "BRA"),
+        "sequence": (direction,),
+    }
+    value_dm = norm.contract_boundary(method="dm", **contraction_options)
+    value_direct = norm.contract_boundary(
+        method="direct", **contraction_options
+    )
+    assert value_dm == pytest.approx(value_direct, rel=1e-8)
+
+
+def test_dm_layered_norm_decomposition_size():
+    """Check DM never decomposes a matrix larger than the bound on its rank,
+    which for a layered norm is much smaller than the reduced density matrix.
+    """
+    from autoray.lazy import descend
+
+    D, chi = 2, 4
+    peps = qtn.PEPS.from_fill_fn(
+        lambda shape: ar.lazy.Variable(shape, backend="numpy"), 4, 4, D, 2
+    )
+    z = peps.make_norm().contract_boundary(
+        max_bond=chi,
+        cutoff=0.0,
+        method="dm",
+        layer_tags=("KET", "BRA"),
+        sequence=("ymin",),
+    )
+    sizes = [
+        min(node.deps[0].shape)
+        for node in descend(z)
+        if any(name in node.fn_name for name in ("eigh", "svd", "qr"))
+    ]
+    assert sizes
+    # rho itself would be chi * D**2 * phys_dim
+    assert max(sizes) <= chi * D
+
+
+@requires_symmray
+@pytest.mark.parametrize(
+    "site_charge",
+    [
+        pytest.param(lambda site: 0, id="even"),
+        pytest.param(lambda site: 1, id="odd"),
+        pytest.param(lambda site: (site[0] + site[1]) % 2, id="odd-checker"),
+    ],
+)
+@pytest.mark.parametrize("duals", bond_orientations)
+@pytest.mark.parametrize("layer_tags", [("KET", "BRA"), ("BRA", "KET")])
+@pytest.mark.parametrize("direction", ["xmin", "xmax", "ymin", "ymax"])
+def test_dm_layered_norm_matches_direct_fermionic(
+    site_charge, duals, layer_tags, direction
+):
+    """Check truncated DM compression of a layered fermionic norm, whose
+    density matrices are not formed explicitly. Odd parity sites, with the bra
+    layer first, need the QR charge and dummy modes kept off the projector.
+    """
+    import symmray as sr
+
+    psi = sr.PEPS_fermionic_rand(
+        "Z2",
+        4,
+        4,
+        bond_dim=2,
+        phys_dim=2,
+        site_charge=site_charge,
+        duals=duals,
+        seed=7,
+        dist="uniform",
+        loc=-0.5,
+    )
+    norm = psi.make_norm()
+    contraction_options = {
+        "max_bond": 4,
+        "cutoff": 0.0,
+        "layer_tags": layer_tags,
+        "sequence": (direction,),
+    }
+    value_dm = norm.contract_boundary(method="dm", **contraction_options)
+    value_direct = norm.contract_boundary(
+        method="direct", **contraction_options
+    )
+    assert value_dm == pytest.approx(value_direct, rel=1e-8)
+
+
 def make_fermionic_long_range_tn():
     """An odd parity fermionic PEPS ordered as a 1D snake, so that the
     vertical bonds (0, 0)-(1, 0) and (0, 1)-(1, 1) are long range.
