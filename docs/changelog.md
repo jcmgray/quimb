@@ -123,6 +123,7 @@ Release notes for `quimb`.
 - 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation): two site terms given in reverse order, for example ``((1, 0), (0, 0))``, no longer raise ``KeyError`` with the boundary route.
 - [`compute_local_expectation_exact`](#TensorNetworkGenVector.compute_local_expectation_exact) and [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster): with ``normalized="return"`` and ``return_all=False``, sum the normalized expectations instead of concatenating expectation/trace tuples.
 - [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster) and other methods that compute terms one at a time now complete the progress bar.
+- Oblique projector compression, e.g. [`L2BP.compress`](#L2BP.compress), CTMRG and HOTRG: fix ``shape-mismatch`` errors with ``symmray`` block sparse arrays, by not fusing the bond indices.
 
 
 ## v1.15.0 (2026-08-10)

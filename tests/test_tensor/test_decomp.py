@@ -15,6 +15,7 @@ from quimb.tensor.decomp import (
 from . import (
     jax_case,
     pytorch_case,
+    requires_symmray,
     tensorflow_case,
 )
 
@@ -327,6 +328,50 @@ def test_oblique_projectors_exactly_low_rank(absorb):
     assert np.isfinite(P).all()
     # inserting the projectors should be the identity on the non-null space
     assert_allclose(Rl @ P @ Rr, Rl @ Rr, atol=1e-12)
+
+
+@pytest.mark.parametrize("absorb", ["both", None, "left", "right"])
+def test_oblique_projectors_unfused_bond(absorb):
+    from quimb.tensor.decomp import compute_oblique_projectors
+
+    rng = np.random.default_rng(1)
+    Rl = rng.standard_normal((5, 3, 4))
+    Rr = rng.standard_normal((3, 4, 6))
+    opts = {"max_bond": 4, "cutoff": 0.0, "absorb": absorb}
+
+    fused = compute_oblique_projectors(
+        Rl.reshape(5, 12), Rr.reshape(12, 6), **opts
+    )
+    unfused = compute_oblique_projectors(Rl, Rr, **opts)
+
+    assert unfused[0].shape == (3, 4, 4)
+    assert unfused[-1].shape == (4, 3, 4)
+    assert_allclose(unfused[0].reshape(12, 4), fused[0])
+    assert_allclose(unfused[-1].reshape(4, 12), fused[-1])
+
+
+@requires_symmray
+def test_oblique_projectors_unfused_bond_mismatched_blocks():
+    # the two sides hold different blocks, so fusing each would not match
+    import symmray as sr
+
+    from quimb.tensor.decomp import compute_oblique_projectors
+
+    a = sr.BlockIndex({0: 2, 1: 3}, dual=False)
+    b = sr.BlockIndex({0: 1, 1: 2}, dual=False)
+    k = sr.BlockIndex({0: 3, 1: 4, 2: 3}, dual=True)
+    Rl = sr.U1Array.random([k, a, b], seed=2)
+    Rr = sr.U1Array.random([a.conj(), b.conj(), k.conj()], seed=3)
+    Rl.del_block(next(s for s in Rl.sectors if s[1:] == (0, 1)))
+
+    Pl, Pr = compute_oblique_projectors(Rl, Rr, cutoff=0.0)
+    P = ar.do("tensordot", Pl, Pr, ((2,), (0,)))
+
+    # at full rank inserting the projectors changes nothing
+    RlP = ar.do("tensordot", Rl, P, ((1, 2), (0, 1)))
+    actual = ar.do("tensordot", RlP, Rr, ((1, 2), (0, 1)))
+    expected = ar.do("tensordot", Rl, Rr, ((1, 2), (0, 1)))
+    assert_allclose(actual.to_dense(), expected.to_dense(), atol=1e-12)
 
 
 def test_sgn_convention():

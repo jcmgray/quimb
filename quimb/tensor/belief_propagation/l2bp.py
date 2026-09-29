@@ -5,6 +5,7 @@ import autoray as ar
 import quimb.tensor as qtn
 from quimb.utils import ensure_dict, oset
 
+from ..array_ops import fuse, unfuse
 from .bp_common import (
     BeliefPropagationCommon,
     combine_local_contractions,
@@ -424,21 +425,26 @@ class L2BP(BeliefPropagationCommon):
             tml = self.messages[i, j]
             tmr = self.messages[j, i]
 
+            nbond = len(bix)
             bix_sizes = [tml.ind_size(ix) for ix in bix]
             dm = math.prod(bix_sizes)
 
-            ml = ar.reshape(tml.data, (dm, dm))
+            # use fuse/unfuse for block max sparse compatibility
+            ml = fuse(tml.data, range(nbond), range(nbond, 2 * nbond))
             dl = self.local_tns[i].outer_size() // dm
             Rl = qtn.decomp.squared_op_to_reduced_factor(
                 ml, dl, dm, right=True, **reduce_opts
             )
 
-            mr = ar.reshape(tmr.data, (dm, dm)).T
+            mr = fuse(tmr.data, range(nbond), range(nbond, 2 * nbond)).T
             dr = self.local_tns[j].outer_size() // dm
             Rr = qtn.decomp.squared_op_to_reduced_factor(
                 mr, dm, dr, right=False, **reduce_opts
             )
 
+            # compute projectors with bonds unfused
+            Rl = unfuse(Rl, axis=1, axis_dims=bix_sizes)
+            Rr = unfuse(Rr, axis=0, axis_dims=bix_sizes)
             Pl, Pr = qtn.decomp.compute_oblique_projectors(
                 Rl, Rr, **compress_opts
             )
@@ -450,8 +456,6 @@ class L2BP(BeliefPropagationCommon):
                 Pr,
                 left_inds=bix,
                 right_inds=bix,
-                left_dims=bix_sizes,
-                right_dims=bix_sizes,
                 new_ltags=i,
                 new_rtags=j,
             )

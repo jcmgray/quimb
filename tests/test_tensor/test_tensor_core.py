@@ -2128,6 +2128,27 @@ class TestTensorNetwork:
         actual = (tnp ^ all).transpose("a", "b").data
         assert_allclose(actual, expected)
 
+    def test_insert_projectors_between_regions_unfused(self):
+        tl = qtn.rand_tensor((2, 2, 3), inds=("a", "x", "y"), tags="L", seed=1)
+        tr = qtn.rand_tensor((2, 3, 2), inds=("x", "y", "b"), tags="R", seed=2)
+        tn = tl & tr
+
+        rng = np.random.default_rng(3)
+        Pl = rng.normal(size=(3, 2, 4))
+        Pr = rng.normal(size=(4, 3, 2))
+        expected = np.einsum("axy,yxk,kzw,wzb->ab", tl.data, Pl, Pr, tr.data)
+
+        tnp = tn.insert_projectors_between_regions(
+            "L",
+            "R",
+            Pl,
+            Pr,
+            left_inds=("y", "x"),
+            right_inds=("y", "x"),
+        )
+        actual = (tnp ^ all).transpose("a", "b").data
+        assert_allclose(actual, expected)
+
     def test_insert_projectors_between_regions_multiple_tensors_and_inplace(
         self,
     ):
@@ -2250,6 +2271,30 @@ class TestTensorNetwork:
         assert tn_other.num_tensors == 6
         d = tn_other.distance(tn)
         assert d == pytest.approx(d1)
+
+    @requires_symmray
+    @pytest.mark.parametrize("fermionic", [False, True])
+    def test_insert_compressor_between_regions_mismatched_blocks(
+        self, fermionic
+    ):
+        import symmray as sr
+
+        # the bonds between rows fuse to different blocks on each side
+        tn = sr.networks.TN2D_abelian_rand(
+            "U1",
+            3,
+            3,
+            4,
+            seed=0,
+            site_charge=lambda site: 0,
+            fermionic=fermionic,
+        )
+        ltags = [tn.site_tag(0, j) for j in range(3)]
+        rtags = [tn.site_tag(1, j) for j in range(3)]
+        tnc = tn.insert_compressor_between_regions(
+            ltags, rtags, max_bond=None, cutoff=0.0
+        )
+        assert tnc.contract() == pytest.approx(tn.contract())
 
     @pytest.mark.parametrize(
         "gauge_power,gauge_smudge",

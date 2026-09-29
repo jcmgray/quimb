@@ -10404,7 +10404,8 @@ class TensorNetwork:
         calculated by `bonds` called on the two regions. The left projector
         should have shape ``(d, new_bond_dim)`` and the right projector shape
         ``(new_bond_dim, d)``, where ``d`` is the product of the respective
-        index dimensions.
+        index dimensions. The projectors can also be supplied unfused, with
+        one axis per index instead of the single fused axis.
 
         Parameters
         ----------
@@ -10414,10 +10415,12 @@ class TensorNetwork:
             The tags of the tensors in the right region.
         Pl : array_like
             The left projector, with the fused original bonds as its first
-            dimension and the new bond as its second dimension.
+            dimension and the new bond as its second dimension, or unfused
+            with one axis per index in ``left_inds`` and then the new bond.
         Pr : array_like
             The right projector, with the new bond as its first dimension and
-            the fused original bonds as its second dimension.
+            the fused original bonds as its second dimension, or unfused with
+            the new bond and then one axis per index in ``right_inds``.
         left_inds : sequence of str, optional
             The ordered indices of the left region to connect to the left
             projector, `Pl`. Calculated automatically as the bonds connecting
@@ -10475,8 +10478,11 @@ class TensorNetwork:
         if bond_ind is None:
             bond_ind = rand_uuid()
 
-        Pl = unfuse(Pl, axis=0, axis_dims=left_dims)
-        Pr = unfuse(Pr, axis=1, axis_dims=right_dims)
+        # projectors with one axis per index are already unfused
+        if do("ndim", Pl) == 2:
+            Pl = unfuse(Pl, axis=0, axis_dims=left_dims)
+        if do("ndim", Pr) == 2:
+            Pr = unfuse(Pr, axis=1, axis_dims=right_dims)
 
         # cut the original bonds
         new_lix = [rand_uuid() for _ in left_inds]
@@ -10659,6 +10665,10 @@ class TensorNetwork:
                 contract_opts=contract_opts,
                 reduce_opts=reduce_opts,
             )
+
+            # unfuse here for max compat with block sparse array
+            Rl = unfuse(Rl, axis=1, axis_dims=bix_sizes)
+            Rr = unfuse(Rr, axis=0, axis_dims=bix_sizes)
 
             # then form the 'oblique' projectors
             Pl, Pr = compute_oblique_projectors(Rl, Rr, **compress_opts)

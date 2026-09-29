@@ -3292,12 +3292,17 @@ def compute_oblique_projectors(
 
         A' = Q_L R_L P_L P_R R_R Q_R
 
+    The bond can also be left as several unfused axes, which can avoid
+    alignment issues with block sparse arrays.
+
     Parameters
     ----------
     Rl : array
-        The left reduced factor matrix.
+        The left reduced factor, with its outer axis first and then one or
+        more bond axes.
     Rr : array
-        The right reduced factor matrix.
+        The right reduced factor, with the bond axes first, in the same order
+        as for ``Rl``, and then its outer axis.
     max_bond : int, optional
         The maximum bond dimension to compress to.
     cutoff : float, optional
@@ -3325,17 +3330,25 @@ def compute_oblique_projectors(
     Returns
     -------
     Pl : array
-        The left oblique projector.
+        The left oblique projector, with the bond axes of ``Rr`` and then the
+        new bond.
     Pr : array
-        The right oblique projector.
+        The right oblique projector, with the new bond and then the bond axes
+        of ``Rl``.
     """
     if max_bond is None:
         max_bond = -1
     absorb = _ABSORB_MAP[absorb]
     cutoff_mode = _CUTOFF_MODE_MAP[cutoff_mode]
 
+    # contract all bond axes directly, so they never need fusing
+    xp = get_namespace(Rl)
+    nbond = xp.ndim(Rl) - 1
+
     Ut, st, VHt = array_split(
-        Rl @ Rr,
+        xp.tensordot(
+            Rl, Rr, (tuple(range(1, nbond + 1)), tuple(range(nbond)))
+        ),
         max_bond=max_bond,
         cutoff=cutoff,
         absorb=None,
@@ -3344,30 +3357,34 @@ def compute_oblique_projectors(
         **compress_opts,
     )
 
+    # find the small matrices that map Rr and Rl to the projectors
     if absorb is None:
         st_inv = safe_inverse(st)
-        Pl = Rr @ rdmul(dag(VHt), st_inv)
-        Pr = ldmul(st_inv, dag(Ut)) @ Rl
-        return Pl, st, Pr
+        Xr = rdmul(dag(VHt), st_inv)
+        Xl = ldmul(st_inv, dag(Ut))
 
     elif absorb == get_Usq_sqVH:
         # note we damp based on st, not sqrt(st), to match the other branches
         st_sqrt_inv = safe_inverse(st, power=0.5)
-
-        # then form the 'oblique' projectors
-        Pl = Rr @ rdmul(dag(VHt), st_sqrt_inv)
-        Pr = ldmul(st_sqrt_inv, dag(Ut)) @ Rl
+        Xr = rdmul(dag(VHt), st_sqrt_inv)
+        Xl = ldmul(st_sqrt_inv, dag(Ut))
 
     elif absorb == get_Us_VH:
-        Pl = Rr @ dag(VHt)
-        Pr = lddiv(st, dag(Ut)) @ Rl
+        Xr = dag(VHt)
+        Xl = lddiv(st, dag(Ut))
 
     elif absorb == get_U_sVH:
-        Pl = Rr @ rddiv(dag(VHt), st)
-        Pr = dag(Ut) @ Rl
+        Xr = rddiv(dag(VHt), st)
+        Xl = dag(Ut)
     else:
         raise ValueError(f"Unrecognized absorb={absorb}.")
 
+    # then form the 'oblique' projectors
+    Pl = xp.tensordot(Rr, Xr, ((nbond,), (0,)))
+    Pr = xp.tensordot(Xl, Rl, ((1,), (0,)))
+
+    if absorb is None:
+        return Pl, st, Pr
     return Pl, Pr
 
 
