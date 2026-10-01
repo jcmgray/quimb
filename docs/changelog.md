@@ -4,127 +4,147 @@ Release notes for `quimb`.
 
 ## v1.16.0 (unreleased)
 
-**Breaking Changes:**
+### Breaking changes
 
-- [`array_split`](#array_split) and the low-level rank-revealing decompositions now default to ``cutoff_mode="rel"`` instead of ``"rsum2"``.
-- Randomized SVD and batched decompositions now reject active cumulative cutoff modes. Use ``"abs"`` or ``"rel"`` instead.
-- 1D ``zipup`` compression now defaults to ``cutoff_mode="rel"`` for its pseudo-canonical truncations.
-- [`HilbertSpace`](#HilbertSpace): site ordering is now immutable. ``set_ordering`` raises ``TypeError``. Use the new [`with_ordering`](#HilbertSpace.with_ordering) method to create a space with a different ordering.
-- [`fermi_hubbard_from_edges`](#fermi_hubbard_from_edges): the default is now ``order="interleaved"``. This alternates the spins at each coordinate instead of grouping them. The on-site interaction is then register-local, so the MPO bond dimension does not grow with system size. The cost is one extra Jordan-Wigner Z per hopping term and a ~10% slower matrix-vector product. The register layout changes. Rebuild anything keyed by rank or flat configuration. Use ``order="blocked"`` for the old layout.
-- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation) now forms the reduced density matrix of each term and computes ``tr(rho G)``. It now normalizes each term locally by default (``normalized=True``). With ``return_all=True`` it returns plain values, or ``(expec, trace)`` pairs with ``normalized="return"``.
-- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation) now requires ``max_bond``. Supply ``None`` explicitly for no limit, which is not recommended in 2D. The new 2D partial trace, expectation and environment methods also require it.
-- 2D [`partial_trace`](#TensorNetwork2DVector.partial_trace) and [`local_expectation`](#TensorNetwork2DVector.local_expectation) now use the 2D boundary or envs routes, with the same options as [`compute_partial_traces`](#TensorNetwork2DVector.compute_partial_traces). A PEPS previously used the arbitrary geometry versions, which take ``optimize`` for compressed contraction. Call [`TensorNetworkGenVector.partial_trace`](#TensorNetworkGenVector.partial_trace) or [`TensorNetworkGenVector.local_expectation`](#TensorNetworkGenVector.local_expectation) directly for those.
-- Partial traces format bra indices by swapping the leading ``k`` of each ket index for ``b``, for example ``"k1,2"`` becomes ``"b1,2"``. If any name is already used, they fall back to random uuids. This changes the index names from [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact), [`make_reduced_density_matrix`](#TensorNetworkGenVector.make_reduced_density_matrix) and the 3D partial traces. See [`get_bra_inds`](#get_bra_inds).
-- Cluster expectations now default to ``smudge=1e-12`` and ``optimize="auto-hq"``, matching cluster partial traces.
+**Decomposition and compression defaults**
 
+- [`array_split`](#array_split) and low-level rank-revealing decompositions now default to ``cutoff_mode="rel"`` instead of ``"rsum2"``. 1D ``zipup`` compression also defaults to ``"rel"``.
+- Randomized SVD and batched decompositions reject active cumulative cutoff modes. Use ``"abs"`` or ``"rel"`` instead.
 
-**Enhancements:**
+**Hilbert spaces and Hubbard models**
 
-- Support fermionic BP projector compression with ``method="projector", canonize="bp"``, and fermionic gates with [`D2BP.gate_`](#D2BP.gate_). BP messages are stored as positive fermionic operators so message updates and projector environments can use messages directly without square-root factorizations.
-- 1D tensor-network compression: add successive deterministic compression (``method="sdc"``) and the ``sdc-oversample``, ``sdcr``, and ``sdcr-oversample`` variants. These methods are based on https://arxiv.org/abs/2601.19650. ``sdc`` forms the low-rank left environments with ``method="svd:eig"``, whereas ``sdcr`` uses a cheap randomized SVD.
-- [`MatrixProductOperator.gate_sandwich_with_auto_swap`](#MatrixProductOperator.gate_sandwich_with_auto_swap): apply a two-site gate sandwich and keep the MPO in canonical form. The method tracks the orthogonality center and can strip the center tensor's exponent. For long-range gates, it swaps the sites together and then restores their positions.
-- 1D compression: ``src``, ``srcmps``, and ``fit`` now create random tensors with ``autoray.random.array`` (autoray v0.10.0 or newer). The tensors match the device and dtype. These methods and their oversampling variants accept a ``seed`` or random generator. By default, they use the backend's global random state.
-- [`svd_rand_truncated`](#svd_rand_truncated): add ``noise_dist`` to select the ``"normal"`` or ``"rademacher"`` random sketch distribution.
-- Split functions accept ``cutoff="auto"``. Exact decompositions use ``1e-10``, randomized SVD disables the cutoff.
-- [`svd_rand_truncated`](#svd_rand_truncated) supports ``"abs"`` and ``"rel"`` cutoffs on the sketched spectrum.
-- Batched ``"abs"`` and ``"rel"`` cutoffs treat the blocks as one spectrum and retain one common bond dimension.
-- Relative and absolute cutoffs support renormalization, including for batched decompositions.
-- 1D ``src`` and ``srcmps`` compression now default to ``cutoff=0.0``. ``sdcr`` leaves its cutoff disabled with the default randomized SVD.
-- The intermediate steps of ``zipup``, ``sdc``, and ``sdcr`` oversampling accept a separate ``cutoff_mode_oversample``. Zipup also accepts method-aware ``cutoff_oversample="auto"``.
-- 1D oversampling methods accept ``compress_opts_final`` for configuring the final direct sweep independently of the intermediate compression.
-- 1D compression: ``fit`` with ``bsz=1`` now supports fermionic tensor networks. It warns if the network contains odd-parity tensors because the result is likely incorrect.
-- 1D compression: ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src`` and their oversampling versions now handle long-range bonds directly (rather than inserting strings of identity tensors), and thus support `symmray` abelian and fermionic tensors.
-- 1D compression: ``dm`` no longer forms a site's density matrix when it is larger than the bound on its rank, for example when compressing one layer of a norm network. It uses a QR reduction instead (QR-SVD, https://arxiv.org/abs/2406.09769). For layered PEPS norm boundary contraction this reduces the cost from $O(\chi^3 D^6)$ to $O(\chi^3 D^4 + \chi^2 D^6)$, below the $O(\chi^3 D^5)$ of ``direct``. Fermionic networks are supported with ``symmray`` from ``468df4e``.
-- Gating: add a ``dagger`` option to [`tensor_network_gate_inds`](#tensor_network_gate_inds) (``tn.gate_inds``), [`tensor_network_gate_sandwich_inds`](#tensor_network_gate_sandwich_inds) (``tn.gate_sandwich_inds``), [`tensor_network_ag_gate`](#tensor_network_ag_gate) (``tn.gate``, ``tn.gate_sandwich``, ``tn.gate_upper``, and ``tn.gate_lower``), [`tensor_network_ag_gate_simple`](#tensor_network_ag_gate_simple) (``tn.gate_simple``, including its long-range variant), and [`TensorNetworkGenOperator.gate_sandwich_with_op_lazy`](#TensorNetworkGenOperator.gate_sandwich_with_op_lazy). This option applies $G^\dagger$ instead of $G$. For example, it changes $G A G^\dagger$ to $G^\dagger A G$ for Heisenberg evolution. It avoids manually reshaping and conjugate-transposing tensor gates.
-- Gating: add a matching ``transpose`` option to the functions above. It applies $G^T$ instead of $G$, without conjugation. [`MatrixProductState.gate_nonlocal`](#MatrixProductState.gate_nonlocal) also accepts this option and passes it to [`gate_with_submpo`](#MatrixProductState.gate_with_submpo).
-- [`Tensor.gate`](#Tensor.gate): rename ``transposed`` to ``transpose`` for consistency with ``dagger`` and the operator-network gating methods. The old name still works but raises ``FutureWarning``.
-- [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate): add ``dtype``, ``to_backend``, and ``convert_eager`` options, as supported by [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate). The operator is built only when an expectation is computed. At that time, conversion applies to the new identity PEPO, the observable, and each gate array used in the backward evolution.
-- [`HilbertSpace`](#HilbertSpace): support ``U1U1`` sectors with any ordering. Each species no longer needs a contiguous block of registers. A new ``species`` argument selects the conserved charge for each site. It also allows the short sector forms ``{species: filling}`` and ``(ka, kb)``, in addition to ``((na, ka), (nb, kb))``.
-- [`HilbertSpace`](#HilbertSpace): ``order`` accepts two presets. ``"blocked"`` puts each species in one contiguous block. ``"interleaved"`` alternates the species at each position.
-- Add [`LocalHamGen.get_trotter_gates`](#LocalHamGen.get_trotter_gates). It returns local gates for a first-, second-, or fourth-order Trotter approximation to $\exp(x H)$ over any number of steps. Terms are grouped into commuting layers. Each [`TrotterGate`](#TrotterGate) has ``frac``, ``layer``, and ``step`` attributes. It also unpacks as ``U, where``, so ``for U, where in gates: psi.gate_(U, where)`` works. Consecutive uses of the same layer are fused by default. Use [`trotter_schedule`](#trotter_schedule) to get only the product formula. [`LocalHam1D`](#LocalHam1D), [`LocalHam2D`](#LocalHam2D), and [`LocalHam3D`](#LocalHam3D) inherit this method.
-- [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized) and [`build_pepo_propagator_trotterized`](#LocalHam2D.build_pepo_propagator_trotterized): add an ``order`` option. Its default remains 1. The 1D method also gains the ``ordering`` option already supported by the 2D method. Both methods now use [`get_trotter_gates`](#LocalHamGen.get_trotter_gates) to build the gate sequence.
-- Belief propagation: all BP classes now accept ``diis`` and ``damping`` in both ``__init__`` and [`run`](#BeliefPropagationCommon.run). Values passed to ``run`` become the new defaults.
-- Add [`gen_gloops_edge_induced`](#gen_gloops_edge_induced) (``tn.gen_gloops_edge_induced``). It yields [`NetworkPatch`](#NetworkPatch) objects that contain each loop's tensors and bonds. Unlike [`gen_gloops`](#gen_gloops), it distinguishes loops that span the same tensors but use different bonds.
-- [`TN_from_strings`](#TN_from_strings): add ``join_prefer`` and ``join_avoid_loop_length``. These select string-end pairs by the length of the loop they would close. Length is the number of lines, or the number of tensors after site contraction. ``join_prefer="short"`` makes many small loops. When no loop can close, it prefers shorter string groups. ``"long"`` makes fewer, larger loops. ``join_avoid_loop_length`` sets the maximum length to avoid. It defaults to 2, which avoids loops made from parallel lines on one edge. Set it to 0 to disable loop avoidance. ``join_avoid_self_loops`` is deprecated. ``join_prefer`` does not support ``join="all"``.
-- Add hidden-cactus tensor networks: [`TN2D_rand_hidden_cactus`](#TN2D_rand_hidden_cactus), [`TN3D_rand_hidden_cactus`](#TN3D_rand_hidden_cactus), and [`TN_rand_hidden_cactus`](#TN_rand_hidden_cactus). They join hidden loops into a tree. This extends hidden correlations across the graph without changing lattice bond dimensions. Their exact contraction cost remains low. The corresponding [`TN_from_strings`](#TN_from_strings) option is ``join_trees``, off by default.
-- Add [`TN_rand_hidden_loop`](#TN_rand_hidden_loop), the arbitrary-graph version of [`TN2D_rand_hidden_loop`](#TN2D_rand_hidden_loop).
-- Fix [`tids_are_connected`](#TensorNetwork.tids_are_connected) so its result does not depend on tensor order.
-- Add [`MatrixProductState.from_product`](#MatrixProductState.from_product). [`MPS_product_state`](#MPS_product_state) now calls this method. It accepts block-sparse single-site vectors, e.g. from ``symmray``. Each new bond index is non-dual on the left and dual on the right. This makes the two ends contractible.
-- Add [`distance_from_overlaps`](#distance_from_overlaps) to compute normalized distances and infidelities directly from three precomputed overlaps.
-- Add [`TensorNetwork.insert_projectors_between_regions`](#TensorNetwork.insert_projectors_between_regions) to insert already computed projector arrays between tensor-network regions.
-- Infinite 2D generalized-loop expectations accept ``max_size`` and ``num_joins`` loop-generation options. Their ``info`` cache can be reused across different loop settings while the state, gauges, and operators are unchanged.
-- TEBD and simple update classes ([`TEBDGen`](#TEBDGen), [`SimpleUpdateGen`](#SimpleUpdateGen), [`TEBD2D`](#TEBD2D), [`SimpleUpdate`](#SimpleUpdate), and their subclasses) accept ``logdir``. The run then writes its progress data to ``"progress.json"`` in that directory every ``log_every`` sweeps. Use [`plot_progress_log`](#plot_progress_log) to plot a run from another process while it is still going, with ``watch=True`` to keep redrawing, whenever the file changes, until the run finishes, or [`load_progress_log`](#load_progress_log) to get the raw data.
-- TEBD and simple update classes: creating a file called ``"STOP"`` in ``logdir`` stops the run gracefully, after the current sweep. The file is removed once seen.
-- TEBD and simple update classes: the first interrupt (Ctrl-C) during [`evolve`](#TEBDSweepMixin.evolve) now also stops the run after the current sweep, rather than part way through it. A second interrupt stops immediately, as before. Set ``graceful_interrupt=False`` for the old behavior.
-- TEBD and simple update classes accept ``checkpoint_every``. When set, it saves the full run state to ``"checkpoint.pkl"`` in ``logdir``. A final checkpoint is also saved when [`evolve`](#TEBDSweepMixin.evolve) completes normally or stops gracefully. Set ``resume=True`` to continue from the checkpoint, or use ``from_checkpoint`` to load it directly. A resumed run gets its state and evolution options from the checkpoint. It skips initial setup, such as gauge equilibration. ``psi0`` and ``ham`` can be omitted. Supplying either raises a warning.
-- TEBD and simple update classes: ``log_every`` and ``checkpoint_every`` also accept a duration, such as ``"10mins"`` or ``"1h30m"``. The run then writes at most that often, rather than counting sweeps, which is useful when sweeps are very quick. See [`parse_time_spec`](#parse_time_spec).
-- Compression functions now accept tag *groups* in ``site_tags``. A tag in a group selects tensors with that tag. A nested sequence selects tensors with every tag. See [`parse_site_tag_groups`](#parse_site_tag_groups). The 1D, 2D, and arbitrary-geometry compression wrappers also accept custom `method` callables.
-- Add the ``quimb.tensor.environments`` module, to compute the environments of many blocks of sites or planes in one sweep, for open or periodic geometries:
-  - [`EnvironmentPlan`](#EnvironmentPlan) plans the moves, with the ``"tree"`` schedule, which never combines two environments, or the ``"cut"`` schedule, which uses linear work.
-  - [`gen_exact_environments`](#gen_exact_environments) and [`gen_compressed_environments`](#gen_compressed_environments) yield each environment as soon as it is ready. The compressed version uses a 1D, 2D or arbitrary geometry compressor, chosen with ``compress_fn``.
-  - [`execute_environment_plan`](#execute_environment_plan), [`all_blocks`](#all_blocks) and [`find_1d_block`](#find_1d_block).
-- 1D: partial traces and local expectations now also work for periodic MPS. Each dispatches on the geometry with ``route=None``, ``"canonical"`` or ``"envs"``:
-  - [`MatrixProductState.partial_trace`](#MatrixProductState.partial_trace) now gives the dense reduced density matrix, and [`compute_partial_traces`](#MatrixProductState.compute_partial_traces) gives many at once.
-  - [`compute_partial_traces_canonical`](#MatrixProductState.compute_partial_traces_canonical) and [`compute_partial_traces_via_envs`](#MatrixProductState.compute_partial_traces_via_envs) for each route.
-  - [`MatrixProductState.local_expectation`](#MatrixProductState.local_expectation), to go with [`compute_local_expectation`](#MatrixProductState.compute_local_expectation).
-  - [`TensorNetwork1D.gen_block_environments`](#TensorNetwork1D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork1D.compute_block_environments), for the exact environments of blocks of sites.
-  - [`TensorNetwork1D.is_cyclic`](#TensorNetwork1D.is_cyclic), to check whether the chain is periodic.
-- 2D: partial traces and local expectations now also work for periodic PEPS. Each dispatches on the geometry with ``route=None``, ``"boundary"`` or ``"envs"``, and takes the main options ``max_bond``, ``cutoff`` and ``method``:
-  - [`TensorNetwork2DVector.partial_trace`](#TensorNetwork2DVector.partial_trace) and [`compute_partial_traces`](#TensorNetwork2DVector.compute_partial_traces).
-  - [`compute_partial_traces_boundary`](#TensorNetwork2DVector.compute_partial_traces_boundary) and [`compute_partial_traces_via_envs`](#TensorNetwork2DVector.compute_partial_traces_via_envs) for each route.
-  - [`TensorNetwork2DVector.local_expectation`](#TensorNetwork2DVector.local_expectation) and [`compute_local_expectation_via_envs`](#TensorNetwork2DVector.compute_local_expectation_via_envs).
-  - [`TensorNetwork2D.gen_block_environments`](#TensorNetwork2D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork2D.compute_block_environments), for the compressed environments of blocks of rows or columns.
-  - [`compute_plaquette_environments_via_envs`](#TensorNetwork2D.compute_plaquette_environments_via_envs), for the environments of plaquettes, which can wrap around periodic boundaries.
-- 2D ``"envs"`` route: each plaquette is contracted approximately in a first direction, then along the strip this leaves. ``second_dense`` chooses whether the strip is contracted exactly, by default only for strips one plane wide. It also supports ``autogroup`` and ``first_contract``, as the boundary route does.
-- 2D ``"cluster_boundary"`` route: [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary) grows a rectangular cluster around the kept sites by ``max_distance``. It can insert simple update ``gauges``. It sweeps one boundary direction inward, then contracts the remaining network exactly. Clusters can cross periodic boundaries and use 1D compression methods. Also add [`compute_partial_traces_cluster_boundary`](#TensorNetwork2DVector.compute_partial_traces_cluster_boundary) and [`compute_local_expectation_cluster_boundary`](#TensorNetwork2DVector.compute_local_expectation_cluster_boundary).
-- [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary): add ``max_separation``, the number of lines left uncompressed on each side of the kept sites. ``0`` also compresses the kept line into a boundary, and ``0.5`` compresses its ket layer into one boundary and its bra layer into the other.
-- 2D [`contract_boundary`](#TensorNetwork2D.contract_boundary): with ``around``, ``max_separation`` now sets how far each side stops from the target region, instead of always one.
-- Add [`compute_partial_traces_exact`](#TensorNetworkGenVector.compute_partial_traces_exact) and [`compute_partial_traces_cluster`](#TensorNetworkGenVector.compute_partial_traces_cluster), to compute many reduced density matrices at once.
-- Partial traces accept ``get="tn"``, to return the uncontracted tensor network, and ``normalized="return"``, to return ``(rho, trace)`` without dividing by the trace. This includes [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact), [`partial_trace_cluster`](#TensorNetworkGenVector.partial_trace_cluster) and [`D2BP.partial_trace`](#D2BP.partial_trace).
-- 2D [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``method="full-bond"``: supply ``compress_opts``, for example ``compress_opts=dict(method="eigh")``, to configure the similarity decomposition, or use ``similarity_method`` as a shortcut.
-- 2D boundary contraction methods, such as [`contract_boundary`](#TensorNetwork2D.contract_boundary), [`compute_environments`](#TensorNetwork2D.compute_environments), [`compute_plaquette_environments`](#TensorNetwork2D.compute_plaquette_environments), [`compute_norm`](#TensorNetwork2DVector.compute_norm), [`normalize`](#TensorNetwork2DVector.normalize) and [`contract_ctmrg`](#TensorNetwork2D.contract_ctmrg), rename ``mode`` to ``method``. The old name still works but raises ``FutureWarning``. With ``mode="full-bond"``, a ``method`` given as well is taken as ``similarity_method``.
-- [`MatrixProductState.compute_local_expectation`](#MatrixProductState.compute_local_expectation): rename ``method`` to ``route``. The old name still works but raises ``FutureWarning``.
+- [`HilbertSpace`](#HilbertSpace): site ordering is now immutable. ``set_ordering`` raises ``TypeError``. Use [`with_ordering`](#HilbertSpace.with_ordering) to create a space with a different ordering.
+- [`fermi_hubbard_from_edges`](#fermi_hubbard_from_edges): default to ``order="interleaved"``, alternating spins at each coordinate to avoid MPO bond dimensions growing with system size, with slightly slower matrix-vector products. Rebuild anything keyed by rank or flat configuration. Use ``order="blocked"`` for the old layout.
+
+**Partial traces and local expectations**
+
+- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation): compute ``tr(rho G)`` from each term's reduced density matrix and normalize locally by default (``normalized=True``). With ``return_all=True``, return plain values, or ``(expec, trace)`` pairs with ``normalized="return"``.
+- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation) and the new 2D partial trace, expectation, and environment methods require ``max_bond``. Supply ``None`` explicitly for no limit, which is not recommended in 2D.
+- 2D [`partial_trace`](#TensorNetwork2DVector.partial_trace) and [`local_expectation`](#TensorNetwork2DVector.local_expectation) use the boundary or envs routes. For the previous arbitrary-geometry compressed contraction with ``optimize``, call [`TensorNetworkGenVector.partial_trace`](#TensorNetworkGenVector.partial_trace) or [`TensorNetworkGenVector.local_expectation`](#TensorNetworkGenVector.local_expectation) directly.
+- Partial traces derive bra index names by replacing a leading ``k`` with ``b``, falling back to random uuids on a name collision. This affects [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact), [`make_reduced_density_matrix`](#TensorNetworkGenVector.make_reduced_density_matrix), and 3D partial traces. See [`get_bra_inds`](#get_bra_inds).
+- Cluster expectations default to ``smudge=1e-12`` and ``optimize="auto-hq"``, matching cluster partial traces.
+
+### Enhancements
+
+#### Tensor decompositions
+
+- Split functions accept ``cutoff="auto"``: ``1e-10`` for exact decompositions, disabled for randomized SVD.
+- [`svd_rand_truncated`](#svd_rand_truncated): support ``"abs"`` and ``"rel"`` cutoffs on the sketched spectrum, and ``noise_dist="normal"`` or ``"rademacher"`` for the random sketch.
+- Batched ``"abs"`` and ``"rel"`` cutoffs treat blocks as one spectrum and retain a common bond dimension. Both modes support renormalization, including for batched decompositions.
+
+#### 1D compression and MPS
+
+- Add successive deterministic compression (``method="sdc"``), ``sdc-oversample``, and randomized variants ``sdcr`` and ``sdcr-oversample``, based on https://arxiv.org/abs/2601.19650.
+- ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src``, and their oversampling variants handle long-range bonds directly, supporting ``symmray`` abelian and fermionic tensors.
+- ``dm`` uses QR-SVD when a site's density matrix would exceed its rank bound, reducing layered PEPS norm boundary contraction costs (https://arxiv.org/abs/2406.09769), including for fermionic networks.
+- ``src``, ``srcmps``, ``fit``, and their oversampling variants accept a ``seed`` or random generator and match the backend's device and dtype (autoray v0.10.0 or newer). By default, use the backend's global random state.
+- ``src`` and ``srcmps`` default to ``cutoff=0.0``. ``sdcr`` leaves the cutoff disabled with its default randomized SVD.
+- ``zipup``, ``sdc``, and ``sdcr`` oversampling accept ``cutoff_mode_oversample``. Zipup also accepts ``cutoff_oversample="auto"``. All 1D oversampling methods accept ``compress_opts_final`` to configure the final direct sweep separately.
+- ``fit`` with ``bsz=1`` supports fermionic tensor networks, but warns for odd-parity tensors because results are likely incorrect.
+- Add [`MatrixProductState.from_product`](#MatrixProductState.from_product), also used by [`MPS_product_state`](#MPS_product_state), with support for block-sparse single-site vectors.
+- Compression functions accept tag groups in ``site_tags``; see [`parse_site_tag_groups`](#parse_site_tag_groups). The 1D, 2D, and arbitrary-geometry wrappers also accept custom ``method`` callables.
+
+#### Partial traces, environments, and 2D contraction
+
+- Add ``quimb.tensor.environments`` for computing many block or plane environments in one sweep on open or periodic geometries. [`EnvironmentPlan`](#EnvironmentPlan) supports ``"tree"`` and ``"cut"`` schedules; [`gen_exact_environments`](#gen_exact_environments) and [`gen_compressed_environments`](#gen_compressed_environments) yield environments as they become ready. Choose a 1D, 2D, or arbitrary-geometry compressor with ``compress_fn``.
+- 1D partial traces and local expectations support periodic MPS with ``route=None``, ``"canonical"``, or ``"envs"``. [`MatrixProductState.partial_trace`](#MatrixProductState.partial_trace) returns a dense reduced density matrix; [`compute_partial_traces`](#MatrixProductState.compute_partial_traces) computes many at once. Add [`local_expectation`](#MatrixProductState.local_expectation) alongside [`compute_local_expectation`](#MatrixProductState.compute_local_expectation), with explicit methods for each route.
+- Add [`TensorNetwork1D.gen_block_environments`](#TensorNetwork1D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork1D.compute_block_environments) for exact block environments, and [`is_cyclic`](#TensorNetwork1D.is_cyclic) to check for periodic chains.
+- 2D partial traces and local expectations support periodic PEPS with ``route=None``, ``"boundary"``, or ``"envs"`` and options ``max_bond``, ``cutoff``, and ``method``. Add [`TensorNetwork2DVector.partial_trace`](#TensorNetwork2DVector.partial_trace), [`compute_partial_traces`](#TensorNetwork2DVector.compute_partial_traces), and [`local_expectation`](#TensorNetwork2DVector.local_expectation), with explicit methods for each route.
+- Add [`TensorNetwork2D.gen_block_environments`](#TensorNetwork2D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork2D.compute_block_environments) for compressed row or column block environments, and [`compute_plaquette_environments_via_envs`](#TensorNetwork2D.compute_plaquette_environments_via_envs) for plaquettes, including those crossing periodic boundaries.
+- The 2D ``"envs"`` route accepts ``second_dense`` to control exact contraction of the remaining strip, by default only for strips one plane wide. It also supports ``autogroup`` and ``first_contract``.
+- Add the 2D ``"cluster_boundary"`` route: [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary), [`compute_partial_traces_cluster_boundary`](#TensorNetwork2DVector.compute_partial_traces_cluster_boundary), and [`compute_local_expectation_cluster_boundary`](#TensorNetwork2DVector.compute_local_expectation_cluster_boundary). Control cluster size with ``max_distance``, optionally insert simple-update ``gauges``, and use 1D boundary compression methods. Clusters can cross periodic boundaries.
+- [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary) accepts ``max_separation`` to control uncompressed lines around kept sites. ``0`` compresses the kept line into a boundary; ``0.5`` compresses its ket and bra layers into opposite boundaries. [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``around`` also respects ``max_separation`` on each side of the target region.
+- Add [`compute_partial_traces_exact`](#TensorNetworkGenVector.compute_partial_traces_exact) and [`compute_partial_traces_cluster`](#TensorNetworkGenVector.compute_partial_traces_cluster) for computing many reduced density matrices at once.
+- Partial traces accept ``get="tn"`` for an uncontracted network and ``normalized="return"`` for ``(rho, trace)`` without normalization, including exact, cluster, and [`D2BP.partial_trace`](#D2BP.partial_trace) methods.
+- 2D [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``method="full-bond"`` accepts ``compress_opts`` to configure the similarity decomposition, or ``similarity_method`` as a shortcut.
+
+#### Gates and circuits
+
+- Add ``dagger`` and ``transpose`` options to tensor-network gating methods, including [`tensor_network_gate_inds`](#tensor_network_gate_inds), [`tensor_network_gate_sandwich_inds`](#tensor_network_gate_sandwich_inds), [`tensor_network_ag_gate`](#tensor_network_ag_gate), [`tensor_network_ag_gate_simple`](#tensor_network_ag_gate_simple), and [`gate_sandwich_with_op_lazy`](#TensorNetworkGenOperator.gate_sandwich_with_op_lazy). These apply $G^\dagger$ or $G^T$ instead of $G$. [`MatrixProductState.gate_nonlocal`](#MatrixProductState.gate_nonlocal) also accepts ``transpose``.
+- Add [`MatrixProductOperator.gate_sandwich_with_auto_swap`](#MatrixProductOperator.gate_sandwich_with_auto_swap) for two-site gate sandwiches that preserve canonical form, including long-range gates, with optional exponent stripping.
+- [`CircuitPEPOSimpleUpdate`](#CircuitPEPOSimpleUpdate): add ``dtype``, ``to_backend``, and ``convert_eager`` options, matching [`CircuitPEPSSimpleUpdate`](#CircuitPEPSSimpleUpdate).
+
+#### Time evolution and run management
+
+- Add [`LocalHamGen.get_trotter_gates`](#LocalHamGen.get_trotter_gates) for first-, second-, and fourth-order Trotter approximations over multiple steps, inherited by 1D, 2D, and 3D Hamiltonians. [`TrotterGate`](#TrotterGate) objects unpack as ``U, where``. Consecutive uses of the same commuting layer are fused by default. [`trotter_schedule`](#trotter_schedule) returns the product formula alone.
+- [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized) and [`build_pepo_propagator_trotterized`](#LocalHam2D.build_pepo_propagator_trotterized) accept ``order`` (default 1). The 1D method also gains ``ordering``, matching the 2D method.
+- TEBD and simple-update classes accept ``logdir`` and ``log_every`` to write ``progress.json``. Use [`plot_progress_log`](#plot_progress_log) with ``watch=True`` to monitor a running job, or [`load_progress_log`](#load_progress_log) for raw data.
+- These classes accept ``checkpoint_every`` to save ``checkpoint.pkl`` in ``logdir``, including a final checkpoint on normal or graceful completion. Continue with ``resume=True`` or load with ``from_checkpoint``; resumed runs restore state and evolution options, so omit ``psi0`` and ``ham``.
+- ``log_every`` and ``checkpoint_every`` accept sweep counts or durations such as ``"10mins"``; see [`parse_time_spec`](#parse_time_spec).
+- A ``STOP`` file in ``logdir`` or the first Ctrl-C during [`evolve`](#TEBDSweepMixin.evolve) stops the run after the current sweep. The file is removed once seen; a second interrupt stops immediately. Use ``graceful_interrupt=False`` for the previous interrupt behavior.
+
+#### Belief propagation and loop expansions
+
+- Support fermionic BP projector compression with ``method="projector", canonize="bp"`` and fermionic gates with [`D2BP.gate_`](#D2BP.gate_).
+- All BP classes accept ``diis`` and ``damping`` in both ``__init__`` and [`run`](#BeliefPropagationCommon.run). Values passed to ``run`` become the new defaults.
+- ``D1BP``, ``D2BP``, ``L1BP``, ``L2BP``, and [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple) accept ``sweep_order``, with an efficient alternating schedule for trees. See [`SweepScheduler`](#SweepScheduler) for other options.
+- Add [`gen_gloops_edge_induced`](#networking.gen_gloops_edge_induced) (``tn.gen_gloops_edge_induced``), yielding [`NetworkPatch`](#NetworkPatch) objects that distinguish loops using different bonds on the same tensors.
+- Infinite 2D generalized-loop expectations accept ``max_size`` and ``num_joins``. Reuse their ``info`` cache across loop settings while the state, gauges, and operators remain unchanged.
+
+#### Network construction
+
+- [`TN_from_strings`](#TN_from_strings): add ``join_prefer="short"`` or ``"long"`` to favor smaller or larger loops, and ``join_avoid_loop_length`` (default 2) to avoid loops up to a given length. Set it to 0 to disable loop avoidance. ``join_prefer`` does not support ``join="all"``.
+- Add hidden-cactus networks [`TN2D_rand_hidden_cactus`](#TN2D_rand_hidden_cactus), [`TN3D_rand_hidden_cactus`](#TN3D_rand_hidden_cactus), and [`TN_rand_hidden_cactus`](#TN_rand_hidden_cactus) to extend hidden correlations while preserving lattice bond dimensions and low exact contraction cost. Also available through ``TN_from_strings(..., join_trees=True)``.
+- Add [`TN_rand_hidden_loop`](#TN_rand_hidden_loop), the arbitrary-graph counterpart of [`TN2D_rand_hidden_loop`](#TN2D_rand_hidden_loop).
+- Add [`TensorNetwork.insert_projectors_between_regions`](#TensorNetwork.insert_projectors_between_regions) to insert precomputed projector arrays between regions.
+
+#### Hilbert spaces and utilities
+
+- [`HilbertSpace`](#HilbertSpace): support ``U1U1`` sectors with any site ordering and a ``species`` argument selecting each site's conserved charge. Accept sector forms ``{species: filling}``, ``(ka, kb)``, and ``((na, ka), (nb, kb))``. ``order="blocked"`` groups species; ``"interleaved"`` alternates them at each position.
+- Add [`distance_from_overlaps`](#distance_from_overlaps) for normalized distances and infidelities from three precomputed overlaps.
+- [`save_to_disk`](#save_to_disk): add ``atomic`` to prevent partially written targets.
+
+### Deprecations
+
+- [`Tensor.gate`](#Tensor.gate): rename ``transposed`` to ``transpose``. The old name raises ``FutureWarning``.
+- 2D boundary contraction, environment, and norm methods: rename ``mode`` to ``method``, with ``FutureWarning`` for the old name. With ``mode="full-bond"``, a ``method`` supplied as well is taken as ``similarity_method``.
+- [`MatrixProductState.compute_local_expectation`](#MatrixProductState.compute_local_expectation): rename ``method`` to ``route``, with ``FutureWarning`` for the old name.
 - Rename ``MatrixProductState.partial_trace_to_dense_canonical`` to [`partial_trace_canonical`](#MatrixProductState.partial_trace_canonical). The old name still works but raises a warning.
-- [`save_to_disk`](#save_to_disk): add ``atomic`` option, to write to a temporary file and then rename it, so the target is never left partly written.
-- Belief propagation (``D1BP``, ``D2BP``, ``L1BP``, ``L2BP``) and [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple): add ``sweep_order``, which automatically uses an efficient alternating schedule for trees. See unified handler [`SweepScheduler`](#SweepScheduler) for other options.
+- [`TN_from_strings`](#TN_from_strings): deprecate ``join_avoid_self_loops`` in favor of ``join_avoid_loop_length``.
 
+### Bug fixes
 
-**Bug fixes:**
+#### Operators and time evolution
 
-- fixed [`SpinHam1D.build_sparse`](#SpinHam1D.build_sparse) with ``cyclic=True`` from missing the last term ({issue}`419`)
-- [`ikron`](#ikron): raise ``ValueError`` for indices that are out of range or repeated. These placed fewer operators than given, with no error.
-- [`D1BP.contract_loop_series_expansion`](#D1BP.contract_loop_series_expansion) and [`D2BP.contract_loop_series_expansion`](#D2BP.contract_loop_series_expansion): sum all distinct loops in each region, including loops that do not excite every bond. Also use the intensive free energy in loop-series suppression factors. Multi-excitation corrections now raise ``RuntimeError`` if they do not converge.
-- [`MPS_product_state`](#MPS_product_state): reshape single-site vectors through the backend-neutral interface. The previous ``x.reshape(*shape)`` call raised ``TypeError`` for array libraries that require a single shape tuple.
-- [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): use each term's register, not its site label, as the ``ikron`` index. The previous code silently returned the wrong matrix when these values differed, e.g. with non-identity ordering or non-integer site labels.
-- [`HilbertSpace`](#HilbertSpace): prevent site reordering from leaving the rank-to-configuration mappings in the old order. In spaces with mixed dimensions, this decoded ranks into invalid configurations. Site ordering is now immutable, as described above.
-- [`compute_oblique_projectors`](#compute_oblique_projectors): damp inverse singular values at ``max(s) * eps`` instead of dividing by them directly. Rank-deficient environments can retain zero singular values when ``cutoff=0.0``. These values previously produced ``inf`` or ``nan`` projectors. The shared diagonal division helpers use the same damping. This also applies to [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges="inverse"``.
-- [`safe_inverse`](#safe_inverse): compute a scalar maximum for a single vector. The previous last-axis reduction broadcast the result back. This caused a ``TypeError`` in ``mode="projector"`` boundary contractions with block-sparse backends such as ``symmray``.
-- 1D compression: fix ``sdc`` and ``sdc-oversample`` for fermionic tensor networks.
-- 3D boundary contraction: remove temporary site tags from replaced tensors, including tensors shared with cached environments.
-- [`tensor_split`](#tensor_split): fix ``method='svd:rand'`` for complex and single precision arrays: use autoray random.array interface to match dtype and device.
-- [`tensor_split`](#tensor_split): fix ``method='svd:eig'`` with nonzero ``cutoff`` for single precision and numba
-- 1D compression: fix ``dm`` for fermionic tensor networks, including mixed bond orientations. Its eigendecomposition now keeps the same subspace as a direct SVD.
-- 1D compression: fix ``fit`` for fermionic tensor networks. Local updates now include dual-axis phases.
-- [`D2BP.compress`](#D2BP.compress) and [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric): preserve positive messages and full-rank identity matrices for fermionic tensor networks.
-- [`TensorNetwork.conj`](#TensorNetwork.conj): use ``output_inds`` to select the global output legs for fermionic conjugation phases. This also works for subnetworks.
-- [`Tensor.conj`](#Tensor.conj): add the same ``output_inds`` control for a single tensor.
-- [`TensorNetwork.conj`](#TensorNetwork.conj) and [`Tensor.conj`](#Tensor.conj): treat the dummy modes of odd parity fermionic arrays as outer legs, unless paired within the network. *Already paired* modes are 'vritually conjugated' / relabelled so they can be combined with the original network.
-- Projector compression (``method="projector"``) of odd parity fermionic norm networks: fix projectors coming out as zero, for every ``canonize`` option.
-- 1D compression: fix truncated ``dm`` compression of odd parity fermionic norm networks.
-- SRC compression: use QR, not SVD, by default to orthogonalize the sketched columns.
-- [`TEBD`](#TEBD): fix ``order=4``, which was only second-order accurate. The Suzuki weight was ``1 / (4 * 4**(1/3))`` instead of ``1 / (4 - 4**(1/3))``. The method now converges at fourth order. For a Heisenberg chain with ``dt=0.05``, it is about 1,000 times more accurate. The correct weights include a negative value, so part of each fourth-order step now evolves backward. [`trotter_schedule`](#trotter_schedule) now supplies the step schedule. ``order=1`` is also accepted.
-- [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized): apply the wrapping term of a cyclic chain with its sites in the correct order. The old order caused error linear in ``x`` instead of quadratic. Terms that are symmetric under a site swap, such as Heisenberg terms, were not affected.
-- [`tensor_network_distance`](#tensor_network_distance): use the magnitude of complex overlaps when computing infidelity. Previously it used only the real part, making infidelity depend incorrectly on the relative phase.
-- [`D2BP.normalize_tensors`](#D2BP.normalize_tensors) refreshes cached contraction inputs after rescaling tensors. Single-site [`D2BP.gate_`](#D2BP.gate_) refreshes expressions, distinct supplied networks are rejected to keep cached state consistent, and complex two-site gates store both messages in bra-ket order.
-- [`D2BP.gauge_temp`](#D2BP.gauge_temp) restores gauges when its body raises. Message conditioning and gauge insertion scale `smudge` by the largest eigenvalue, including spectra stored in unsorted symmetry blocks.
-- [`FullUpdate`](#FullUpdate): ``compute_energy`` now reuses its cached plaquette map, rather than rebuilding it.
-- [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact) with ``get="tensor"`` and ``normalized=True`` no longer raises ``AttributeError``.
-- [`local_expectation_exact`](#TensorNetworkGenVector.local_expectation_exact), [`local_expectation_cluster`](#TensorNetworkGenVector.local_expectation_cluster), [`partial_trace_cluster`](#TensorNetworkGenVector.partial_trace_cluster) and the arbitrary geometry [`partial_trace`](#TensorNetworkGenVector.partial_trace) and [`local_expectation`](#TensorNetworkGenVector.local_expectation) now accept a single site as ``where``, instead of raising ``TypeError``.
-- [`local_expectation_cluster`](#TensorNetworkGenVector.local_expectation_cluster) with ``max_bond`` now works on an MPS.
-- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation): two site terms given in reverse order, for example ``((1, 0), (0, 0))``, no longer raise ``KeyError`` with the boundary route.
-- [`compute_local_expectation_exact`](#TensorNetworkGenVector.compute_local_expectation_exact) and [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster): with ``normalized="return"`` and ``return_all=False``, sum the normalized expectations instead of concatenating expectation/trace tuples.
-- [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster) and other methods that compute terms one at a time now complete the progress bar.
-- Oblique projector compression, e.g. [`L2BP.compress`](#L2BP.compress), CTMRG and HOTRG: fix ``shape-mismatch`` errors with ``symmray`` block sparse arrays, by not fusing the bond indices.
+- [`SpinHam1D.build_sparse`](#SpinHam1D.build_sparse): include the last term with ``cyclic=True`` ({issue}`419`).
+- [`ikron`](#ikron): raise ``ValueError`` for out-of-range or repeated indices, which previously placed fewer operators than supplied without an error.
+- [`build_matrix_ikron`](#SparseOperatorBuilder.build_matrix_ikron): fix incorrect matrices with non-identity ordering or non-integer site labels.
+- [`HilbertSpace`](#HilbertSpace): prevent incorrect rank-to-configuration mappings after reordering, including invalid configurations for mixed dimensions. Ordering is now immutable, as described above.
+- [`TEBD`](#TEBD): fix ``order=4`` to achieve fourth-order accuracy. Correct Suzuki weights include backward evolution during part of each step. Also accept ``order=1``.
+- [`build_mpo_propagator_trotterized`](#LocalHam1D.build_mpo_propagator_trotterized): fix cyclic wrapping terms that are not symmetric under a site swap.
+- [`FullUpdate`](#FullUpdate): reuse the cached plaquette map in ``compute_energy``.
+
+#### Decompositions and compression
+
+- [`compute_oblique_projectors`](#compute_oblique_projectors): avoid ``inf`` or ``nan`` projectors for rank-deficient environments with ``cutoff=0.0``. The same fix applies to shared diagonal division helpers and [`D2BP.gauge_insert`](#D2BP.gauge_insert) with ``return_gauges="inverse"``.
+- [`safe_inverse`](#safe_inverse): fix ``TypeError`` in projector boundary contractions with block-sparse backends such as ``symmray``.
+- [`tensor_split`](#tensor_split): fix ``method="svd:rand"`` for complex and single-precision arrays, preserving dtype and device, and ``method="svd:eig"`` with nonzero ``cutoff`` for single precision and Numba.
+- Oblique projector compression, including [`L2BP.compress`](#L2BP.compress), CTMRG, and HOTRG: fix ``shape-mismatch`` errors with ``symmray`` block-sparse arrays.
+- 3D boundary contraction: remove temporary site tags from replaced tensors, including those shared with cached environments.
+
+#### Fermionic tensors
+
+- 1D compression: fix ``sdc``, ``sdc-oversample``, and ``fit`` for fermionic networks, and ``dm`` for mixed bond orientations and truncated odd-parity norm networks.
+- Projector compression (``method="projector"``): fix zero projectors for odd-parity fermionic norm networks with every ``canonize`` option.
+- [`D2BP.compress`](#D2BP.compress) and [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric): preserve positive messages and full-rank identity matrices for fermionic networks.
+- [`TensorNetwork.conj`](#TensorNetwork.conj) and [`Tensor.conj`](#Tensor.conj): add ``output_inds`` to select output legs for fermionic conjugation phases, including subnetworks. Fix conjugation of paired and unpaired odd-parity dummy modes.
+
+#### Belief propagation and overlaps
+
+- [`D1BP.contract_loop_series_expansion`](#D1BP.contract_loop_series_expansion) and [`D2BP.contract_loop_series_expansion`](#D2BP.contract_loop_series_expansion): include all distinct loops in each region and correct suppression factors. Multi-excitation corrections raise ``RuntimeError`` if they fail to converge.
+- [`D2BP.normalize_tensors`](#D2BP.normalize_tensors) and single-site [`D2BP.gate_`](#D2BP.gate_): keep contractions consistent after updates. Reject distinct supplied networks, and fix message ordering for complex two-site gates.
+- [`D2BP.gauge_temp`](#D2BP.gauge_temp): restore gauges when its body raises. Fix relative ``smudge`` scaling for unsorted symmetry-block spectra.
+- [`tensor_network_distance`](#tensor_network_distance): remove incorrect dependence of infidelity on relative phase.
+
+#### Partial traces and general tensor operations
+
+- [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact): fix ``AttributeError`` with ``get="tensor"`` and ``normalized=True``.
+- Exact, cluster, and arbitrary-geometry partial traces and local expectations accept a single site as ``where`` instead of raising ``TypeError``.
+- [`local_expectation_cluster`](#TensorNetworkGenVector.local_expectation_cluster): support ``max_bond`` on MPS.
+- 2D [`compute_local_expectation`](#TensorNetwork2DVector.compute_local_expectation): accept reversed two-site terms without ``KeyError`` in the boundary route.
+- [`compute_local_expectation_exact`](#TensorNetworkGenVector.compute_local_expectation_exact) and [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster): correctly sum normalized expectations with ``normalized="return"`` and ``return_all=False``. Methods that compute terms individually also complete their progress bars.
+- [`MPS_product_state`](#MPS_product_state): fix ``TypeError`` for backends requiring a single shape tuple when reshaping single-site vectors.
+- [`TensorNetwork.tids_are_connected`](#TensorNetwork.tids_are_connected): make results independent of tensor order.
 
 
 ## v1.15.0 (2026-08-10)
