@@ -336,8 +336,7 @@ class BeliefPropagationCommon:
         while not self.converged and it < max_iterations:
             self._maybe_contract()
 
-            # perform a single iteration of BP
-            # we supply tol here for use with local convergence
+            # pass tol for local convergence checks
             result = self.iterate(tol=tol)
 
             if self._diis is not None:
@@ -363,8 +362,11 @@ class BeliefPropagationCommon:
                 pbar.set_description(msg, refresh=False)
                 pbar.update()
 
-            # check covergence criteria
+            # check convergence
             self.converged |= max_mdiff < tol_abs
+            if (self._diis is None) and (tol_abs >= tol):
+                # no pending updates means changes above tol have propagated
+                self.converged |= result.get("npending", None) == 0
             if tol_rolling_diff > 0.0:
                 # check rolling mean convergence
                 rdm.update(max_mdiff)

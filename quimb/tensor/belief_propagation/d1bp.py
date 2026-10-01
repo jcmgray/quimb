@@ -15,8 +15,7 @@ import autoray as ar
 
 from quimb.tensor import Tensor, TensorNetwork, rand_uuid
 from quimb.tensor.contraction import array_contract
-from quimb.tensor.networking import NetworkPatch
-from quimb.utils import oset
+from quimb.tensor.networking import NetworkPatch, SweepScheduler
 
 from .bp_common import (
     BeliefPropagationCommon,
@@ -79,39 +78,35 @@ class D1BP(BeliefPropagationCommon):
         The initial messages to use, effectively defaults to all ones if not
         specified.
     damping : float or callable, optional
-        The damping factor to apply to messages. This simply mixes some part
-        of the old message into the new one, with the final message being
-        ``damping * old + (1 - damping) * new``. This makes convergence more
-        reliable but slower.
+        Mix old and new messages as ``damping * old + (1 - damping) * new``.
+        This can make convergence more reliable but slower.
     diis : bool or dict, optional
-        Whether to use direct inversion in the iterative subspace to help
-        converge the messages by extrapolating to low error guesses. If a
-        dict, should contain options for the DIIS algorithm. The relevant
-        options are {`max_history`, `beta`, `rcond`}.
+        Use direct inversion in the iterative subspace (DIIS) to estimate
+        messages with lower error. A dict can contain DIIS options:
+        ``max_history``, ``beta``, ``rcond``.
     update : {'sequential', 'parallel'}, optional
-        Whether to update messages sequentially (newly computed messages are
-        immediately used for other updates in the same iteration round) or in
-        parallel (all messages are comptued using messages from the previous
-        round only). Sequential generally helps convergence but parallel can
-        possibly converge to differnt solutions.
+        With 'sequential', use new messages in later updates of the same
+        sweep. With 'parallel', use only messages from the previous sweep.
+        Sequential updates usually help convergence. Parallel updates can
+        converge to different solutions.
+    sweep_order : {'auto', 'alternate', 'fixed', None}, optional
+        Sequential update order. Use 'alternate' to reverse each sweep,
+        starting reversed, or 'fixed' to keep the same order. With 'auto',
+        alternate on graphs with no loops, else use a fixed order. With None,
+        use reverse insertion order. See :class:`.SweepScheduler`.
     normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
-        How to normalize messages after each update. If None choose
-        automatically. If a callable, it should take a message and return the
-        normalized message. If a string, it should be one of 'L1', 'L2',
-        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
-        but also normalizes the phase of the message, by default used for
-        complex dtypes.
+        Norm to use after each update. With None, choose automatically.
+        Callables should take a message and return its normalized form.
+        'L2phased' also normalizes the phase, and is the default for complex
+        dtypes.
     distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
-        How to compute the distance between messages to check for convergence.
-        If None choose automatically. If a callable, it should take two
-        messages and return the distance. If a string, it should be one of
-        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
-        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
-        messages, by default used for complex dtypes if phased normalization is
-        not already being used.
+        Distance between messages to check convergence. With None, choose
+        automatically. Callables should take two messages and return their
+        distance. 'L2phased' normalizes their phases before computing the L2
+        distance. It is the default for complex dtypes when normalization
+        does not already fix the phase.
     local_convergence : bool, optional
-        Whether to allow messages to locally converge - i.e. if all their
-        input messages have converged then stop updating them.
+        Stop updating messages whose input messages have converged.
     contract_every : int, optional
         If not None, 'contract' (via BP) the tensor network every
         ``contract_every`` iterations. The resulting values are stored in
@@ -139,6 +134,7 @@ class D1BP(BeliefPropagationCommon):
         damping=0.0,
         diis=False,
         update="sequential",
+        sweep_order="auto",
         normalize=None,
         distance=None,
         local_convergence=True,
@@ -163,6 +159,16 @@ class D1BP(BeliefPropagationCommon):
         )
 
         self.local_convergence = local_convergence
+        self.sweeper = SweepScheduler(
+            nodes=self.tn.tensor_map,
+            edges=[
+                tuple(tids)
+                for tids in self.tn.ind_map.values()
+                if len(tids) == 2
+            ],
+            key_to_nodes=lambda tid: (tid,),
+            sweep_order=sweep_order,
+        )
 
         if callable(messages):
             self.messages = initialize_messages(self.tn, messages)
@@ -171,8 +177,7 @@ class D1BP(BeliefPropagationCommon):
         else:
             self.messages = messages
 
-        # record which messages touch which tids, for efficient updates
-        self.touched = oset()
+        # pair messages sent in opposite directions
         self.key_pairs = {}
         for ix, tids in tn.ind_map.items():
             if len(tids) != 2:
@@ -182,16 +187,17 @@ class D1BP(BeliefPropagationCommon):
             self.key_pairs[ix, tida] = (ix, tidb)
 
     def iterate(self, tol=5e-6):
-        if (not self.local_convergence) or (not self.touched):
-            # assume if asked to iterate that we want to check all messages
-            self.touched = oset(self.tn.tensor_map)
+        if (not self.local_convergence) or (not self.sweeper.touched):
+            # check all messages when none are marked for update
+            self.sweeper.touch(self.tn.tensor_map)
 
-        ncheck = len(self.touched)
+        ncheck = 0
         nconv = 0
         max_mdiff = -1.0
-        new_touched = oset()
 
         def _compute_ms(tid):
+            nonlocal ncheck
+            ncheck += 1
             t = self.tn.tensor_map[tid]
             ms = [self.messages[ix, tid] for ix in t.inds]
             coo = parse_coo(t.data)
@@ -212,18 +218,15 @@ class D1BP(BeliefPropagationCommon):
 
             old_m = self.messages[key]
 
-            # pre-damp distance
+            # measure change before damping
             mdiff = self._distance_fn(old_m, new_m)
 
             if self.damping:
                 new_m = self._damping_fn(old_m, new_m)
 
-            # # post-damp distance
-            # mdiff = self._distance_fn(old_m, new_m)
-
             if mdiff > tol:
-                # mark distination tid for update
-                new_touched.add(key[1])
+                # update messages from the destination tensor
+                self.sweeper.touch((key[1],))
             else:
                 nconv += 1
 
@@ -231,30 +234,26 @@ class D1BP(BeliefPropagationCommon):
             self.messages[key] = new_m
 
         if self.update == "sequential":
-            # compute each new message and immediately re-insert it
-            while self.touched:
-                tid = self.touched.pop()
+            # use each new message in subsequent updates
+            for tid in self.sweeper.sweep():
                 keys, new_ms = _compute_ms(tid)
                 for key, new_m in zip(keys, new_ms):
                     _update_m(key, new_m)
 
         elif self.update == "parallel":
             new_data = {}
-            # compute all new messages
-            while self.touched:
-                tid = self.touched.pop()
+            # compute all messages before updating any
+            for tid in self.sweeper.sweep():
                 keys, new_ms = _compute_ms(tid)
                 for key, new_m in zip(keys, new_ms):
                     new_data[key] = new_m
-            # insert all new messages
             for key, new_m in new_data.items():
                 _update_m(key, new_m)
-
-        self.touched = new_touched
 
         return {
             "nconv": nconv,
             "ncheck": ncheck,
+            "npending": len(self.sweeper.touched),
             "max_mdiff": max_mdiff,
         }
 
@@ -775,20 +774,16 @@ def contract_d1bp(
     update : {'sequential', 'parallel'}, optional
         Whether to update messages sequentially or in parallel.
     normalize : {'L1', 'L2', 'L2phased', 'Linf', callable}, optional
-        How to normalize messages after each update. If None choose
-        automatically. If a callable, it should take a message and return the
-        normalized message. If a string, it should be one of 'L1', 'L2',
-        'L2phased', 'Linf' for the corresponding norms. 'L2phased' is like 'L2'
-        but also normalizes the phase of the message, by default used for
-        complex dtypes.
+        Norm to use after each update. With None, choose automatically.
+        Callables should take a message and return its normalized form.
+        'L2phased' also normalizes the phase, and is the default for complex
+        dtypes.
     distance : {'L1', 'L2', 'L2phased', 'Linf', 'cosine', callable}, optional
-        How to compute the distance between messages to check for convergence.
-        If None choose automatically. If a callable, it should take two
-        messages and return the distance. If a string, it should be one of
-        'L1', 'L2', 'L2phased', 'Linf', or 'cosine' for the corresponding
-        norms. 'L2phased' is like 'L2' but also normalizes the phases of the
-        messages, by default used for complex dtypes if phased normalization is
-        not already being used.
+        Distance between messages to check convergence. With None, choose
+        automatically. Callables should take two messages and return their
+        distance. 'L2phased' normalizes their phases before computing the L2
+        distance. It is the default for complex dtypes when normalization
+        does not already fix the phase.
     tol_abs : float, optional
         The absolute convergence tolerance for maximum message update
         distance, if not given then taken as ``tol``.
@@ -798,8 +793,7 @@ def contract_d1bp(
         running when the messages are just bouncing around the same level,
         without any overall upward or downward trends, roughly speaking.
     local_convergence : bool, optional
-        Whether to allow messages to locally converge - i.e. if all their
-        input messages have converged then stop updating them.
+        Stop updating messages whose input messages have converged.
     strip_exponent : bool, optional
         Whether to return the mantissa and exponent separately.
     check_zero : bool, optional

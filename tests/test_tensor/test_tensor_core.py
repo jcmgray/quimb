@@ -1858,6 +1858,41 @@ class TestTensorNetwork:
         assert info == {}
         assert np.linalg.norm(next(iter(g2.values()))) == pytest.approx(1.0)
 
+    @pytest.mark.parametrize("sweep_order", ["auto", "alternate", "fixed"])
+    def test_gauge_all_simple_disconnected(self, sweep_order):
+        # one sweep should gauge the bonds of every component
+        tna = qtn.MPS_rand_state(4, 3, seed=42)
+        tnb = qtn.MPS_rand_state(4, 3, seed=43).reindex_sites_("q{}")
+        tn = tna | tnb
+        gauges = {}
+        tn.gauge_all_simple(
+            max_iterations=1, gauges=gauges, sweep_order=sweep_order
+        )
+        assert set(gauges) == set(tn.inner_inds())
+
+    def test_gauge_all_simple_local_restart(self):
+        # changes at the middle site require new gauges on both sides
+        psi = qtn.MPS_rand_state(16, 4, seed=42)
+        gauges = {}
+        psi.gauge_all_simple_(max_iterations=1000, tol=1e-12, gauges=gauges)
+        psi.isel_({psi.site_ind(8): 0})
+        ref = psi.copy()
+        gauges_ref = dict(gauges)
+        ref.gauge_all_simple_(
+            max_iterations=1000, tol=1e-12, gauges=gauges_ref
+        )
+        info = {}
+        psi.gauge_all_simple_(
+            max_iterations=1000,
+            tol=1e-10,
+            gauges=gauges,
+            touched_tids=psi._get_tids_from_tags("I8"),
+            info=info,
+        )
+        assert info["iterations"] <= 3
+        for ix, g in gauges_ref.items():
+            assert_allclose(gauges[ix], g, atol=1e-8)
+
     def test_cut_bond(self):
         ta = qtn.rand_tensor((2, 2, 2), inds="abc", tags="A")
         tb = qtn.rand_tensor((2, 2, 2), inds="cde", tags="B")

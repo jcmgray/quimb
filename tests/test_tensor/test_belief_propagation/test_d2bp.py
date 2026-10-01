@@ -240,7 +240,7 @@ class TestMessageConditioner:
     def test_properties_update_conditioner(self):
         tn = qtn.TN_rand_tree(4, 2, 2, seed=1)
         bp = qbp.D2BP(tn)
-        bp.touched.clear()
+        bp.sweeper.touched.clear()
 
         bp.power = 0.5
         assert bp.power == 0.5
@@ -249,9 +249,9 @@ class TestMessageConditioner:
             0.0,
             bp.backend,
         )
-        assert set(bp.touched) == set(bp.exprs)
+        assert set(bp.sweeper.touched) == set(bp.exprs)
 
-        bp.touched.clear()
+        bp.sweeper.touched.clear()
         bp.smudge = 0.1
         assert bp.smudge == 0.1
         assert bp._message_conditioner is _get_message_conditioner(
@@ -259,7 +259,7 @@ class TestMessageConditioner:
             0.1,
             bp.backend,
         )
-        assert set(bp.touched) == set(bp.exprs)
+        assert set(bp.sweeper.touched) == set(bp.exprs)
 
 
 class TestConditionedMessageStore:
@@ -308,7 +308,7 @@ class TestConditionedMessageStore:
         bp.run(max_iterations=1000, tol=1e-13)
         old = {k: m.copy() for k, m in bp.messages.items()}
         # a further full sweep should not change the raw messages
-        bp.touched.update(bp.exprs)
+        bp.sweeper.touch(bp.exprs)
         bp.iterate(tol=1e-13)
         for key, m in bp.messages.items():
             assert m == pytest.approx(old[key], abs=1e-10)
@@ -346,7 +346,7 @@ class TestConditionedMessageStore:
         bp.gauge_symmetric(power=gauge_power, inplace=True)
 
         old = {k: m / np.linalg.norm(m) for k, m in bp.messages.items()}
-        bp.touched.update(bp.exprs)
+        bp.sweeper.touch(bp.exprs)
         bp.iterate(tol=1e-13)
         for key, m in bp.messages.items():
             m = m / np.linalg.norm(m)
@@ -700,7 +700,7 @@ class TestSymmetricMessages:
         bp.gauge_symmetric(inplace=True)
 
         old = {k: m / m.norm() for k, m in bp.messages.items()}
-        bp.touched.update(bp.exprs)
+        bp.sweeper.touch(bp.exprs)
         bp.iterate(tol=1e-13)
         for key, m in bp.messages.items():
             assert float((m / m.norm() - old[key]).norm()) < 1e-8

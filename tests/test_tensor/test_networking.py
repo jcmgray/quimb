@@ -5,6 +5,7 @@ import warnings
 import pytest
 
 import quimb.tensor as qtn
+from quimb.tensor.networking import SweepScheduler, compute_sweep_ranks
 
 
 def test_istree():
@@ -586,3 +587,77 @@ def test_connected_bipartitions():
         assert not (pa & pb)
         assert tn._select_tids(pa).isconnected()
         assert tn._select_tids(pb).isconnected()
+
+
+class TestSweepScheduler:
+    def test_compute_sweep_ranks_chain_from_middle(self):
+        edges = [(0, 1), (1, 2), (2, 3), (3, 4)]
+        ranks, is_tree = compute_sweep_ranks([2, 0, 1, 3, 4], edges)
+        assert ranks == {2: 0, 1: 1, 3: 2, 0: 3, 4: 4}
+        assert is_tree
+
+    def test_compute_sweep_ranks_components(self):
+        edges = [(0, 1), (2, 3)]
+        ranks, is_tree = compute_sweep_ranks([0, 1, 2, 3, 4], edges)
+        assert ranks == {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+        assert is_tree
+
+    @pytest.mark.parametrize(
+        "edges",
+        [
+            [(0, 1), (1, 2), (2, 0)],
+            # a repeated edge is a loop
+            [(0, 1), (1, 2), (1, 2)],
+        ],
+    )
+    def test_compute_sweep_ranks_loops(self, edges):
+        _, is_tree = compute_sweep_ranks([0, 1, 2], edges)
+        assert not is_tree
+
+    @pytest.mark.parametrize(
+        "sweep_order, edges, expected",
+        [
+            ("auto", [(0, 1), (1, 2)], [[2, 1, 0], [0, 1, 2], [2, 1, 0]]),
+            ("auto", [(0, 1), (1, 2), (2, 0)], [[0, 1, 2]] * 3),
+            ("alternate", [(0, 1), (1, 2), (2, 0)], [[2, 1, 0], [0, 1, 2]]),
+            ("fixed", [(0, 1), (1, 2)], [[0, 1, 2]] * 2),
+            (None, [(0, 1), (1, 2)], [[1, 2, 0]] * 2),
+        ],
+    )
+    def test_sweep_order(self, sweep_order, edges, expected):
+        sweeper = SweepScheduler(
+            [0, 1, 2], edges, lambda k: (k,), sweep_order=sweep_order
+        )
+        for keys in expected:
+            sweeper.touch([0, 2, 1])
+            assert list(sweeper.sweep()) == keys
+
+    def test_touch_during_sweep(self):
+        edges = [(i, i + 1) for i in range(4)]
+        sweeper = SweepScheduler(range(5), edges, lambda k: (k,), "fixed")
+        sweeper.touch([0])
+        keys = []
+        for k in sweeper.sweep():
+            keys.append(k)
+            # next key joins this sweep, updated key waits for the next
+            sweeper.touch([k, min(k + 1, 4)])
+        assert keys == [0, 1, 2, 3, 4]
+        assert set(sweeper.touched) == {0, 1, 2, 3, 4}
+
+    def test_touch_during_sweep_none_order(self):
+        sweeper = SweepScheduler(
+            range(3), [(0, 1), (1, 2)], lambda k: (k,), None
+        )
+        sweeper.touch([0])
+        keys = []
+        for k in sweeper.sweep():
+            keys.append(k)
+            sweeper.touch([k + 1])
+        assert keys == [0]
+        assert list(sweeper.touched) == [1]
+
+    def test_unranked_nodes_get_next_rank(self):
+        sweeper = SweepScheduler([0, 1], [(0, 1)], lambda k: (k,), "fixed")
+        sweeper.touch([7, 1, 0])
+        assert list(sweeper.sweep()) == [0, 1, 7]
+        assert sweeper.ranks[7] == 2

@@ -86,6 +86,7 @@ Release notes for `quimb`.
 - [`MatrixProductState.compute_local_expectation`](#MatrixProductState.compute_local_expectation): rename ``method`` to ``route``. The old name still works but raises ``FutureWarning``.
 - Rename ``MatrixProductState.partial_trace_to_dense_canonical`` to [`partial_trace_canonical`](#MatrixProductState.partial_trace_canonical). The old name still works but raises a warning.
 - [`save_to_disk`](#save_to_disk): add ``atomic`` option, to write to a temporary file and then rename it, so the target is never left partly written.
+- Belief propagation (``D1BP``, ``D2BP``, ``L1BP``, ``L2BP``) and [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple): add ``sweep_order``, which automatically uses an efficient alternating schedule for trees. See unified handler [`SweepScheduler`](#SweepScheduler) for other options.
 
 
 **Bug fixes:**

@@ -93,12 +93,14 @@ from .fitting import (
     tensor_network_fit_tree,
 )
 from .networking import (
+    SweepScheduler,
     compute_centralities,
     compute_hierarchical_grouping,
     compute_hierarchical_linkage,
     compute_hierarchical_ordering,
     compute_hierarchical_ssa_path,
     compute_shortest_distances,
+    compute_sweep_ranks,
     connected_bipartitions,
     gen_all_paths_between_tids,
     gen_gloops,
@@ -4637,14 +4639,21 @@ class TensorNetwork:
         self._link_inds(new - old, tid)
 
     @property
-    def num_tensors(self):
+    def num_tensors(self) -> int:
         """The total number of tensors in the tensor network."""
         return len(self.tensor_map)
 
     @property
-    def num_indices(self):
+    def num_indices(self) -> int:
         """The total number of indices in the tensor network."""
         return len(self.ind_map)
+
+    @property
+    def num_bonds(self) -> int:
+        """The total number of inner indices. 'Inner' here is simply defined as
+        any index which appear on more than one tensor.
+        """
+        return len(self._inner_inds)
 
     def pop_tensor(self, tid_or_tags, which="all") -> Tensor:
         """Remove a tensor from this network, and return it.
@@ -7846,23 +7855,20 @@ class TensorNetwork:
         fuse_multibonds=True,
         equalize_norms=False,
         touched_tids=None,
+        sweep_order="auto",
         info=None,
         progbar=False,
         reduce_opts=None,
         compress_opts=None,
         inplace=False,
     ):
-        """Iterative gauge all the bonds in this tensor network with a 'simple
-        update' like strategy. If gauges are not supplied they are initialized
-        and then reabsorbed at the end, in which case this method acts as a
-        kind of conditioning. More usefully, if you supply `gauges` then they
-        will be updated inplace and *not* absorbed back into the tensor
-        network, with the assumption that you are using/tracking them
-        externally.
+        """Gauge all bonds with iterative 'simple update' steps. Supplied
+        ``gauges`` are updated in place and kept separate from the network.
+        Otherwise, initialize gauges and absorb them at the end to condition
+        the network.
 
-        Note the default settings perform a small number of iterations
-        sufficient for conditioning a network, but not converging to a fixed
-        point suitable for cluster calculations for example.
+        The default few iterations condition the network. For cluster
+        calculations, use enough iterations to converge the gauges.
 
         Parameters
         ----------
@@ -7880,13 +7886,18 @@ class TensorNetwork:
         gauges : dict, optional
             Supply the initial gauges to use.
         fuse_multibonds : bool, optional
-            Whether to fuse multibonds before gauging, this is usually
-            desirable unless you want to explicitly retain the exact
-            multi-index structure.
+            Fuse bonds between the same tensors. Usually helpful unless you
+            need to keep these indices separate.
         equalize_norms : bool, optional
             Whether to equalize the norms of the tensors after each update.
         touched_tids : sequence of int, optional
-            The tensor identifiers to start the gauge sweep from.
+            Tensor ids to start from. Initially mark only their bonds for
+            update. Start the breadth first search from the first tensor.
+        sweep_order : {'auto', 'alternate', 'fixed'}, optional
+            Bond update order. Use 'alternate' to reverse each sweep, starting
+            reversed, or 'fixed' to keep the same order. With 'auto',
+            alternate on graphs with no loops, else use a fixed order.
+            See :class:`.SweepScheduler`.
         info : dict, optional
             Store extra information about the gauging process in this dict.
             The following keys are filled:
@@ -7917,32 +7928,61 @@ class TensorNetwork:
         """
         tn = self if inplace else self.copy()
 
-        # the vector 'gauges' that will live on the bonds
         gauges_supplied = gauges is not None
         if not gauges_supplied:
             gauges = {}
 
-        # we store the actual ("conditioned") vectors treated as the
-        # environments separately from the 'exact' gauges
+        # keep conditioned environments separate from raw gauges
         gauges_conditioned = {}
-        # if damping we need to mark if we have updated gauge specifically
+        # track which conditioned gauges are current
         have_conditioned = set()
 
         if info is None:
             info = {}
-        # tensor_gauge_simple_bond accrues the log10 of each stripped gauge
-        # norm into "exponent" - seed it so the scaling is tracked
+        # tensor_gauge_simple_bond adds log10 of removed gauge norms here
         info["exponent"] = 0.0
 
-        # keep track of which indices are available to be updated
         if touched_tids is not None:
-            # use indices adjacent to the given tensors
-            next_touched = oset(
+            touched = oset(
                 ix for tid in touched_tids for ix in tn.tensor_map[tid].inds
             )
         else:
-            # use all indices
-            next_touched = oset(tn._inner_inds)
+            touched = oset(tn._inner_inds)
+
+        check_opt("sweep_order", sweep_order, ("auto", "alternate", "fixed"))
+        if sweep_order == "auto" and touched_tids is not None:
+            # check beyond the scheduler's initial region
+            is_tree = (
+                # short-cut (anything with num_bonds >= num_tensors is loopy)
+                (tn.num_bonds < tn.num_tensors)
+                # else must check inverse explictly due to disconnected tensors
+                and (
+                    compute_sweep_ranks(
+                        nodes=tn.tensor_map,
+                        edges=[
+                            tuple(tids)
+                            for tids in map(tn.ind_map.get, tn._inner_inds)
+                            if len(tids) == 2
+                        ],
+                    )[1]
+                )
+            )
+            sweep_order = "alternate" if is_tree else "fixed"
+
+        # rank bonds outwards from touched tensors, skipping hyper indices
+        bond_tid_pairs = [
+            tuple(tids)
+            for tids in map(tn.ind_map.get, touched)
+            if len(tids) == 2
+        ]
+        sweeper = SweepScheduler(
+            nodes=(*(touched_tids or ()), *concat(bond_tid_pairs)),
+            edges=bond_tid_pairs,
+            # fused bonds may have been removed from ind_map
+            key_to_nodes=lambda ix: tn.ind_map.get(ix, ()),
+            sweep_order=sweep_order,
+        )
+        sweeper.touch(touched)
 
         if progbar:
             import tqdm
@@ -7956,22 +7996,15 @@ class TensorNetwork:
         compute_diff = (tol > 0.0) or (pbar is not None)
 
         while unconverged and it < max_iterations:
-            # seeding "max_sdiff" tells tensor_gauge_simple_bond to track the
-            # running maximum diff here (and can only converge if tol > 0.0)
+            # initialize max_sdiff so tensor_gauge_simple_bond tracks changes
             if compute_diff:
                 info["max_sdiff"] = -1.0
 
-            touched, next_touched = next_touched, oset()
-            # add an arbitrary index to start the sweep
-            queue = oset([touched.popleft()])
-
-            while queue:
-                bond_ind = queue.popleft()
-
+            for bond_ind in sweeper.sweep():
                 try:
                     tida, tidb = tn.ind_map[bond_ind]
                 except (KeyError, ValueError):
-                    # fused multibond (removed) or not a bond (len(tids != 2))
+                    # removed bond or index not shared by exactly two tensors
                     continue
 
                 ta = tn.tensor_map[tida]
@@ -7995,29 +8028,20 @@ class TensorNetwork:
                 )
 
                 if equalize_norms:
-                    # the norms of the tensors are not kept under control by
-                    # the the orthogonalization because of the inverse gauge
-                    # application above, so explicitly equalize here
+                    # inverse gauges can change tensor norms
                     tn.strip_exponent(tida)
                     tn.strip_exponent(tidb)
 
-                # mark conditioned version as out-of-date (note we still retain
-                # the old version in gauge_conditioned for possible damping)
+                # keep old conditioned gauge for damping, but mark it outdated
                 have_conditioned.discard(bond_ind)
                 has_changed = (tol == 0.0) or (info["sdiff"] > tol)
                 if has_changed:
-                    # mark index and neighbors as touched for next sweep
-                    next_touched.add(bond_ind)
-
-                for neighbor_ind in tn._get_neighbor_inds(bond_ind):
-                    if neighbor_ind in tn._inner_inds:
-                        if neighbor_ind in touched:
-                            # move into queue
-                            touched.remove(neighbor_ind)
-                            queue.add(neighbor_ind)
-                        if has_changed:
-                            # mark as touched for next sweep
-                            next_touched.add(neighbor_ind)
+                    # update neighbors, joining this sweep if possible
+                    sweeper.touch(
+                        ix
+                        for ix in tn._get_neighbor_inds(bond_ind)
+                        if ix in tn._inner_inds
+                    )
 
             if pbar is not None:
                 pbar.update()
@@ -8029,13 +8053,11 @@ class TensorNetwork:
             unconverged = (tol == 0.0) or (info["max_sdiff"] > tol)
             it += 1
 
-        # pop the accrued scale back out - it is redistributed into the network
-        # below, not left as a pending exponent for the caller to apply
+        # apply accumulated scale to the network
         nfact = info.pop("exponent")
         if equalize_norms:
             tn.exponent += nfact
         else:
-            # redistribute the accrued scaling
             tn.multiply_each_(10 ** (nfact / tn.num_tensors))
 
         if not gauges_supplied:

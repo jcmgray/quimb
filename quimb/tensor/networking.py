@@ -4,11 +4,12 @@ finding paths, loops, connected components, hierarchical groupings and more.
 
 import collections
 import functools
+import heapq
 import itertools
 import math
 import warnings
 
-from ..utils import oset, unique
+from ..utils import check_opt, oset, unique
 
 
 class NetworkPatch:
@@ -1810,3 +1811,176 @@ def least_central_tid(tn):
     """Find the least central tensor in the network."""
     cents = tn.compute_centralities()
     return min((score, tid) for tid, score in cents.items())[1]
+
+
+def compute_sweep_ranks(nodes, edges):
+    r"""Rank ``nodes`` by a breadth first search over ``edges``. Start each
+    connected component from its first unranked node in ``nodes``. Except
+    for starting nodes, each node has a higher rank than at least one neighbor.
+    E.g. for a 2D grid starting at the corner::
+
+        0--1--3--6--...
+        |  |  |  |
+        2--4--7--...
+        |  |  |
+        5--8--...
+        |  |
+        ...
+
+    Parameters
+    ----------
+    nodes : sequence of hashable
+        All nodes, in the order to choose starting nodes.
+    edges : sequence of tuple[hashable, hashable]
+        The edges of the graph. A repeated edge counts as a loop.
+
+    Returns
+    -------
+    ranks : dict[hashable, int]
+        The rank of each node.
+    is_tree : bool
+        Whether the graph has no loops, i.e. is a tree (or forest).
+    """
+    neighbors = {}
+    for a, b in edges:
+        neighbors.setdefault(a, []).append(b)
+        neighbors.setdefault(b, []).append(a)
+
+    ranks = {}
+    ncomponents = 0
+    for start in nodes:
+        if start in ranks:
+            continue
+        ncomponents += 1
+        ranks[start] = len(ranks)
+        queue = collections.deque((start,))
+        while queue:
+            for node in neighbors.get(queue.popleft(), ()):
+                if node not in ranks:
+                    ranks[node] = len(ranks)
+                    queue.append(node)
+
+    return ranks, len(edges) == len(ranks) - ncomponents
+
+
+class SweepScheduler:
+    """Schedule updates in sweeps over a graph, for belief propagation or
+    simple gauging, defaulting to an efficient order when a tree is detected.
+    Keys are hashable identifiers for updates, e.g. message keys, bond indices,
+    or tensor ids. Nodes are graph vertices used to order these updates.
+    ``key_to_nodes(key)`` returns the nodes for an update key.
+
+    Sort keys by their node ranks, see :func:`compute_sweep_ranks`. Yield each
+    key at most once per sweep. Keys marked during a sweep join it if not yet
+    yielded (except with ``sweep_order=None``) this causes a local change to
+    propagate fully along a chain for example.
+
+    Parameters
+    ----------
+    nodes : sequence of hashable
+        Nodes, in the order to choose starting nodes. Rank these at
+        initialization. Nodes later returned by ``key_to_nodes`` get the next
+        unused rank if not already ranked.
+    edges : sequence of tuple[hashable, hashable]
+        The edges of the graph.
+    key_to_nodes : callable
+        Must accept an update key and return its graph nodes. Keys are ordered
+        by the sorted ranks of these nodes.
+    sweep_order : {'auto', 'alternate', 'fixed', None}, optional
+        - 'alternate': reverse node rank order every other sweep, starting
+          reversed. Undamped sequential BP on trees gives exact messages
+          after two sweeps.
+        - 'fixed': use the same order every sweep, usually better with loops.
+        - 'auto': use 'alternate' for graphs with no loops, else 'fixed'.
+        - ``None``: use reverse insertion order. Leave keys marked during a
+          sweep for the next sweep.
+
+    Attributes
+    ----------
+    touched : oset
+        The keys to update in the next sweep.
+    alternate : bool
+        Whether the order is reversed every other sweep.
+
+    Examples
+    --------
+    Mark initial keys, perform a sweep, and mark affected keys::
+
+        sweeper = SweepScheduler(nodes, edges, key_to_nodes)
+        sweeper.touch(initial_keys)
+        for key in sweeper.sweep():
+            affected_keys = update(key)
+            sweeper.touch(affected_keys)
+
+    ``update(key)`` should perform the update and return keys that need an
+    update as a result. Keys only yield once per sweep.
+    """
+
+    def __init__(self, nodes, edges, key_to_nodes, sweep_order="auto"):
+        check_opt(
+            "sweep_order", sweep_order, ("auto", "alternate", "fixed", None)
+        )
+        self.sweep_order = sweep_order
+        self.key_to_nodes = key_to_nodes
+        self.ranks, is_tree = compute_sweep_ranks(nodes, edges)
+        self.alternate = (sweep_order == "alternate") or (
+            (sweep_order == "auto") and is_tree
+        )
+        self.nsweeps = 0
+        self.touched = oset()
+        # only set during a sweep
+        self._heap = None
+        self._yielded = None
+        self._rank_sign = 1
+        self._counter = itertools.count()
+
+    def _push_key(self, key):
+        # rank new nodes after those already seen
+        rank = sorted(
+            self.ranks.setdefault(node, len(self.ranks))
+            for node in self.key_to_nodes(key)
+        )
+        rank = tuple(self._rank_sign * r for r in rank)
+        # use insertion order to break ties without comparing keys
+        heapq.heappush(self._heap, (rank, next(self._counter), key))
+
+    def touch(self, keys):
+        """Mark ``keys`` for update. Add them to the current sweep if not yet
+        updated in it, otherwise to the next. With ``sweep_order=None``,
+        always add them to the next sweep.
+        """
+        if self._heap is None:
+            self.touched.update(keys)
+            return
+        for key in keys:
+            if key in self._yielded:
+                self.touched.add(key)
+            else:
+                self._push_key(key)
+
+    def sweep(self):
+        """Yield keys for one sweep. Keep keys marked again in ``touched``."""
+        touched, self.touched = self.touched, oset()
+
+        if self.sweep_order is None:
+            # legacy sweep order
+            yield from tuple(touched)[::-1]
+            return
+
+        self._rank_sign = (
+            -1 if (self.alternate and self.nsweeps % 2 == 0) else 1
+        )
+        self.nsweeps += 1
+        self._heap = []
+        self._yielded = set()
+        try:
+            for key in touched:
+                self._push_key(key)
+            while self._heap:
+                key = heapq.heappop(self._heap)[-1]
+                if key not in self._yielded:
+                    self._yielded.add(key)
+                    yield key
+        finally:
+            self._heap = None
+            self._yielded = None
