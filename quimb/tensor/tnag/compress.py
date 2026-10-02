@@ -9,6 +9,8 @@ the tensor network can locally have arbitrary structure and outer indices.
 
 """
 
+import warnings
+
 from ...utils import ensure_dict
 from ..tensor_core import (
     TensorNetwork,
@@ -642,6 +644,7 @@ def tensor_network_ag_compress(
     optimize="auto-hq",
     equalize_norms=False,
     inplace=False,
+    sweep_reverse=False,
     **kwargs,
 ):
     """Compress an arbitrary geometry tensor network, with potentially multiple
@@ -690,9 +693,17 @@ def tensor_network_ag_compress(
         the overall scaling factor will be accumulated into `.exponent`.
     inplace : bool, optional
         Whether to perform the compression inplace.
+    sweep_reverse : bool, optional
+        Ignored, since there is no sweep direction. Accepted to match the 1D
+        methods, with a warning if ``True``.
     kwargs
         Supplied to the chosen compression method.
     """
+    if sweep_reverse:
+        warnings.warn(
+            "sweep_reverse has no effect for arbitrary geometry (AG) methods."
+        )
+
     if callable(method):
         f_compress = method
     else:

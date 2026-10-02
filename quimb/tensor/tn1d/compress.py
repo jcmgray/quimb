@@ -40,31 +40,44 @@ from ..tnag.core import tensor_network_apply_op_vec
 
 
 def enforce_1d_like(tn, site_tags=None, fix_bonds=True, inplace=False):
-    """Check that ``tn`` is 1D-like with OBC, i.e. 1) that each tensor has
-    exactly one of the given ``site_tags``. If not, raise a ValueError. 2) That
-    there are no hyper indices. And 3) that there are only bonds within sites
-    or between nearest neighbor sites. Long range bonds can optionally be
-    fixed by inserting a string of identity tensors, or simply allowed, for
-    methods that handle them directly.
+    """Check and optionally fix bonds for a 1D site ordering.
+
+    Tensors joined by a bond must each have exactly one of the given
+    ``site_tags``. Each site can contain multiple tensors and outer indices.
+    Hyper indices connecting more than two tensors are rejected.
+
+    Bonds within a site or between adjacent sites are allowed. ``fix_bonds``
+    controls how to handle bonds between non-adjacent sites, including bonds
+    wrapping from the first site to the last.
 
     Parameters
     ----------
     tn : TensorNetwork
         The tensor network to check.
     site_tags : sequence of str, optional
-        The tags to use to group and order the tensors from ``tn``. If not
-        given, uses ``tn.site_tags``.
+        Tags that group and order the sites. Defaults to ``tn.site_tags``.
     fix_bonds : bool or None, optional
-        How to handle long range bonds. If ``True``, insert a string of
-        identity tensors along each. If ``False``, raise a ValueError. If
-        ``None``, allow them and leave them as they are.
+        If ``True``, replace each long-range bond with a string of identity
+        tensors along the site order. If ``False``, raise ``ValueError`` for
+        long-range bonds. If ``None``, leave them unchanged for compression
+        methods that handle them directly. Inserting identities requires
+        the array backend to support ``eye``.
     inplace : bool, optional
-        Whether to perform the fix inplace or not.
+        Whether to modify ``tn`` when inserting identity tensors. Otherwise
+        return a copy.
+
+    Returns
+    -------
+    TensorNetwork
+        The checked network, including any inserted identity tensors.
+        This is ``tn`` if ``inplace=True``, otherwise a copy.
 
     Raises
     ------
     ValueError
-        If the tensor network is not 1D-like.
+        If a tensor joined by a bond does not have exactly one site tag,
+        an index connects more than two tensors, or a long-range bond is
+        found with ``fix_bonds=False``.
     """
     tn = tn if inplace else tn.copy()
 
@@ -2516,7 +2529,7 @@ def tensor_network_1d_compress_srcmps(
         The MPS specificing the sampling noise (its bond dimension effectively
         sets the compression rank). If not given, a random MPS with bond
         dimension ``max_bond`` is used. If a string or dict, this is used to
-        construct the MPS from ``tn``.
+        construct the MPS from ``tn``. Note it is conjugated before use.
     site_tags : sequence of str or tag groups, optional
         Tags that identify and order sites. Defaults to ``tn.site_tags``.
         Each item can group tags as described by
@@ -2589,7 +2602,9 @@ def tensor_network_1d_compress_srcmps(
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
     L = len(site_tags)
 
-    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
+    tn = enforce_1d_like(
+        tn, site_tags=site_tags, fix_bonds=None, inplace=inplace
+    )
 
     local_tns = []
     for i in range(L):
@@ -2603,6 +2618,8 @@ def tensor_network_1d_compress_srcmps(
                 tn,
                 max_bond=max_bond,
                 site_tags=site_tags,
+                # explicitly exclude long range bonds from guess geometry
+                edges=itertools.pairwise(site_tags),
                 dist=noise_dist,
                 seed=seed,
             )
@@ -2613,6 +2630,9 @@ def tensor_network_1d_compress_srcmps(
             tn_fit.setdefault("cutoff", cutoff)
             tn_fit.setdefault("site_tags", site_tags)
             tn_fit = tensor_network_1d_compress(tn, **tn_fit)
+
+    # treat the guess as the bra side
+    tn_fit = tn_fit.conj()
 
     # compute the left environments
     left_envs = {}
@@ -3264,7 +3284,10 @@ def tensor_network_1d_compress_fit(
     site_tags, untag_groups = parse_site_tag_groups(tns_to_tag, site_tags)
 
     tns = tuple(
-        enforce_1d_like(tn, site_tags=site_tags, inplace=inplace) for tn in tns
+        enforce_1d_like(
+            tn, site_tags=site_tags, fix_bonds=None, inplace=inplace
+        )
+        for tn in tns
     )
 
     # choose the block size of the sweeping function
@@ -3311,24 +3334,27 @@ def tensor_network_1d_compress_fit(
             # don't start larger than the target bond dimension
             current_bond_dim = min(initial_bond_dim, max_bond)
 
-        # if we are only doing a small number of iterations, we need to make
-        # sure the doubling logic can actually reach max_bond
-        max_increase = 2 ** (max_iterations)
-        current_bond_dim = max(
-            current_bond_dim,
-            max_bond // max_increase + bool(max_bond % max_increase),
-        )
+        if max_bond != float("inf"):
+            if max_iterations <= 1:
+                # single sweep, no need to start smaller and expand
+                current_bond_dim = max_bond
+            else:
+                # if we are only doing a small number of iterations, we need
+                # to make sure the doubling logic can actually reach max_bond
+                max_increase = 2 ** (max_iterations)
+                current_bond_dim = max(
+                    current_bond_dim,
+                    max_bond // max_increase + bool(max_bond % max_increase),
+                )
 
         if tn_fit is None:
             # random initial guess
-            if max_iterations <= 1:
-                # no need to generate a random guess and expand it
-                current_bond_dim = max_bond
-
             tn_fit = TN_matching(
                 tns[0],
                 max_bond=current_bond_dim,
                 site_tags=site_tags,
+                # explicitly exclude long range bonds from guess geometry
+                edges=itertools.pairwise(site_tags),
                 dist=noise_dist,
                 seed=seed,
             )
@@ -3554,8 +3580,8 @@ def tensor_network_1d_compress_fit_oversample(
 ):
     """Compress this 1D-like tensor network using the 'fit-oversample'
     algorithm, that is, first compressing the tensor network to a larger bond
-    dimension using the variational 'fit' algorithm, then compressing to the
-    desired bond dimension using a direct sweep.
+    dimension using *a single sweep* of the 'fit' algorithm, then compressing
+    to the desired bond dimension using a direct sweep.
 
     Parameters
     ----------
@@ -3865,10 +3891,12 @@ def tensor_network_1d_compress(
         )
 
     # generic tensor network compression methods
-    if sweep_reverse:
-        warnings.warn(
-            "sweep_reverse has no effect for arbitrary geometry (AG) methods."
-        )
+    if site_tags is None:
+        site_tags = tn.site_tags
+    site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)
+
+    # possibly insert identity tensors to make geometry exactly 1D-like
+    tn = enforce_1d_like(tn, site_tags=site_tags, inplace=inplace)
 
     tnc = tensor_network_ag_compress(
         tn,
@@ -3879,13 +3907,15 @@ def tensor_network_1d_compress(
         canonize=canonize,
         optimize=optimize,
         equalize_norms=equalize_norms,
-        inplace=inplace,
+        inplace=True,
+        sweep_reverse=sweep_reverse,
         **kwargs,
     )
 
     if permute_arrays:
         possibly_permute_(tnc, permute_arrays)
 
+    untag_groups(tnc)
     return tnc
 
 

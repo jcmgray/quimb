@@ -1297,17 +1297,25 @@ class TensorNetwork2D(TensorNetworkGen):
         layer_tags=None,
         **compress_opts,
     ):
-        from quimb.tensor.tn1d.compress import tensor_network_1d_compress
-
         r2d = Rotator2D(self, xrange, yrange, from_which)
         site_tag = r2d.site_tag
         istep = r2d.istep
+
+        if r2d.cyclic_y:
+            # keep the periodic boundary as a ring
+            from quimb.tensor.tnag.compress import (
+                tensor_network_ag_compress as compress,
+            )
+        else:
+            from quimb.tensor.tn1d.compress import (
+                tensor_network_1d_compress as compress,
+            )
 
         def _do_compress(site_tags):
             site_tags, untag_groups = parse_site_tag_groups(self, site_tags)
             tn_boundary = self.partition(site_tags, inplace=True)[1]
 
-            tensor_network_1d_compress(
+            compress(
                 tn_boundary,
                 max_bond=max_bond,
                 cutoff=cutoff,

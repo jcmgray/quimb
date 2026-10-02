@@ -4597,6 +4597,7 @@ def TN_matching(
     fill_fn=None,
     dtype=None,
     *,
+    edges=None,
     dist="normal",
     loc=0.0,
     scale=1.0,
@@ -4625,6 +4626,11 @@ def TN_matching(
     dtype : dtype, optional
         The data type to use for the new tensors, if not given uses the same as
         the original tensors.
+    edges : sequence of (str, str), optional
+        The pairs of site tags to place a bond between. If not given, a bond
+        is placed between each pair of sites that ``tn`` connects. For
+        example, ``itertools.pairwise(site_tags)`` gives a plain chain,
+        ignoring any long range bonds in ``tn``.
     dist : {"normal", "uniform", "rademacher"}, optional
         The distribution to sample the random entries from.
     loc : float, optional
@@ -4642,7 +4648,15 @@ def TN_matching(
     -------
     TensorNetwork
     """
-    _, neighbors = create_lazy_edge_map(tn, site_tags)
+    if edges is None:
+        _, neighbors = create_lazy_edge_map(tn, site_tags)
+    else:
+        if site_tags is None:
+            site_tags = tn.site_tags
+        neighbors = {tag: [] for tag in site_tags if tag in tn.tag_map}
+        for tag_a, tag_b in edges:
+            neighbors[tag_a].append(tag_b)
+            neighbors[tag_b].append(tag_a)
 
     if fill_fn is None:
         # namespace injects the dtype and device of ``tn`` if not given here

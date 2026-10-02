@@ -10,6 +10,7 @@ Release notes for `quimb`.
 
 - [`array_split`](#array_split) and low-level rank-revealing decompositions now default to ``cutoff_mode="rel"`` instead of ``"rsum2"``. 1D ``zipup`` compression also defaults to ``"rel"``.
 - Randomized SVD and batched decompositions reject active cumulative cutoff modes. Use ``"abs"`` or ``"rel"`` instead.
+- [`tensor_network_1d_compress`](#tensor_network_1d_compress) with an arbitrary-geometry ``method`` always returns a 1D network, inserting identities along long-range bonds. To keep the geometry, call [`tensor_network_ag_compress`](#tensor_network_ag_compress) directly, as 2D boundary contraction now does for periodic boundaries, which therefore need an ag ``method``.
 
 **Hilbert spaces and Hubbard models**
 
@@ -35,7 +36,7 @@ Release notes for `quimb`.
 #### 1D compression and MPS
 
 - Add successive deterministic compression (``method="sdc"``), ``sdc-oversample``, and randomized variants ``sdcr`` and ``sdcr-oversample``, based on https://arxiv.org/abs/2601.19650.
-- ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src``, and their oversampling variants handle long-range bonds directly, supporting ``symmray`` abelian and fermionic tensors.
+- ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src``, ``srcmps``, ``fit``, and their oversampling variants handle long-range bonds directly, supporting ``symmray`` abelian and fermionic tensors (for ``srcmps`` and ``fit``, with a supplied ``tn_fit``).
 - ``dm`` uses QR-SVD when a site's density matrix would exceed its rank bound, reducing layered PEPS norm boundary contraction costs (https://arxiv.org/abs/2406.09769), including for fermionic networks.
 - ``src``, ``srcmps``, ``fit``, and their oversampling variants accept a ``seed`` or random generator and match the backend's device and dtype (autoray v0.10.0 or newer). By default, use the backend's global random state.
 - ``src`` and ``srcmps`` default to ``cutoff=0.0``. ``sdcr`` leaves the cutoff disabled with its default randomized SVD.
@@ -87,6 +88,7 @@ Release notes for `quimb`.
 - Add hidden-cactus networks [`TN2D_rand_hidden_cactus`](#TN2D_rand_hidden_cactus), [`TN3D_rand_hidden_cactus`](#TN3D_rand_hidden_cactus), and [`TN_rand_hidden_cactus`](#TN_rand_hidden_cactus) to extend hidden correlations while preserving lattice bond dimensions and low exact contraction cost. Also available through ``TN_from_strings(..., join_trees=True)``.
 - Add [`TN_rand_hidden_loop`](#TN_rand_hidden_loop), the arbitrary-graph counterpart of [`TN2D_rand_hidden_loop`](#TN2D_rand_hidden_loop).
 - Add [`TensorNetwork.insert_projectors_between_regions`](#TensorNetwork.insert_projectors_between_regions) to insert precomputed projector arrays between regions.
+- [`TN_matching`](#TN_matching): add ``edges`` to choose which sites to join, for example a plain chain ignoring long-range bonds.
 
 #### Hilbert spaces and utilities
 
@@ -121,6 +123,8 @@ Release notes for `quimb`.
 - [`tensor_split`](#tensor_split): fix ``method="svd:rand"`` for complex and single-precision arrays, preserving dtype and device, and ``method="svd:eig"`` with nonzero ``cutoff`` for single precision and Numba.
 - Oblique projector compression, including [`L2BP.compress`](#L2BP.compress), CTMRG, and HOTRG: fix ``shape-mismatch`` errors with ``symmray`` block-sparse arrays.
 - 3D boundary contraction: remove temporary site tags from replaced tensors, including those shared with cached environments.
+- 1D ``fit`` with ``max_iterations=1``: build any initial guess at ``max_bond`` rather than padding a smaller one, and fix a ``TypeError`` when only ``cutoff`` is given.
+- 1D ``srcmps``: conjugate the sampling MPS, so a supplied guess helps for complex arrays, and odd-parity fermionic networks work.
 
 #### Fermionic tensors
 
