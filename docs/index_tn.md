@@ -9,6 +9,7 @@ tensor/tensor-contraction
 tensor/tensor-drawing
 tensor/tensor-optimization
 tensor/tensor-1d
+tensor/tensor-1d-compress
 tensor/tensor-2d
 tensor/tensor-design
 ```

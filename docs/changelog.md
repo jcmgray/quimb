@@ -35,6 +35,7 @@ Release notes for `quimb`.
 
 #### 1D compression and MPS
 
+- Add a [1D compression guide](tensor/tensor-1d-compress.md) with method comparisons, benchmarks, and usage examples.
 - Add successive deterministic compression (``method="sdc"``), ``sdc-oversample``, and randomized variants ``sdcr`` and ``sdcr-oversample``, based on https://arxiv.org/abs/2601.19650.
 - ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src``, ``srcmps``, ``fit``, and their oversampling variants handle long-range bonds directly, supporting ``symmray`` abelian and fermionic tensors (for ``srcmps`` and ``fit``, with a supplied ``tn_fit``).
 - ``dm`` uses QR-SVD when a site's density matrix would exceed its rank bound, reducing layered PEPS norm boundary contraction costs (https://arxiv.org/abs/2406.09769), including for fermionic networks.
