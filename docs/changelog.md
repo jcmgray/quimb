@@ -107,6 +107,10 @@ Release notes for `quimb`.
 
 ### Bug fixes
 
+#### Sparse matrices
+
+- ``csr_matrix @ vector``: fix wrong results for tall matrices and segfaults for wide matrices on the parallel path, used for ``nnz > 50000`` once ``quimb`` is imported ({issue}`432`).
+
 #### Operators and time evolution
 
 - [`SpinHam1D.build_sparse`](#SpinHam1D.build_sparse): include the last term with ``cyclic=True`` ({issue}`419`).
