@@ -297,6 +297,31 @@ class TestDot:
         assert x.shape == (_TEST_SZ,)
         assert_allclose(y, x.reshape(-1, 1))
 
+    @mark.parametrize("shape", [(40, 7), (7, 40)])
+    @mark.parametrize("vshape", ["1d", "2d"])
+    def test_par_dot_csr_matvec_non_square(self, shape, vshape):
+        rng = np.random.default_rng(42)
+        A = sp.random(*shape, density=0.5, format="csr", rng=rng)
+        x = rng.standard_normal(shape[1])
+        if vshape == "2d":
+            x = x.reshape(-1, 1)
+        y = par_dot_csr_matvec(A, x, target_block_size=2, num_threads=3)
+        assert y.shape == (shape[0],) + x.shape[1:]
+        assert_allclose(y, A.toarray() @ x)
+
+    @mark.parametrize("shape", [(400, 300), (300, 400)])
+    def test_csr_matmul_non_square_parallel(self, shape, monkeypatch):
+        import quimb.core
+
+        monkeypatch.setattr(quimb.core, "_NUM_THREAD_WORKERS", 4)
+        rng = np.random.default_rng(42)
+        A = sp.random(*shape, density=0.5, format="csr", rng=rng)
+        assert A.nnz > 50000
+        x = rng.standard_normal(shape[1])
+        y = A @ x
+        assert y.shape == (shape[0],)
+        assert_allclose(y, A.toarray() @ x)
+
 
 class TestAccelVdot:
     def test_accel_vdot(self, ket_d, ket_d2):

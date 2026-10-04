@@ -756,7 +756,7 @@ def _dot_csr_matvec_numba(
     num_threads=1,
     target_block_size=-1024,
 ):
-    N = vec.size
+    N = out.size
 
     # this thread processes every num_threads'th block: the logic here is you
     # want to process a large enough block of contiguous rows to make the
@@ -802,7 +802,8 @@ def par_dot_csr_matvec(A, x, target_block_size=-1024, num_threads=None):
     The main bottleneck for sparse matrix vector product is memory access,
     as such this function is only beneficial for pretty large matrices.
     """
-    y = np.empty(x.size, common_type(A, x))
+    m = A.shape[0]
+    y = np.empty(m, common_type(A, x))
 
     maybe_multithread(
         _dot_csr_matvec_numba,
@@ -811,12 +812,12 @@ def par_dot_csr_matvec(A, x, target_block_size=-1024, num_threads=None):
         A.indices,
         x.ravel(),
         y,
-        size_total=x.size,
+        size_total=m,
         target_block_size=target_block_size,
         num_threads=num_threads,
     )
 
-    y.shape = x.shape
+    y = y.reshape((m,) + x.shape[1:])
     if isinstance(x, qarray):
         y = qarray(y)
     return y
