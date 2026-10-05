@@ -229,6 +229,9 @@ from .tn3d.core import (
 from .tn3d.tebd import (
     LocalHam3D,
 )
+from .tnag.compress import (
+    tensor_network_ag_compress,
+)
 from .tnag.core import (
     LatticeBondMap,
     TensorNetworkGen,
@@ -441,6 +444,7 @@ __all__ = (
     "tensor_gauge_simple_bond",
     "tensor_linop_backend",
     "tensor_network_1d_compress",
+    "tensor_network_ag_compress",
     "tensor_network_ag_gate",
     "tensor_network_ag_gate_simple",
     "tensor_network_ag_sum",
