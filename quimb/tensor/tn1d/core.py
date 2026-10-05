@@ -644,12 +644,14 @@ class TensorNetwork1D(TensorNetworkGen):
         cyclic : bool, optional
             Whether the network is periodic. By default infer this from the
             network structure.
-        schedule : {'auto', 'cut', 'tree'}, optional
+        schedule : {'auto', 'cut', 'cutpair', 'tree'}, optional
             Environment construction schedule, only relevant if ``cyclic``.
             By default use 'cut', which uses linear work by permitting
             exact environment-environment contractions, but keeps O(L)
-            environments in memory. The 'tree' schedule uses O(L log L) work
-            but keeps only O(log L) environments in memory.
+            environments in memory. The 'cutpair' schedule keeps the two
+            environments either side of the cut separate. The 'tree'
+            schedule uses O(L log L) work but keeps only O(log L)
+            environments in memory.
         contract_opts
             Supplied to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.contract`, always
@@ -698,7 +700,7 @@ class TensorNetwork1D(TensorNetworkGen):
         cyclic : bool, optional
             Whether the network is periodic. By default infer this from the
             network structure.
-        schedule : {'auto', 'cut', 'tree'}, optional
+        schedule : {'auto', 'cut', 'cutpair', 'tree'}, optional
             Environment construction schedule, only relevant if ``cyclic``,
             see :meth:`gen_block_environments`.
         contract_opts
@@ -3084,7 +3086,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         get : {'matrix', 'array', 'tensor', 'tn'}, optional
             How to return each reduced density matrix, see
             :meth:`compute_partial_traces`.
-        schedule : {'auto', 'cut', 'tree'}, optional
+        schedule : {'auto', 'cut', 'cutpair', 'tree'}, optional
             Environment construction schedule if cyclic, see
             :meth:`gen_block_environments`. Use 'tree' to keep only O(log L)
             environments in memory.
@@ -3391,7 +3393,7 @@ class MatrixProductState(TensorNetwork1DVector, TensorNetwork1DFlat):
         return_all : bool, optional
             Whether to return each expectation in `terms` separately
             or sum them all together (the default).
-        schedule : {'auto', 'cut', 'tree'}, optional
+        schedule : {'auto', 'cut', 'cutpair', 'tree'}, optional
             Environment construction schedule if cyclic, see
             :meth:`gen_block_environments`.
         contract_opts

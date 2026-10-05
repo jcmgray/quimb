@@ -2788,12 +2788,13 @@ class TensorNetwork2D(TensorNetworkGen):
             :func:`~quimb.tensor.environments.gen_compressed_environments`.
             By default use '1d' if the other direction is open, and 'ag' if
             it is periodic.
-        schedule : {'auto', 'tree', 'cut'}, optional
+        schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
             Environment construction schedule, only relevant if ``cyclic``.
             By default use 'tree', which never compresses two environments
-            together. The 'cut' schedule uses fewer compressions but can
-            degrade the approximation by combining two already compressed
-            environments.
+            together. The 'cut' schedule uses fewer compressions but combines
+            two environments as its final step, which can be expensive in an
+            approx contraction setting. The 'cutpair' schedule keeps these two
+            environments separate.
         method : str or callable, optional
             The compression method, supplied to ``compress_fn``. By default
             use its own default method.
@@ -3660,10 +3661,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Periodicity in each direction. By default infer it.
         first_contract : {'x', 'y'}, optional
             Direction to contract approximately first.
-        schedule : {'auto', 'tree', 'cut'}, optional
+        schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
             Construction schedule of the approximate environments in the
             first direction, see :meth:`gen_block_environments`.
-        second_schedule : {'auto', 'tree', 'cut'}, optional
+        second_schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
             Schedule along each strip. By default use 'cut' for exact
             contraction and 'tree' for compressed contraction.
         second_dense : bool, optional
@@ -3733,8 +3734,9 @@ class TensorNetwork2D(TensorNetworkGen):
             compress_opts=compress_opts,
             **compress_method_opts,
         )
-        return dict(
-            _gen_plaquette_environments_via_envs(
+        return {
+            p: environment
+            for p, environment, _ in _gen_plaquette_environments_via_envs(
                 self,
                 tuple((start, (x_bsz, y_bsz)) for start in starts),
                 cyclic_x,
@@ -3745,7 +3747,7 @@ class TensorNetwork2D(TensorNetworkGen):
                 environment_opts,
                 second_dense=second_dense,
             )
-        )
+        }
 
     def coarse_grain_hotrg(
         self,
@@ -4338,6 +4340,32 @@ def _choose_plaquette_first_contract(tn, x_bsz, y_bsz, first_contract):
     return first_contract
 
 
+def _half_absorb_block_layers(
+    tn, envl, envr, block_tags, layer_tags, compress_fn
+):
+    """Absorb the ket layer of the block's first plane into ``envl``, and the
+    bra layer of its last plane into ``envr``. Return the two halves of the
+    strip, ``envl`` with the remaining ket layers, and the remaining bra
+    layers with ``envr``. These keep any exponent the compression gave the
+    environments.
+    """
+    ket_tag, bra_tag = layer_tags
+    # split each plane of the block into its two layers
+    ket_planes = [
+        tn.select((tag, ket_tag), "all", virtual=False) for tag in block_tags
+    ]
+    bra_planes = [
+        tn.select((tag, bra_tag), "all", virtual=False) for tag in block_tags
+    ]
+    # absorb the outermost layer on each side
+    envl = compress_fn(envl | ket_planes.pop(0))
+    envr = compress_fn(envr | bra_planes.pop())
+    return (
+        TensorNetwork((envl, *ket_planes)),
+        TensorNetwork((*bra_planes, envr)),
+    )
+
+
 def _gen_plaquette_environments_via_envs(
     tn,
     plaquettes,
@@ -4348,6 +4376,7 @@ def _gen_plaquette_environments_via_envs(
     contract_opts,
     environment_opts,
     second_dense=None,
+    max_separation=1,
 ):
     """Yield environments for plaquettes ``((i, j), (x_bsz, y_bsz))``.
     Plaquettes can differ in size and cross periodic boundaries.
@@ -4359,9 +4388,44 @@ def _gen_plaquette_environments_via_envs(
     Then contract along each strip. By default, contract strips of width one
     exactly and compress wider strips. Set ``second_dense`` to choose
     explicitly.
+
+    With ``max_separation=0.5``, where a block has an environment on each
+    side, ``envl`` absorbs the first layer of the block's first plane, and
+    ``envr`` the last layer of its last plane. Contract these strips
+    exactly, and also yield the local sides of each layer at the plaquette.
+    Otherwise yield ``None`` for these.
+
+    Schematically (from the side):
+
+            max_separation=1:      max_separation=0.5:     max_separation=0:
+                      ┊  ┊                  ┊  ┊
+        KET->      ┏━━░──░━━┓          envl┏█──░┓               ┊  ┊
+               envl█        █envr          ┃    ┃           envl█━━█envr
+        BRA->      ┗━━░──░━━┛              ┗░──█┛envr           ┊  ┊
+                      ┊  ┊                  ┊  ┊
+                      ....                  ....                ....
+                   plaquette
+
     """
     # the first direction is 'x' in each rotated frame
     rotators = {d: Rotator2D(tn, None, None, d + "min") for d in "xy"}
+
+    if max_separation == 0.5:
+        if environment_opts["layer_tags"] is None:
+            raise ValueError("`max_separation=0.5` needs `layer_tags`.")
+        from ..tn1d.compress import tensor_network_1d_compress
+        from ..tnag.compress import tensor_network_ag_compress
+
+        # options for compressing a single layer into an environment
+        max_bond = environment_opts["max_bond"]
+        half_absorb_opts = {
+            k: v
+            for k, v in environment_opts.items()
+            if (k not in ("max_bond", "schedule", "layer_tags"))
+            and (v is not None)
+        }
+    elif max_separation != 1:
+        raise ValueError("max_separation must be 1 or 0.5")
 
     # group strip targets by first direction and first block
     blocks_by_direction = {"x": defaultdict(set), "y": defaultdict(set)}
@@ -4386,7 +4450,15 @@ def _gen_plaquette_environments_via_envs(
         r2d = rotators[direction]
         first_tag, second_tag = r2d.x_tag, r2d.y_tag
         first_cyclic, second_cyclic = r2d.rotate(cyclic_x, cyclic_y)
-        first_length = len(r2d.sweep)
+
+        schedule = environment_opts["schedule"]
+        if max_separation == 0.5 and first_cyclic and schedule != "cutpair":
+            warnings.warn(
+                f"`max_separation=0.5` has no effect along periodic "
+                f"'{direction}' direction with schedule={schedule!r}, as each "
+                "block has a single environment. Needs schedule='cutpair'.",
+                stacklevel=3,
+            )
 
         first_envs = tn.gen_block_environments(
             direction,
@@ -4396,23 +4468,62 @@ def _gen_plaquette_environments_via_envs(
             **environment_opts,
         )
         second_tags = tuple(map(second_tag, r2d.sweep_other))
+        if max_separation == 0.5:
+            # for compressing environment and one absorbed layer along strip
+            half_compress_fn = functools.partial(
+                tensor_network_ag_compress
+                if second_cyclic
+                else tensor_network_1d_compress,
+                max_bond=max_bond,
+                site_tags=second_tags,
+                **half_absorb_opts,
+            )
 
         # each first environment is used then dropped as soon as it is ready
         for (first, first_bsz), first_env in first_envs:
             first_block_tags = tuple(
                 first_tag(first + d) for d in range(first_bsz)
             )
-            # join the block and its environment for the second sweep
-            strip = tn.select_any(first_block_tags, virtual=False) | first_env
             second_blocks = tuple(second_blocks_by_first[first, first_bsz])
 
-            # by default only contract strips one plane wide exactly
-            if second_dense is None:
-                dense = first_bsz < 2
+            # envl just before the block (can wrap round), envr the rest
+            strip_exponent = first_env.exponent
+            if first_cyclic or first > 0:
+                envl_tids = first_env.tag_map.get(first_tag(first - 1), ())
             else:
-                dense = second_dense
+                envl_tids = ()
+            has_envl = bool(envl_tids)
+            has_envr = len(envl_tids) < first_env.num_tensors
 
-            if dense:
+            # only absorb when envl and envr are separate
+            half_absorb = (max_separation == 0.5) and has_envl and has_envr
+            if half_absorb:
+                envr, envl = first_env.partition(first_tag(first - 1))
+                half_ket_side, half_bra_side = _half_absorb_block_layers(
+                    tn,
+                    envl,
+                    envr,
+                    first_block_tags,
+                    environment_opts["layer_tags"],
+                    half_compress_fn,
+                )
+                strip_exponent += (
+                    half_ket_side.exponent + half_bra_side.exponent
+                )
+                strip = half_ket_side | half_bra_side
+                # remaining strip is thin, so always contract it exactly
+                strip_dense = True
+            else:
+                # just combine block and environment for second sweep
+                strip = tn.select_any(first_block_tags, virtual=False)
+                strip |= first_env
+                # by default only contract strips one plane wide exactly
+                if second_dense is None:
+                    strip_dense = first_bsz < 2
+                else:
+                    strip_dense = second_dense
+
+            if strip_dense:
                 second_envs = gen_exact_environments(
                     strip,
                     second_tags,
@@ -4422,20 +4533,17 @@ def _gen_plaquette_environments_via_envs(
                     contract_opts=contract_opts,
                 )
             else:
-                # compress along the strip
-                if first_cyclic:
-                    # a single piece, connected to both ends of the block
-                    if first_bsz < first_length:
-                        first_block_tags += (first_tag(first + first_bsz),)
-                else:
-                    # a piece either side, unless the block is at an edge
-                    if first > 0:
-                        first_block_tags = (
-                            first_tag(first - 1),
-                            *first_block_tags,
-                        )
-                    if first + first_bsz < first_length:
-                        first_block_tags += (first_tag(first + first_bsz),)
+                # compress along the strip, with envl and envr as extra sites
+                if has_envl:
+                    first_block_tags = (
+                        first_tag(first - 1),
+                        *first_block_tags,
+                    )
+                if has_envr:
+                    first_block_tags = (
+                        *first_block_tags,
+                        first_tag(first + first_bsz),
+                    )
 
                 second_envs = gen_compressed_environments(
                     strip,
@@ -4447,20 +4555,36 @@ def _gen_plaquette_environments_via_envs(
                     **{**environment_opts, "schedule": second_schedule},
                 )
 
+            # now iterate over the second direction
             for (second, second_bsz), second_env in second_envs:
-                # add the first environment's edges alongside the plaquette
-                target_tags = tuple(
+                second_block_tags = tuple(
                     second_tag(second + d) for d in range(second_bsz)
                 )
-                edge_env = first_env.select_any(target_tags, virtual=False)
-                environment = TensorNetwork((second_env, edge_env))
-                environment.exponent += first_env.exponent
+                if half_absorb:
+                    # the absorbed pieces are part of the local sides
+                    environment = second_env
+                    half_local = (
+                        half_ket_side.select_any(
+                            second_block_tags, virtual=False
+                        ),
+                        half_bra_side.select_any(
+                            second_block_tags, virtual=False
+                        ),
+                    )
+                else:
+                    # add the first environment's edges alongside the plaquette
+                    edge_env = first_env.select_any(
+                        second_block_tags, virtual=False
+                    )
+                    environment = TensorNetwork((second_env, edge_env))
+                    half_local = None
+                environment.exponent += strip_exponent
                 # return the plaquette in the original coordinates
-                p = (
+                plaquette = (
                     r2d.rotate(first, second),
                     r2d.rotate(first_bsz, second_bsz),
                 )
-                yield p, environment
+                yield plaquette, environment, half_local
 
 
 def _find_plaquette(where, Lx, Ly, cyclic_x, cyclic_y):
@@ -4472,8 +4596,11 @@ def _find_plaquette(where, Lx, Ly, cyclic_x, cyclic_y):
 
 
 def _grow_1d_block(start, size, max_distance, L, cyclic):
-    """Grow a block on both sides. Clip open blocks to the lattice. A
-    periodic block can cross the boundary but must leave one site outside.
+    """Grow the block ``(start, size)`` by ``max_distance`` on each side, and
+    return the new ``(start, size)``. If open, stop at the lattice edges. If
+    periodic, the block can wrap past the boundary. If it would then reach
+    all ``L`` sites, return each site once, splitting the extra sites evenly
+    either side of the original block, with any odd one after it.
     """
     if not cyclic:
         stop = min(start + size + max_distance, L)
@@ -4482,11 +4609,7 @@ def _grow_1d_block(start, size, max_distance, L, cyclic):
 
     new_size = size + 2 * max_distance
     if new_size >= L:
-        raise ValueError(
-            f"A cluster of size {new_size} would cover all {L} sites of a "
-            "periodic direction. Use `max_distance` at most "
-            f"{(L - 1 - size) // 2} here."
-        )
+        return (start - (L - size) // 2) % L, L
     return (start - max_distance) % L, new_size
 
 
@@ -4892,11 +5015,13 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         normalized=True,
         get="matrix",
         autogroup=True,
+        plaquette_sizes=None,
         cyclic=None,
         first_contract=None,
         schedule="auto",
         second_schedule="auto",
         second_dense=None,
+        max_separation=1,
         method=None,
         layer_tags=("KET", "BRA"),
         cutoff=None,
@@ -4906,6 +5031,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         compress_opts=None,
         contract_opts=None,
         progbar=False,
+        callback_rhos=None,
         **compress_method_opts,
     ):
         """Compute reduced density matrices for open or periodic boundaries.
@@ -4942,21 +5068,43 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             that size, keeping its start coordinate. At open boundaries,
             shift it inward if needed to fit the lattice. Reuse an
             environment when both the plaquette size and start match.
+        plaquette_sizes : sequence[tuple[int, int]], optional
+            Plaquette sizes ``(x_bsz, y_bsz)`` to use in place of those
+            chosen by ``autogroup``. Each set of sites must fit in one of
+            them.
         cyclic : bool or tuple[bool, bool], optional
             Periodicity in each direction. By default infer it.
         first_contract : {'x', 'y'}, optional
             Direction to compress first for all plaquettes. By default choose
             it per plaquette to keep the strip narrow, e.g. 'x' for 1x2 and 'y'
             for 2x1. This can require a sweep in each direction.
-        schedule : {'auto', 'tree', 'cut'}, optional
+        schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
             Construction schedule of the approximate environments in the
             first direction, see :meth:`gen_block_environments`.
-        second_schedule : {'auto', 'tree', 'cut'}, optional
+        second_schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
             Schedule along each strip. By default use 'cut' for exact
             contraction and 'tree' for compressed contraction.
         second_dense : bool, optional
             Whether to contract along each strip exactly. By default do so only
             for strips of width one. Compress wider strips.
+        max_separation : {1, 0.5}, optional
+            How far to leave between the environments and kept sites. By
+            default (1), they are left adjacent. If 0.5, as long as there is a
+            different env on either side and two ``layer_tags``, absorb the
+            first layer of adjacent sites into one env and the last layer of
+            adjacent sites into the other. The remaining strip is then
+            contracted exactly, regardless of ``second_dense``. From the
+            side::
+
+                    max_separation=1:      max_separation=0.5:
+                              ┊  ┊                  ┊  ┊
+                KET->      ┏━━░──░━━┓          envl┏█──░┓
+                       envl█        █envr          ┃    ┃
+                BRA->      ┗━━░──░━━┛              ┗░──█┛envr
+                              ┊  ┊                  ┊  ┊
+                              ....                  ....
+                           plaquette
+
         method : str or callable, optional
             Compression method. By default use the compressor's default for
             each direction. See
@@ -4983,6 +5131,12 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         progbar : bool, optional
             Whether to show a progress bar, with one step per reduced density
             matrix.
+        callback_rhos : callable, optional
+            If given, call ``callback_rhos(rhos)`` with the new reduced density
+            matrices of each plaquette as soon as they are ready, in the same
+            form as the return value. Plaquettes finish in sweep order, not
+            the order of ``wheres``. This can be used to save results during
+            a long run.
         compress_method_opts
             Additional options supplied to the compression method.
 
@@ -4993,31 +5147,42 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             order of ``where``.
         """
         cyclic_x, cyclic_y = _normalize_2d_cyclic(self, cyclic)
-        norm, ket, bra = self.make_norm(return_all=True)
+        norm, ket, bra = self.make_norm(layer_tags=layer_tags, return_all=True)
         plaquettes = {
             where: _find_plaquette(where, self.Lx, self.Ly, cyclic_x, cyclic_y)
             for where in wheres
         }
-        sizes = {size for _, size in plaquettes.values()}
-        if autogroup:
-            # drop sizes contained in another, e.g. 1x2 and 2x1 in 2x2
-            sizes = {
-                a
-                for a in sizes
-                if not any(
-                    a != b and a[0] <= b[0] and a[1] <= b[1] for b in sizes
+        if plaquette_sizes is not None:
+            sizes = set(map(tuple, plaquette_sizes))
+            if any(x > self.Lx or y > self.Ly for x, y in sizes):
+                raise ValueError(
+                    f"Plaquette sizes {plaquette_sizes} must fit in the "
+                    f"{self.Lx}x{self.Ly} lattice."
                 )
-            }
         else:
-            # a single plaquette size that covers every set of sites
-            sizes = {tuple(map(max, zip(*sizes)))}
+            sizes = {size for _, size in plaquettes.values()}
+            if autogroup:
+                # drop sizes contained in another, e.g. 1x2 and 2x1 in 2x2
+                sizes = {
+                    a
+                    for a in sizes
+                    if not any(
+                        a != b and a[0] <= b[0] and a[1] <= b[1] for b in sizes
+                    )
+                }
+            else:
+                # a single plaquette size that covers every set of sites
+                sizes = {tuple(map(max, zip(*sizes)))}
 
         for where, ((i, j), (x_bsz, y_bsz)) in plaquettes.items():
             # use the smallest remaining size that contains these sites
-            x_bsz, y_bsz = min(
-                (b for b in sizes if x_bsz <= b[0] and y_bsz <= b[1]),
-                key=lambda b: (b[0] * b[1], b),
-            )
+            possible = [b for b in sizes if x_bsz <= b[0] and y_bsz <= b[1]]
+            if not possible:
+                raise ValueError(
+                    f"None of the plaquette sizes {plaquette_sizes} fit the "
+                    f"sites {where}, which need at least {x_bsz}x{y_bsz}."
+                )
+            x_bsz, y_bsz = min(possible, key=lambda b: (b[0] * b[1], b))
             if not cyclic_x:
                 i = min(i, self.Lx - x_bsz)
             if not cyclic_y:
@@ -5052,38 +5217,47 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             contract_opts,
             environment_opts,
             second_dense=second_dense,
+            max_separation=max_separation,
         )
 
         if progbar:
-            # environments are generated lazily, so this tracks the full cost
+            # environments are generated lazily, so this follows full cost
             pbar = Progbar(total=len(wheres), desc="rdms")
         else:
             pbar = None
 
         rhos = {}
-        for p, environment in plaquette_envs:
-            (i, j), (x_bsz, y_bsz) = p
-            tags = tuple(
-                ket.site_tag((i + di) % self.Lx, (j + dj) % self.Ly)
-                for di in range(x_bsz)
-                for dj in range(y_bsz)
-            )
-            ket_local = ket.select_any(tags, virtual=False)
-            bra_local = bra.select_any(tags, virtual=False)
-            rhos.update(
-                partial_traces_from_environment(
-                    self,
-                    wheres_by_plaquette[p],
-                    ket_local,
-                    bra_local,
-                    environment,
-                    normalized=normalized,
-                    get=get,
-                    **contract_opts,
+        for plaquette, environment, half_local in plaquette_envs:
+            if half_local is not None:
+                # envs already absorbed into a local plaquette
+                ket_local, bra_local = half_local
+            else:
+                # select the plaquette from each layer
+                (i, j), (x_bsz, y_bsz) = plaquette
+                tags = tuple(
+                    ket.site_tag((i + di) % self.Lx, (j + dj) % self.Ly)
+                    for di in range(x_bsz)
+                    for dj in range(y_bsz)
                 )
+                ket_local = ket.select_any(tags, virtual=False)
+                bra_local = bra.select_any(tags, virtual=False)
+
+            # contract plaquette with env to all local rdms!
+            new_rhos = partial_traces_from_environment(
+                self,
+                wheres_by_plaquette[plaquette],
+                ket_local,
+                bra_local,
+                environment,
+                normalized=normalized,
+                get=get,
+                **contract_opts,
             )
+            rhos.update(new_rhos)
+            if callback_rhos is not None:
+                callback_rhos(new_rhos)
             if pbar is not None:
-                pbar.update(len(wheres_by_plaquette[p]))
+                pbar.update(len(wheres_by_plaquette[plaquette]))
 
         if pbar is not None:
             pbar.close()
@@ -5117,7 +5291,16 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         by ``max_distance`` sites on each side. Insert simple update bond
         ``gauges`` if supplied. Sweep one axis inward until at most
         ``max_separation`` rows or columns remain on each side of the kept
-        sites. Contract the remaining network exactly.
+        sites. Contract the remaining network exactly. From the side::
+
+                max_separation=1:     max_separation=0.5:     max_separation=0:
+                          ┊  ┊                 ┊  ┊
+            KET->      ┏━━░──░━━┓         envl┏█──░┓               ┊  ┊
+                   envl█        █envr         ┃    ┃           envl█━━█envr
+            BRA->      ┗━━░──░━━┛             ┗░──█┛envr           ┊  ┊
+                          ┊  ┊                 ┊  ┊
+                          ....                 ....                ....
+                       plaquette
 
         The cluster can cross a periodic boundary. It is treated as an open
         network, so it supports the usual boundary compression methods,
@@ -5132,17 +5315,15 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             to truncate using only ``cutoff``.
         max_distance : int, optional
             Number of sites to add on each side. Must be non-negative. Open
-            boundaries clip the cluster to the lattice. Each periodic
-            direction must have at least one site outside the cluster.
+            boundaries clip the cluster to the lattice. If the cluster would
+            cover a whole periodic direction, the two sides are cut.
         max_separation : int or 0.5, optional
-            Number of rows or columns to leave uncompressed on each side of
-            the kept sites. With ``0``, the boundaries also absorb the rows
-            or columns holding the kept sites, keeping their indices open,
-            until two remain. This is cheaper but less accurate. With
-            ``0.5``, one boundary absorbs the ket layer of the kept row or
-            column, and the other boundary absorbs the bra layer. This needs
-            the kept sites to lie in a single row or column across the swept
-            axis.
+            How far to leave between the boundary and kept sites. By default
+            (1), they are left adjacent. If 0, the boundaries also absorb the
+            adjacent row (but not if this means joining envs). If 0.5, as long
+            as there is a different env on either side and two ``layer_tags``,
+            absorb the first layer of adjacent sites into one env and the last
+            layer of adjacent sites into the other.
         gauges : dict[str, array_like], optional
             Simple update bond gauges keyed by index. Only matching bonds
             receive a gauge.
@@ -5201,74 +5382,78 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         y0, ny = _grow_1d_block(j, y_bsz, max_distance, self.Ly, cyclic_y)
 
         # map global coordinates to the open cluster
-        xs = {(x0 + dx) % self.Lx: dx for dx in range(nx)}
-        ys = {(y0 + dy) % self.Ly: dy for dy in range(ny)}
+        x_to_local = {(x0 + dx) % self.Lx: dx for dx in range(nx)}
+        y_to_local = {(y0 + dy) % self.Ly: dy for dy in range(ny)}
         site_map = {
             self.site_tag(x, y): self.site_tag(dx, dy)
-            for x, dx in xs.items()
-            for y, dy in ys.items()
+            for x, dx in x_to_local.items()
+            for y, dy in y_to_local.items()
         }
 
-        k = self.select_any(tuple(site_map), virtual=False)
+        cluster = self.select_any(tuple(site_map), virtual=False)
+
+        # if cluster extents all the way round, need to cut the bonds
+        full_x = cyclic_x and (nx == self.Lx)
+        full_y = cyclic_y and (ny == self.Ly)
+        if (full_x and self.Lx < 3) or (full_y and self.Ly < 3):
+            raise ValueError(
+                "A cluster can only cover a periodic direction with at least "
+                "3 sites."
+            )
+        cuts = []
+        if full_x:
+            cuts.extend((((x0 - 1) % self.Lx, y), (x0, y)) for y in y_to_local)
+        if full_y:
+            cuts.extend(((x, (y0 - 1) % self.Ly), (x, y0)) for x in x_to_local)
+        if cuts and gauges is not None:
+            # we need to copy gauges on either side
+            gauges = dict(gauges)
+
+        for coo_a, coo_b in cuts:
+            tn_b = cluster.select(self.site_tag(*coo_b))
+            for ix in bonds(cluster.select(self.site_tag(*coo_a)), tn_b):
+                new_ix = rand_uuid()
+                tn_b.reindex_({ix: new_ix})
+                if gauges is not None and ix in gauges:
+                    # both sides keep the full gauge
+                    gauges[new_ix] = gauges[ix]
+
         if gauges is not None:
-            k.gauge_simple_insert(gauges, smudge=smudge, power=power)
-        k.retag_(
+            cluster.gauge_simple_insert(gauges, smudge=smudge, power=power)
+        cluster.retag_(
             {
                 **site_map,
-                **{self.x_tag(x): self.x_tag(dx) for x, dx in xs.items()},
-                **{self.y_tag(y): self.y_tag(dy) for y, dy in ys.items()},
+                **{
+                    self.x_tag(x): self.x_tag(dx)
+                    for x, dx in x_to_local.items()
+                },
+                **{
+                    self.y_tag(y): self.y_tag(dy)
+                    for y, dy in y_to_local.items()
+                },
             }
         )
-        k.view_as_(TensorNetwork2D, like=self, Lx=nx, Ly=ny)
+        cluster.view_as_(TensorNetwork2D, like=self, Lx=nx, Ly=ny)
         first_contract = _choose_plaquette_first_contract(
-            k, x_bsz, y_bsz, first_contract
+            cluster, x_bsz, y_bsz, first_contract
         )
-        around = tuple((xs[x % self.Lx], ys[y % self.Ly]) for x, y in keep)
+        keep_local = tuple(
+            (x_to_local[x % self.Lx], y_to_local[y % self.Ly]) for x, y in keep
+        )
 
         # keep the physical ket and bra indices separate at these sites
-        _, ket, bra = k.make_norm(layer_tags=layer_tags, return_all=True)
+        _, ket, bra = cluster.make_norm(layer_tags=layer_tags, return_all=True)
         k_inds = tuple(map(self.site_ind, keep))
         b_inds = get_bra_inds(self, keep, warn=get in ("tensor", "tn"))
         bra.reindex_(dict(zip(k_inds, b_inds)))
 
         if max_separation == 0.5:
-            # split the kept row or column in two, ket layer first, so that
-            # each boundary absorbs one layer
-            axis = "xy".index(first_contract)
-            lines = {coo[axis] for coo in around}
-            if len(lines) != 1:
-                raise ValueError(
-                    "`max_separation=0.5` needs the kept sites in a single "
-                    f"row or column across the swept axis, got {keep}."
-                )
-            (t,) = lines
-            line_tag_id = (self.x_tag_id, self.y_tag_id)[axis]
-            for layer, start in ((ket, t + 1), (bra, t)):
-                # use the tag ids directly, `site_tag` would wrap around
-                retag = {}
-                for coo in product(range(nx), range(ny)):
-                    new = list(coo)
-                    if coo[axis] >= start:
-                        new[axis] += 1
-                    retag[self.site_tag_id.format(*coo)] = (
-                        self.site_tag_id.format(*new)
-                    )
-                for a in range(start, (nx, ny)[axis]):
-                    retag[line_tag_id.format(a)] = line_tag_id.format(a + 1)
-                layer.retag_(retag)
-
-            # the bra halves of the kept sites are now one line further on
-            around += tuple(
-                (x + 1, y) if axis == 0 else (x, y + 1) for x, y in around
-            )
-            max_separation = 0
-            if axis == 0:
-                nx += 1
-            else:
-                ny += 1
+            if layer_tags is None:
+                raise ValueError("`max_separation=0.5` needs `layer_tags`.")
+            from ..tn1d.compress import tensor_network_1d_compress
 
         rho_tn = ket.combine(bra, virtual=True, check_collisions=False)
-        rho_tn.view_as_(TensorNetwork2D, like=k, Lx=nx, Ly=ny)
+        rho_tn.view_as_(TensorNetwork2D, like=cluster, Lx=nx, Ly=ny)
         rho_tn.contract_boundary_(
             max_bond,
             cutoff=cutoff,
@@ -5277,10 +5462,61 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             layer_tags=layer_tags,
             compress_opts=compress_opts,
             sequence=(f"{first_contract}min", f"{first_contract}max"),
-            around=around,
-            max_separation=max_separation,
+            around=keep_local,
+            # with 0.5 the boundaries absorb one layer each afterwards
+            max_separation=1 if max_separation == 0.5 else max_separation,
             **contract_boundary_opts,
         )
+
+        if max_separation == 0.5:
+            # the lines holding the kept sites, and any boundary on each side
+            first_axis = "xy".index(first_contract)
+            first_tag, second_tag = (
+                (rho_tn.x_tag, rho_tn.y_tag)
+                if first_axis == 0
+                else (rho_tn.y_tag, rho_tn.x_tag)
+            )
+            kept_lines = [coo[first_axis] for coo in keep_local]
+            kept_start, kept_stop = min(kept_lines), max(kept_lines) + 1
+            n_first, n_second = (nx, ny) if first_axis == 0 else (ny, nx)
+            if kept_start > 0:
+                envl = rho_tn.select(first_tag(kept_start - 1))
+            else:
+                envl = TensorNetwork([])
+            if kept_stop < n_first:
+                envr = rho_tn.select(first_tag(kept_stop))
+            else:
+                envr = TensorNetwork([])
+
+            # only absorb when there is a boundary on each side
+            if envl.num_tensors and envr.num_tensors:
+                # compress a boundary and one absorbed layer along the lines
+                half_compress_fn = functools.partial(
+                    tensor_network_1d_compress,
+                    max_bond=max_bond,
+                    cutoff=cutoff,
+                    # 2d only boundary methods use 'direct' for a single layer
+                    method=(
+                        "direct"
+                        if method in ("mps", "full-bond", "projector2d")
+                        else method
+                    ),
+                    site_tags=tuple(map(second_tag, range(n_second))),
+                    canonize=canonize,
+                    compress_opts=compress_opts,
+                )
+                half_ket_side, half_bra_side = _half_absorb_block_layers(
+                    rho_tn,
+                    envl,
+                    envr,
+                    tuple(map(first_tag, range(kept_start, kept_stop))),
+                    layer_tags,
+                    half_compress_fn,
+                )
+                # the strip is now the two halves, keep the sweep's exponent
+                rho_exponent = rho_tn.exponent
+                rho_tn = TensorNetwork((half_ket_side, half_bra_side))
+                rho_tn.exponent += rho_exponent
 
         return contract_reduced_density_matrix(
             rho_tn,

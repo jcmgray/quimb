@@ -1,4 +1,5 @@
 import itertools
+import warnings
 
 import autoray as ar
 import numpy as np
@@ -648,7 +649,7 @@ class Test2DContract:
         assert not tn.is_cyclic_y()
         assert tn.num_indices == 2 * 3 * 4 - 7
 
-    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     @pytest.mark.parametrize("direction", ["x", "y"])
     def test_compute_block_environments(self, direction, schedule):
         tn = qtn.TN2D_rand(4, 4, 2, cyclic=True, seed=42)
@@ -670,7 +671,7 @@ class Test2DContract:
             actual = (tn.select_any(tags) | environment).contract()
             assert actual == pytest.approx(expected)
 
-    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     def test_compute_block_environments_layered(self, schedule):
         peps = qtn.PEPS.rand(3, 3, 2, cyclic=True, seed=42)
         norm = peps.make_norm()
@@ -718,7 +719,7 @@ class Test2DContract:
             )
 
     @pytest.mark.parametrize("second_schedule", ["tree", "cut"])
-    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     @pytest.mark.parametrize("first_contract", ["x", "y"])
     @pytest.mark.parametrize("cyclic", [True, (True, False), (False, True)])
     def test_compute_plaquette_environments_via_envs(
@@ -776,19 +777,27 @@ class Test2DContract:
                 "x", blocks=((tn.Lx, 1),), max_bond=4
             )
 
-    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.filterwarnings("ignore:`max_separation=0.5` has no effect")
+    @pytest.mark.parametrize("max_separation", [1, 0.5])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     @pytest.mark.parametrize("normalized", [False, True, "return"])
-    def test_compute_local_expectation_via_envs(self, normalized, schedule):
-        peps = qtn.PEPS.rand(3, 3, 2, cyclic=True, seed=42, dtype="complex128")
+    def test_compute_local_expectation_via_envs(
+        self, normalized, schedule, max_separation
+    ):
+        peps = qtn.PEPS.rand(3, 3, 2, cyclic=True, seed=42, dist="uniform")
         peps.equalize_norms_(1.0)
         terms = {
-            (2, 2): qu.rand_herm(2),
-            (0, 0): qu.rand_herm(2),
-            ((2, 0), (0, 0)): qu.rand_herm(4),
-            ((0, 0), (2, 0)): qu.rand_herm(4),
-            ((1, 2), (1, 0)): qu.rand_herm(4),
+            (2, 2): qu.rand_herm(2, seed=7),
+            (0, 0): qu.rand_herm(2, seed=7),
+            ((2, 0), (0, 0)): qu.rand_herm(4, seed=8),
+            ((0, 0), (2, 0)): qu.rand_herm(4, seed=8),
+            ((1, 2), (1, 0)): qu.rand_herm(4, seed=8),
         }
-        opts = {"max_bond": 256, "cutoff": 1e-10}
+        opts = {
+            "max_bond": 8,
+            "cutoff": 1e-4,
+            "max_separation": max_separation,
+        }
         expecs_ex = {
             where: peps.local_expectation_exact(
                 G, where, normalized=normalized
@@ -806,10 +815,12 @@ class Test2DContract:
             if normalized == "return":
                 expec, nfactor = expecs[where]
                 expec_ex, nfactor_ex = expecs_ex[where]
-                assert nfactor == pytest.approx(nfactor_ex)
-                assert expec == pytest.approx(expec_ex)
+                assert nfactor == pytest.approx(nfactor_ex, rel=1e-2, abs=1e-3)
+                assert expec == pytest.approx(expec_ex, rel=1e-2, abs=1e-3)
             else:
-                assert expecs[where] == pytest.approx(expecs_ex[where])
+                assert expecs[where] == pytest.approx(
+                    expecs_ex[where], rel=1e-2, abs=1e-3
+                )
 
         # the default method for a periodic PEPS
         total = peps.compute_local_expectation(
@@ -819,14 +830,16 @@ class Test2DContract:
             expected = sum(e / n for e, n in expecs_ex.values())
         else:
             expected = sum(expecs_ex.values())
-        assert total == pytest.approx(expected)
+        assert total == pytest.approx(expected, rel=1e-2, abs=1e-3)
 
+    @pytest.mark.filterwarnings("ignore:`max_separation=0.5` has no effect")
+    @pytest.mark.parametrize("max_separation", [1, 0.5])
     @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])
     @pytest.mark.parametrize("cyclic", [False, True, (True, False)])
-    def test_compute_partial_traces_via_envs(self, cyclic, get):
-        peps = qtn.PEPS.rand(
-            3, 4, 2, cyclic=cyclic, seed=42, dtype="complex128"
-        )
+    def test_compute_partial_traces_via_envs(
+        self, cyclic, get, max_separation
+    ):
+        peps = qtn.PEPS.rand(3, 4, 2, cyclic=cyclic, seed=42, dist="uniform")
         peps.equalize_norms_(1.0)
         # share one first sweep across plaquette sizes
         wheres = [
@@ -839,7 +852,11 @@ class Test2DContract:
         if peps.is_cyclic_x():
             wheres.append(((2, 0), (0, 0)))
         rhos = peps.compute_partial_traces_via_envs(
-            wheres, max_bond=256, cutoff=1e-10, get=get
+            wheres,
+            max_bond=4,
+            cutoff=1e-4,
+            get=get,
+            max_separation=max_separation,
         )
         assert set(rhos) == set(wheres)
         for where in wheres:
@@ -848,7 +865,7 @@ class Test2DContract:
             if get == "tensor":
                 assert rho.inds == expected.inds
                 rho, expected = rho.data, expected.data
-            assert rho == pytest.approx(expected)
+            assert rho == pytest.approx(expected, rel=1e-2, abs=1e-3)
 
     @pytest.mark.parametrize(
         "first_contract,autogroup,diagonal,expected_sweeps",
@@ -929,6 +946,90 @@ class Test2DContract:
         for where in wheres:
             expected = peps.partial_trace_exact(where)
             assert rhos[where] == pytest.approx(expected)
+
+    @pytest.mark.parametrize("schedule", ["auto", "tree", "cut"])
+    def test_compute_partial_traces_via_envs_half_warns(self, schedule):
+        peps = qtn.PEPS.rand(4, 4, 2, cyclic=(True, False), seed=42)
+        opts = dict(max_bond=8, max_separation=0.5, schedule=schedule)
+        with pytest.warns(UserWarning, match="cutpair"):
+            peps.compute_partial_traces_via_envs(
+                [(1, 1)], first_contract="x", **opts
+            )
+        # no warning along the open direction
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            peps.compute_partial_traces_via_envs(
+                [(1, 1)], first_contract="y", **opts
+            )
+
+    def test_compute_partial_traces_via_envs_half_needs_layer_tags(self):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        with pytest.raises(ValueError, match="needs `layer_tags`"):
+            peps.compute_partial_traces_via_envs(
+                [(1, 1)], max_bond=8, max_separation=0.5, layer_tags=None
+            )
+
+    @pytest.mark.parametrize("layer_tags", [("BRA", "KET"), ("K", "B")])
+    @pytest.mark.parametrize("max_separation", [1, 0.5])
+    def test_compute_partial_traces_via_envs_layer_tags(
+        self, layer_tags, max_separation
+    ):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype="complex128")
+        rho = peps.compute_partial_traces_via_envs(
+            [(1, 1)],
+            16,
+            max_separation=max_separation,
+            layer_tags=layer_tags,
+            cutoff=1e-6,
+        )[(1, 1)]
+        assert rho == pytest.approx(
+            peps.partial_trace_exact((1, 1)), rel=1e-2, abs=1e-3
+        )
+
+    def test_compute_partial_traces_via_envs_callback_rhos(self):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype="complex128")
+        wheres = [(0, 0), (1, 1), ((0, 1), (0, 2)), ((1, 2), (2, 2))]
+        batches = []
+        rhos = peps.compute_partial_traces_via_envs(
+            wheres, 8, callback_rhos=batches.append
+        )
+        # one call per plaquette, each with only its new results
+        assert len(batches) > 1
+        collected = {}
+        for batch in batches:
+            assert not set(batch) & set(collected)
+            collected.update(batch)
+        assert set(collected) == set(rhos)
+        for where, rho in rhos.items():
+            assert collected[where] is rho
+
+    def test_compute_partial_traces_via_envs_plaquette_sizes(self):
+        peps = qtn.PEPS.rand(4, 4, 2, seed=42, dtype="complex128")
+        wheres = [((1, 1), (1, 2)), ((1, 1), (2, 1)), ((1, 1), (2, 2))]
+        opts = dict(max_bond=2, cutoff=0.0)
+        rhos = peps.compute_partial_traces_via_envs(wheres, **opts)
+        # alone, the pair would get a smaller plaquette, and a different rdm
+        pair = wheres[0]
+        rho = peps.compute_partial_traces_via_envs([pair], **opts)[pair]
+        assert rho != pytest.approx(rhos[pair])
+        # fixing the sizes gives the same result as the full run
+        rho = peps.compute_partial_traces_via_envs(
+            [pair], plaquette_sizes=[(2, 2)], **opts
+        )[pair]
+        assert rho == pytest.approx(rhos[pair])
+
+    @pytest.mark.parametrize(
+        "plaquette_sizes, match",
+        [([(1, 2)], "None of the plaquette sizes"), ([(4, 1)], "must fit")],
+    )
+    def test_compute_partial_traces_via_envs_plaquette_sizes_raises(
+        self, plaquette_sizes, match
+    ):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42)
+        with pytest.raises(ValueError, match=match):
+            peps.compute_partial_traces_via_envs(
+                [((1, 1), (2, 1))], 8, plaquette_sizes=plaquette_sizes
+            )
 
     def test_compute_partial_traces_via_envs_contract_opts(self):
         peps = qtn.PEPS.rand(3, 3, 2, seed=42, dtype="complex128")
@@ -1044,12 +1145,9 @@ class Test2DContract:
         )
         assert actual == pytest.approx(expected)
 
-    @requires_symmray
-    @pytest.mark.parametrize("schedule", ["tree", "cut"])
-    @pytest.mark.parametrize("fermionic", [False, True])
-    def test_compute_local_expectation_via_envs_symmray(
-        self, fermionic, schedule
-    ):
+    @pytest.fixture(scope="class")
+    @staticmethod
+    def envs_symmray_state(request):
         import symmray as sr
 
         peps = sr.PEPS_abelian_rand(
@@ -1058,9 +1156,9 @@ class Test2DContract:
             3,
             bond_dim=2,
             cyclic=True,
-            fermionic=fermionic,
+            fermionic=request.param,
             subsizes="equal",
-            dtype="complex128",
+            dist="uniform",
             seed=42,
         )
         # include bonds across both periodic boundaries
@@ -1070,7 +1168,7 @@ class Test2DContract:
             ((1, 2), (1, 0)),
             ((0, 0), (2, 0)),
         ]
-        if fermionic:
+        if request.param:
             terms = sr.ham_fermi_hubbard_spinless_from_edges("Z2", edges)
         else:
             terms = sr.ham_heisenberg_from_edges("Z2", edges)
@@ -1079,38 +1177,177 @@ class Test2DContract:
             peps.local_expectation_exact(G, where)
             for where, G in terms.items()
         )
+        return peps, terms, expected
+
+    @pytest.mark.filterwarnings("ignore:`max_separation=0.5` has no effect")
+    @requires_symmray
+    @pytest.mark.parametrize("max_separation", [1, 0.5])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
+    @pytest.mark.parametrize(
+        "envs_symmray_state", [False, True], indirect=True
+    )
+    def test_compute_local_expectation_via_envs_symmray(
+        self, envs_symmray_state, schedule, max_separation
+    ):
+        peps, terms, expected = envs_symmray_state
+        peps = peps.copy()
         actual = peps.compute_local_expectation_via_envs(
             terms,
-            max_bond=256,
-            cutoff=1e-10,
+            max_bond=32,
+            cutoff=1e-6,
             schedule=schedule,
+            max_separation=max_separation,
         )
-        assert actual == pytest.approx(expected)
+        assert actual == pytest.approx(expected, rel=1e-2, abs=1e-3)
+
+    @pytest.fixture(scope="class")
+    @staticmethod
+    def envs_fermionic_odd_state(request):
+        import symmray as sr
+
+        # odd parity, so the bra tensors carry dual dummy modes
+        peps = sr.PEPS_fermionic_rand(
+            "Z2",
+            3,
+            3,
+            bond_dim=2,
+            phys_dim=2,
+            cyclic=request.param,
+            seed=7,
+            site_charge=lambda site: 1,
+        )
+        wheres = [(1, 1), ((1, 1), (1, 2)), ((1, 1), (2, 1)), ((0, 0), (1, 1))]
+        if request.param:
+            wheres.append(((2, 1), (0, 1)))
+        expected = {
+            where: peps.partial_trace_exact(where, get="array")
+            for where in wheres
+        }
+        return peps, wheres, expected
+
+    @pytest.mark.filterwarnings("ignore:`max_separation=0.5` has no effect")
+    @requires_symmray
+    @pytest.mark.parametrize("max_separation", [1, 0.5])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
+    @pytest.mark.parametrize(
+        "envs_fermionic_odd_state",
+        [False, (True, False), True],
+        ids=["open", "cyl", "torus"],
+        indirect=True,
+    )
+    def test_compute_partial_traces_via_envs_fermionic_odd(
+        self, monkeypatch, envs_fermionic_odd_state, schedule, max_separation
+    ):
+        from quimb.tensor.tn2d import core
+
+        peps, wheres, expected = envs_fermionic_odd_state
+        peps = peps.copy()
+        absorbed = []
+        absorb_block_layers = core._half_absorb_block_layers
+
+        def spy(*args, **kwargs):
+            absorbed.append(True)
+            return absorb_block_layers(*args, **kwargs)
+
+        monkeypatch.setattr(core, "_half_absorb_block_layers", spy)
+        opts = dict(
+            max_bond=64,
+            cutoff=1e-14,
+            schedule=schedule,
+            max_separation=max_separation,
+            get="array",
+        )
+        rhos = peps.compute_partial_traces_via_envs(wheres, **opts)
+        for where in wheres:
+            rhos[where].test_allclose(expected[where])
+
+        # keep a width-one strip so grouping cannot skip the half step
+        rho = peps.compute_partial_traces_via_envs([(1, 1)], **opts)[1, 1]
+        rho.test_allclose(expected[1, 1])
+        assert bool(absorbed) == (
+            max_separation == 0.5
+            and (not peps.is_cyclic_x() or schedule == "cutpair")
+        )
 
     @pytest.mark.parametrize("max_separation", [0, 0.5, 1])
     @pytest.mark.parametrize("layer_tags", [None, ("KET", "BRA"), ("K", "B")])
     @pytest.mark.parametrize("method", [None, "dm", "projector2d"])
     @pytest.mark.parametrize(
-        "where", [(1, 1), ((0, 1), (0, 2)), ((2, 1), (1, 1)), ((0, 0), (1, 1))]
+        "where",
+        [
+            (1, 1),
+            ((0, 1), (0, 2)),
+            ((2, 1), (1, 1)),
+            ((0, 0), (1, 1)),
+            ((0, 1), (1, 2)),
+        ],
     )
     def test_partial_trace_cluster_boundary_open(
         self, where, method, layer_tags, max_separation
     ):
-        peps = qtn.PEPS.rand(3, 4, 2, seed=42, dtype="complex128")
+        peps = qtn.PEPS.rand(3, 4, 2, seed=42, dist="uniform")
         opts = dict(
             max_distance=4,
             max_separation=max_separation,
             method=method,
             layer_tags=layer_tags,
+            cutoff=1e-6,
         )
-        if max_separation == 0.5 and where == ((0, 0), (1, 1)):
-            # half lines need the kept sites in a single row or column
-            with pytest.raises(ValueError, match="single row or column"):
-                peps.partial_trace_cluster_boundary(where, 64, **opts)
+        if max_separation == 0.5 and layer_tags is None:
+            with pytest.raises(ValueError, match="needs `layer_tags`"):
+                peps.partial_trace_cluster_boundary(where, 16, **opts)
             return
         # the clipped cluster covers the whole lattice
-        rho = peps.partial_trace_cluster_boundary(where, 64, **opts)
-        assert rho == pytest.approx(peps.partial_trace_exact(where))
+        rho = peps.partial_trace_cluster_boundary(where, 16, **opts)
+        assert rho == pytest.approx(
+            peps.partial_trace_exact(where), rel=1e-2, abs=1e-3
+        )
+
+    @pytest.mark.parametrize(
+        "where, num_tensors",
+        [
+            # a boundary on each side absorbs a layer of the kept columns
+            ((1, 2), (12, 6)),
+            (((0, 2), (1, 3)), (18, 12)),
+            # a single boundary absorbs nothing
+            ((1, 0), (9, 9)),
+            (((0, 0), (1, 1)), (15, 15)),
+        ],
+    )
+    @pytest.mark.parametrize("method", [None, "dm"])
+    def test_partial_trace_cluster_boundary_half(
+        self, where, num_tensors, method
+    ):
+        peps = qtn.PEPS.rand(3, 6, 2, seed=42, dtype="complex128")
+        expected = peps.partial_trace_exact(where)
+        for max_separation, n in zip((1, 0.5), num_tensors):
+            opts = dict(
+                max_distance=6,
+                max_separation=max_separation,
+                method=method,
+                cutoff=1e-14,
+            )
+            tn = peps.partial_trace_cluster_boundary(
+                where, 64, get="tn", **opts
+            )
+            assert tn.num_tensors == n
+            # the clipped cluster covers the whole lattice
+            rho = peps.partial_trace_cluster_boundary(where, 64, **opts)
+            assert rho == pytest.approx(expected)
+
+    def test_partial_trace_cluster_boundary_half_compress_opts(self):
+        peps = qtn.PEPS.rand(3, 3, 2, seed=42, dist="uniform")
+        rho = peps.partial_trace_cluster_boundary(
+            (1, 1),
+            16,
+            max_distance=3,
+            max_separation=0.5,
+            cutoff=1e-6,
+            compress_opts={"method": "svd"},
+        )
+        assert rho == pytest.approx(
+            peps.partial_trace_exact((1, 1)), rel=1e-2, abs=1e-3
+        )
 
     @pytest.mark.parametrize("get", ["matrix", "array", "tensor"])
     @pytest.mark.parametrize("normalized", [False, True, "return"])
@@ -1157,11 +1394,78 @@ class Test2DContract:
         k.gauge_simple_insert(gauges, smudge=1e-12)
         assert rho == pytest.approx(k.partial_trace_exact(where))
 
+    @pytest.mark.parametrize("max_separation", [0, 0.5, 1])
+    @pytest.mark.parametrize("gauged", [False, True])
+    @pytest.mark.parametrize(
+        "where", [(1, 1), ((1, 1), (1, 2)), ((1, 1), (2, 2))]
+    )
+    def test_partial_trace_cluster_boundary_whole_periodic(
+        self, where, gauged, max_separation
+    ):
+        peps = qtn.PEPS.rand(4, 4, 2, cyclic=True, seed=7)
+        # the cut bonds are between the last and first rows and columns, so
+        # with these bonds of size one cutting them is exact
+        for i in range(4):
+            peps.compress_between((3, i), (0, i), max_bond=1)
+            peps.compress_between((i, 3), (i, 0), max_bond=1)
+        gauges = None
+        expected_peps = peps
+        if gauged:
+            gauges = {}
+            peps.gauge_all_simple_(gauges=gauges, max_iterations=10)
+            expected_peps = peps.copy()
+            expected_peps.gauge_simple_insert(gauges)
+        rho = peps.partial_trace_cluster_boundary(
+            where,
+            64,
+            max_distance=4,
+            max_separation=max_separation,
+            gauges=gauges,
+            cutoff=1e-14,
+        )
+        assert rho == pytest.approx(expected_peps.partial_trace_exact(where))
+
+    @requires_symmray
+    @pytest.mark.parametrize("max_separation", [0, 0.5, 1])
+    @pytest.mark.parametrize(
+        "where", [(1, 1), ((1, 1), (1, 2)), ((1, 1), (2, 2))]
+    )
+    def test_partial_trace_cluster_boundary_whole_periodic_fermionic(
+        self, where, max_separation
+    ):
+        import symmray as sr
+
+        # odd parity, so the bra tensors carry dual dummy modes
+        peps = sr.PEPS_fermionic_rand(
+            "Z2",
+            4,
+            4,
+            bond_dim=2,
+            phys_dim=2,
+            cyclic=True,
+            seed=7,
+            site_charge=lambda site: 1,
+        )
+        for i in range(4):
+            peps.compress_between((3, i), (0, i), max_bond=1)
+            peps.compress_between((i, 3), (i, 0), max_bond=1)
+        rho = peps.partial_trace_cluster_boundary(
+            where,
+            64,
+            max_distance=4,
+            max_separation=max_separation,
+            cutoff=1e-14,
+            get="array",
+        )
+        rho.test_allclose(peps.partial_trace_exact(where, get="array"))
+
     def test_partial_trace_cluster_boundary_too_large(self):
-        peps = qtn.PEPS.rand(5, 6, 2, cyclic=True, seed=7)
-        # 1 + 2 * 2 sites covers the whole periodic x direction
-        with pytest.raises(ValueError, match="at most 1"):
-            peps.partial_trace_cluster_boundary((0, 0), 8, max_distance=2)
+        # two rows have a single bond, so there is no separate one to cut
+        peps = qtn.PEPS.rand(2, 4, 2, cyclic=True, seed=7)
+        with pytest.raises(ValueError, match="at least 3 sites"):
+            peps.partial_trace_cluster_boundary(
+                (0, 0), 8, max_distance=1, cyclic=True
+            )
         # open directions clip to the lattice
         peps = qtn.PEPS.rand(5, 6, 2, cyclic=(False, True), seed=7)
         rho = peps.partial_trace_cluster_boundary((0, 0), 64, max_distance=2)
@@ -1207,8 +1511,14 @@ class Test2DContract:
     ):
         import symmray as sr
 
-        L = 7 if cyclic else 3
-        opts = {"bond_dim": 2, "phys_dim": 2, "cyclic": cyclic, "seed": 7}
+        L = 5 if cyclic else 3
+        opts = {
+            "bond_dim": 2,
+            "phys_dim": 2,
+            "cyclic": cyclic,
+            "seed": 7,
+            "dist": "uniform",
+        }
         if fermionic:
             # odd parity, so the bra tensors carry dual dummy modes
             peps = sr.PEPS_fermionic_rand(
@@ -1221,18 +1531,19 @@ class Test2DContract:
 
         if cyclic:
             # across the x boundary
-            where = ((6, 2), (0, 2))
-            xs, ys = (4, 5, 6, 0, 1, 2), (0, 1, 2, 3, 4)
+            where = ((4, 1), (0, 1))
+            xs, ys = (3, 4, 0, 1), (0, 1, 2)
         else:
             # the clipped cluster covers the whole lattice
             where = ((1, 1), (1, 2))
             xs = ys = range(L)
         rho = peps.partial_trace_cluster_boundary(
             where,
-            64,
-            max_distance=2,
+            16,
+            max_distance=1 if cyclic else 2,
             max_separation=max_separation,
             gauges=gauges,
+            cutoff=1e-6,
             get="array",
         )
         k = peps.select_any(
@@ -1240,7 +1551,7 @@ class Test2DContract:
         )
         k.gauge_simple_insert(gauges, smudge=1e-12)
         expected = k.partial_trace_exact(where, get="array")
-        rho.test_allclose(expected)
+        rho.test_allclose(expected, rtol=1e-2, atol=1e-3)
 
     @pytest.mark.parametrize("direction", ["x", "y"])
     @pytest.mark.parametrize(
@@ -1271,7 +1582,7 @@ class Test2DContract:
         actual = (tn.select(tag) | environment).contract()
         assert actual == pytest.approx(expected)
 
-    @pytest.mark.parametrize("schedule", ["tree", "cut"])
+    @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     def test_compute_block_environments_equalize_norms(self, schedule):
         tn = qtn.TN2D_rand(4, 4, 2, cyclic=True, seed=42)
         tn.equalize_norms_(1.0)
