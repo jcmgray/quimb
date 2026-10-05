@@ -40,11 +40,26 @@ class EnvironmentPlan:
     """Plan reusable environments for consecutive blocks in one dimension.
 
     The default 'tree' schedule adds one site at a time. It starts near the
-    opposite side of each target block. It suits approximate contraction,
-    where combining two large environments can be costly or less accurate.
+    opposite side of each target block, and never combines two environments.
+    This makes it suitable for approximate contraction, where combining two
+    large environments can be costly or less accurate.
 
-    The 'cut' schedule can combine two cached environments. It suits exact
-    contraction and uses linear work for a full sweep.
+    The 'cut' schedule grows environments from a fixed cut, using linear work
+    for a full sweep. This produces two environments for each block. On a ring,
+    it combines the environments either side of each block into one, which is
+    fine for exact contraction. The 'cutpair' schedule keeps these separate, so
+    most blocks have two environments, which also share bonds across the cut.
+
+    A visual representation of what environments are produced:
+
+        non-cyclic:     'cutpair':    'tree'/'cut':
+
+                        envl envr          env
+        envl   envr      ┏━█━█━┓         ┏━███━┓
+         █━░─░─░━█       ┃     ┃         ┃     ┃
+           .....         ┗░─░─░┛         ┗░─░─░┛
+           block          .....           .....
+                          block           block
 
     Parameters
     ----------
@@ -52,14 +67,19 @@ class EnvironmentPlan:
         The number of sites.
     cyclic : bool, optional
         Whether the sites have periodic boundary conditions.
-    schedule : {'tree', 'cut'}, optional
+    schedule : {'tree', 'cut', 'cutpair'}, optional
         How to share work between target blocks. For a full periodic sweep:
 
         - 'tree': add one site at a time, using ``O(L log L)`` contractions
-          and ``O(log L)`` cached environments.
+          and ``O(log L)`` cached environments. Each target has a single
+          environment.
         - 'cut': build left and right environments from a fixed cut, then
           combine them for each target. Uses about ``3L`` contractions and
           ``O(L)`` cached environments.
+        - 'cutpair': as 'cut', but keep the left and right environments
+          separate, using about ``2L`` contractions. Blocks that touch or
+          cross the cut have a single environment. Environments are never
+          combined.
 
         Ignored for open boundaries, where environments grow from each end.
 
@@ -124,8 +144,8 @@ class EnvironmentPlan:
     def __init__(self, L, cyclic=True, schedule="tree"):
         if L < 1:
             raise ValueError("L must be at least 1")
-        if schedule not in ("tree", "cut"):
-            raise ValueError("schedule must be 'tree' or 'cut'")
+        if schedule not in ("tree", "cut", "cutpair"):
+            raise ValueError("schedule must be 'tree', 'cut' or 'cutpair'")
 
         self.L = L
         self.cyclic = cyclic
@@ -261,7 +281,11 @@ class EnvironmentPlan:
                 )
                 input_envs += (left_key,)
 
-            if self.cyclic and len(input_envs) == 2:
+            if (
+                self.cyclic
+                and (self.schedule == "cut")
+                and (len(input_envs) == 2)
+            ):
                 # on a ring they share bonds across the cut, so merge
                 output_env = (stop, L + start)
                 moves.append(
@@ -580,7 +604,7 @@ def gen_exact_environments(
         different sizes.
     cyclic : bool, optional
         Whether the planes wrap around periodically.
-    schedule : {'auto', 'tree', 'cut'}, optional
+    schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
         Environment construction schedule, only relevant if ``cyclic``. By
         default use 'cut', which uses linear work by permitting exact
         environment-environment contractions.
@@ -667,6 +691,8 @@ def gen_compressed_environments(
 
     If ``cyclic``, the planes before and after the block form a single
     environment, connected to both the first and last plane of the block.
+    The 'cutpair' schedule instead usually keeps them as two, which are also
+    connected across the periodic boundary.
 
     Parameters
     ----------
@@ -697,11 +723,13 @@ def gen_compressed_environments(
         - '2d': :func:`~quimb.tensor.tn2d.compress.tensor_network_2d_compress`,
           for a 2D lattice.
 
-    schedule : {'auto', 'tree', 'cut'}, optional
+    schedule : {'auto', 'tree', 'cut', 'cutpair'}, optional
         Environment construction schedule, only relevant if ``cyclic``. By
         default use 'tree', which never compresses two environments together.
-        The 'cut' schedule uses fewer compressions but can degrade the
-        approximation by combining two already compressed environments.
+        The 'cut' schedule uses fewer compressions but combines two
+        environments as its final step, which can be expensive in an approx
+        contraction setting. The 'cutpair' schedule keeps these two
+        environments separate.
     method : str or callable, optional
         The compression method, supplied to ``compress_fn``. By default use
         its own default method.
