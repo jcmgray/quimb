@@ -434,6 +434,23 @@ class TestGetBraInds:
 
 
 class TestReducedDensityMatrices:
+    @pytest.mark.parametrize(
+        "layer_tags", [False, True, 0, 1, None, ("K", "B")]
+    )
+    def test_make_reduced_density_matrix_layer_tags(self, layer_tags):
+        peps = qtn.PEPS.rand(2, 2, 2, seed=42, dtype="complex128")
+        where = ((0, 0), (1, 1))
+        tn = peps.make_reduced_density_matrix(where, layer_tags=layer_tags)
+        tags = ("KET", "BRA") if layer_tags == 1 else layer_tags
+        if tags:
+            assert all(tag in tn.tags for tag in tags)
+        else:
+            assert tn.tags == peps.tags
+        rho = tn.to_dense(("k0,0", "k1,1"), ("b0,0", "b1,1"))
+        assert rho == pytest.approx(
+            peps.partial_trace_exact(where, normalized=False)
+        )
+
     @pytest.mark.parametrize("method", ["exact", "cluster"])
     def test_compute_local_expectation_return_norm(self, method):
         psi = qtn.MPS_rand_state(4, 2, seed=42) * 3

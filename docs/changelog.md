@@ -36,13 +36,13 @@ Release notes for `quimb`.
 #### 1D compression and MPS
 
 - Add a [1D compression guide](tensor/tensor-1d-compress.md) with method comparisons, benchmarks, and usage examples.
-- Add successive deterministic compression (``method="sdc"``), ``sdc-oversample``, and randomized variants ``sdcr`` and ``sdcr-oversample``, based on https://arxiv.org/abs/2601.19650.
+- Add successive deterministic compression (``method="sdc"``), ``sdc-oversample``, and randomized variants ``sdcr`` and ``sdcr-oversample``, supporting fermionic networks, based on https://arxiv.org/abs/2601.19650.
 - ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src``, ``srcmps``, ``fit``, and their oversampling variants handle long-range bonds directly, supporting ``symmray`` abelian and fermionic tensors (for ``srcmps`` and ``fit``, with a supplied ``tn_fit``).
 - ``dm`` uses QR-SVD when a site's density matrix would exceed its rank bound, reducing layered PEPS norm boundary contraction costs (https://arxiv.org/abs/2406.09769), including for fermionic networks.
 - ``src``, ``srcmps``, ``fit``, and their oversampling variants accept a ``seed`` or random generator and match the backend's device and dtype (autoray v0.10.0 or newer). By default, use the backend's global random state.
-- ``src`` and ``srcmps`` default to ``cutoff=0.0``. ``sdcr`` leaves the cutoff disabled with its default randomized SVD.
+- [`tensor_network_1d_compress`](#tensor_network_1d_compress) defaults to ``cutoff="auto"``, choosing the cutoff for each method: ``0.0`` for ``src`` and ``srcmps``, disabled for ``sdcr`` with its default randomized SVD, and ``1e-10`` otherwise.
 - ``zipup``, ``sdc``, and ``sdcr`` oversampling accept ``cutoff_mode_oversample``. Zipup also accepts ``cutoff_oversample="auto"``. All 1D oversampling methods accept ``compress_opts_final`` to configure the final direct sweep separately.
-- ``fit`` with ``bsz=1`` supports fermionic tensor networks, but warns for odd-parity tensors because results are likely incorrect.
+- ``fit`` with ``bsz=1`` now supports fermionic tensor networks, including odd-parity tensors.
 - Add [`MatrixProductState.from_product`](#MatrixProductState.from_product), also used by [`MPS_product_state`](#MPS_product_state), with support for block-sparse single-site vectors.
 - Compression functions accept tag groups in ``site_tags``; see [`parse_site_tag_groups`](#parse_site_tag_groups). The 1D, 2D, and arbitrary-geometry wrappers also accept custom ``method`` callables.
 
@@ -53,12 +53,13 @@ Release notes for `quimb`.
 - Add [`TensorNetwork1D.gen_block_environments`](#TensorNetwork1D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork1D.compute_block_environments) for exact block environments, and [`is_cyclic`](#TensorNetwork1D.is_cyclic) to check for periodic chains.
 - 2D partial traces and local expectations support periodic PEPS with ``route=None``, ``"boundary"``, or ``"envs"`` and options ``max_bond``, ``cutoff``, and ``method``. Add [`TensorNetwork2DVector.partial_trace`](#TensorNetwork2DVector.partial_trace), [`compute_partial_traces`](#TensorNetwork2DVector.compute_partial_traces), and [`local_expectation`](#TensorNetwork2DVector.local_expectation), with explicit methods for each route.
 - Add [`TensorNetwork2D.gen_block_environments`](#TensorNetwork2D.gen_block_environments) and [`compute_block_environments`](#TensorNetwork2D.compute_block_environments) for compressed row or column block environments, and [`compute_plaquette_environments_via_envs`](#TensorNetwork2D.compute_plaquette_environments_via_envs) for plaquettes, including those crossing periodic boundaries.
-- The 2D ``"envs"`` route accepts ``second_dense`` to control exact contraction of the remaining strip, by default only for strips one plane wide. It also supports ``autogroup``, ``first_contract`` and custom ``layer_tags``. With ``max_separation=0.5`` the environments either side of each block can now absorb its first ket layer and last bra layer. ``plaquette_sizes`` can now fix the plaquette sizes, and ``callback_rhos`` lets you save each plaquette's reduced density matrices as they finish.
-- Add the 2D ``"cluster_boundary"`` route: [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary), [`compute_partial_traces_cluster_boundary`](#TensorNetwork2DVector.compute_partial_traces_cluster_boundary), and [`compute_local_expectation_cluster_boundary`](#TensorNetwork2DVector.compute_local_expectation_cluster_boundary). Control cluster size with ``max_distance``, optionally insert simple-update ``gauges``, and use 1D boundary compression methods. Clusters can cross periodic boundaries.
-- [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary) accepts ``max_separation`` to control uncompressed lines around kept sites. ``0`` compresses the kept line into a boundary, and ``0.5`` now compresses the first ket layer and last bra layer of the kept lines into the boundaries either side. ``max_distance`` can now cover a whole periodic direction. [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``around`` also respects ``max_separation`` on each side of the target region.
+- The 2D ``"envs"`` route supports ``second_dense`` to control exact contraction of the remaining strip, by default only for strips one plane wide, alongside ``autogroup``, ``first_contract``, custom ``layer_tags``, fixed ``plaquette_sizes``, and ``callback_rhos`` to save reduced density matrices as they finish. ``max_separation=0.5`` enables half-layer compression, including with a single periodic environment.
+- Add the 2D ``"cluster_boundary"`` route: [`partial_trace_cluster_boundary`](#TensorNetwork2DVector.partial_trace_cluster_boundary), [`compute_partial_traces_cluster_boundary`](#TensorNetwork2DVector.compute_partial_traces_cluster_boundary), and [`compute_local_expectation_cluster_boundary`](#TensorNetwork2DVector.compute_local_expectation_cluster_boundary). Control cluster size with ``max_distance``, including across periodic boundaries or over a whole periodic direction, optionally insert simple-update ``gauges``, and use 1D boundary compression methods. ``max_separation`` controls uncompressed lines around kept sites, with ``0.5`` enabling half-layer compression even with only one boundary.
+- [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``around`` now respects ``max_separation`` on each side of the target region.
 - Add [`compute_partial_traces_exact`](#TensorNetworkGenVector.compute_partial_traces_exact) and [`compute_partial_traces_cluster`](#TensorNetworkGenVector.compute_partial_traces_cluster) for computing many reduced density matrices at once.
-- Partial traces accept ``get="tn"`` for an uncontracted network and ``normalized="return"`` for ``(rho, trace)`` without normalization, including exact, cluster, and [`D2BP.partial_trace`](#D2BP.partial_trace) methods.
+- Exact and cluster partial traces now accept ``get="tn"`` for an uncontracted network. [`D2BP.partial_trace`](#D2BP.partial_trace) now accepts ``normalized="return"`` for ``(rho, trace)`` without normalization.
 - 2D [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``method="full-bond"`` accepts ``compress_opts`` to configure the similarity decomposition, or ``similarity_method`` as a shortcut.
+- Norm, overlap, and reduced density matrix constructors, and 2D norm, normalization, partial trace, and expectation methods accept ``layer_tags=True`` or ``1`` for the default ket and bra tags and ``False`` or ``0`` to disable them. Methods operating on an existing network reject these boolean and integer options with a clear error. 2D [`normalize`](#TensorNetwork2DVector.normalize) now honors custom layer tags.
 
 #### Gates and circuits
 
@@ -133,10 +134,10 @@ Release notes for `quimb`.
 
 #### Fermionic tensors
 
-- 1D compression: fix ``sdc``, ``sdc-oversample``, and ``fit`` for fermionic networks, and ``dm`` for mixed bond orientations and truncated odd-parity norm networks.
+- 1D compression: fix ``fit`` for fermionic networks, and ``dm`` for mixed bond orientations and truncated odd-parity norm networks.
 - Projector compression (``method="projector"``): fix zero projectors for odd-parity fermionic norm networks with every ``canonize`` option.
 - [`D2BP.compress`](#D2BP.compress) and [`D2BP.gauge_symmetric`](#D2BP.gauge_symmetric): preserve positive messages and full-rank identity matrices for fermionic networks.
-- [`TensorNetwork.conj`](#TensorNetwork.conj) and [`Tensor.conj`](#Tensor.conj): add ``output_inds`` to select output legs for fermionic conjugation phases, including subnetworks. Fix conjugation of paired and unpaired odd-parity dummy modes.
+- [`Tensor.conj`](#Tensor.conj): add ``output_inds`` to select output legs for fermionic conjugation phases. Fix conjugation phases for subnetworks and paired and unpaired odd-parity dummy modes in [`TensorNetwork.conj`](#TensorNetwork.conj) and [`Tensor.conj`](#Tensor.conj).
 
 #### Belief propagation and overlaps
 

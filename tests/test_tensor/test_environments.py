@@ -34,6 +34,26 @@ def execute_symbolically(plan, blocks):
     return outputs, peak_cache
 
 
+class TestCompressedEnvironmentOptions:
+    @pytest.mark.parametrize("layer_tags", [False, True, 0, 1])
+    def test_rejects_boolean_layer_tags(self, layer_tags):
+        import quimb.tensor as qtn
+        from quimb.tensor.environments import gen_compressed_environments
+
+        norm = qtn.PEPS.rand(2, 2, 2, seed=42).make_norm()
+        with pytest.raises(TypeError, match="existing tensor network"):
+            list(
+                gen_compressed_environments(
+                    norm,
+                    ("X0", "X1"),
+                    ("Y0", "Y1"),
+                    (),
+                    max_bond=4,
+                    layer_tags=layer_tags,
+                )
+            )
+
+
 class TestEnvironmentPlan:
     @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     @pytest.mark.parametrize("cyclic", [False, True])

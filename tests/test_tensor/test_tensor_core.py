@@ -958,6 +958,34 @@ class TestTensorFunctions:
 
 
 class TestTensorNetwork:
+    @pytest.mark.parametrize("method", ["make_norm", "make_overlap"])
+    @pytest.mark.parametrize(
+        "layer_tags",
+        [False, True, 0, 1, np.int64(0), np.int64(1), None, ("K", "B")],
+    )
+    def test_make_layers_tags(self, method, layer_tags):
+        psi = qtn.MPS_rand_state(3, 2, seed=42, dtype="complex128")
+        if method == "make_norm":
+            other = psi
+            tn, ket, bra = psi.make_norm(
+                layer_tags=layer_tags, return_all=True
+            )
+        else:
+            other = qtn.MPS_rand_state(3, 2, seed=43, dtype="complex128")
+            tn, ket, bra = psi.make_overlap(
+                other, layer_tags=layer_tags, return_all=True
+            )
+        tags = ("KET", "BRA") if layer_tags == 1 else layer_tags
+        if tags:
+            assert tags[0] in ket.tags
+            assert tags[1] in bra.tags
+        else:
+            assert ket.tags == psi.tags
+            assert bra.tags == other.tags
+        assert tn.contract() == pytest.approx((other.H & psi).contract())
+        assert "KET" not in psi.tags
+        assert "BRA" not in other.tags
+
     def test_combining_tensors(self):
         a = rand_tensor((2, 3, 4), inds=[0, 1, 2], tags="red")
         b = rand_tensor((3, 4, 5), inds=[1, 2, 3], tags="blue")

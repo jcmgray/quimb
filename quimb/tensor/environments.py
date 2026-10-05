@@ -733,10 +733,11 @@ def gen_compressed_environments(
     method : str or callable, optional
         The compression method, supplied to ``compress_fn``. By default use
         its own default method.
-    layer_tags : None or sequence[str], optional
-        Add each plane's layers in this order, compressing after each.
-        Assign each tensor to its first matching tag. A compressed tensor
-        with all layer tags is thus added with the first layer.
+    layer_tags : None or sequence of str, optional
+        Tags identifying the layers, which are contracted one by one in this
+        order. Use ``None`` to contract all layers together. Booleans and
+        integers are not accepted. Compress after each layer. Tensors with
+        several layer tags are assigned to the first matching layer.
     cutoff : float, optional
         Compression cutoff, supplied to ``compress_fn``. By default use its
         own default cutoff.
@@ -758,7 +759,9 @@ def gen_compressed_environments(
     environment : TensorNetwork
         The compressed environment of ``block``.
     """
-    from .tensor_core import TensorNetwork
+    from .tensor_core import TensorNetwork, parse_layer_tags
+
+    layer_tags = parse_layer_tags(layer_tags)
 
     if compress_fn == "ag":
         from .tnag.compress import tensor_network_ag_compress as compressor

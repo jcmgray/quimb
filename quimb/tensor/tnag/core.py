@@ -17,6 +17,7 @@ from ..tensor_core import (
     Tensor,
     TensorNetwork,
     oset,
+    parse_layer_tags,
     rand_uuid,
     tags_to_oset,
     tensor_canonize_bond,
@@ -2584,9 +2585,12 @@ class TensorNetworkGenVector(TensorNetworkGen):
             directly.
         mangle_append : str, optional
             The string to append to indices that are not traced out.
-        layer_tags : tuple of str, optional
-            The tags to apply to the ket and bra tensor network layers.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, in that order. Use ``True`` or
+            ``1`` for ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` for
+            no layer tags.
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         if self.has_site(where):
             where = (where,)
         where = tuple(where)

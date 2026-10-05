@@ -6,6 +6,20 @@ import quimb.tensor as qtn
 
 
 class TestTensorNetwork3D:
+    @pytest.mark.parametrize("layer_tags", [False, True, 0, 1])
+    @pytest.mark.parametrize(
+        "method", ["contract_boundary", "contract_boundary_from"]
+    )
+    def test_boundary_rejects_boolean_layer_tags(self, layer_tags, method):
+        tn = qtn.TN3D_classical_ising_partition_function(2, 2, 2, beta=0.3)
+        opts = {"max_bond": 4, "layer_tags": layer_tags}
+        if method == "contract_boundary_from":
+            opts.update(
+                xrange=(0, 1), yrange=(0, 1), zrange=(0, 1), from_which="xmin"
+            )
+        with pytest.raises(TypeError, match="existing tensor network"):
+            getattr(tn, method)(**opts)
+
     def test_cyclic_basic(self):
         tn = qtn.TN3D_empty(Lx=3, Ly=4, Lz=5, D=2, cyclic=True)
         assert tn.is_cyclic_x()

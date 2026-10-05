@@ -29,6 +29,7 @@ from ..tensor_core import (
     bonds,
     bonds_size,
     oset,
+    parse_layer_tags,
     parse_site_tag_groups,
     rand_uuid,
     tags_to_oset,
@@ -1796,8 +1797,10 @@ class TensorNetwork2D(TensorNetworkGen):
         default), ``'full-bond'``, ``'projector2d'`` or any 1D compression
         method, see
         :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress`.
-        ``mode`` is a deprecated alias of ``method``.
+        ``mode`` is a deprecated alias of ``method``. For ``layer_tags``,
+        see :meth:`contract_boundary`.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
 
         tn = self if inplace else self.copy()
@@ -1874,7 +1877,7 @@ class TensorNetwork2D(TensorNetworkGen):
             >──●══●══●══●  -->  >──>──●══●══●  -->  >──>──>──●══●
             .  .           -->     .  .        -->        .  .
 
-        If ``layer_tags`` is specified, each then each layer is contracted in
+        If ``layer_tags`` is supplied, each layer is contracted in
         and compressed separately, resulting generally in a lower memory
         scaling. For two layer tags this looks like::
 
@@ -1915,12 +1918,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
-        layer_tags : None or sequence[str], optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i + 1, j)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i + 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         sweep_reverse : bool, optional
             Which way to perform the compression sweep, which has an effect on
             which tensors end up being canonized. Setting this to true sweeps
@@ -1935,6 +1936,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmax, contract_boundary_from_ymin,
         contract_boundary_from_ymax
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -1992,7 +1994,7 @@ class TensorNetwork2D(TensorNetworkGen):
             |  |  |  |  |  -->  |  |  |  |  |  -->  |  |  |  |  |
             .  .           -->     .  .        -->        .  .
 
-        If ``layer_tags`` is specified, each then each layer is contracted in
+        If ``layer_tags`` is supplied, each layer is contracted in
         and compressed separately, resulting generally in a lower memory
         scaling. For two layer tags this looks like::
 
@@ -2033,12 +2035,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
-        layer_tags : None or str, optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i - 1, j)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i - 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         sweep_reverse : bool, optional
             Which way to perform the compression sweep, which has an effect on
             which tensors end up being canonized. Setting this to true sweeps
@@ -2053,6 +2053,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_ymin,
         contract_boundary_from_ymax
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -2116,7 +2117,7 @@ class TensorNetwork2D(TensorNetworkGen):
             ║         │
             ●──       ^──
 
-        If ``layer_tags`` is specified, each then each layer is contracted in
+        If ``layer_tags`` is supplied, each layer is contracted in
         and compressed separately, resulting generally in a lower memory
         scaling. For two layer tags this looks like::
 
@@ -2168,12 +2169,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
-        layer_tags : None or str, optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i, j + 1)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i + 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         sweep_reverse : bool, optional
             Which way to perform the compression sweep, which has an effect on
             which tensors end up being canonized. Setting this to true sweeps
@@ -2188,6 +2187,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_xmax,
         contract_boundary_from_ymax
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -2251,7 +2251,7 @@ class TensorNetwork2D(TensorNetworkGen):
               ║         │
             ──●       ──^
 
-        If ``layer_tags`` is specified, each then each layer is contracted in
+        If ``layer_tags`` is supplied, each layer is contracted in
         and compressed separately, resulting generally in a lower memory
         scaling. For two layer tags this looks like::
 
@@ -2302,12 +2302,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
-        layer_tags : None or str, optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i, j - 1)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i + 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         sweep_reverse : bool, optional
             Which way to perform the compression sweep, which has an effect on
             which tensors end up being canonized. Setting this to true sweeps
@@ -2322,6 +2320,7 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_xmax,
         contract_boundary_from_ymin
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -2368,6 +2367,7 @@ class TensorNetwork2D(TensorNetworkGen):
         tn = self if inplace else self.copy()
 
         contract_boundary_opts = ensure_dict(contract_boundary_opts)
+        parse_layer_tags(contract_boundary_opts.get("layer_tags"))
 
         if equalize_norms == "auto":
             # if we are going to extract exponent at end, assume we
@@ -2588,8 +2588,9 @@ class TensorNetwork2D(TensorNetworkGen):
             How to perform the compression on the boundary, can also be any of
             the generic 1D or arbgeom methods.
         layer_tags : None or sequence of str, optional
-            If given, perform a multilayer contraction, contracting the inner
-            sites in each layer into the boundary individually.
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         compress_opts : None or dict, optional
             Other low level options to pass to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
@@ -2642,6 +2643,7 @@ class TensorNetwork2D(TensorNetworkGen):
             Supplied to :meth:`contract_boundary_from`, including compression
             and canonization options.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["method"] = method
@@ -2798,9 +2800,11 @@ class TensorNetwork2D(TensorNetworkGen):
         method : str or callable, optional
             The compression method, supplied to ``compress_fn``. By default
             use its own default method.
-        layer_tags : None or sequence[str], optional
-            Add the tensors at each row or column one layer at a time in this
-            order, compressing after each.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
+            Compress after each layer.
         cutoff : float, optional
             Compression cutoff. By default use the default of the compression
             function.
@@ -2823,6 +2827,7 @@ class TensorNetwork2D(TensorNetworkGen):
             The environment of ``block``, which also carries the original
             network's ``.exponent``.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         check_opt("direction", direction, ("x", "y"))
         r2d = Rotator2D(self, None, None, direction + "min")
         if cyclic is None:
@@ -2937,10 +2942,10 @@ class TensorNetwork2D(TensorNetworkGen):
             compressing.
         method : {'mps', 'projector', 'full-bond', ...}, optional
             Which contraction method to use for the environments.
-        layer_tags : str or iterable[str], optional
-            If this 2D TN is multi-layered (e.g. a bra and a ket), and
-            ``method == 'mps'``, contract and compress each specified layer
-            separately, for a cheaper contraction.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         dense : bool, optional
             Whether to use dense tensors for the environments.
         compress_opts : dict, optional
@@ -2966,6 +2971,7 @@ class TensorNetwork2D(TensorNetworkGen):
             A dictionary of the environments, with keys of the form
             ``(from_which, row_or_col_index)``.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         tn = self.copy()
 
@@ -3114,12 +3120,10 @@ class TensorNetwork2D(TensorNetworkGen):
             If true, contract the boundary in as a single dense tensor.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the boundary compression.
-        layer_tags : None or sequence[str], optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i + 1, j)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i + 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         compress_opts : None or dict, optional
             Supplied to :meth:`compress_between`.
         envs : dict, optional
@@ -3137,6 +3141,7 @@ class TensorNetwork2D(TensorNetworkGen):
             The two environment tensor networks of row ``i`` will be stored in
             ``x_envs['xmin', i]`` and ``x_envs['xmax', i]``.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
@@ -3224,12 +3229,10 @@ class TensorNetwork2D(TensorNetworkGen):
             If true, contract the boundary in as a single dense tensor.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the boundary compression.
-        layer_tags : None or sequence[str], optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i + 1, j)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i + 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         compress_opts : None or dict, optional
             Supplied to :meth:`compress_between`.
         contract_boundary_opts
@@ -3245,6 +3248,7 @@ class TensorNetwork2D(TensorNetworkGen):
             The two environment tensor networks of column ``j`` will be stored
             in ``y_envs['ymin', j]`` and ``y_envs['ymax', j]``.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
@@ -3560,12 +3564,10 @@ class TensorNetwork2D(TensorNetworkGen):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the boundary compression.
-        layer_tags : None or sequence[str], optional
-            If ``None``, all tensors at each coordinate pair
-            ``[(i, j), (i + 1, j)]`` will be first contracted. If specified,
-            then the outer tensor at ``(i, j)`` will be contracted with the
-            tensor specified by ``[(i + 1, j), layer_tag]``, for each
-            ``layer_tag`` in ``layer_tags``.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
         first_contract : {None, 'x', 'y'}, optional
             The environments can either be generated with initial sweeps in
             the row ('x') or column ('y') direction. Generally it makes sense
@@ -3592,6 +3594,7 @@ class TensorNetwork2D(TensorNetworkGen):
             startings coordinate of the plaquette being the first and the size
             of the plaquette being the second pair.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, compute_environment_opts)
         first_contract = _choose_plaquette_first_contract(
             self, x_bsz, y_bsz, first_contract
@@ -3674,9 +3677,11 @@ class TensorNetwork2D(TensorNetworkGen):
             Compression method. By default use the compressor's default for
             each direction. See
             :func:`~quimb.tensor.environments.gen_compressed_environments`.
-        layer_tags : None or sequence[str], optional
-            Contract the tensors of each plane one layer at a time, in this
-            order.
+        layer_tags : None or sequence of str, optional
+            Tags identifying the layers, which are contracted one by one
+            in this order. Use ``None`` to contract all layers together.
+            Booleans and integers are not accepted.
+            Compress after each layer.
         cutoff : float, optional
             Compression cutoff. By default use the default of the compression
             function.
@@ -3700,6 +3705,7 @@ class TensorNetwork2D(TensorNetworkGen):
         dict[((int, int), (int, int)), TensorNetwork]
             Plaquette environments keyed by start and size.
         """
+        layer_tags = parse_layer_tags(layer_tags)
         cyclic_x, cyclic_y = _normalize_2d_cyclic(self, cyclic)
         if not 1 <= x_bsz <= self.Lx:
             raise ValueError("x_bsz must satisfy 1 <= x_bsz <= Lx")
@@ -4347,7 +4353,7 @@ def _half_absorb_block_layers(
     bra layer of its last plane into ``envr``. Return the two halves of the
     strip, ``envl`` with the remaining ket layers, and the remaining bra
     layers with ``envr``. These keep any exponent the compression gave the
-    environments.
+    environments. An empty environment leaves its layer unabsorbed.
     """
     ket_tag, bra_tag = layer_tags
     # split each plane of the block into its two layers
@@ -4358,8 +4364,10 @@ def _half_absorb_block_layers(
         tn.select((tag, bra_tag), "all", virtual=False) for tag in block_tags
     ]
     # absorb the outermost layer on each side
-    envl = compress_fn(envl | ket_planes.pop(0))
-    envr = compress_fn(envr | bra_planes.pop())
+    if envl.num_tensors:
+        envl = compress_fn(envl | ket_planes.pop(0))
+    if envr.num_tensors:
+        envr = compress_fn(envr | bra_planes.pop())
     return (
         TensorNetwork((envl, *ket_planes)),
         TensorNetwork((*bra_planes, envr)),
@@ -4389,9 +4397,10 @@ def _gen_plaquette_environments_via_envs(
     exactly and compress wider strips. Set ``second_dense`` to choose
     explicitly.
 
-    With ``max_separation=0.5``, where a block has an environment on each
-    side, ``envl`` absorbs the first layer of the block's first plane, and
-    ``envr`` the last layer of its last plane. Contract these strips
+    With ``max_separation=0.5``, ``envl`` absorbs the first layer of the
+    block's first plane, and ``envr`` the last layer of its last plane,
+    wherever these environments exist. A single periodic environment absorbs
+    only the first layer of the first plane. Contract these strips
     exactly, and also yield the local sides of each layer at the plaquette.
     Otherwise yield ``None`` for these.
 
@@ -4451,15 +4460,6 @@ def _gen_plaquette_environments_via_envs(
         first_tag, second_tag = r2d.x_tag, r2d.y_tag
         first_cyclic, second_cyclic = r2d.rotate(cyclic_x, cyclic_y)
 
-        schedule = environment_opts["schedule"]
-        if max_separation == 0.5 and first_cyclic and schedule != "cutpair":
-            warnings.warn(
-                f"`max_separation=0.5` has no effect along periodic "
-                f"'{direction}' direction with schedule={schedule!r}, as each "
-                "block has a single environment. Needs schedule='cutpair'.",
-                stacklevel=3,
-            )
-
         first_envs = tn.gen_block_environments(
             direction,
             tuple(second_blocks_by_first),
@@ -4495,10 +4495,13 @@ def _gen_plaquette_environments_via_envs(
             has_envl = bool(envl_tids)
             has_envr = len(envl_tids) < first_env.num_tensors
 
-            # only absorb when envl and envr are separate
-            half_absorb = (max_separation == 0.5) and has_envl and has_envr
+            half_absorb = (max_separation == 0.5) and (has_envl or has_envr)
             if half_absorb:
-                envr, envl = first_env.partition(first_tag(first - 1))
+                if has_envl:
+                    envr, envl = first_env.partition(first_tag(first - 1))
+                else:
+                    envl = TensorNetwork([])
+                    envr = first_env.select(None, virtual=False)
                 half_ket_side, half_bra_side = _half_absorb_block_layers(
                     tn,
                     envl,
@@ -4573,8 +4576,10 @@ def _gen_plaquette_environments_via_envs(
                     )
                 else:
                     # add the first environment's edges alongside the plaquette
-                    edge_env = first_env.select_any(
-                        second_block_tags, virtual=False
+                    edge_env = (
+                        first_env.select_any(second_block_tags, virtual=False)
+                        if first_env.num_tensors
+                        else TensorNetwork([])
                     )
                     environment = TensorNetwork((second_env, edge_env))
                     half_local = None
@@ -4820,9 +4825,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary, can also be any of
             the generic 1D or arbgeom methods.
-        layer_tags : None or sequence of str, optional
-            If given, perform a multilayer contraction, contracting the inner
-            sites in each layer into the boundary individually.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, which are then contracted
+            one by one in this order. Use ``True`` or ``1`` for
+            ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` to contract
+            both layers together.
         compress_opts : None or dict, optional
             Other low level options to pass to
             :meth:`~quimb.tensor.tensor_core.TensorNetwork.compress_between`.
@@ -4845,6 +4852,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         -------
         scalar
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         method = _parse_boundary_method(method, contract_opts)
         norm = self.make_norm(layer_tags=layer_tags)
         return norm.contract_boundary(
@@ -4910,9 +4918,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
-        layer_tags : None or sequence of str, optional
-            If given, perform a multilayer contraction, contracting the inner
-            sites in each layer into the boundary individually.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, which are then contracted
+            one by one in this order. Use ``True`` or ``1`` for
+            ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` to contract
+            both layers together.
         autogroup : bool, optional
             If ``True`` (the default), group sites into horizontal and
             vertical sets to be computed separately (usually more efficient)
@@ -4939,10 +4949,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             The reduced density matrix for each ``where``, with sites in the
             order of ``where``.
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         method = _parse_boundary_method(method, plaquette_env_options)
         if cutoff is None:
             cutoff = 1e-10
-        norm, ket, bra = self.make_norm(return_all=True)
+        norm, ket, bra = self.make_norm(layer_tags=layer_tags, return_all=True)
 
         if progbar:
             pbar = Progbar(total=len(wheres))
@@ -5089,10 +5100,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             for strips of width one. Compress wider strips.
         max_separation : {1, 0.5}, optional
             How far to leave between the environments and kept sites. By
-            default (1), they are left adjacent. If 0.5, as long as there is a
-            different env on either side and two ``layer_tags``, absorb the
-            first layer of adjacent sites into one env and the last layer of
-            adjacent sites into the other. The remaining strip is then
+            default (1), they are left adjacent. If 0.5, with two
+            ``layer_tags``, absorb the first layer of adjacent sites into the
+            min-side env and the last layer into the max-side env, wherever
+            these exist. A single periodic env connected to both sides
+            absorbs only the first layer. The remaining strip is then
             contracted exactly, regardless of ``second_dense``. From the
             side::
 
@@ -5109,9 +5121,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             Compression method. By default use the compressor's default for
             each direction. See
             :func:`~quimb.tensor.environments.gen_compressed_environments`.
-        layer_tags : None or sequence[str], optional
-            Contract the tensors of each plane one layer at a time, in this
-            order. By default contract the ket and bra layers separately.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, which are then contracted
+            one by one in this order. Use ``True`` or ``1`` for
+            ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` to contract
+            both layers together.
         cutoff : float, optional
             Compression cutoff. By default use the default of the compression
             function.
@@ -5146,6 +5160,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             The reduced density matrix for each ``where``, with sites in the
             order of ``where``.
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         cyclic_x, cyclic_y = _normalize_2d_cyclic(self, cyclic)
         norm, ket, bra = self.make_norm(layer_tags=layer_tags, return_all=True)
         plaquettes = {
@@ -5320,10 +5335,10 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         max_separation : int or 0.5, optional
             How far to leave between the boundary and kept sites. By default
             (1), they are left adjacent. If 0, the boundaries also absorb the
-            adjacent row (but not if this means joining envs). If 0.5, as long
-            as there is a different env on either side and two ``layer_tags``,
-            absorb the first layer of adjacent sites into one env and the last
-            layer of adjacent sites into the other.
+            adjacent row (but not if this means joining envs). If 0.5, with
+            two ``layer_tags``, absorb the first layer of adjacent sites into
+            the min-side env and the last layer into the max-side env,
+            wherever these exist.
         gauges : dict[str, array_like], optional
             Simple update bond gauges keyed by index. Only matching bonds
             receive a gauge.
@@ -5335,9 +5350,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             accepted. Defaults to ``'mps'``.
         canonize : bool, optional
             Whether to canonize before compressing.
-        layer_tags : None or sequence of str, optional
-            Tags for the ket and bra layers. If given, contract the layers
-            separately.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, which are then contracted
+            one by one in this order. Use ``True`` or ``1`` for
+            ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` to contract
+            both layers together.
         first_contract : {'x', 'y'}, optional
             Axis to sweep. By default, choose the one that leaves the
             narrowest strip.
@@ -5365,6 +5382,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         -------
         array or Tensor or TensorNetwork or (array, float) or (Tensor, float)
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         if max_distance < 0:
             raise ValueError(
                 f"`max_distance` must be non-negative, got {max_distance}."
@@ -5488,8 +5506,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             else:
                 envr = TensorNetwork([])
 
-            # only absorb when there is a boundary on each side
-            if envl.num_tensors and envr.num_tensors:
+            if envl.num_tensors or envr.num_tensors:
                 # compress a boundary and one absorbed layer along the lines
                 half_compress_fn = functools.partial(
                     tensor_network_1d_compress,
@@ -6039,9 +6056,11 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             Whether to sweep one way with canonization before compressing.
         method : {'mps', 'full-bond', ...}, optional
             How to perform the compression on the boundary.
-        layer_tags : None or sequence of str, optional
-            If given, perform a multilayer contraction, contracting the inner
-            sites in each layer into the boundary individually.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, which are then contracted
+            one by one in this order. Use ``True`` or ``1`` for
+            ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` to contract
+            both layers together.
         balance_bonds : bool, optional
             Whether to balance the bonds after normalization, a form of
             conditioning.
@@ -6055,6 +6074,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
             :meth:`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_boundary`,
             by default, two layer contraction will be used.
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         method = _parse_boundary_method(method, contract_boundary_opts)
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
@@ -6062,7 +6082,7 @@ class TensorNetwork2DVector(TensorNetwork2D, TensorNetworkGenVector):
         contract_boundary_opts["method"] = method
         contract_boundary_opts["layer_tags"] = layer_tags
 
-        norm = self.make_norm()
+        norm = self.make_norm(layer_tags=layer_tags)
         nfact = norm.contract_boundary(**contract_boundary_opts)
 
         n_ket = self.multiply_each(

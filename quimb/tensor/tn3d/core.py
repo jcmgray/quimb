@@ -17,6 +17,7 @@ from ..tensor_core import (
     bonds,
     bonds_size,
     oset,
+    parse_layer_tags,
     parse_site_tag_groups,
     tags_to_oset,
 )
@@ -1455,7 +1456,11 @@ class TensorNetwork3D(TensorNetworkGen):
             Whether to modify this tensor network in place.
         contract_boundary_opts
             Additional options for the selected boundary-contraction method.
+            For ``layer_tags``, supply tags identifying the layers to
+            contract one by one in this order, or ``None`` to contract all
+            layers together. Booleans and integers are not accepted.
         """
+        parse_layer_tags(contract_boundary_opts.get("layer_tags"))
         tn = self if inplace else self.copy()
 
         # universal options
@@ -1787,7 +1792,11 @@ class TensorNetwork3D(TensorNetworkGen):
             Whether to perform the contraction in place or on a copy.
         contract_boundary_opts
             Additional options passed to :meth:`contract_boundary_from`.
+            For ``layer_tags``, supply tags identifying the layers to
+            contract one by one in this order, or ``None`` to contract all
+            layers together. Booleans and integers are not accepted.
         """
+        parse_layer_tags(contract_boundary_opts.get("layer_tags"))
         contract_boundary_opts["max_bond"] = max_bond
         contract_boundary_opts["cutoff"] = cutoff
         contract_boundary_opts["mode"] = mode

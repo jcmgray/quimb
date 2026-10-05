@@ -154,6 +154,19 @@ def tags_to_oset(tags):
         return oset(tags)
 
 
+def parse_layer_tags(layer_tags, *, create=False):
+    """Resolve layer tag options when constructing ket and bra layers."""
+    if isinstance(layer_tags, Integral) and layer_tags in (0, 1):
+        if not create:
+            raise TypeError(
+                f"layer_tags={layer_tags} cannot choose tags for an existing "
+                "tensor network. Use None to contract layers together, or "
+                "supply the layer tag names explicitly."
+            )
+        return ("KET", "BRA") if layer_tags else None
+    return layer_tags
+
+
 def parse_site_tag_groups(tn, site_tags, tag_id="__GST{}__"):
     """Turn possible groups of tags specifying sites into single temporary
     tags. The tensor network is tagged inplace with any needed temporary tags,
@@ -5009,8 +5022,10 @@ class TensorNetwork:
         ----------
         mangle_append : {str, False or None}, optional
             How to mangle the inner indices of the bra.
-        layer_tags : (str, str), optional
-            The tags to identify the top and bottom.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, in that order. Use ``True`` or
+            ``1`` for ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` for
+            no layer tags.
         output_inds : sequence of str, optional
             If given, the indices to mangle will be restricted to those not in
             this list. This is only needed for (hyper) tensor networks where
@@ -5023,6 +5038,7 @@ class TensorNetwork:
         -------
         tn_norm : TensorNetwork
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         ket = self.copy()
 
         if layer_tags:
@@ -5119,8 +5135,10 @@ class TensorNetwork:
             outer indices as this tensor network, all other indices will be
             explicitly mangled in the copy taken, allowing 'hyper' overlaps.
             This tensor network will be conjugated in the overlap.
-        layer_tags : (str, str), optional
-            The tags to identify the top and bottom.
+        layer_tags : None, bool, int or tuple[str, str], optional
+            Tags for the ket and bra layers, in that order. Use ``True`` or
+            ``1`` for ``("KET", "BRA")``, or ``False``, ``0`` or ``None`` for
+            no layer tags.
         output_inds : sequence of str, optional
             If given, the indices to mangle will be restricted to those not in
             this list. This is only needed for (hyper) tensor networks where
@@ -5133,6 +5151,7 @@ class TensorNetwork:
         -------
         tn_overlap : TensorNetwork
         """
+        layer_tags = parse_layer_tags(layer_tags, create=True)
         ket = self.copy()
         if layer_tags:
             ket.add_tag(layer_tags[0])
