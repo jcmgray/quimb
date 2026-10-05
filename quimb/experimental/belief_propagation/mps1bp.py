@@ -21,9 +21,9 @@ class MPS1BP(BeliefPropagationCommon):
     max_bond : int
         The maximum bond dimension to use when compressing the message update
         tensor network.
-    layer_tags : sequence[str, ...]
-        The tags which identify the layers of the tensor network. Each tensor
-        should have exactly one of these tags.
+    layer_tags : sequence of str
+        Tags identifying the layers. Each tensor must have exactly
+        one of these tags.
     site_tags : sequence[str, ...], optional
         The tags which identify the sites of the tensor network. If None, these
         are assumed to be default `tn.site_tags`.
