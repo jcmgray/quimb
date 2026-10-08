@@ -59,7 +59,7 @@ Release notes for `quimb`.
 - Add [`compute_partial_traces_exact`](#TensorNetworkGenVector.compute_partial_traces_exact) and [`compute_partial_traces_cluster`](#TensorNetworkGenVector.compute_partial_traces_cluster) for computing many reduced density matrices at once.
 - Exact and cluster partial traces now accept ``get="tn"`` for an uncontracted network. [`D2BP.partial_trace`](#D2BP.partial_trace) now accepts ``normalized="return"`` for ``(rho, trace)`` without normalization.
 - 2D [`contract_boundary`](#TensorNetwork2D.contract_boundary) with ``method="full-bond"`` accepts ``compress_opts`` to configure the similarity decomposition, or ``similarity_method`` as a shortcut.
-- Norm, overlap, and reduced density matrix constructors, and 2D norm, normalization, partial trace, and expectation methods accept ``layer_tags=True`` or ``1`` for the default ket and bra tags and ``False`` or ``0`` to disable them. Methods operating on an existing network reject these boolean and integer options with a clear error. 2D [`normalize`](#TensorNetwork2DVector.normalize) now honors custom layer tags.
+- Norm, overlap, and reduced density matrix constructors, and 2D norm, normalization, partial trace, and expectation methods accept ``layer_tags=True`` or ``1`` for the default ket and bra tags and ``False`` or ``0`` to disable them. Methods operating on an existing network reject these boolean and integer options with a clear error. 2D [`normalize`](#TensorNetwork2DVector.normalize) and boundary route partial traces now use custom layer tags, which were previously ignored.
 
 #### Gates and circuits
 

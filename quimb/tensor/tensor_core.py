@@ -155,8 +155,13 @@ def tags_to_oset(tags):
 
 
 def parse_layer_tags(layer_tags, *, create=False):
-    """Resolve layer tag options when constructing ket and bra layers."""
-    if isinstance(layer_tags, Integral) and layer_tags in (0, 1):
+    """Resolve a ``layer_tags`` option. With ``create=True``, for methods that
+    build the ket and bra layers, map ``True`` or ``1`` to ``("KET", "BRA")``
+    and ``False`` or ``0`` to ``None``. Otherwise, for methods taking an
+    existing network, raise ``TypeError`` for these, since the tags must
+    already be present. Return any other value unchanged.
+    """
+    if isinstance(layer_tags, (Integral, np.bool_)) and layer_tags in (0, 1):
         if not create:
             raise TypeError(
                 f"layer_tags={layer_tags} cannot choose tags for an existing "

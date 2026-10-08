@@ -961,7 +961,18 @@ class TestTensorNetwork:
     @pytest.mark.parametrize("method", ["make_norm", "make_overlap"])
     @pytest.mark.parametrize(
         "layer_tags",
-        [False, True, 0, 1, np.int64(0), np.int64(1), None, ("K", "B")],
+        [
+            False,
+            True,
+            0,
+            1,
+            np.int64(0),
+            np.int64(1),
+            np.False_,
+            np.True_,
+            None,
+            ("K", "B"),
+        ],
     )
     def test_make_layers_tags(self, method, layer_tags):
         psi = qtn.MPS_rand_state(3, 2, seed=42, dtype="complex128")

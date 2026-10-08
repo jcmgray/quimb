@@ -1936,7 +1936,6 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmax, contract_boundary_from_ymin,
         contract_boundary_from_ymax
         """
-        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -2053,7 +2052,6 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_ymin,
         contract_boundary_from_ymax
         """
-        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -2187,7 +2185,6 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_xmax,
         contract_boundary_from_ymax
         """
-        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -2320,7 +2317,6 @@ class TensorNetwork2D(TensorNetworkGen):
         contract_boundary_from_xmin, contract_boundary_from_xmax,
         contract_boundary_from_ymin
         """
-        layer_tags = parse_layer_tags(layer_tags)
         method = _parse_boundary_method(method, contract_boundary_opts)
         return self.contract_boundary_from(
             xrange=xrange,
@@ -4501,7 +4497,7 @@ def _gen_plaquette_environments_via_envs(
                     envr, envl = first_env.partition(first_tag(first - 1))
                 else:
                     envl = TensorNetwork([])
-                    envr = first_env.select(None, virtual=False)
+                    envr = first_env.copy()
                 half_ket_side, half_bra_side = _half_absorb_block_layers(
                     tn,
                     envl,
