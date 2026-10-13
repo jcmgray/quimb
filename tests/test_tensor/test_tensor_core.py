@@ -894,6 +894,33 @@ class TestTensorFunctions:
         )
         assert z1.almost_equals(z2)
 
+    def test_multiply_index_diagonals(self):
+        x = rand_tensor((3, 4, 5), "abc")
+        sa, sc = qu.randn(3), qu.randn(5)
+        expected = x.multiply_index_diagonal("c", sc).multiply_index_diagonal(
+            "a", sa
+        )
+        assert x.multiply_index_diagonals(("c", "a"), (sc, sa)).almost_equals(
+            expected
+        )
+        x.multiply_index_diagonals_(("c", "a"), (sc, sa))
+        assert x.almost_equals(expected)
+
+    @pytest.mark.parametrize("n_inds, n_xs", [(2, 1), (1, 2)])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_multiply_index_diagonals_mismatched_lengths(
+        self, n_inds, n_xs, inplace
+    ):
+        x = rand_tensor((3, 4, 5), "abc", seed=42)
+        original = x.copy()
+        inds = ("a", "c")
+        xs = (np.full(3, 2.0), np.full(5, 3.0))
+        with pytest.raises(ValueError):
+            x.multiply_index_diagonals(
+                inds[:n_inds], xs[:n_xs], inplace=inplace
+            )
+        assert x.almost_equals(original)
+
     @pytest.mark.parametrize("smudge", [1e-6, 1e-12])
     def test_balance_bonds(self, smudge):
         t1 = rand_tensor((3, 4), "ab")

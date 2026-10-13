@@ -78,6 +78,7 @@ Release notes for `quimb`.
 
 #### Belief propagation and loop expansions
 
+- Add [`Tensor.multiply_index_diagonals`](#Tensor.multiply_index_diagonals) for applying multiple diagonal weights together, also used by simple gauging.
 - Support fermionic BP projector compression with ``method="projector", canonize="bp"`` and fermionic gates with [`D2BP.gate_`](#D2BP.gate_).
 - All BP classes accept ``diis`` and ``damping`` in both ``__init__`` and [`run`](#BeliefPropagationCommon.run). Values passed to ``run`` become the new defaults.
 - ``D1BP``, ``D2BP``, ``L1BP``, ``L2BP``, and [`TensorNetwork.gauge_all_simple`](#TensorNetwork.gauge_all_simple) accept ``sweep_order``, with an efficient alternating schedule for trees. See [`SweepScheduler`](#SweepScheduler) for other options.

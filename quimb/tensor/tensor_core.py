@@ -1521,9 +1521,13 @@ def tensor_gauge_simple_bond(
         lix = tuple(jx for jx in ta.inds if jx != bond_ind)
         rix = tuple(jx for jx in tb.inds if jx != bond_ind)
 
-    # absorb 'outer' gauges into tensors
+    # the old inner gauge, also kept to measure the change below
+    old_gauge = gauges.get(bond_ind, None)
+
+    # absorb 'outer' gauges into tensors, and any inner gauge into ta
     inv_gauges = []
     for t, ixs in ((ta, lix), (tb, rix)):
+        inds, ss = [], []
         for ix in ixs:
             if ix not in gauges:
                 # gauge is missing -> just skip
@@ -1543,15 +1547,20 @@ def tensor_gauge_simple_bond(
                 # have already computed s this sweep
                 s = gauges_conditioned[ix]
 
-            t.multiply_index_diagonal_(ix, s)
-            # keep track of how to invert gauge
-            inv_gauges.append((t, ix, 1 / s))
+            inds.append(ix)
+            ss.append(s)
 
-    # absorb the inner gauge, if it exists - also remember it so we can
-    # optionally measure the convergence diff against the updated gauge below
-    old_gauge = gauges.get(bond_ind, None)
-    if old_gauge is not None:
-        ta.multiply_index_diagonal_(bond_ind, old_gauge)
+        # keep track of how to invert the outer gauges
+        if inds:
+            inv_gauges.append((t, tuple(inds), [1 / s for s in ss]))
+
+        if (t is ta) and (old_gauge is not None):
+            inds.append(bond_ind)
+            ss.append(old_gauge)
+
+        if inds:
+            # perform all gauging in single step
+            t.multiply_index_diagonals_(inds, ss)
 
     # for retrieving singular values
     sub_info = {}
@@ -1590,8 +1599,8 @@ def tensor_gauge_simple_bond(
 
     # update inner gauge and undo outer gauges
     gauges[bond_ind] = new_gauge
-    for t, ix, inv_s in inv_gauges:
-        t.multiply_index_diagonal_(ix, inv_s)
+    for t, inds, inv_ss in inv_gauges:
+        t.multiply_index_diagonals_(inds, inv_ss)
 
 
 def new_bond(
@@ -3881,6 +3890,22 @@ class Tensor:
 
     multiply_index_diagonal_ = functools.partialmethod(
         multiply_index_diagonal, inplace=True
+    )
+
+    def multiply_index_diagonals(self, inds, xs, inplace=False):
+        """Multiply this tensor by each 1D array in ``xs`` as if it were a
+        diagonal tensor being contracted into the matching index in ``inds``.
+
+        Prefered over multiple `multiply_index_diagonal` calls as backends
+        might provide a more efficient fused version.
+        """
+        t = self if inplace else self.copy()
+        axes = tuple(map(t.inds.index, inds))
+        t.modify(data=do("multiply_diagonals", t.data, tuple(xs), axes=axes))
+        return t
+
+    multiply_index_diagonals_ = functools.partialmethod(
+        multiply_index_diagonals, inplace=True
     )
 
     def almost_equals(self, other, **kwargs):
@@ -8458,6 +8483,9 @@ class TensorNetwork:
             _get = gauges.get
         conditioner = _get_gauge_conditioner(power=power, smudge=smudge)
 
+        # the gauges for each tensor, applied in one call each at the end
+        pending = {}
+
         # absorb outer gauges fully into single tensor
         outer = [] if return_gauges is not None else None
         for ix in self.outer_inds():
@@ -8468,7 +8496,9 @@ class TensorNetwork:
             g = conditioner(g)
 
             (t,) = self._inds_get(ix)
-            t.multiply_index_diagonal_(ix, g)
+            _, inds, gs = pending.setdefault(id(t), (t, [], []))
+            inds.append(ix)
+            gs.append(g)
             if return_gauges is not None:
                 gr = g if return_gauges == "raw" else g**-1
                 outer.append((t, ix, gr))
@@ -8481,11 +8511,16 @@ class TensorNetwork:
                 continue
             g = g**0.5
             tl, tr = self._inds_get(ix)
-            tl.multiply_index_diagonal_(ix, g)
-            tr.multiply_index_diagonal_(ix, g)
+            for t in (tl, tr):
+                _, inds, gs = pending.setdefault(id(t), (t, [], []))
+                inds.append(ix)
+                gs.append(g)
             if return_gauges is not None:
                 gr = g if return_gauges == "raw" else g**-1
                 inner.append(((tl, tr), ix, gr))
+
+        for t, inds, gs in pending.values():
+            t.multiply_index_diagonals_(inds, gs)
 
         if return_gauges is not None:
             return outer, inner
@@ -8553,14 +8588,22 @@ class TensorNetwork:
         ``return_gauges="raw"``, not the records from
         ``return_gauges="inverse"``.
         """
+        # the inverse gauges for each tensor, applied in one call each
+        pending = {}
         while outer:
             t, ix, g = outer.pop()
-            t.multiply_index_diagonal_(ix, g**-1)
+            _, inds, gs = pending.setdefault(id(t), (t, [], []))
+            inds.append(ix)
+            gs.append(g**-1)
         while inner:
             (tl, tr), ix, g = inner.pop()
             ginv = g**-1
-            tl.multiply_index_diagonal_(ix, ginv)
-            tr.multiply_index_diagonal_(ix, ginv)
+            for t in (tl, tr):
+                _, inds, gs = pending.setdefault(id(t), (t, [], []))
+                inds.append(ix)
+                gs.append(ginv)
+        for t, inds, gs in pending.values():
+            t.multiply_index_diagonals_(inds, gs)
 
     @contextlib.contextmanager
     def gauge_simple_temp(

@@ -270,6 +270,18 @@ def multiply_diagonal(x, v, axis, backend=None):
 
 
 @compose
+def multiply_diagonals(x, vs, axes, backend=None):
+    """Multiply each vector in ``vs`` into ``x`` as if contracting in a
+    diagonal matrix along the matching axis in ``axes``. For example this is
+    the gauge weighting step in simple update like algorithms. Backends can
+    override this to do it in one pass.
+    """
+    for v, axis in zip(vs, axes, strict=True):
+        x = multiply_diagonal(x, v, axis, backend=backend)
+    return x
+
+
+@compose
 def align_axes(*arrays, axes, backend=None):
     """Prepare a set of arrays that should be contractible along ``axes``.
 
