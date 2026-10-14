@@ -2519,9 +2519,9 @@ def qr_via_cholesky(
     orthog_tol : float, optional
         Before each pass after the first, check the previous result's Gram
         matrix. Raise ``ValueError`` if its distance from the identity is at
-        least this value. Use the Frobenius norm over the whole batch. Large
-        errors can prevent the next pass from restoring orthogonality. With
-        None, skip this check.
+        least this value. The distance is the Frobenius norm over the whole
+        batch. Large errors can stop the next pass restoring orthogonality.
+        None skips this check.
 
     Returns
     -------
@@ -2638,7 +2638,8 @@ def qr_auto(
         ``m >= min_aspect * n``. For LQ, swap ``m`` and ``n``.
     min_work : int, optional
         Minimum ``m * n**2`` for Cholesky QR. For LQ, swap ``m`` and ``n``.
-        Use standard QR below this threshold to avoid extra call overhead.
+        Below this, standard QR is used, as the extra calls cost more than
+        they save.
 
     Returns
     -------

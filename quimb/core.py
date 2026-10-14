@@ -49,7 +49,7 @@ _NUMBA_CACHE = {
 }[os.environ.get("QUIMB_NUMBA_CACHE", "True").upper()]
 
 njit = functools.partial(numba.njit, cache=_NUMBA_CACHE, nogil=True)
-"""Numba nopython JIT with the configured cache. Release the GIL so compiled
+"""Numba nopython JIT with the configured cache. Releases the GIL, so compiled
 functions can run in parallel threads.
 """
 

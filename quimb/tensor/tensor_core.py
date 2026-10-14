@@ -1559,7 +1559,7 @@ def tensor_gauge_simple_bond(
             ss.append(old_gauge)
 
         if inds:
-            # perform all gauging in single step
+            # apply all gauges in one call
             t.multiply_index_diagonals_(inds, ss)
 
     # for retrieving singular values
@@ -3896,8 +3896,8 @@ class Tensor:
         """Multiply this tensor by each 1D array in ``xs`` as if it were a
         diagonal tensor being contracted into the matching index in ``inds``.
 
-        Prefered over multiple `multiply_index_diagonal` calls as backends
-        might provide a more efficient fused version.
+        Use this over several `multiply_index_diagonal` calls, as backends
+        can do it in one pass.
         """
         t = self if inplace else self.copy()
         axes = tuple(map(t.inds.index, inds))
