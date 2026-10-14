@@ -29,6 +29,8 @@ Release notes for `quimb`.
 
 #### Tensor decompositions
 
+- Cholesky QR supports repeated orthogonalization with ``passes``.
+- new ``method="qr:auto"`` tries Cholesky QR for suitable matrices and uses standard QR if it fails or loses too much orthogonality.
 - Split functions accept ``cutoff="auto"``: ``1e-10`` for exact decompositions, disabled for randomized SVD.
 - [`svd_rand_truncated`](#svd_rand_truncated): support ``"abs"`` and ``"rel"`` cutoffs on the sketched spectrum, and ``noise_dist="normal"`` or ``"rademacher"`` for the random sketch.
 - Batched ``"abs"`` and ``"rel"`` cutoffs treat blocks as one spectrum and retain a common bond dimension. Both modes support renormalization, including for batched decompositions.

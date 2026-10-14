@@ -48,8 +48,9 @@ _NUMBA_CACHE = {
     "OFF": False,
 }[os.environ.get("QUIMB_NUMBA_CACHE", "True").upper()]
 
-njit = functools.partial(numba.njit, cache=_NUMBA_CACHE)
-"""Numba no-python jit, but obeying cache setting.
+njit = functools.partial(numba.njit, cache=_NUMBA_CACHE, nogil=True)
+"""Numba nopython JIT with the configured cache. Release the GIL so compiled
+functions can run in parallel threads.
 """
 
 vectorize = functools.partial(numba.vectorize, cache=_NUMBA_CACHE)

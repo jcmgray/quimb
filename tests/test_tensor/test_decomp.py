@@ -198,6 +198,48 @@ def test_trim_singular_vals():
     assert _compute_number_svals_to_keep_numba(s, 5.02, 3) == 1
 
 
+class TestConjNeeded:
+    @pytest.mark.parametrize(
+        "backend", ["numpy", jax_case, tensorflow_case, pytorch_case]
+    )
+    @pytest.mark.parametrize("complex_first", [False, True])
+    def test_dtype_not_cached(self, backend, complex_first):
+        from quimb.tensor.array_ops import is_conj_needed
+
+        xp = ar.get_namespace(backend)
+        for cplx in (complex_first, not complex_first, complex_first):
+            dtype = "complex64" if cplx else "float32"
+            x = xp.zeros((2, 3), dtype=dtype)
+            assert is_conj_needed(x) is cplx
+
+    def test_lazy(self):
+        from quimb.tensor.array_ops import is_conj_needed
+
+        x = ar.lazy.Variable((2, 3), backend="numpy")
+        assert is_conj_needed(x) is True
+        assert is_conj_needed(ar.lazy.array(np.ones((2, 3)))) is True
+
+    @requires_symmray
+    @pytest.mark.parametrize("fermionic", [False, True])
+    def test_block_sparse(self, fermionic):
+        import symmray as sr
+
+        from quimb.tensor.array_ops import is_conj_needed
+
+        cls = sr.Z2FermionicArray if fermionic else sr.Z2Array
+        inds = [sr.BlockIndex({0: 2, 1: 2}, dual=d) for d in (False, True)]
+        x = cls.random(inds, dtype="float64", seed=42)
+        assert is_conj_needed(x) is True
+
+    @pytest.mark.parametrize(
+        "x, expected", [(1.0, False), (1, False), (True, False), (1j, True)]
+    )
+    def test_scalars(self, x, expected):
+        from quimb.tensor.array_ops import is_conj_needed
+
+        assert is_conj_needed(x) is expected
+
+
 class TestSafeInverse:
     def test_matches_exact_inverse_away_from_zero(self):
         from quimb.tensor.decomp import safe_inverse
@@ -491,12 +533,14 @@ def test_qr_stabilized_sign_bug(dtype):
     "absorb", ["U", "s", "VH", "Us", "sVH", "U,s,VH", "U,sVH", "Us,VH"]
 )
 @pytest.mark.parametrize("descending", [True, False])
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
 def test_decomp_svd_via_eig(
     da,
     db,
     k,
     absorb,
     descending,
+    dtype,
 ):
     from quimb.tensor.decomp import svd_via_eig
 
@@ -507,6 +551,8 @@ def test_decomp_svd_via_eig(
 
     rng = np.random.default_rng(seed)
     x = rng.uniform(size=(da, db))
+    if dtype == "complex128":
+        x = x + 1j * rng.uniform(size=(da, db))
     x /= np.linalg.norm(x)
 
     Ux, sx, VHx = np.linalg.svd(x, full_matrices=False)
@@ -566,12 +612,15 @@ def test_decomp_svd_via_eig(
 @pytest.mark.parametrize(
     "absorb", ["U,s,VH", "U,sVH", "Us,VH", "U", "VH", "Us", "sVH", "s"]
 )
-def test_svd_rand(da, db, k, absorb):
+@pytest.mark.parametrize("dtype", ["float64", "complex128"])
+def test_svd_rand(da, db, k, absorb, dtype):
     from quimb.tensor.decomp import svd_rand_truncated
 
     seed = qu.utils.hash_kwargs_to_int(da=da, db=db, k=k, absorb=absorb)
     rng = np.random.default_rng(seed)
     x = rng.uniform(size=(da, db))
+    if dtype == "complex128":
+        x = x + 1j * rng.uniform(size=(da, db))
     x /= np.linalg.norm(x)
 
     rank = min(da, db) if k < 0 else min(da, db, k)
@@ -769,6 +818,7 @@ QR_METHODS = (
     "qr",
     "lq",
     "qr:cholesky",
+    "qr:auto",
     "svd",
     "svd:eig",
     "svd:rand",
@@ -778,6 +828,7 @@ LQ_METHODS = (
     "lq",
     "qr",
     "lq:cholesky",
+    "lq:auto",
     "svd",
     "svd:eig",
     "svd:rand",
@@ -860,25 +911,25 @@ _PARTIAL_ABSORB_CONFIG = {
     #   null_side: "left" means left output is None
     #   cholesky_skip: "m<n" or "m>n"
     "rfactor": (
-        ["qr:cholesky"],
+        ["qr:cholesky", "qr:auto"],
         "m<n",
         "left",
         False,
     ),
     "lfactor": (
-        ["qr:cholesky", "lq:cholesky"],
+        ["qr:cholesky", "lq:cholesky", "lq:auto"],
         "m>n",
         "right",
         False,
     ),
     "rorthog": (
-        ["qr:cholesky", "lq:cholesky"],
+        ["qr:cholesky", "lq:cholesky", "lq:auto"],
         "m>n",
         "left",
         True,
     ),
     "lorthog": (
-        ["qr:cholesky"],
+        ["qr:cholesky", "qr:auto"],
         "m<n",
         "right",
         True,
@@ -926,6 +977,164 @@ def test_partial_factor_methods(absorb, m, n, dtype):
             assert left.shape == (m, k)
             if check_orthog:
                 assert_allclose(left.conj().T @ left, np.eye(k), atol=1e-10)
+
+
+def rand_with_cond(m, n, cond, dtype="float64", rank=None, seed=42):
+    """Build random matrices of shape ``(m, n)``. ``m`` must be at least ``n``.
+    Space singular values logarithmically from 1 to ``1 / cond``. If ``rank``
+    is given, set remaining values to zero before forming the matrix.
+    """
+    rng = np.random.default_rng(seed)
+    u = rng.standard_normal((m, n))
+    v = rng.standard_normal((n, n))
+    if dtype == "complex128":
+        u = u + 1j * rng.standard_normal((m, n))
+        v = v + 1j * rng.standard_normal((n, n))
+    u, _ = np.linalg.qr(u)
+    v, _ = np.linalg.qr(v)
+    s = np.logspace(0, -np.log10(cond), n)
+    if rank is not None:
+        s[rank:] = 0.0
+    return (u * s) @ v.conj().T
+
+
+class TestCholeskyQR:
+    @pytest.mark.parametrize(
+        "passes, error",
+        [
+            (0, ValueError),
+            (-1, ValueError),
+            (np.int64(0), ValueError),
+            (1.5, TypeError),
+            (None, TypeError),
+            ("2", TypeError),
+        ],
+    )
+    def test_invalid_passes(self, passes, error):
+        with pytest.raises(error, match="passes must be"):
+            array_split(np.eye(2), method="qr:cholesky", passes=passes)
+
+    def test_numpy_integer_passes(self):
+        q, _, r = array_split(
+            np.eye(2), method="qr:cholesky", passes=np.int64(2)
+        )
+        assert q @ r == pytest.approx(np.eye(2))
+
+    @pytest.mark.parametrize("absorb", ["right", "left"])
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    def test_lazy(self, absorb, dtype):
+        x = rand_with_cond(40, 4, 1e2, dtype=dtype)
+        if absorb == "left":
+            x = x.T
+        left, _, right = array_split(
+            ar.lazy.array(x),
+            method="qr:cholesky",
+            absorb=absorb,
+            shift=False,
+            solve_triangular=False,
+        )
+        left, right = left.compute(), right.compute()
+        assert left @ right == pytest.approx(x, abs=1e-12)
+        q = left if absorb == "right" else right.conj().T
+        assert q.conj().T @ q == pytest.approx(np.eye(4), abs=1e-10)
+
+    @pytest.mark.parametrize("absorb", ["right", "left"])
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    @pytest.mark.parametrize(
+        "passes, cond, rank, tol",
+        [
+            (1, 1e2, None, 1e-10),
+            (2, 1e7, None, 1e-12),
+            (3, 1e14, None, 1e-12),
+            (3, 1e2, 10, 1e-9),
+        ],
+    )
+    def test_passes(self, absorb, dtype, passes, cond, rank, tol):
+        from quimb.tensor.decomp import qr_via_cholesky
+
+        x = rand_with_cond(500, 20, cond, dtype, rank=rank)
+        if absorb == "left":
+            x = x.T
+        left, s, right = qr_via_cholesky(x, absorb=absorb, passes=passes)
+        assert s is None
+        assert_allclose(left @ right, x, atol=1e-12)
+        if absorb == "right":
+            q, r = left, right
+        else:
+            q, r = right.conj().T, left.conj().T
+        assert_allclose(q.conj().T @ q, np.eye(20), atol=tol)
+        assert np.all(np.diag(r).real > 0)
+        assert_allclose(np.diag(r).imag, 0.0, atol=1e-12)
+
+    @pytest.mark.parametrize("absorb", ["rfactor", "lfactor"])
+    def test_passes_factor_only(self, absorb):
+        x = rand_with_cond(500, 20, 1e7)
+        if absorb == "lfactor":
+            x = x.T
+        expected = array_split(x, method="qr", absorb=absorb)
+        result = array_split(x, method="qr:cholesky", absorb=absorb, passes=2)
+        for a, b in zip(expected, result):
+            if a is None:
+                assert b is None
+            else:
+                assert_allclose(a, b, atol=1e-10)
+
+    def test_orthog_tol(self):
+        from quimb.tensor.decomp import qr_via_cholesky
+
+        x = rand_with_cond(500, 20, 1e12)
+        with pytest.raises(ValueError, match="lost orthogonality"):
+            qr_via_cholesky(x, absorb="right", passes=2, orthog_tol=1e-3)
+
+    @pytest.mark.parametrize("absorb", ["right", "left"])
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    @pytest.mark.parametrize(
+        "cond, rank, uses_cholesky",
+        [
+            (1e2, None, True),
+            (1e6, None, True),
+            (1e12, None, False),
+            (1e2, 10, False),
+        ],
+    )
+    def test_qr_auto(
+        self, monkeypatch, absorb, dtype, cond, rank, uses_cholesky
+    ):
+        from quimb.tensor import decomp
+
+        calls = []
+        qr_stabilized = decomp.qr_stabilized
+
+        def record(*args, **kwargs):
+            calls.append(None)
+            return qr_stabilized(*args, **kwargs)
+
+        monkeypatch.setattr(decomp, "qr_stabilized", record)
+
+        x = rand_with_cond(4000, 20, cond, dtype, rank=rank)
+        if absorb == "left":
+            x = x.T
+        left, _, right = array_split(x, method="qr:auto", absorb=absorb)
+        assert (not calls) == uses_cholesky
+        assert_allclose(left @ right, x, atol=1e-12)
+        q = left if absorb == "right" else right.conj().T
+        assert_allclose(q.conj().T @ q, np.eye(20), atol=1e-12)
+
+    def test_qr_auto_small_uses_qr(self, monkeypatch):
+        from quimb.tensor import decomp
+
+        calls = []
+        qr_via_cholesky = decomp.qr_via_cholesky
+
+        def record(*args, **kwargs):
+            calls.append(None)
+            return qr_via_cholesky(*args, **kwargs)
+
+        monkeypatch.setattr(decomp, "qr_via_cholesky", record)
+        x = rand_with_cond(100, 20, 1e2)
+        left, _, right = array_split(x, method="qr:auto", absorb="right")
+        assert not calls
+        assert_allclose(left @ right, x, atol=1e-12)
 
 
 @pytest.mark.parametrize(
@@ -1064,6 +1273,8 @@ def test_svd_rand_sketch_matches_dtype_and_device(backend, dtype):
         ("qr:cholesky", (3, 7, 5), ((3, 7, 5), (3, 5), (3, 5, 5))),
         ("lq", (3, 5, 7), ((3, 5, 5), (3, 5), (3, 5, 7))),
         ("lq:cholesky", (3, 5, 7), ((3, 5, 5), (3, 5), (3, 5, 7))),
+        ("qr:auto", (3, 7, 5), ((3, 7, 5), (3, 5), (3, 5, 5))),
+        ("lq:auto", (3, 5, 7), ((3, 5, 5), (3, 5), (3, 5, 7))),
     ],
 )
 def test_batch_qr_lq(backend, method, shape, expected_shapes):

@@ -302,6 +302,32 @@ def iscomplex(x):
     return "complex" in get_dtype_name(x)
 
 
+_conj_check_lookup = {}
+
+
+def is_conj_needed(x):
+    """Check whether conjugation can change values or index metadata.
+    Always return True for lazy and block-sparse arrays. Cache checkers by
+    class. Check dense array dtypes on each call. This is a small optimization
+    to avoid certain unnecessary array copies.
+    """
+    cls = x.__class__
+    try:
+        check = _conj_check_lookup[cls]
+    except KeyError:
+        backend = infer_backend(x)
+        if backend == "autoray.lazy" or isblocksparse(x):
+            check = lambda x: True
+        elif isinstance(getattr(x, "dtype", None), numpy.dtype):
+            check = lambda x: x.dtype.kind == "c"
+        elif backend == "torch":
+            check = lambda x: x.is_complex()
+        else:
+            check = iscomplex
+        _conj_check_lookup[cls] = check
+    return check(x)
+
+
 @compose
 def norm_fro(x):
     """The frobenius norm of an array."""
