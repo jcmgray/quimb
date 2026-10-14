@@ -906,6 +906,42 @@ class TestTensorFunctions:
         x.multiply_index_diagonals_(("c", "a"), (sc, sa))
         assert x.almost_equals(expected)
 
+    @requires_symmray
+    @pytest.mark.parametrize("fermionic", [False, True])
+    @pytest.mark.parametrize("dtype", ["float64", "complex128"])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_multiply_index_diagonals_symmray(self, fermionic, dtype, inplace):
+        import symmray as sr
+
+        cls = sr.Z2FermionicArray if fermionic else sr.Z2Array
+        indices = [
+            sr.BlockIndex({0: 2, 1: 1}, dual=False),
+            sr.BlockIndex({0: 1, 1: 2}, dual=True),
+            sr.BlockIndex({0: 2, 1: 2}, dual=False),
+        ]
+        opts = {"label": "diagonals"} if fermionic else {}
+        data = cls.random(indices, charge=1, dtype=dtype, seed=42, **opts)
+        x = Tensor(data, "abc")
+        original = x.data.to_dense()
+        sa = sr.BlockVector({0: np.array([0.5, 1.5]), 1: np.array([2.5])})
+        sc = sr.BlockVector({0: np.array([2.0, 3.0]), 1: np.array([4.0, 5.0])})
+        expected = (
+            original
+            * np.array([0.5, 1.5, 2.5])[:, None, None]
+            * np.array([2.0, 3.0, 4.0, 5.0])[None, None, :]
+        )
+
+        result = x.multiply_index_diagonals(
+            ("c", "a"), (sc, sa), inplace=inplace
+        )
+        assert isinstance(result.data, cls)
+        assert result.inds == x.inds
+        assert_allclose(result.data.to_dense(), expected)
+        if inplace:
+            assert result is x
+        else:
+            assert_allclose(x.data.to_dense(), original)
+
     @pytest.mark.parametrize("n_inds, n_xs", [(2, 1), (1, 2)])
     @pytest.mark.parametrize("inplace", [False, True])
     def test_multiply_index_diagonals_mismatched_lengths(

@@ -277,7 +277,7 @@ def multiply_diagonals(x, vs, axes, backend=None):
     override this to do it in one pass.
     """
     for v, axis in zip(vs, axes, strict=True):
-        x = multiply_diagonal(x, v, axis, backend=backend)
+        x = multiply_diagonal(x, v, axis, like=backend)
     return x
 
 
