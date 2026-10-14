@@ -2478,7 +2478,7 @@ def qr_via_cholesky(
     shift=True,
     solve_triangular=True,
     passes=1,
-    orthog_tol=None,
+    tol_orthog=None,
 ):
     """Compute QR or LQ factors from the Gram matrix using Cholesky.
     This can be faster for tall, narrow matrices. Ill-conditioned inputs
@@ -2516,7 +2516,7 @@ def qr_via_cholesky(
         For rank-deficient inputs, regularization can preserve reconstruction.
         It does not ensure orthogonality. Use ``'qr'`` or ``'qr:auto'`` when
         orthogonality is required.
-    orthog_tol : float, optional
+    tol_orthog : float, optional
         Before each pass after the first, check the previous result's Gram
         matrix. Raise ``ValueError`` if its distance from the identity is at
         least this value. The distance is the Frobenius norm over the whole
@@ -2537,7 +2537,7 @@ def qr_via_cholesky(
         If ``passes`` is not an integer.
     ValueError
         If ``passes`` is not positive, or the Gram matrix error is at least
-        ``orthog_tol``.
+        ``tol_orthog``.
     """
     try:
         passes = operator.index(passes)
@@ -2574,12 +2574,12 @@ def qr_via_cholesky(
     for p in range(passes):
         xx = x @ xp.swapaxes(xp.conj(x) if need_to_conj else x, -2, -1)
 
-        if p and (orthog_tol is not None):
+        if p and (tol_orthog is not None):
             err = xp.sum(xp.abs(xx - xp.eye(m)) ** 2) ** 0.5
-            if not (err < orthog_tol):
+            if not (err < tol_orthog):
                 raise ValueError(
                     f"Cholesky QR lost orthogonality, pass {p} has Gram "
-                    f"matrix error {err}, above orthog_tol={orthog_tol}."
+                    f"matrix error {err}, above tol_orthog={tol_orthog}."
                 )
 
         L, _, _ = cholesky_regularized(xx, absorb=get_Usq, shift=shift)
@@ -2658,7 +2658,7 @@ def qr_auto(
     if (m >= min_aspect * n) and (m * n**2 >= min_work):
         try:
             return qr_via_cholesky(
-                x, absorb=absorb, shift=False, passes=2, orthog_tol=0.5
+                x, absorb=absorb, shift=False, passes=2, tol_orthog=0.5
             )
         except Exception:  # noqa: BLE001, S110
             # use standard QR if cholesky QR fails

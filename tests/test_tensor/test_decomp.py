@@ -1084,7 +1084,7 @@ class TestCholeskyQR:
 
         x = rand_with_cond(500, 20, 1e12)
         with pytest.raises(ValueError, match="lost orthogonality"):
-            qr_via_cholesky(x, absorb="right", passes=2, orthog_tol=1e-3)
+            qr_via_cholesky(x, absorb="right", passes=2, tol_orthog=1e-3)
 
     @pytest.mark.parametrize("absorb", ["right", "left"])
     @pytest.mark.parametrize("dtype", ["float64", "complex128"])
