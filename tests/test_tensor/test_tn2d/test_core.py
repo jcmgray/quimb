@@ -776,6 +776,33 @@ class Test2DContract:
                 layer_tags=("KET", "BRA"),
             )
 
+    @pytest.mark.parametrize("bsz", [(1, 1), (1, 2), (2, 1), (2, 2)])
+    @pytest.mark.parametrize("equalize_norms", [False, True])
+    @pytest.mark.parametrize("first_contract", ["x", "y"])
+    def test_compute_plaquette_environments_exponent(
+        self, first_contract, equalize_norms, bsz
+    ):
+        tn = qtn.TN2D_rand(4, 5, 2, seed=42)
+        tn.exponent = 2.0
+        expected = tn.contract()
+        x_bsz, y_bsz = bsz
+        environments = tn.compute_plaquette_environments(
+            x_bsz,
+            y_bsz,
+            max_bond=64,
+            cutoff=1e-14,
+            first_contract=first_contract,
+            equalize_norms=equalize_norms,
+        )
+        for ((i, j), _), environment in environments.items():
+            tags = [
+                tn.site_tag(i + di, j + dj)
+                for di in range(x_bsz)
+                for dj in range(y_bsz)
+            ]
+            actual = (tn.select_any(tags) | environment).contract()
+            assert actual == pytest.approx(expected)
+
     @pytest.mark.parametrize("second_schedule", ["tree", "cut"])
     @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     @pytest.mark.parametrize("first_contract", ["x", "y"])

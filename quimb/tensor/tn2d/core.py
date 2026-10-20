@@ -2996,7 +2996,9 @@ class TensorNetwork2D(TensorNetworkGen):
                 tn ^= (x_tag(iprevprev), x_tag(iprev))
 
                 if equalize_norms:
-                    tn.equalize_norms_(equalize_norms)
+                    # only normalize boundary tensors
+                    for t in tn.select_tensors(x_tag(iprev)):
+                        tn.strip_exponent(t, equalize_norms)
 
             else:
                 tn.contract_boundary_from_(
@@ -3369,12 +3371,22 @@ class TensorNetwork2D(TensorNetworkGen):
 
             env_ij = TensorNetwork(
                 (
-                    y_envs[i0]["ymin", j0].select_any(ymin_tags),
-                    y_envs[i0]["ymax", j0 + y_bsz - 1].select_any(ymax_tags),
-                    x_envs["xmin", i0].select_any(xmin_tags),
-                    x_envs["xmax", i0 + x_bsz - 1].select_any(above_tags),
+                    y_envs[i0]["ymin", j0].select_any(
+                        ymin_tags, with_exponent=True
+                    ),
+                    y_envs[i0]["ymax", j0 + y_bsz - 1].select_any(
+                        ymax_tags, with_exponent=True
+                    ),
+                    x_envs["xmin", i0].select_any(
+                        xmin_tags, with_exponent=True
+                    ),
+                    x_envs["xmax", i0 + x_bsz - 1].select_any(
+                        above_tags, with_exponent=True
+                    ),
                 )
             )
+            # include any initial exponent from original network
+            env_ij.exponent += self.exponent
 
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()
@@ -3497,12 +3509,22 @@ class TensorNetwork2D(TensorNetworkGen):
 
             env_ij = TensorNetwork(
                 (
-                    y_envs["ymin", j0].select_any(ymin_tags),
-                    y_envs["ymax", j0 + y_bsz - 1].select_any(ymax_tags),
-                    x_envs[j0]["xmin", i0].select_any(xmin_tags),
-                    x_envs[j0]["xmax", i0 + x_bsz - 1].select_any(xmax_tags),
+                    y_envs["ymin", j0].select_any(
+                        ymin_tags, with_exponent=True
+                    ),
+                    y_envs["ymax", j0 + y_bsz - 1].select_any(
+                        ymax_tags, with_exponent=True
+                    ),
+                    x_envs[j0]["xmin", i0].select_any(
+                        xmin_tags, with_exponent=True
+                    ),
+                    x_envs[j0]["xmax", i0 + x_bsz - 1].select_any(
+                        xmax_tags, with_exponent=True
+                    ),
                 )
             )
+            # include any initial exponent from original network
+            env_ij.exponent += self.exponent
 
             # finally, absorb any rank-2 corner tensors
             env_ij.rank_simplify_()

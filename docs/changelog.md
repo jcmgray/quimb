@@ -158,6 +158,7 @@ Release notes for `quimb`.
 - [`compute_local_expectation_exact`](#TensorNetworkGenVector.compute_local_expectation_exact) and [`compute_local_expectation_cluster`](#TensorNetworkGenVector.compute_local_expectation_cluster): correctly sum normalized expectations with ``normalized="return"`` and ``return_all=False``. Methods that compute terms individually also complete their progress bars.
 - [`MPS_product_state`](#MPS_product_state): fix ``TypeError`` for backends requiring a single shape tuple when reshaping single-site vectors.
 - [`TensorNetwork.tids_are_connected`](#TensorNetwork.tids_are_connected): make results independent of tensor order.
+- [`compute_plaquette_environments`](#TensorNetwork2D.compute_plaquette_environments) and [`compute_environments`](#TensorNetwork2D.compute_environments): environments now have the correct scale with ``equalize_norms``, and plaquette environments also include the network's own exponent.
 
 
 ## v1.15.0 (2026-08-10)
