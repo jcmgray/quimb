@@ -336,6 +336,7 @@ def tensor_contract(
     drop_tags=False,
     strip_exponent=False,
     exponent=None,
+    check_zero=False,
     **contract_opts,
 ):
     """Contract a collection of tensors into a scalar or tensor, automatically
@@ -395,6 +396,11 @@ def tensor_contract(
         rescaled 'mantissa'. Useful for very large or small values.
     exponent : float, optional
         If supplied, an overall base exponent to scale the result by.
+    check_zero : bool, optional
+        If ``True``, when ``strip_exponent=True``, check for exactly zero
+        intermediates and result, which are returned as a zero mantissa with
+        exponent ``0.0`` rather than ``nan``. Off by default to avoid data
+        dependent branching when tracing and computing gradients etc.
     contract_opts
         Passed to ``cotengra.array_contract``.
 
@@ -421,6 +427,10 @@ def tensor_contract(
             **contract_opts,
         )
 
+    if check_zero:
+        # only pass when needed, older cotengra versions don't accept it
+        contract_opts["check_zero"] = True
+
     # perform the contraction!
     data_out = array_contract(
         arrays,
@@ -436,7 +446,9 @@ def tensor_contract(
         # mantissa and exponent returned separately
         data_out, result_exponent = data_out
 
-        if exponent is not None:
+        if exponent is not None and not (
+            check_zero and do("max", do("abs", data_out)) == 0.0
+        ):
             # custom base exponent supplied
             result_exponent = result_exponent + exponent
 
@@ -1953,6 +1965,7 @@ def maybe_unwrap(
     strip_exponent=False,
     equalize_norms=False,
     output_inds=None,
+    check_zero=False,
 ):
     """Maybe unwrap a ``TensorNetwork`` or ``Tensor`` into a ``Tensor`` or
     scalar, depending on how many tensors and indices it has, optionally
@@ -1977,6 +1990,10 @@ def maybe_unwrap(
         network before unwrapping.
     output_inds : sequence of str, optional
         If unwrapping a tensor, then transpose it to the specified indices.
+    check_zero : bool, optional
+        If ``True``, check for zero norm tensors when equalizing norms or
+        stripping the exponent. An exactly zero result is returned with
+        exponent ``0.0``, rather than ``nan``.
 
     Returns
     -------
@@ -1986,10 +2003,10 @@ def maybe_unwrap(
         if equalize_norms is True:
             if strip_exponent:
                 # accumulate into the exponent
-                t.equalize_norms_(1.0)
+                t.equalize_norms_(1.0, check_zero=check_zero)
             else:
                 # this also redistributes the any collected norm exponent
-                t.equalize_norms_()
+                t.equalize_norms_(check_zero=check_zero)
 
         if preserve_tensor_network or (t.num_tensors != 1):
             return t
@@ -2006,8 +2023,12 @@ def maybe_unwrap(
 
     if strip_exponent:
         tnorm = t.norm()
-        t /= tnorm
-        exponent += do("log10", tnorm)
+        if check_zero and tnorm == 0.0:
+            # exact zero, any accumulated exponent is meaningless
+            exponent = 0.0
+        else:
+            t /= tnorm
+            exponent += do("log10", tnorm)
 
     if preserve_tensor or t.ndim != 0:
         # return as a tensor
@@ -9685,6 +9706,7 @@ class TensorNetwork:
         backend=None,
         strip_exponent=False,
         equalize_norms="auto",
+        check_zero=False,
         preserve_tensor=False,
         inplace=False,
         **contract_opts,
@@ -9742,6 +9764,12 @@ class TensorNetwork:
         equalize_norms : bool or "auto", optional
             Whether to equalize the norms of the tensors *during* the
             contraction. By default ("auto") this follows `strip_exponent`.
+        check_zero : bool, optional
+            If ``True``, when stripping the exponent or equalizing norms,
+            check for exactly zero tensors, so that an exactly zero result is
+            returned as a zero mantissa with exponent ``0.0`` rather than
+            ``nan``. Off by default to avoid data dependent branching when
+            tracing and computing gradients etc.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
@@ -9780,6 +9808,12 @@ class TensorNetwork:
         # whether we should let tensor_contract return a raw scalar
         preserve_tensor = preserve_tensor or inplace or (tn.num_tensors >= 1)
 
+        if (tn.num_tensors == 0) and (not inplace):
+            # nothing left to hold the exponent, so include it in the result
+            base_exponent = tn.exponent
+        else:
+            base_exponent = None
+
         t = tensor_contract(
             *tagged_ts,
             output_inds=output_inds,
@@ -9787,6 +9821,8 @@ class TensorNetwork:
             get=get,
             backend=backend,
             strip_exponent=equalize_norms,
+            exponent=base_exponent,
+            check_zero=check_zero,
             preserve_tensor=preserve_tensor,
             **contract_opts,
         )
@@ -9802,8 +9838,12 @@ class TensorNetwork:
                 # already scalar
                 tnorm = do("abs", t)
 
-            t /= tnorm
-            exponent = do("log10", tnorm)
+            if check_zero and tnorm == 0.0:
+                # exact zero, leave unscaled
+                exponent = 0.0
+            else:
+                t /= tnorm
+                exponent = do("log10", tnorm)
         else:
             exponent = None
 
@@ -9838,6 +9878,7 @@ class TensorNetwork:
         get=None,
         max_bond=None,
         strip_exponent=False,
+        check_zero=False,
         preserve_tensor=False,
         backend=None,
         inplace=False,
@@ -9892,6 +9933,12 @@ class TensorNetwork:
             contraction. If a TensorNetwork is returned, this exponent is
             accumulated in the `exponent` attribute. If a Tensor or scalar is
             returned, the exponent is returned separately.
+        check_zero : bool, optional
+            If ``True``, when stripping the exponent or equalizing norms,
+            check for exactly zero tensors, so that an exactly zero result is
+            returned as a zero mantissa with exponent ``0.0`` rather than
+            ``nan``. Off by default to avoid data dependent branching when
+            tracing and computing gradients etc.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
@@ -9933,6 +9980,11 @@ class TensorNetwork:
                 raise NotImplementedError
             if kwargs.pop("backend", None) is not None:
                 raise NotImplementedError
+            if check_zero:
+                raise NotImplementedError(
+                    "check_zero is not yet supported for compressed "
+                    "contraction."
+                )
 
             return self.contract_compressed(
                 max_bond=max_bond,
@@ -9949,6 +10001,7 @@ class TensorNetwork:
             return self.contract_structured(
                 tags,
                 strip_exponent=strip_exponent,
+                check_zero=check_zero,
                 inplace=inplace,
                 **kwargs,
             )
@@ -9959,12 +10012,17 @@ class TensorNetwork:
                 *self.tensor_map.values(),
                 strip_exponent=strip_exponent,
                 exponent=self.exponent,
+                check_zero=check_zero,
                 **kwargs,
             )
 
         # contract some or all tensors, but keeping tensor network
         return self.contract_tags(
-            tags, strip_exponent=strip_exponent, inplace=inplace, **kwargs
+            tags,
+            strip_exponent=strip_exponent,
+            check_zero=check_zero,
+            inplace=inplace,
+            **kwargs,
         )
 
     contract_ = functools.partialmethod(contract, inplace=True)
@@ -9975,6 +10033,7 @@ class TensorNetwork:
         output_inds=None,
         strip_exponent=False,
         equalize_norms="auto",
+        check_zero=False,
         preserve_tensor=False,
         inplace=False,
         **contract_opts,
@@ -10000,6 +10059,12 @@ class TensorNetwork:
         equalize_norms : bool or "auto", optional
             Whether to equalize the norms of the tensors *during* the
             contraction. By default ("auto") this follows `strip_exponent`.
+        check_zero : bool, optional
+            If ``True``, when stripping the exponent or equalizing norms,
+            check for exactly zero tensors, so that an exactly zero result is
+            returned as a zero mantissa with exponent ``0.0`` rather than
+            ``nan``. Off by default to avoid data dependent branching when
+            tracing and computing gradients etc.
         preserve_tensor : bool, optional
             Whether to return a tensor regardless of whether the output object
             is a scalar (has no indices) or not.
@@ -10035,6 +10100,7 @@ class TensorNetwork:
                 c_tags,
                 which="any",
                 equalize_norms=equalize_norms,
+                check_zero=check_zero,
                 **contract_opts,
             )
 
@@ -10049,6 +10115,7 @@ class TensorNetwork:
             strip_exponent=strip_exponent,
             equalize_norms=equalize_norms,
             output_inds=output_inds,
+            check_zero=check_zero,
         )
 
     def contraction_path(

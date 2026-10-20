@@ -159,6 +159,8 @@ Release notes for `quimb`.
 - [`MPS_product_state`](#MPS_product_state): fix ``TypeError`` for backends requiring a single shape tuple when reshaping single-site vectors.
 - [`TensorNetwork.tids_are_connected`](#TensorNetwork.tids_are_connected): make results independent of tensor order.
 - [`compute_plaquette_environments`](#TensorNetwork2D.compute_plaquette_environments) and [`compute_environments`](#TensorNetwork2D.compute_environments): environments now have the correct scale with ``equalize_norms``, and plaquette environments also include the network's own exponent.
+- [`TensorNetwork.contract`](#TensorNetwork.contract) with ``strip_exponent=True`` can now take ``check_zero=True`` to return an exactly zero result as ``(0.0, 0.0)`` instead of ``nan`` (requires cotengra v0.8.3 or newer, not yet for compressed contraction).
+- [`TensorNetwork.contract_tags`](#TensorNetwork.contract_tags): include the network's existing ``exponent`` when contracting all tensors.
 
 
 ## v1.15.0 (2026-08-10)

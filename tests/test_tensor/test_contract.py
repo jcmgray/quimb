@@ -4,6 +4,8 @@ import pytest
 import quimb.tensor as qtn
 from quimb.tensor.contraction import _CONTRACT_BACKEND, _TENSOR_LINOP_BACKEND
 
+from . import pytorch_case, requires_symmray
+
 
 def test_tensor_contract_strip_exponent():
     tn = qtn.TN_rand_reg(10, 3, 3, dtype=complex)
@@ -131,6 +133,96 @@ def test_contract_compressed_strip_exponent(
             return
 
     assert Z == pytest.approx(Zex, rel=1e-3)
+
+
+def _contract_route(tn, route, **kwargs):
+    if route == "all":
+        return tn.contract(all, **kwargs)
+    if route == "tags":
+        return tn.contract_tags(all, **kwargs)
+    if route == "structured":
+        assert tn._CONTRACT_STRUCTURED
+        return tn.contract(..., **kwargs)
+    raise ValueError(route)
+
+
+@pytest.mark.parametrize("route", ["all", "tags", "structured"])
+@pytest.mark.parametrize("insert_exponent", [False, True])
+class TestCheckZero:
+    @staticmethod
+    def to_backend(tn, backend):
+        if backend == "torch":
+            import torch
+
+            tn.apply_to_arrays(torch.tensor)
+        return tn
+
+    @staticmethod
+    def make_mps(backend):
+        if backend == "symmray":
+            import symmray as sr
+
+            return sr.MPS_abelian_rand(
+                "Z2", 6, bond_dim=4, subsizes="equal", seed=42
+            )
+        return qtn.MPS_rand_state(6, 4, seed=42)
+
+    @pytest.mark.parametrize(
+        "backend",
+        [
+            "numpy",
+            pytorch_case,
+            pytest.param("symmray", marks=requires_symmray),
+        ],
+    )
+    def test_zero_tensor(self, route, insert_exponent, backend):
+        psi = self.make_mps(backend)
+        psi[2].modify(apply=lambda x: 0 * x)
+        tn = self.to_backend(psi.make_norm(), backend)
+        if insert_exponent:
+            tn.exponent = 3.0
+        m, e = _contract_route(tn, route, strip_exponent=True, check_zero=True)
+        assert float(abs(m)) == 0.0
+        assert float(e) == 0.0
+
+    @pytest.mark.parametrize("backend", ["numpy", pytorch_case])
+    def test_cancellation(self, route, insert_exponent, backend):
+        a = qtn.MPS_product_state([np.array([1.0, 1.0])] * 4)
+        b = qtn.MPS_product_state(
+            [np.array([1.0, -1.0])] + [np.array([1.0, 1.0])] * 3
+        )
+        tn = self.to_backend(a.make_overlap(b), backend)
+        if insert_exponent:
+            tn.exponent = 3.0
+        m, e = _contract_route(tn, route, strip_exponent=True, check_zero=True)
+        assert float(abs(m)) == 0.0
+        assert float(e) == 0.0
+
+    @pytest.mark.parametrize(
+        "backend",
+        [
+            "numpy",
+            pytorch_case,
+            pytest.param("symmray", marks=requires_symmray),
+        ],
+    )
+    def test_tiny_nonzero(self, route, insert_exponent, backend):
+        psi = self.make_mps(backend)
+        Zex = psi.make_norm().contract()
+        psi.multiply_each_(1e-40)
+        tn = self.to_backend(psi.make_norm(), backend)
+        if insert_exponent:
+            tn.exponent = 3.0
+        m, e = _contract_route(tn, route, strip_exponent=True, check_zero=True)
+        # 12 tensors each scaled by 1e-40, which would underflow
+        shift = 480 - 3 * insert_exponent
+        assert complex(m) * 10 ** (float(e) + shift) == pytest.approx(Zex)
+
+
+def test_check_zero_compressed_not_implemented():
+    tn = qtn.TN2D_rand(3, 3, 2, seed=42)
+    with pytest.raises(NotImplementedError):
+        tn.contract(max_bond=2, strip_exponent=True, check_zero=True)
 
 
 class TestContractOpts:
