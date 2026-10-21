@@ -2916,6 +2916,7 @@ class TensorNetwork2D(TensorNetworkGen):
         compress_opts=None,
         envs=None,
         equalize_norms=False,
+        check_zero=False,
         **contract_boundary_opts,
     ):
         """Compute the 1D boundary tensor networks describing the environments
@@ -2957,6 +2958,12 @@ class TensorNetwork2D(TensorNetworkGen):
             original tensor network has a non-zero exponent, you may need to
             use it to get the correct overall scaling. For example:
             ``envs["xmin", i] | tn.select(tn.x_tag(i), with_exponent=True) | envs["xmax", i]``.
+        check_zero : bool, optional
+            If ``True``, when equalizing norms, leave exactly zero boundary
+            tensors as they are rather than giving ``nan``. Only used with
+            ``dense=True``, not by the compressed boundary methods. Off by
+            default to avoid data dependent branching when tracing and
+            computing gradients etc.
         contract_boundary_opts
             Other options to pass to
             :meth:`~quimb.tensor.tn2d.core.TensorNetwork2D.contract_boundary_from`.
@@ -2998,7 +3005,9 @@ class TensorNetwork2D(TensorNetworkGen):
                 if equalize_norms:
                     # only normalize boundary tensors
                     for t in tn.select_tensors(x_tag(iprev)):
-                        tn.strip_exponent(t, equalize_norms)
+                        tn.strip_exponent(
+                            t, equalize_norms, check_zero=check_zero
+                        )
 
             else:
                 tn.contract_boundary_from_(

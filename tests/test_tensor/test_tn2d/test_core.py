@@ -803,6 +803,43 @@ class Test2DContract:
             actual = (tn.select_any(tags) | environment).contract()
             assert actual == pytest.approx(expected)
 
+    def test_compute_environments_equalize_norms_zero(self):
+        tn = qtn.TN2D_rand(4, 4, 2, seed=42)
+        tn[0, 0].modify(apply=lambda x: 0 * x)
+        envs = tn.compute_environments(
+            "xmin", dense=True, equalize_norms=True, check_zero=True
+        )
+        for i in range(1, 4):
+            env = envs["xmin", i]
+            assert np.isfinite(env.exponent)
+            for t in env:
+                assert np.isfinite(t.data).all()
+        # the last row and its env make up the whole network
+        actual = (tn.select(tn.x_tag(3)) | envs["xmin", 3]).contract()
+        assert actual == pytest.approx(0.0)
+
+    @pytest.mark.parametrize("first_contract", ["x", "y"])
+    def test_compute_plaquette_environments_equalize_norms_zero(
+        self, first_contract
+    ):
+        # two planes, so only the dense second sweep sees the zero
+        shape = (2, 4) if first_contract == "x" else (4, 2)
+        tn = qtn.TN2D_rand(*shape, 2, seed=42)
+        tn[0, 0].modify(apply=lambda x: 0 * x)
+        environments = tn.compute_plaquette_environments(
+            1,
+            1,
+            max_bond=8,
+            first_contract=first_contract,
+            second_dense=True,
+            equalize_norms=True,
+            check_zero=True,
+        )
+        for ((i, j), _), environment in environments.items():
+            assert np.isfinite(environment.exponent)
+            actual = (tn.select(tn.site_tag(i, j)) | environment).contract()
+            assert actual == pytest.approx(0.0)
+
     @pytest.mark.parametrize("second_schedule", ["tree", "cut"])
     @pytest.mark.parametrize("schedule", ["tree", "cut", "cutpair"])
     @pytest.mark.parametrize("first_contract", ["x", "y"])
