@@ -626,14 +626,14 @@ def eigs_slepc(
 
     # gather eigenvectors
     if return_vecs:
-        pvec = pA.getVecLeft()
+        pvec = pA.createVecLeft()
 
         def get_vecs_local():
             for i in range(k):
                 eigensolver.getEigenvector(i, pvec)
 
                 if P is not None:
-                    pvecP = pP.getVecLeft()
+                    pvecP = pP.createVecLeft()
                     pP.mult(pvec, pvecP)
 
                 yield gather_petsc_array(
