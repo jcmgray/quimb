@@ -365,7 +365,7 @@ class ComputeEnergyBoundary(ComputeEnergyMixin):
 
     @property
     def chi(self):
-        """The bond dimensino to use for contracting the boundary for when
+        """The bond dimension to use for contracting the boundary for when
         computing the energy.
         """
         return self.compute_energy_opts["max_bond"]
