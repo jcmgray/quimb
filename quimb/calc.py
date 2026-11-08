@@ -1152,7 +1152,7 @@ def decomp(a, fn, fn_args, fn_d, nmlz_func, mode="p", tol=1e-3):
     # Print decomposition
     if "p" in mode:
         for x, cff in names_cffs.items():
-            if abs(cff) < 0.01:
+            if abs(cff) < tol:
                 break
             dps = int(round(0.5 - np.log10(1.001 * tol)))  # decimal places
             print(x, "{: .{prec}f}".format(cff, prec=dps))
