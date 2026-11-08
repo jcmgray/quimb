@@ -583,6 +583,13 @@ class TestDecomp:
         for name in itertools.permutations("IXYZ", 2):
             assert_allclose(names_cffs["".join(name)], 0.0)
 
+    def test_pauli_decomp_custom_tol(self, capsys):
+        p = qu.pauli("X") * 0.005
+        qu.pauli_decomp(p, mode="p", tol=0.001)
+        out = capsys.readouterr().out
+        assert "X" in out
+        assert "0.005" in out
+
     def test_pauli_reconstruct(self):
         p1 = qu.rand_rho(4)
         names_cffs = qu.pauli_decomp(p1, mode="c")
