@@ -359,6 +359,13 @@ class Test2DContract:
             )
         assert Z == pytest.approx(expected)
 
+    def test_contract_boundary_full_bond_strip_exponent_raises(self):
+        tn = qtn.TN2D_rand(4, 4, 2, seed=42)
+        with pytest.raises(NotImplementedError, match="equalize_norms"):
+            tn.contract_boundary(
+                max_bond=4, method="full-bond", strip_exponent=True
+            )
+
     @pytest.mark.parametrize("two_layer", [False, True])
     def test_contract_2d_boundary_via_1d(self, two_layer):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags="KET")

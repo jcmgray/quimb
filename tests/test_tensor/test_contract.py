@@ -53,6 +53,25 @@ def test_contract_tags_strip_exponent(
     assert Z == pytest.approx(Zex, rel=1e-3)
 
 
+@pytest.mark.parametrize("strip_exponent", [False, True])
+@pytest.mark.parametrize("equalize_norms", [False, 1.0, True, "auto"])
+def test_contract_all_strip_exponent(strip_exponent, equalize_norms):
+    # full contraction goes directly to tensor_contract
+    tn = qtn.TN_rand_reg(8, 3, 2, seed=42)
+    tn.exponent = 1.5
+    Zex = tn.contract()
+
+    Z = tn.contract(
+        all,
+        strip_exponent=strip_exponent,
+        equalize_norms=equalize_norms,
+    )
+    if strip_exponent:
+        Z = Z[0] * 10 ** Z[1]
+
+    assert Z == pytest.approx(Zex, rel=1e-3)
+
+
 @pytest.mark.parametrize("insert_exponent", [False, True])
 @pytest.mark.parametrize("strip_exponent", [False, True])
 @pytest.mark.parametrize("equalize_norms", [False, 1.0, True])

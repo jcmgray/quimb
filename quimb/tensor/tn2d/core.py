@@ -1541,7 +1541,10 @@ class TensorNetwork2D(TensorNetworkGen):
             each full bond environment.
         """
         if equalize_norms:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "method='full-bond' does not yet support `equalize_norms`, "
+                "which also defaults to on with `strip_exponent=True`."
+            )
 
         compress_opts = ensure_dict(compress_opts)
         if similarity_method is not None:

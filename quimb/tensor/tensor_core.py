@@ -9875,6 +9875,7 @@ class TensorNetwork:
         get=None,
         max_bond=None,
         strip_exponent=False,
+        equalize_norms="auto",
         check_zero=False,
         preserve_tensor=False,
         backend=None,
@@ -9930,6 +9931,12 @@ class TensorNetwork:
             contraction. If a TensorNetwork is returned, this exponent is
             accumulated in the `exponent` attribute. If a Tensor or scalar is
             returned, the exponent is returned separately.
+        equalize_norms : bool, float or "auto", optional
+            Whether to equalize the norms of the tensors *during* the
+            contraction, accumulating the scale in an exponent. By default
+            ("auto") this follows `strip_exponent`. A float sets the norm of
+            each intermediate tensor, except for a single full contraction,
+            which only uses it as ``True``.
         check_zero : bool, optional
             If ``True``, when stripping the exponent or equalizing norms,
             check for exactly zero tensors, so that an exactly zero result is
@@ -9967,6 +9974,7 @@ class TensorNetwork:
         kwargs["get"] = get
         kwargs["backend"] = backend
         kwargs["preserve_tensor"] = preserve_tensor
+        kwargs["equalize_norms"] = equalize_norms
 
         all_tags = (tags is all) or (tags is ...)
 
@@ -10005,13 +10013,24 @@ class TensorNetwork:
 
         # contracting everything to single output
         if all_tags and not inplace:
-            return tensor_contract(
+            del kwargs["equalize_norms"]
+            if equalize_norms == "auto":
+                equalize_norms = strip_exponent
+            # a single contraction can only rescale while contracting
+            equalize_norms = bool(equalize_norms)
+
+            out = tensor_contract(
                 *self.tensor_map.values(),
-                strip_exponent=strip_exponent,
+                strip_exponent=strip_exponent or equalize_norms,
                 exponent=self.exponent,
                 check_zero=check_zero,
                 **kwargs,
             )
+            if equalize_norms and not strip_exponent and get is None:
+                # fold the stripped exponent back in
+                out, exponent = out
+                out = out * 10**exponent
+            return out
 
         # contract some or all tensors, but keeping tensor network
         return self.contract_tags(
