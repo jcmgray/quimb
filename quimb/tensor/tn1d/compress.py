@@ -24,6 +24,7 @@ import warnings
 
 from autoray import do
 
+from ...utils import check_opt
 from ..tensor_builder import TN_matching
 from ..tensor_core import (
     Tensor,
@@ -35,7 +36,10 @@ from ..tensor_core import (
     rand_uuid,
     tensor_contract,
 )
-from ..tnag.compress import tensor_network_ag_compress
+from ..tnag.compress import (
+    _TNAG_COMPRESS_METHODS,
+    tensor_network_ag_compress,
+)
 from ..tnag.core import tensor_network_apply_op_vec
 
 
@@ -3891,6 +3895,11 @@ def tensor_network_1d_compress(
         )
 
     # generic tensor network compression methods
+    check_opt(
+        "method",
+        method,
+        (*_TN1D_COMPRESS_METHODS, *_TNAG_COMPRESS_METHODS),
+    )
     if site_tags is None:
         site_tags = tn.site_tags
     site_tags, untag_groups = parse_site_tag_groups(tn, site_tags)

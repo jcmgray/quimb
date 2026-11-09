@@ -11,7 +11,7 @@ the tensor network can locally have arbitrary structure and outer indices.
 
 import warnings
 
-from ...utils import ensure_dict
+from ...utils import check_opt, ensure_dict
 from ..tensor_core import (
     TensorNetwork,
     choose_local_compress_gauge_settings,
@@ -707,6 +707,7 @@ def tensor_network_ag_compress(
     if callable(method):
         f_compress = method
     else:
+        check_opt("method", method, tuple(_TNAG_COMPRESS_METHODS))
         f_compress = _TNAG_COMPRESS_METHODS[method]
 
     return f_compress(

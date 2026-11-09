@@ -427,10 +427,6 @@ def tensor_contract(
             **contract_opts,
         )
 
-    if check_zero:
-        # only pass when needed, older cotengra versions don't accept it
-        contract_opts["check_zero"] = True
-
     # perform the contraction!
     data_out = array_contract(
         arrays,
@@ -438,6 +434,7 @@ def tensor_contract(
         inds_out,
         optimize=optimize,
         strip_exponent=strip_exponent,
+        check_zero=check_zero,
         backend=backend,
         **contract_opts,
     )

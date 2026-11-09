@@ -375,6 +375,12 @@ class Test2DContract:
         assert norm.contract(all) == pytest.approx(xe, rel=5e-2)
         assert not any(tag.startswith("__ST") for tag in view.tag_map)
 
+    def test_contract_boundary_periodic_1d_only_method_raises(self):
+        # a periodic boundary is compressed as a ring, so 1D methods fail
+        tn = qtn.TN2D_rand(4, 4, 2, cyclic=True, seed=42)
+        with pytest.raises(ValueError, match="projector"):
+            tn.contract_boundary(max_bond=4, method="dm")
+
     def test_contract_2d_full_bond(self):
         psi = qtn.PEPS.rand(4, 4, 3, seed=42, tags="KET")
         norm = psi.make_norm()

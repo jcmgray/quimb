@@ -777,6 +777,14 @@ def test_fit_single_sweep_guess_full_bond():
     assert out.distance_normalized(tn) <= ref.distance_normalized(tn) + 1e-6
 
 
+def test_unknown_method_raises():
+    tn = qtn.MPS_rand_state(6, 4, seed=1)
+    with pytest.raises(ValueError, match="sdcr"):
+        qtn.tensor_network_1d_compress(tn, max_bond=2, method="unknown")
+    with pytest.raises(ValueError, match="projector"):
+        qtn.tensor_network_ag_compress(tn, max_bond=2, method="dm")
+
+
 @pytest.mark.parametrize(
     "method",
     [
