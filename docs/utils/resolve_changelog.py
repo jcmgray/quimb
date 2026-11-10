@@ -6,17 +6,19 @@ This script converts MyST/Sphinx-style roles in the changelog, such as
 that can be pasted directly into GitHub release notes.
 
 Usage:
-    python resolve_changelog.py input.md [output.md]
+    python resolve_changelog.py [--latest] input.md [output.md]
 
-If ``output.md`` is not given, prints to stdout.
+If ``output.md`` is not given, prints to stdout. With ``--latest``, only the
+first release section is kept, without its heading, ready for the notes of
+that release.
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import functools
 import re
-import sys
 import warnings
 from pathlib import Path
 
@@ -359,18 +361,48 @@ def resolve_links(text):
     return text
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__.strip())
-        sys.exit(1)
+def latest_section(text):
+    """Extract the first ``## `` release section without its heading. The
+    version suffix that keeps subheadings unique in the docs is also removed,
+    e.g. ``### Bug fixes (1.2.0)`` becomes ``### Bug fixes``.
+    """
+    sections = re.split(r"^## .*\n", text, flags=re.MULTILINE)
+    if len(sections) < 2:
+        raise ValueError("No '## ' release section found.")
+    body = re.sub(
+        r"^(#{3,} .+?) \(v?\d+(?:\.\d+)*\)$",
+        r"\1",
+        sections[1],
+        flags=re.MULTILINE,
+    )
+    return body.strip() + "\n"
 
-    with open(sys.argv[1], encoding="utf-8") as file_obj:
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Resolve changelog references to full markdown links."
+    )
+    parser.add_argument("input", help="the changelog markdown file")
+    parser.add_argument(
+        "output", nargs="?", help="file to write, else print to stdout"
+    )
+    parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="only keep the first release section, without its heading",
+    )
+    args = parser.parse_args()
+
+    with open(args.input, encoding="utf-8") as file_obj:
         text = file_obj.read()
+
+    if args.latest:
+        text = latest_section(text)
 
     result = resolve_links(text)
 
-    if len(sys.argv) >= 3:
-        with open(sys.argv[2], "w", encoding="utf-8") as file_obj:
+    if args.output is not None:
+        with open(args.output, "w", encoding="utf-8") as file_obj:
             file_obj.write(result)
     else:
         print(result)
