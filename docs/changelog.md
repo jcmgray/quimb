@@ -2,15 +2,15 @@
 
 Release notes for `quimb`.
 
-## v1.16.0 (unreleased)
+## v1.16.0 (2026-11-09)
 
-### Breaking changes
+### Breaking changes (1.16.0)
 
 **Decomposition and compression defaults**
 
 - [`array_split`](#array_split) and low-level rank-revealing decompositions now default to ``cutoff_mode="rel"`` instead of ``"rsum2"``. 1D ``zipup`` compression also defaults to ``"rel"``.
 - Randomized SVD and batched decompositions reject active cumulative cutoff modes. Use ``"abs"`` or ``"rel"`` instead.
-- [`tensor_network_1d_compress`](#tensor_network_1d_compress) with an arbitrary-geometry ``method`` always returns a 1D network, inserting identities along long-range bonds. To keep the geometry, call [`tensor_network_ag_compress`](#tensor_network_ag_compress) directly, as 2D boundary contraction now does for periodic boundaries, which therefore need an ag ``method``.
+- [`tensor_network_1d_compress`](#tensor_network_1d_compress) with an arbitrary-geometry ``method`` always returns a 1D network, inserting identities along long-range bonds. To keep the geometry, call [`tensor_network_ag_compress`](#tensor_network_ag_compress) directly, as 2D boundary contraction now does for periodic boundaries, which therefore need an arbitrary-geometry ``method``.
 
 **Hilbert spaces and Hubbard models**
 
@@ -25,23 +25,26 @@ Release notes for `quimb`.
 - Partial traces derive bra index names by replacing a leading ``k`` with ``b``, falling back to random uuids on a name collision. This affects [`partial_trace_exact`](#TensorNetworkGenVector.partial_trace_exact), [`make_reduced_density_matrix`](#TensorNetworkGenVector.make_reduced_density_matrix), and 3D partial traces. See [`get_bra_inds`](#get_bra_inds).
 - Cluster expectations default to ``smudge=1e-12`` and ``optimize="auto-hq"``, matching cluster partial traces.
 
-### Enhancements
+### Dependencies (1.16.0)
+
+- Require ``autoray`` v0.10.0 or newer and ``cotengra`` v0.8.3 or newer.
+
+### Enhancements (1.16.0)
 
 #### Tensor decompositions
 
-- Cholesky QR supports repeated orthogonalization with ``passes``.
-- new ``method="qr:auto"`` tries Cholesky QR for suitable matrices and uses standard QR if it fails or loses too much orthogonality.
+- [`qr_via_cholesky`](#qr_via_cholesky) supports repeated orthogonalization with ``passes``.
+- Add ``method="qr:auto"``, which tries Cholesky QR for suitable matrices and uses standard QR if it fails or loses too much orthogonality.
 - Split functions accept ``cutoff="auto"``: ``1e-10`` for exact decompositions, disabled for randomized SVD.
 - [`svd_rand_truncated`](#svd_rand_truncated): support ``"abs"`` and ``"rel"`` cutoffs on the sketched spectrum, and ``noise_dist="normal"`` or ``"rademacher"`` for the random sketch.
 - Batched ``"abs"`` and ``"rel"`` cutoffs treat blocks as one spectrum and retain a common bond dimension. Both modes support renormalization, including for batched decompositions.
 
 #### 1D compression and MPS
 
-- Add a [1D compression guide](tensor/tensor-1d-compress.md) with method comparisons, benchmarks, and usage examples.
 - Add successive deterministic compression (``method="sdc"``), ``sdc-oversample``, and randomized variants ``sdcr`` and ``sdcr-oversample``, supporting fermionic networks, based on https://arxiv.org/abs/2601.19650.
 - ``direct``, ``dm``, ``zipup``, ``sdc``, ``sdcr``, ``src``, ``srcmps``, ``fit``, and their oversampling variants handle long-range bonds directly, supporting ``symmray`` abelian and fermionic tensors (for ``srcmps`` and ``fit``, with a supplied ``tn_fit``).
 - ``dm`` uses QR-SVD when a site's density matrix would exceed its rank bound, reducing layered PEPS norm boundary contraction costs (https://arxiv.org/abs/2406.09769), including for fermionic networks.
-- ``src``, ``srcmps``, ``fit``, and their oversampling variants accept a ``seed`` or random generator and match the backend's device and dtype (autoray v0.10.0 or newer). By default, use the backend's global random state.
+- ``src``, ``srcmps``, ``fit``, and their oversampling variants accept a ``seed`` or random generator and match the backend's device and dtype. By default, use the backend's global random state.
 - [`tensor_network_1d_compress`](#tensor_network_1d_compress) defaults to ``cutoff="auto"``, choosing the cutoff for each method: ``0.0`` for ``src`` and ``srcmps``, disabled for ``sdcr`` with its default randomized SVD, and ``1e-10`` otherwise.
 - ``zipup``, ``sdc``, and ``sdcr`` oversampling accept ``cutoff_mode_oversample``. Zipup also accepts ``cutoff_oversample="auto"``. All 1D oversampling methods accept ``compress_opts_final`` to configure the final direct sweep separately.
 - ``fit`` with ``bsz=1`` now supports fermionic tensor networks, including odd-parity tensors.
@@ -101,7 +104,11 @@ Release notes for `quimb`.
 - Add [`distance_from_overlaps`](#distance_from_overlaps) for normalized distances and infidelities from three precomputed overlaps.
 - [`save_to_disk`](#save_to_disk): add ``atomic`` to prevent partially written targets.
 
-### Deprecations
+#### Contraction
+
+- [`TensorNetwork.contract`](#TensorNetwork.contract) with ``strip_exponent=True`` can now take ``check_zero=True`` to return an exactly zero result as ``(0.0, 0.0)`` instead of ``nan`` (not yet for compressed contraction).
+
+### Deprecations (1.16.0)
 
 - [`Tensor.gate`](#Tensor.gate): rename ``transposed`` to ``transpose``. The old name raises ``FutureWarning``.
 - 2D boundary contraction, environment, and norm methods: rename ``mode`` to ``method``, with ``FutureWarning`` for the old name. With ``mode="full-bond"``, a ``method`` supplied as well is taken as ``similarity_method``.
@@ -109,7 +116,7 @@ Release notes for `quimb`.
 - Rename ``MatrixProductState.partial_trace_to_dense_canonical`` to [`partial_trace_canonical`](#MatrixProductState.partial_trace_canonical). The old name still works but raises a warning.
 - [`TN_from_strings`](#TN_from_strings): deprecate ``join_avoid_self_loops`` in favor of ``join_avoid_loop_length``.
 
-### Bug fixes
+### Bug fixes (1.16.0)
 
 #### Sparse matrices
 
@@ -159,8 +166,12 @@ Release notes for `quimb`.
 - [`MPS_product_state`](#MPS_product_state): fix ``TypeError`` for backends requiring a single shape tuple when reshaping single-site vectors.
 - [`TensorNetwork.tids_are_connected`](#TensorNetwork.tids_are_connected): make results independent of tensor order.
 - [`compute_plaquette_environments`](#TensorNetwork2D.compute_plaquette_environments) and [`compute_environments`](#TensorNetwork2D.compute_environments): environments now have the correct scale with ``equalize_norms``, and plaquette environments also include the network's own exponent.
-- [`TensorNetwork.contract`](#TensorNetwork.contract) with ``strip_exponent=True`` can now take ``check_zero=True`` to return an exactly zero result as ``(0.0, 0.0)`` instead of ``nan`` (not yet for compressed contraction).
 - [`TensorNetwork.contract_tags`](#TensorNetwork.contract_tags): include the network's existing ``exponent`` when contracting all tensors.
+
+### Documentation (1.16.0)
+
+- Add a [1D compression guide](tensor/tensor-1d-compress.md) with method comparisons, benchmarks, and usage examples.
+- Move quantum circuits to a top level [Quantum Circuit Guide](index_circuit.md), with circuit examples grouped separately.
 
 
 ## v1.15.0 (2026-08-10)
