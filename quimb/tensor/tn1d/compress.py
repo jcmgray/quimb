@@ -3566,6 +3566,7 @@ def tensor_network_1d_compress_fit_oversample(
     max_bond_oversample=None,
     cutoff=1e-10,
     cutoff_fit=0.0,
+    tn_fit=None,
     bsz=1,
     site_tags=None,
     noise_dist="normal",
@@ -3606,6 +3607,12 @@ def tensor_network_1d_compress_fit_oversample(
         A dynamic threshold for discarding singular values when compressing to
         the intermediate bond dimension using the 'fit' algorithm (only
         relevant if ``bsz=2``).
+    tn_fit : TensorNetwork, dict, or str, optional
+        An initial guess for the 'fit' step, see
+        :func:`~quimb.tensor.tn1d.compress.tensor_network_1d_compress_fit`.
+        A guess built from a `dict` or string, e.g. ``"zipup"``, uses
+        ``max_bond_oversample``. If not given, a random 1D tensor network is
+        used.
     bsz : {1, 2}, optional
         The block size to use for the variational fitting sweep.
     site_tags : sequence of str or tag groups, optional
@@ -3695,6 +3702,7 @@ def tensor_network_1d_compress_fit_oversample(
         tn,
         max_bond=max_bond_oversample,
         cutoff=cutoff_fit,
+        tn_fit=tn_fit,
         bsz=bsz,
         max_iterations=1,
         site_tags=site_tags,

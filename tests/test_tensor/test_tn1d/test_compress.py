@@ -660,7 +660,9 @@ def test_truncating_fermionic_long_range(method, sweep_reverse):
 
 
 @requires_symmray
-@pytest.mark.parametrize("method", ["srcmps", "srcmps-oversample", "fit"])
+@pytest.mark.parametrize(
+    "method", ["srcmps", "srcmps-oversample", "fit", "fit-oversample"]
+)
 @pytest.mark.parametrize("symmetry", ["abelian", "fermionic"])
 @pytest.mark.parametrize("sweep_reverse", [False, True])
 def test_long_range_with_guess(method, symmetry, sweep_reverse):
@@ -676,6 +678,11 @@ def test_long_range_with_guess(method, symmetry, sweep_reverse):
     else:
         psi, site_tags = make_fermionic_long_range_tn()
 
+    opts = {}
+    if method == "fit-oversample":
+        # symmray can't pad the guess up to size for 1-site sweeps
+        opts["bsz"] = 2
+
     new = qtn.tensor_network_1d_compress(
         psi,
         max_bond=8,
@@ -683,6 +690,7 @@ def test_long_range_with_guess(method, symmetry, sweep_reverse):
         site_tags=site_tags,
         tn_fit="zipup",
         sweep_reverse=sweep_reverse,
+        **opts,
     )
     assert new.num_tensors == 6
     expected = (psi.conj() & psi).contract()
@@ -721,8 +729,9 @@ def test_srcmps_guess_sketch():
     assert new.distance_normalized(tn) < 1.05 * guess.distance_normalized(tn)
 
 
-@pytest.mark.parametrize("method", ["srcmps", "fit"])
+@pytest.mark.parametrize("method", ["srcmps", "fit", "fit-oversample"])
 def test_tn_fit(method):
+    # with a guess supplied, the seed should have no effect
     psi = qtn.MPS_rand_state(4, 3, seed=7)
     tn_fit = qtn.TN_matching(psi, max_bond=2, seed=42)
     compress_opts = {
@@ -732,6 +741,8 @@ def test_tn_fit(method):
     }
     if method == "fit":
         compress_opts["max_iterations"] = 1
+    elif method == "fit-oversample":
+        compress_opts["max_bond_oversample"] = 2
     else:
         compress_opts["cutoff"] = 0.0
 
