@@ -745,9 +745,40 @@ def maybe_get_thread_pool(thread_pool):
     return thread_pool
 
 
-def create_lazy_community_edge_map(tn, site_tags=None, rank_simplify=True):
+def create_lazy_community_edge_map(
+    tn,
+    site_tags=None,
+    rank_simplify=True,
+    include_reverse=False,
+):
     """For lazy BP algorithms, create the data structures describing the
     effective graph of the lazily grouped 'sites' given by ``site_tags``.
+
+    Parameters
+    ----------
+    tn : TensorNetwork
+        The tensor network, with each tensor in one site.
+    site_tags : sequence of str, optional
+        The tags defining the sites, by default ``tn.site_tags``.
+    rank_simplify : bool, optional
+        Whether to rank simplify each site's local tensor network.
+    include_reverse : bool, optional
+        Whether a new message ``(i, j)`` also marks the reverse message
+        ``(j, i)`` for update. By default messages are non-backtracking, so
+        ``(j, i)`` doesn't depend on ``(i, j)``. Set this for algorithms whose
+        update of ``(j, i)`` reads ``(i, j)``.
+
+    Returns
+    -------
+    edges : dict[tuple[str, str], tuple[str]]
+        The bond indices between each pair of sites ``(i, j)``, with ``i < j``.
+    neighbors : dict[str, list[str]]
+        The neighboring sites of each site.
+    local_tns : dict[str, TensorNetwork]
+        The local tensor network of each site.
+    touch_map : dict[tuple[str, str], tuple[tuple[str, str]]]
+        For each directed message ``(i, j)``, the messages ``(j, k)`` to
+        mark for update when it changes.
     """
     if site_tags is None:
         site_tags = set(tn.site_tags)
@@ -791,8 +822,12 @@ def create_lazy_community_edge_map(tn, site_tags=None, rank_simplify=True):
             edges[i, j] = tuple(bonds(tn_i, tn_j))
 
     for i, j in edges:
-        touch_map[(i, j)] = tuple((j, k) for k in neighbors[j] if k != i)
-        touch_map[(j, i)] = tuple((i, k) for k in neighbors[i] if k != j)
+        touch_map[(i, j)] = tuple(
+            (j, k) for k in neighbors[j] if include_reverse or k != i
+        )
+        touch_map[(j, i)] = tuple(
+            (i, k) for k in neighbors[i] if include_reverse or k != j
+        )
 
     if len(local_tns) != len(site_tags):
         # handle potentially disconnected sites
