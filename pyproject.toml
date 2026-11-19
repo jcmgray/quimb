@@ -298,7 +298,7 @@ description = "Apply code formatting and fix imports with ruff."
 cmd = """
     ruff check --select I --fix &&
     ruff format &&
-    find . -name "*.ipynb" -print0 | xargs -0 squeaky
+    git ls-files -z "*.ipynb" | xargs -0 squeaky
 """
 cwd = "."
 description = "Format all files including notebooks with squeaky."
