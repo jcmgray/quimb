@@ -3437,17 +3437,27 @@ def compute_oblique_projectors(
 
         A' = Q_L R_L P_L P_R R_R Q_R
 
+    or ``Q_L R_L P_L s P_R R_R Q_R`` if ``absorb=None``. This is the best rank
+    ``k`` approximation of ``A``. Since only the reduced factors are needed,
+    the projectors can be inserted directly on the original bond, for example
+    as ``L P_L P_R R`` for ``A = L R``.
+
+    Neither factor is conjugated: ``Rl`` and ``Rr`` are factors of ``A``
+    itself. For example, if ``R_R Q_R`` comes from a QR decomposition of the
+    transpose of the right side, ``R^T = Q R'``, then ``R_R = R'^T``, i.e. the
+    transpose and not the adjoint.
+
     The bond can also be left as several unfused axes, which can avoid
     alignment issues with block sparse arrays.
 
     Parameters
     ----------
     Rl : array
-        The left reduced factor, with its outer axis first and then one or
-        more bond axes.
+        The left reduced factor, with shape ``(kl, *bond)``: its outer axis
+        first and then one or more bond axes.
     Rr : array
-        The right reduced factor, with the bond axes first, in the same order
-        as for ``Rl``, and then its outer axis.
+        The right reduced factor, with shape ``(*bond, kr)``: the bond axes
+        first, in the same order as for ``Rl``, and then its outer axis.
     max_bond : int, optional
         The maximum bond dimension to compress to.
     cutoff : float, optional
@@ -3475,11 +3485,33 @@ def compute_oblique_projectors(
     Returns
     -------
     Pl : array
-        The left oblique projector, with the bond axes of ``Rr`` and then the
-        new bond.
+        The left oblique projector, with shape ``(*bond, k)``: the bond axes
+        of ``Rr`` and then the new bond. ``k`` is the rank kept, at most
+        ``min(max_bond, kl, kr)``.
+    s : array
+        The ``k`` kept singular values, only returned if ``absorb=None``.
     Pr : array
-        The right oblique projector, with the new bond and then the bond axes
-        of ``Rl``.
+        The right oblique projector, with shape ``(k, *bond)``: the new bond
+        and then the bond axes of ``Rl``.
+
+    Examples
+    --------
+    Truncate the bond of a complex ``A = L @ R`` to rank two, which matches
+    the truncated SVD of ``A``:
+
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(42)
+    >>> L = rng.normal(size=(6, 4)) + 1j * rng.normal(size=(6, 4))
+    >>> R = rng.normal(size=(4, 5)) + 1j * rng.normal(size=(4, 5))
+    >>> _, Rl = np.linalg.qr(L)  # L = Q_L @ Rl
+    >>> _, Rt = np.linalg.qr(R.T)  # R = Rr @ Q_R
+    >>> Rr = Rt.T  # transpose, not adjoint
+    >>> Pl, Pr = compute_oblique_projectors(Rl, Rr, max_bond=2)
+    >>> Pl.shape, Pr.shape
+    ((4, 2), (2, 4))
+    >>> U, s, VH = np.linalg.svd(L @ R)
+    >>> np.allclose(L @ Pl @ Pr @ R, (U[:, :2] * s[:2]) @ VH[:2])
+    True
     """
     if max_bond is None:
         max_bond = -1
